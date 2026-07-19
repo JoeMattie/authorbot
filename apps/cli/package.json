@@ -1,0 +1,39 @@
+{
+  "name": "@authorbot/cli",
+  "version": "0.1.0",
+  "description": "Authorbot command-line interface: validate Authorbot book repositories against the Phase 0 contract (section 5)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "authorbot": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "start": "cd ../.. && node apps/cli/dist/bin.js"
+  },
+  "dependencies": {
+    "@authorbot/markdown": "workspace:*",
+    "@authorbot/schemas": "workspace:*",
+    "yaml": "^2.5.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@authorbot/test-fixtures": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,30 @@
+/**
+ * @authorbot/cli — `authorbot` command-line interface (Phase 0).
+ *
+ * The validation logic is importable so the API service can reuse it later:
+ * `validateBookRepo(path)` returns the same `{ valid, errors, warnings }`
+ * report the `--json` flag prints.
+ */
+
+export { runCli, type CliIo } from "./cli.js";
+export {
+  DEFAULT_BOOK_SETTINGS,
+  FindingCollector,
+  RepoAccessError,
+  VALIDATION_CODES,
+  checkAuthorbotRecords,
+  checkChapterWorldRefs,
+  checkStoryGraph,
+  loadBookConfig,
+  loadChapters,
+  loadStoryWorld,
+  validateBookRepo,
+  type BookSettings,
+  type ChapterIndex,
+  type ChapterInfo,
+  type Finding,
+  type FindingSeverity,
+  type StoryWorld,
+  type ValidationCode,
+  type ValidationReport,
+} from "./validate/index.js";
