@@ -1,0 +1,33 @@
+{
+  "name": "@authorbot/schemas",
+  "version": "0.1.0",
+  "description": "Zod v4 schemas, inferred TypeScript types, and generated JSON Schemas for Authorbot book-repository artifacts (Phase 0 contract section 4)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./json/*": "./json/*"
+  },
+  "files": [
+    "dist",
+    "json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node dist/scripts/generate-json-schemas.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

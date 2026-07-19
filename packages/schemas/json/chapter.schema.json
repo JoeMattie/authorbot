@@ -1,0 +1,89 @@
+{
+  "$id": "authorbot.chapter/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "authorbot.chapter/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "order": {
+      "type": "number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "proposed",
+        "published",
+        "archived"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "published_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:(?:[0-5]\\d|60)(?:\\.\\d{1,9})?Z$"
+    },
+    "authors": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": "string",
+            "pattern": "^(?:github|agent|system):[A-Za-z0-9][A-Za-z0-9._-]*$"
+          }
+        },
+        "required": [
+          "actor"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "string"
+    },
+    "timeline_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^event:[a-z0-9][a-z0-9-]*$"
+      }
+    },
+    "character_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^character:[a-z0-9][a-z0-9-]*$"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "slug",
+    "title",
+    "order",
+    "status",
+    "revision",
+    "authors"
+  ],
+  "additionalProperties": false
+}

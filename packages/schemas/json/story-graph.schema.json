@@ -1,0 +1,159 @@
+{
+  "$id": "authorbot.story-graph/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "authorbot.story-graph/v1"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "summary": {
+                "type": "string"
+              },
+              "parent": {
+                "type": "string",
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+              },
+              "order": {
+                "type": "number"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "type": {
+                "type": "string",
+                "const": "chapter"
+              },
+              "chapter_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "proposed",
+                  "published",
+                  "archived"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "type",
+              "chapter_id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "summary": {
+                "type": "string"
+              },
+              "parent": {
+                "type": "string",
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+              },
+              "order": {
+                "type": "number"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "premise",
+                  "arc",
+                  "part",
+                  "scene",
+                  "beat",
+                  "custom"
+                ]
+              },
+              "goal": {
+                "type": "string"
+              },
+              "conflict": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "nodes"
+  ],
+  "additionalProperties": false
+}

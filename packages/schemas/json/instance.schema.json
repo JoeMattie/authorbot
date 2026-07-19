@@ -1,0 +1,273 @@
+{
+  "$id": "authorbot.instance/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "authorbot.instance/v1"
+    },
+    "project": {
+      "type": "object",
+      "properties": {
+        "book_config_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default_branch": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "public_read": {
+          "type": "boolean"
+        },
+        "public_annotations": {
+          "type": "boolean"
+        },
+        "writes_require_membership": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "type": "object",
+      "properties": {
+        "context_characters": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "range_scope": {
+          "type": "string",
+          "enum": [
+            "single_block"
+          ]
+        },
+        "allow_range_comments": {
+          "type": "boolean"
+        },
+        "allow_chapter_comments": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "votes": {
+      "type": "object",
+      "properties": {
+        "values": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject",
+              "abstain"
+            ]
+          }
+        },
+        "export": {
+          "type": "string",
+          "enum": [
+            "aggregate",
+            "named",
+            "pseudonymous"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "vote_changed"
+            ]
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "all": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "metric": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]*$"
+                        },
+                        "operator": {
+                          "type": "string",
+                          "enum": [
+                            "gte",
+                            "gt",
+                            "lte",
+                            "lt",
+                            "eq",
+                            "neq"
+                          ]
+                        },
+                        "value": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "metric",
+                        "operator",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "all"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "any": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "metric": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]*$"
+                        },
+                        "operator": {
+                          "type": "string",
+                          "enum": [
+                            "gte",
+                            "gt",
+                            "lte",
+                            "lt",
+                            "eq",
+                            "neq"
+                          ]
+                        },
+                        "value": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "metric",
+                        "operator",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "any"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "action": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "create_work_item"
+              },
+              "work_type": {
+                "type": "string",
+                "enum": [
+                  "revise_range",
+                  "revise_block",
+                  "revise_chapter",
+                  "write_chapter",
+                  "resolve_conflict",
+                  "planning"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "work_type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "version",
+          "when",
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "leases": {
+      "type": "object",
+      "properties": {
+        "duration": {
+          "type": "string",
+          "pattern": "^P(?!$)(?:\\d+Y)?(?:\\d+M)?(?:\\d+W)?(?:\\d+D)?(?:T(?=\\d)(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?$"
+        },
+        "renewal_prompt_before": {
+          "type": "string",
+          "pattern": "^P(?!$)(?:\\d+Y)?(?:\\d+M)?(?:\\d+W)?(?:\\d+D)?(?:T(?=\\d)(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?$"
+        },
+        "renewal_duration": {
+          "type": "string",
+          "pattern": "^P(?!$)(?:\\d+Y)?(?:\\d+M)?(?:\\d+W)?(?:\\d+D)?(?:T(?=\\d)(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?$"
+        },
+        "maximum_total_duration": {
+          "type": "string",
+          "pattern": "^P(?!$)(?:\\d+Y)?(?:\\d+M)?(?:\\d+W)?(?:\\d+D)?(?:T(?=\\d)(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "publishing": {
+      "type": "object",
+      "properties": {
+        "collaboration_data": {
+          "type": "string",
+          "enum": [
+            "dynamic",
+            "static"
+          ]
+        },
+        "static_snapshot_on_release": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema"
+  ],
+  "additionalProperties": false
+}
