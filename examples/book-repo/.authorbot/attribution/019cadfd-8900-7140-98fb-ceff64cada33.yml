@@ -1,0 +1,12 @@
+schema: authorbot.attribution/v1
+chapter_id: 019cadfd-8900-7140-98fb-ceff64cada33
+entries:
+  - revision: 1
+    actor: github:avery-cole
+    commit: 7c1a9f0e2b5d4c8a6f3e1d0b9a8c7e6f5d4b3a29
+  - revision: 2
+    actor: github:avery-cole
+    commit: 91d4e7b2c5a8f1e0d3b6a9c2e5f8b1d4a7c0e3f6
+  - revision: 3
+    actor: agent:draftsmith-01
+    commit: 4e8b1c5f9a2d6e0b3c7f1a4d8e2b5c9f0a3d6e1b

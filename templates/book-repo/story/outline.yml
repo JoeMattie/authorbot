@@ -1,0 +1,17 @@
+# Story graph (schema: authorbot.story-graph/v1).
+# Method-neutral planning nodes: premise, arc, part, chapter, scene, beat,
+# custom. Chapter nodes carry the chapter's UUID in `chapter_id`.
+schema: authorbot.story-graph/v1
+nodes:
+  - id: premise:main
+    type: premise
+    title: Core premise
+    summary: One sentence describing what the book is about.
+    order: 10
+  - id: chapter:opening
+    type: chapter
+    title: Opening
+    chapter_id: 019f1ce9-00e0-7926-93ca-d1293511260b
+    parent: premise:main
+    order: 20
+    status: draft

@@ -1,0 +1,9 @@
+schema: authorbot.story-graph/v1
+nodes:
+  - id: premise:the-hook
+    type: premise
+    order: 1
+links:
+  - from: premise:the-hook
+    to: location:nowhere
+    type: set-in

@@ -1,0 +1,43 @@
+# Authorbot validation workflow skeleton (design section 17.1).
+#
+# This file is intentionally fully commented out: uncomment and adapt it once
+# your project has access to the `authorbot` CLI. It runs on pull requests and
+# pushes that touch book content and fails the build on any validation error.
+#
+# What validation covers:
+#   - book.yml and all frontmatter schemas
+#   - unique chapter IDs, slugs, and order values
+#   - block ID presence, uniqueness, and UUIDv7 format
+#   - annotation selectors and cross-references (story graph, timeline,
+#     characters, work items, decisions, releases, attribution)
+#   - raw HTML and unsafe URL schemes in prose
+#   - work-item original-text delimiter integrity
+#
+# name: validate
+#
+# on:
+#   push:
+#     paths:
+#       - "book.yml"
+#       - "chapters/**"
+#       - "story/**"
+#       - ".authorbot/**"
+#   pull_request:
+#     paths:
+#       - "book.yml"
+#       - "chapters/**"
+#       - "story/**"
+#       - ".authorbot/**"
+#
+# jobs:
+#   validate:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 22
+#       - name: Install the Authorbot CLI
+#         run: npm install --global @authorbot/cli
+#       - name: Validate the book repository
+#         run: authorbot validate . --json

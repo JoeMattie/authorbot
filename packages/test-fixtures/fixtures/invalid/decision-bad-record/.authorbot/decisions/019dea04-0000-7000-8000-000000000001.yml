@@ -1,0 +1,8 @@
+schema: authorbot.decision/v1
+id: 019dea04-0000-7000-8000-000000000001
+rule: suggestion_to_work_item
+rule_version: 1
+metrics:
+  approvals: 1
+result: mystery
+effective_at: 2026-05-03T10:00:00Z

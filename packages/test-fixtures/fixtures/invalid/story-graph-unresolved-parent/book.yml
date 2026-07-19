@@ -1,0 +1,10 @@
+schema: authorbot.book/v1
+id: 019de28d-3c00-74f0-b285-64f4e7f44d86
+title: Minimal Fixture Book
+slug: minimal-fixture
+language: en
+content:
+  chapters_glob: chapters/*.md
+  raw_html: false
+planning:
+  outline: story/outline.yml

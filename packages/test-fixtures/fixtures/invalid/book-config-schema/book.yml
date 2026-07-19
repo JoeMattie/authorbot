@@ -1,0 +1,8 @@
+schema: authorbot.book/v1
+id: not-a-uuid
+title: Minimal Fixture Book
+slug: minimal-fixture
+language: en
+content:
+  chapters_glob: chapters/*.md
+  raw_html: false

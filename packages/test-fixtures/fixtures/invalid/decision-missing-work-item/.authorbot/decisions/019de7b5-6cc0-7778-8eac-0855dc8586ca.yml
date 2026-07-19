@@ -1,0 +1,13 @@
+schema: authorbot.decision/v1
+id: 019de7b5-6cc0-7778-8eac-0855dc8586ca
+source_annotation_id: 019de7b3-9800-70d2-988f-9a6d50123695
+rule: suggestion_to_work_item
+rule_version: 1
+metrics:
+  approvals: 3
+  rejections: 0
+  net_score: 3
+  human_approvals: 2
+result: create_work_item
+work_item_id: 019decda-de60-708d-80c5-f1025df1fd1f
+effective_at: 2026-05-02T08:02:00Z

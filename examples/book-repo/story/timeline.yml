@@ -1,0 +1,46 @@
+schema: authorbot.timeline/v1
+calendar:
+  type: relative
+  epoch_label: Run Cycle 0
+events:
+  - id: event:first-drift
+    sort_key: 410217
+    display_time: Run Cycle 41, 02:17
+    title: The drift is first logged
+    participants:
+      - character:mara-voss
+    locations:
+      - location:instrument-bay
+    chapter_refs:
+      - 019cadfd-8900-7140-98fb-ceff64cada33
+    facts:
+      - The residual arc repeats every seventy-one minutes.
+      - The arc amplitude is 4.1e-4 and constant across runs.
+  - id: event:null-campaign
+    sort_key: 440000
+    display_time: Run Cycles 44-47
+    title: Substitution campaign fails to remove the signal
+    participants:
+      - character:mara-voss
+      - character:theo-abara
+    locations:
+      - location:instrument-bay
+    chapter_refs:
+      - 019d0bc2-a980-734d-b0c1-aa819448d107
+    facts:
+      - Run 47 executed on isolated generator power with the cesium-2 reference.
+      - The rewritten pipeline reproduces the arc exactly.
+  - id: event:structure-resolved
+    sort_key: 520305
+    display_time: Run Cycle 52, 03:05
+    title: Eleven notches resolve inside the arc
+    participants:
+      - character:mara-voss
+      - character:theo-abara
+    locations:
+      - location:control-room
+    chapter_refs:
+      - 019d7c32-d780-7cc1-817a-a1369297a9fc
+    facts:
+      - The arc contains eleven evenly spaced notches per cycle.
+      - Notch spacing is constant to the nanosecond.

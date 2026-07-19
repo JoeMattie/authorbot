@@ -1,0 +1,32 @@
+{
+  "name": "@authorbot/test-fixtures",
+  "version": "0.1.0",
+  "description": "Fixture book repositories for Authorbot Phase 0: a valid minimal repo plus invalid repos each broken in one documented way, with typed helpers to enumerate them and read their expected validation error codes (Phase 0 contract section 5)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "fixtures"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

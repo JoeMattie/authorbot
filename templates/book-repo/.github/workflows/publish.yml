@@ -1,0 +1,44 @@
+# Authorbot publication workflow skeleton (design section 17.2).
+#
+# This file is intentionally fully commented out: uncomment and adapt it once
+# your project has a publisher and a static host configured. It should run
+# only when public content changes (path filters below) or on manual release,
+# never on raw collaboration traffic (design section 7.4).
+#
+# Steps, per design section 17.2:
+#   1. Checkout the exact commit.
+#   2. Validate.
+#   3. Build static output.
+#   4. Generate authorbot-build.json (commit, chapter revisions, timestamp).
+#   5. Deploy to the configured static host.
+#   6. Notify Authorbot of the deployment result (signed callback) or let it
+#      reconcile deployment status through the provider API.
+#
+# name: publish
+#
+# on:
+#   push:
+#     branches: [main]
+#     paths:
+#       - "book.yml"
+#       - "chapters/**"
+#       - "story/**"
+#       - ".authorbot/releases/**"
+#   workflow_dispatch: {}
+#
+# jobs:
+#   publish:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 22
+#       - name: Install the Authorbot toolchain
+#         run: npm install --global @authorbot/cli
+#       - name: Validate the book repository
+#         run: authorbot validate .
+#       - name: Build the static site and build manifest
+#         run: authorbot build . --out dist
+#       - name: Deploy
+#         run: echo "Deploy ./dist to your static host here"

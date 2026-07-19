@@ -1,0 +1,5 @@
+schema: authorbot.story-graph/v1
+nodes:
+  - id: premise:the-hook
+    type: saga
+    order: 1

@@ -1,0 +1,11 @@
+schema: authorbot.timeline/v1
+calendar:
+  type: relative
+  epoch_label: Day 0
+events:
+  - id: event:unwitnessed
+    sort_key: 100
+    display_time: Day 1
+    title: An event referencing a chapter that does not exist
+    chapter_refs:
+      - 019decd9-f400-78d1-8fdb-e8a94ff8f36f

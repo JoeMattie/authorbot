@@ -1,0 +1,12 @@
+schema: authorbot.story-graph/v1
+nodes:
+  - id: premise:main
+    type: premise
+    title: Core premise
+    summary: One sentence.
+    order: 10
+  - id: scene:orphaned
+    type: scene
+    title: A scene with a missing parent
+    parent: part:ghost
+    order: 20

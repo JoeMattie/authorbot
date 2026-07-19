@@ -1,0 +1,4 @@
+schema: authorbot.timeline/v1
+events:
+  - id: event:the-drift
+    display_time: "Day 1"

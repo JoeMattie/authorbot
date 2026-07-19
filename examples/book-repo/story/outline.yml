@@ -1,0 +1,65 @@
+schema: authorbot.story-graph/v1
+nodes:
+  - id: premise:main
+    type: premise
+    title: Core premise
+    summary: A small metrology lab discovers a periodic anomaly in its interferometer that survives every attempt to explain it away, and slowly realizes the signal is an aperture, not an error.
+    order: 10
+  - id: part:one
+    type: part
+    title: "Part One: Instrument Error"
+    summary: The team exhausts every mundane explanation.
+    parent: premise:main
+    order: 20
+  - id: chapter:baseline
+    type: chapter
+    title: Baseline
+    chapter_id: 019cadfd-8900-7140-98fb-ceff64cada33
+    parent: part:one
+    order: 30
+    status: published
+  - id: scene:calibration-drift
+    type: scene
+    title: The fourth decimal place
+    parent: chapter:baseline
+    order: 31
+    goal: Establish the drift as real, small, and periodic.
+    conflict: Every plausible explanation implicates the instrument or its operator.
+    outcome: Mara logs the drift and keeps it to herself.
+  - id: chapter:null-results
+    type: chapter
+    title: Null Results
+    chapter_id: 019d0bc2-a980-734d-b0c1-aa819448d107
+    parent: part:one
+    order: 40
+    status: published
+  - id: scene:substitution-campaign
+    type: scene
+    title: Killing the signal
+    parent: chapter:null-results
+    order: 41
+    goal: Eliminate the instrument as the source of the drift.
+    conflict: Each substitution costs beam time and proves nothing.
+    outcome: The drift survives an isolated-power run; the instrument is exonerated.
+  - id: chapter:the-window
+    type: chapter
+    title: The Window
+    chapter_id: 019d7c32-d780-7cc1-817a-a1369297a9fc
+    parent: part:one
+    order: 50
+    status: draft
+  - id: scene:the-notches
+    type: scene
+    title: Eleven notches
+    parent: chapter:the-window
+    order: 51
+    goal: Resolve the arc into deliberate structure.
+    conflict: Structure implies intent, which nobody wants to be first to say.
+    outcome: The team stops calling it instrument error and names the window.
+links:
+  - from: scene:calibration-drift
+    to: scene:the-notches
+    type: foreshadows
+  - from: chapter:null-results
+    to: chapter:the-window
+    type: leads_to

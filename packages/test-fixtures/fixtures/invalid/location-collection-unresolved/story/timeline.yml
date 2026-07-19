@@ -1,0 +1,8 @@
+schema: authorbot.timeline/v1
+events:
+  - id: event:the-drift
+    sort_key: 10
+    display_time: "Day 1"
+    title: The drift appears
+    locations:
+      - location:nowhere

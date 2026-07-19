@@ -1,0 +1,21 @@
+schema: authorbot.book/v1
+id: 019c46c7-6a80-7bb3-a312-466834c8f96d
+title: The Hollow Creek Anomaly
+slug: hollow-creek-anomaly
+language: en-US
+license: CC-BY-NC-4.0
+repository:
+  default_branch: main
+content:
+  chapters_glob: chapters/*.md
+  raw_html: false
+planning:
+  method: snowflake
+  outline: story/outline.yml
+  timeline: story/timeline.yml
+  characters_glob: story/characters/*.md
+publication:
+  chapter_url: /chapters/{slug}/
+  show_revision: true
+  show_attribution: true
+  show_public_annotations: true

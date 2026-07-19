@@ -1,0 +1,18 @@
+# Timeline (schema: authorbot.timeline/v1).
+# `sort_key` is the sortable value; `display_time` is the human label. This
+# keeps custom calendars and relative time sortable without parsing labels.
+schema: authorbot.timeline/v1
+calendar:
+  type: relative
+  epoch_label: Day 0
+events:
+  - id: event:opening-event
+    sort_key: 100
+    display_time: Day 0
+    title: The story begins
+    participants:
+      - character:protagonist
+    chapter_refs:
+      - 019f1ce9-00e0-7926-93ca-d1293511260b
+    facts:
+      - Continuity facts live here as short declarative sentences.
