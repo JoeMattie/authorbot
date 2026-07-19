@@ -1,0 +1,17 @@
+{
+  "name": "authorbot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Git-backed editorial control plane and collaboration protocol for serial books",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.15.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "validate:example": "pnpm --filter @authorbot/cli start validate examples/book-repo"
+  }
+}
