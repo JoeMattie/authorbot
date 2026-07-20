@@ -104,7 +104,7 @@ option — never emitted otherwise).
 |---|---|---|
 | 0–4 | contracts, publisher, API, governance, leases & submissions | complete |
 | 5 | GitHub App reader/writer, coordinator, publication tracking | in progress |
-| 6 | guided onboarding wizard + "New chapter" authoring | contracted |
+| 6 | onboarding wizard, "New chapter" authoring, browser settings | contracted |
 | 7 | hardening: rate limits, restore drill, reviews, load testing | contracted |
 | 8 | installable collaborator skill for agent fleets | contracted |
 

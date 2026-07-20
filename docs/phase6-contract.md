@@ -81,9 +81,12 @@ interactive and browser-driven) rather than attempting to script credentials.
 
 ### 3.2 `book` — create the book repository
 
-Prompts: title, slug (offered, derived from title, editable), author name,
-license (with a plain-language summary of each option, not just SPDX ids),
-and whether to start from the template or an existing directory.
+Prompts, kept to the irreducible minimum — everything else is editable later
+in the browser (§3.6), so the wizard must not front-load decisions an author
+cannot yet make: **title**, **slug** (derived from the title, editable, and
+explained as "part of your URLs"), and **public or private repository**.
+Author name comes from the authenticated `gh` account; license defaults to
+CC-BY-NC-4.0 and is changed in settings, not at a prompt.
 
 Generates: `book.yml` with a real UUIDv7, an empty `story/` scaffold,
 `.github/workflows/`, `README.md`, `.gitignore`. Runs `authorbot validate`
@@ -108,13 +111,13 @@ private, explaining the consequence for a work-in-progress novel).
 
 ### 3.3 `publish` — the reading site
 
-Choose GitHub Pages (simplest) or Cloudflare (needed later for the API), with
-the trade-off stated. Configures the chosen path: for Pages, enables it and
-sets the source to Actions; for Cloudflare, creates the Worker config and
-guides `CLOUDFLARE_API_TOKEN` creation. Pins `AUTHORBOT_REF` to the toolchain
-commit the wizard itself ran, explaining why pinning matters. Triggers the
-first deploy and **waits for it, reporting the live URL** — the stage is not
-complete until the site actually loads.
+Cloudflare only (ADR-0020); there is no host question to ask. Creates or
+reuses the Worker, guides `CLOUDFLARE_API_TOKEN` creation (or reuses an
+authenticated `wrangler`), offers a custom domain or the `workers.dev`
+default, and pins `AUTHORBOT_REF` to the toolchain commit the wizard itself
+ran, explaining why pinning matters. Triggers the first deploy and **waits for
+it, reporting the live URL** — the stage is not complete until the site
+actually loads.
 
 ### 3.4 `collaborate` — the API (optional)
 
@@ -167,7 +170,45 @@ This is what makes the wizard's promise true. Without it, setup produces a
 book the author cannot add to except by editing files in a text editor, which
 is the exact problem this phase exists to remove.
 
-### 3.6 `agent` — invite an agent (optional)
+### 3.6 Book settings in the browser
+
+The wizard's job is to get an author to a working book, not to interview them.
+Everything not required to *create* the book is configured afterwards in the
+site itself, signed in with the GitHub account that owns the project.
+
+A **Settings** view, visible only to maintainers, editing the same `book.yml`
+that lives in Git — through the same outbox, coordinator, validation, and
+attribution path as any other write. Settings changes are commits: diffable,
+revertable, audited. There is no second configuration store.
+
+**Editable:**
+
+- Title, language, license (offered with plain-language summaries).
+- Publication display: show revision, show attribution, show public
+  annotations.
+- Governance thresholds — the vote rule from Phase 3, in author-facing terms
+  ("how many approvals before a suggestion becomes work?"), with the
+  human-approval requirement explained rather than merely rendered.
+
+**Guarded, with the consequence stated before the change is accepted:**
+
+- `slug` and `chapter_url` — changing either breaks existing links to
+  published chapters. Require explicit confirmation naming what breaks.
+
+**Never editable from the browser:**
+
+- `id` (permanent identity), `repository.default_branch` and
+  `content.chapters_glob` (deployment and layout invariants), and
+  `content.raw_html` — enabling raw HTML is a security decision that belongs
+  in a reviewed commit, not a toggle.
+
+**Amendment to Phase 3 §3.** Governance rules move from the `RULES_JSON`
+environment variable into `book.yml`, so they are versioned, diffable, and
+reviewable alongside the prose they govern — and therefore editable here. The
+environment variable remains as a bootstrap default for a book that has not
+set them.
+
+### 3.7 `agent` — invite an agent (optional)
 
 Mints a scoped agent token, printing it exactly once with a plain warning, and
 writes a ready-to-paste prompt for the user's coding agent that includes the
@@ -269,4 +310,9 @@ the repository, this replaces the separate OAuth App. Requirements:
    empty state; `templates/book-repo` ships blank and self-consistent.
 9. No CORS header is emitted under any configuration; a book deployed under a
    base path works end to end (site, API, sign-in, and islands).
-10. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+10. A maintainer changes the book's title, license, display options, and vote
+    threshold entirely in the browser; each lands as a validated, attributed
+    commit to `book.yml`, and guarded fields require confirmation while
+    never-editable fields are absent from the interface.
+11. No GitHub Pages code, workflow step, or documentation remains.
+12. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
