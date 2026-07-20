@@ -45,6 +45,12 @@ UI are Phase 3.
 
 ## 3. Security
 
+> **Superseded in part by ADR-0019 (2026-07-20):** cross-origin deployment is
+> no longer supported. CORS and `ALLOWED_ORIGINS` are removed, the session
+> cookie is always `SameSite=Lax`, and `api_url` must be root-relative. The
+> CSRF origin check below still applies. The rest of this section is retained
+> as the record of what Phase 2b built.
+
 - **Client rendering of bodies is plain text**: escaped, newline-preserving,
   no client-side Markdown rendering in 2b. (Server-side sanitized rendering
   can come later; this forecloses the XSS surface now.)

@@ -53,6 +53,19 @@ wizard from a trap.
 8. Colour and Unicode degrade gracefully; respect `NO_COLOR`; never require a
    terminal wider than 80 columns.
 
+## 2a. Prerequisite: same-origin only (ADR-0019)
+
+Before the wizard is written, the cross-origin deployment path is removed:
+CORS and `ALLOWED_ORIGINS` deleted, the session cookie fixed at
+`SameSite=Lax`, `return_to` and `api_url` restricted to the API's own origin,
+and **base-path support added** so a book can live at `example.com/my-book/`
+with its API under the same prefix. CSRF origin checks stay.
+
+This is a prerequisite rather than a side quest: the wizard's hardest question
+to ask a novelist would have been "same-origin or split?", and the honest
+answer is that there was only ever one right choice. Removing the fork removes
+the question.
+
 ## 3. Stages
 
 Each stage is independently runnable (`create-authorbot <stage>`) and the
@@ -254,4 +267,6 @@ the repository, this replaces the separate OAuth App. Requirements:
    work unchanged.
 8. A chapterless book validates, builds, publishes, and renders a welcoming
    empty state; `templates/book-repo` ships blank and self-consistent.
-9. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+9. No CORS header is emitted under any configuration; a book deployed under a
+   base path works end to end (site, API, sign-in, and islands).
+10. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
