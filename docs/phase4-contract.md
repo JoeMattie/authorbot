@@ -48,7 +48,13 @@ types above only), rich editor, notifications, rate limits (Phase 6).
 ## 3. Task bundle (design §15.3)
 
 Claim response exactly: `workItem { id, type, acceptanceCriteria[],
-priority }`, `lease { id, token, expiresAt, maxExpiresAt }`, `document
+priority }`, `lease { id, token, expiresAt, maxExpiresAt, renewalPromptAt }`
+(amended 2026-07-20: `renewalPromptAt` — `expiresAt` minus the configured
+`LEASE_RENEWAL_PROMPT_BEFORE` — was omitted from the original contract, which
+forced the §7 UI to hardcode the 5-minute default on a freshly claimed lease
+and ignore a deployment's configured lead time until the first renewal, where
+the renew response already carries the field. It is a derived timestamp, not
+capability material.), `document
 { chapterId, revision, contentHash: "sha256:…", source }` (full chapter
 Markdown at base revision), `target { blockId, exact, start, end }` (absent
 for chapter scope), `context { annotationBody, chapterSummary, storyRefs[] }`,

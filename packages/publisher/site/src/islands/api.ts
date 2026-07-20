@@ -178,7 +178,15 @@ export interface BundleTarget {
 export interface TaskBundle {
   workItem: { id: string; type: string; acceptanceCriteria: string[]; priority: string };
   /** `token` is returned exactly once by the API and is never logged. */
-  lease: { id: string; token: string; expiresAt: string; maxExpiresAt: string };
+  lease: {
+    id: string;
+    token: string;
+    expiresAt: string;
+    maxExpiresAt: string;
+    /** Contract §3 (amended): lets a fresh claim honor the deployment's
+     * configured renewal lead time instead of assuming the default. */
+    renewalPromptAt?: string;
+  };
   document: { chapterId: string; revision: number; contentHash: string; source: string };
   target?: BundleTarget;
   context: { annotationBody: string; chapterSummary: string; storyRefs: string[] };

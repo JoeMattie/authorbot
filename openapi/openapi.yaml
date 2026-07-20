@@ -2407,11 +2407,14 @@ components:
           allOf:
             - $ref: "#/components/schemas/Lease"
             - type: object
-              required: [token]
+              required: [token, renewalPromptAt]
               properties:
                 token:
                   type: string
                   description: Opaque lease secret, returned once; only its hash is stored.
+                renewalPromptAt:
+                  $ref: "#/components/schemas/Timestamp"
+                  description: When a client should offer renewal — expiresAt minus the configured lead time.
         document:
           type: object
           required: [chapterId, revision, contentHash, source]

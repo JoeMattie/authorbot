@@ -305,6 +305,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
           token: minted.token,
           expiresAt: lease.expiresAt,
           maxExpiresAt: lease.maxExpiresAt,
+          renewalPromptAt: renewalPromptAt(lease, leaseConfig),
         },
         document: {
           chapterId: chapter.id,

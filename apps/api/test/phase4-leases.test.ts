@@ -28,8 +28,20 @@ async function eventTypes(harness: Phase4Harness): Promise<string[]> {
   return events.map((e) => e.type);
 }
 
-function leaseOf(bundle: Record<string, unknown>): { id: string; token: string; expiresAt: string; maxExpiresAt: string } {
-  return bundle["lease"] as { id: string; token: string; expiresAt: string; maxExpiresAt: string };
+function leaseOf(bundle: Record<string, unknown>): {
+  id: string;
+  token: string;
+  expiresAt: string;
+  maxExpiresAt: string;
+  renewalPromptAt: string;
+} {
+  return bundle["lease"] as {
+    id: string;
+    token: string;
+    expiresAt: string;
+    maxExpiresAt: string;
+    renewalPromptAt: string;
+  };
 }
 
 async function renew(
@@ -108,6 +120,10 @@ describe("claim (contract §2/§3)", () => {
       // Design §25 defaults from the fake clock's 18:00:00Z.
       expect(lease.expiresAt).toBe("2026-07-19T18:30:00Z");
       expect(lease.maxExpiresAt).toBe("2026-07-19T22:00:00Z");
+      // Contract §3 (amended): the claim advertises the renewal prompt instant
+      // so a fresh lease honours the deployment's configured lead time rather
+      // than the client assuming the default.
+      expect(lease.renewalPromptAt).toBe("2026-07-19T18:25:00Z");
       const document = body["document"] as Record<string, unknown>;
       expect(document["chapterId"]).toBe(CHAPTER_ID);
       expect(document["revision"]).toBe(3);
