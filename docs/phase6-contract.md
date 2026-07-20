@@ -73,15 +73,15 @@ have to generate twice:
 
 - Claim the `@authorbot` npm scope and publish `@authorbot/cli`,
   `@authorbot/api`, and `@authorbot/create` with prebuilt `dist/`.
-- A release workflow: semver tag → build once → publish with `--provenance`
-  → attach self-contained bundles and `SHA256SUMS` to the GitHub release.
+- A release workflow: semver tag → build once → publish with `--provenance`.
+  No second distribution channel: `npm pack`, offline caches, and registry
+  mirrors already cover vendoring (ADR-0022).
 - Generated book repositories get a `package.json` + lockfile pinning
   `@authorbot/cli`; `AUTHORBOT_REF` is retired. Template CI drops the
   checkout-and-build steps, and `wrangler.jsonc` points `main` at
   `node_modules/@authorbot/api/dist/worker.js`.
 - Migrate `causal-projector` off `AUTHORBOT_REF`, removing the repository
   variable once nothing reads it.
-- Document vendoring the release bundles as a supported, opt-in escape hatch.
 
 ## 3. Stages
 
@@ -356,6 +356,5 @@ the repository, this replaces the separate OAuth App. Requirements:
     publish workflow applies pending D1 migrations before deploying.
 13. A generated book publishes with no clone or compile of this repository:
     author CI installs pinned npm packages and runs the binary. Releases
-    publish with provenance, and the vendoring escape hatch is documented and
-    tested at least once.
+    publish with provenance.
 14. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.

@@ -83,17 +83,29 @@ The "check out and build the Authorbot toolchain" steps are deleted.
 
 A semver tag triggers a workflow that builds once and publishes to npm with
 **`--provenance`** (GitHub Actions OIDC attestation, tying each published
-artifact to the commit and workflow that produced it). The same workflow
-attaches self-contained bundles and a `SHA256SUMS` file to the GitHub release.
+artifact to the commit and workflow that produced it).
 
-### Vendoring stays available, opt-in
+### No bespoke vendoring channel
 
-The release bundles are the escape hatch for anyone wanting zero external
-dependency: commit `authorbot.mjs` and `worker.mjs` into the book repository
-and point CI and wrangler at them. Documented, supported, and **not the
-default** — because a vendored bundle in the repository puts a 1.5 MB diff
-into every upgrade pull request, destroying the reviewability that makes those
-PRs worth opening.
+*(Revised the same day this ADR was accepted, narrowing its scope.)*
+
+An earlier draft attached self-contained bundles to each GitHub release as a
+supported vendoring path. That is dropped: **npm already provides vendoring**,
+and better than we would.
+
+- `npm pack @authorbot/cli@1.5.0` produces a tarball that can be committed and
+  installed from a path.
+- `npm ci --offline` works against a populated cache.
+- A registry mirror or proxy covers an organisation that cannot reach npm.
+
+None of that requires anything from us. Publishing a second, parallel
+distribution channel would mean building, checksumming, documenting, and
+testing artifacts that almost nobody uses — and an untested artifact that
+silently rots is worse than none, because it looks supported.
+
+The disappearance scenario is therefore answered by standard tooling rather
+than a bespoke mechanism, and the reviewability of upgrade pull requests
+(ADR-0021 §3) is preserved by default rather than by advice.
 
 ## Consequences
 

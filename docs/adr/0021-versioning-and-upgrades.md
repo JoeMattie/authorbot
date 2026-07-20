@@ -99,11 +99,13 @@ expectation with old files — the exact state validation is meant to catch, so
 
 ### 6. The build-time dependency, stated plainly
 
-An author's CI clones this repository at build time. If it disappeared, their
-next build fails — while their deployed site and API keep serving untouched.
-Documented mitigations: fork the repository, or vendor a release archive.
-This is the only dependency an author has on us, and it should never grow
-into a runtime one.
+An author's CI depends on our published packages at build time (ADR-0022
+replaced the git checkout this originally described). If they became
+unavailable, the next build fails — while the deployed site and API keep
+serving untouched. Mitigation is ordinary npm tooling: `npm pack` a tarball
+into the repository, a populated offline cache, or a registry mirror. This
+remains the only dependency an author has on us, and it must never grow into
+a runtime one.
 
 ## Consequences
 
