@@ -14,12 +14,23 @@ import {
   OutboxRepository,
   WebhookDeliveriesRepository,
 } from "./operations.js";
+import {
+  DecisionsRepository,
+  EventsRepository,
+  VoteEventsRepository,
+  VotesRepository,
+  WorkItemsRepository,
+} from "./collaboration.js";
 
 export * from "./identity.js";
 export * from "./content.js";
 export * from "./operations.js";
+export * from "./collaboration.js";
 
-/** One repository per Phase 2 contract §2 table, sharing a `SqlDatabase`. */
+/**
+ * One repository per table (Phase 2 contract §2 plus the Phase 3 contract
+ * §2/§4/§5 tables), sharing a `SqlDatabase`.
+ */
 export interface Repositories {
   projects: ProjectsRepository;
   actors: ActorsRepository;
@@ -34,6 +45,11 @@ export interface Repositories {
   idempotencyKeys: IdempotencyKeysRepository;
   webhookDeliveries: WebhookDeliveriesRepository;
   auditEvents: AuditEventsRepository;
+  votes: VotesRepository;
+  voteEvents: VoteEventsRepository;
+  decisions: DecisionsRepository;
+  workItems: WorkItemsRepository;
+  events: EventsRepository;
 }
 
 export function createRepositories(db: SqlDatabase): Repositories {
@@ -51,5 +67,10 @@ export function createRepositories(db: SqlDatabase): Repositories {
     idempotencyKeys: new IdempotencyKeysRepository(db),
     webhookDeliveries: new WebhookDeliveriesRepository(db),
     auditEvents: new AuditEventsRepository(db),
+    votes: new VotesRepository(db),
+    voteEvents: new VoteEventsRepository(db),
+    decisions: new DecisionsRepository(db),
+    workItems: new WorkItemsRepository(db),
+    events: new EventsRepository(db),
   };
 }

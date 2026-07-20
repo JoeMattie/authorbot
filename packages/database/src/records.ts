@@ -202,6 +202,118 @@ export interface WebhookDeliveryRecord {
   processedAt: string | null;
 }
 
+/** Phase 3 contract §2. */
+export type VoteValue = "approve" | "reject" | "abstain";
+
+/** Phase 0 contract §4 decision record `result`. */
+export type DecisionResult =
+  | "create_work_item"
+  | "rejected"
+  | "support_changed"
+  | "overridden";
+
+/** Phase 0 contract §4 work-item vocabulary (Phase 3 uses `revise_*` only). */
+export type WorkItemType =
+  | "revise_range"
+  | "revise_block"
+  | "revise_chapter"
+  | "write_chapter"
+  | "resolve_conflict"
+  | "planning";
+
+/** Phase 0 contract §4; Phase 3 stops at `ready` (Phase 3 contract §1). */
+export type WorkItemStatus =
+  | "ready"
+  | "leased"
+  | "submitted"
+  | "applying"
+  | "completed"
+  | "conflict"
+  | "failed"
+  | "cancelled";
+
+export type WorkItemPriority = "low" | "normal" | "high";
+
+/** One current vote per (annotation, actor) — Phase 3 contract §2. */
+export interface VoteRecord {
+  id: string;
+  projectId: string;
+  annotationId: string;
+  actorId: string;
+  value: VoteValue;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Append-only vote history (Phase 3 contract §2). `value: null` records a
+ * cleared vote; `previousValue: null` records a first vote.
+ */
+export interface VoteEventRecord {
+  id: string;
+  projectId: string;
+  annotationId: string;
+  actorId: string;
+  value: VoteValue | null;
+  previousValue: VoteValue | null;
+  createdAt: string;
+}
+
+/**
+ * Sticky decision record (Phase 3 contract §4, design §11.3–11.4). Unique on
+ * `(sourceAnnotationId, actionType, ruleVersion)` — the idempotency key that
+ * collapses concurrent threshold crossings to one decision. `ruleVersion` 0
+ * is reserved for maintainer force-create.
+ */
+export interface DecisionRecord {
+  id: string;
+  projectId: string;
+  sourceAnnotationId: string;
+  actionType: string;
+  rule: string;
+  ruleVersion: number;
+  /** Aggregate metrics snapshot at crossing — never per-voter data (§26.1). */
+  metrics: Record<string, number>;
+  result: DecisionResult;
+  /** Design §11.3: set when support drops below the rule, cleared on return. */
+  supportChanged: boolean;
+  overrideReason: string | null;
+  workItemId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Phase 3 contract §4, design §13. */
+export interface WorkItemRecord {
+  id: string;
+  projectId: string;
+  type: WorkItemType;
+  status: WorkItemStatus;
+  sourceAnnotationId: string;
+  chapterId: string;
+  baseRevision: number;
+  /** Annotation target selector snapshot incl. quote; null for chapter scope. */
+  target: unknown;
+  priority: WorkItemPriority;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A row of the SSE event feed (Phase 3 contract §5, design §15.5). `id` is a
+ * database-assigned monotonic integer — the stream cursor.
+ */
+export interface EventRecord {
+  id: number;
+  projectId: string;
+  type: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+/** Input for appending an event; the database assigns the monotonic id. */
+export type NewEventRecord = Omit<EventRecord, "id">;
+
 export interface AuditEventRecord {
   id: string;
   projectId: string;

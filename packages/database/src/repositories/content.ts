@@ -191,6 +191,34 @@ export class AnnotationsRepository {
     return result.changes > 0;
   }
 
+  /**
+   * Optimistic (compare-and-swap) status transition: flip `from` → `to` only
+   * when the row is currently in `from`. If it is not, the CASE yields NULL,
+   * which violates the `status NOT NULL` constraint and aborts the enclosing
+   * `db.batch` atomically (SQLite has no per-statement rowcount gate inside a
+   * transaction). This is the cross-isolate backstop for governance
+   * transitions: the loser of a race that read a stale `open` status sees a
+   * constraint error instead of blindly clobbering a concurrent transition
+   * (e.g. a maintainer reject silently undone by, or coexisting with, a rule
+   * crossing). Callers catch the constraint error, re-read fresh state, and
+   * respond (already-decided, or a state conflict).
+   */
+  casStatusStatement(
+    id: string,
+    from: AnnotationRecordStatus,
+    to: AnnotationRecordStatus,
+    updatedAt: string,
+  ): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE annotations
+           SET status = CASE WHEN status = ? THEN ? ELSE NULL END,
+               updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(from, to, updatedAt, id);
+  }
+
   setGitOperationStatement(id: string, gitOperationId: string, updatedAt: string): SqlStatement {
     return this.db
       .prepare(`UPDATE annotations SET git_operation_id = ?, updated_at = ? WHERE id = ?`)
