@@ -1,0 +1,37 @@
+{
+  "name": "@authorbot/git-github",
+  "version": "0.1.0",
+  "description": "Worker-compatible GitHub integration for Authorbot (Phase 5 contract): GitHub App auth, Git Data API reader/writer, and a deterministic in-process fake GitHub with a real git object model",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@authorbot/markdown": "workspace:*",
+    "@authorbot/repo-coordinator": "workspace:*",
+    "@authorbot/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
