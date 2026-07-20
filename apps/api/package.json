@@ -1,0 +1,48 @@
+{
+  "name": "@authorbot/api",
+  "version": "0.1.0",
+  "description": "Authorbot Phase 2 API: Hono 4 app for Cloudflare Workers with runtime-agnostic business wiring (identity, annotations, replies, Git-mirroring command flow, projection rebuild, webhook ingest)",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local.d.ts",
+      "default": "./dist/local.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "dev:node": "pnpm build && node dist/dev-server.js",
+    "migrate:local": "wrangler d1 migrations apply authorbot --local",
+    "smoke": "bash scripts/smoke.sh"
+  },
+  "dependencies": {
+    "@authorbot/database": "workspace:*",
+    "@authorbot/domain": "workspace:*",
+    "@authorbot/markdown": "workspace:*",
+    "@authorbot/repo-coordinator": "workspace:*",
+    "@authorbot/schemas": "workspace:*",
+    "hono": "^4.6.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

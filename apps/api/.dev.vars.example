@@ -1,0 +1,14 @@
+# Copy to .dev.vars (gitignored) before `wrangler dev`. These are throwaway
+# local-development values — never reuse production secrets here.
+#
+# AUTH_MODE lives here (NOT in wrangler.jsonc) so a `wrangler deploy` of the
+# committed config can never ship dev auth. DEV_LOGIN_ENABLED is a second,
+# independent guard: AUTH_MODE=dev refuses to boot without it.
+AUTH_MODE=dev
+DEV_LOGIN_ENABLED=true
+SESSION_SECRET=dev-session-secret-not-for-production
+WEBHOOK_SECRET=dev-webhook-secret-not-for-production
+# github mode only:
+# GITHUB_CLIENT_ID=...
+# GITHUB_CLIENT_SECRET=...
+# GITHUB_REDIRECT_URI=http://127.0.0.1:8787/v1/auth/github/callback

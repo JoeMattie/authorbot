@@ -1,0 +1,44 @@
+// Cloudflare Worker configuration for @authorbot/api (Phase 2 contract §6).
+// Secrets are NOT set here: run
+//   wrangler secret put SESSION_SECRET
+//   wrangler secret put WEBHOOK_SECRET
+//   wrangler secret put GITHUB_CLIENT_SECRET   (github mode only)
+// For `wrangler dev`, put dev-only values in .dev.vars (gitignored).
+//
+// SECURITY: AUTH_MODE is deliberately NOT set here. AUTH_MODE=dev mounts the
+// unauthenticated POST /v1/dev/login (a total auth bypass on a reachable
+// deployment), so the dev mode must never be the deployable default. A deploy
+// must set AUTH_MODE=github (`wrangler deploy --var AUTH_MODE:github` or an
+// `env` block); local development sets AUTH_MODE=dev plus DEV_LOGIN_ENABLED=true
+// in .dev.vars (gitignored). Without AUTH_MODE the Worker refuses to boot.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "authorbot-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  // node:fs/promises is imported (but never called in the Worker) by the
+  // @authorbot/database migration runner; production migrations go through
+  // `wrangler d1 migrations apply`.
+  "compatibility_flags": ["nodejs_compat"],
+  // The Worker uses only the D1 adapter; stub out the native sqlite module
+  // that @authorbot/database's index also re-exports.
+  "alias": {
+    "better-sqlite3": "./src/stubs/better-sqlite3.ts"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "authorbot",
+      // Placeholder for local dev; replace with the real D1 database id on deploy.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations"
+    }
+  ],
+  "vars": {
+    "PROJECT_SLUG": "hollow-creek-anomaly",
+    "PROJECT_REPO": "JoeMattie/causal-projector",
+    "INITIAL_MAINTAINER": "github:JoeMattie",
+    "DEFAULT_BRANCH": "main",
+    "MIRROR_MODE": "queue"
+  }
+}
