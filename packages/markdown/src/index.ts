@@ -38,3 +38,31 @@ export {
   type NormalizedText,
 } from "./normalize.js";
 export { isUuidv7, UUIDV7_REGEX } from "./uuidv7.js";
+export { generateUuidv7 } from "./generate.js";
+export {
+  buildBlockCharMap,
+  mapNormalizedSpanToSource,
+  type BlockCharMap,
+  type MappedUnit,
+} from "./sourcemap.js";
+export {
+  listMarkedBlocks,
+  resolveTarget,
+  type MarkedBlock,
+  type RangeTarget,
+  type ResolutionKind,
+  type ResolveResult,
+  type ResolvedSpan,
+} from "./resolve.js";
+export {
+  applyBlockReplacement,
+  applyChapterReplacement,
+  applyRangeReplacement,
+  PatchError,
+  stripBlockMarkers,
+  type BlockReplacementResult,
+  type ChapterReplacementResult,
+  type PatchErrorCode,
+  type PatchOptions,
+  type RangeReplacementResult,
+} from "./patch.js";

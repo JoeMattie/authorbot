@@ -148,3 +148,78 @@ export type {
   TokenExpiryResult,
   TokenInactiveReason,
 } from "./token.js";
+
+export {
+  DEFAULT_LEASE_CONFIG,
+  LEASE_DURATION_MS,
+  LEASE_MAX_TOTAL_DURATION_MS,
+  LEASE_RENEWAL_DURATION_MS,
+  LEASE_RENEWAL_PROMPT_BEFORE_MS,
+  checkLeaseActive,
+  checkLeaseRenewable,
+  checkWorkItemClaimable,
+  isLeaseExpired,
+  leaseConfigSchema,
+  parseIsoDuration,
+  renewalPromptAt,
+  resolveLeaseExpiry,
+  shouldExpireLease,
+} from "./lease.js";
+export type {
+  ClaimCheckResult,
+  ClaimDenialReason,
+  IsoDurationParseResult,
+  LeaseConfig,
+  LeaseConfigInput,
+  LeaseInactiveReason,
+  LeaseSnapshot,
+  RenewCheckResult,
+  RenewDenialReason,
+} from "./lease.js";
+
+export {
+  LEASE_TOKEN_PREFIX,
+  LEASE_TOKEN_REGEX,
+  LEASE_TOKEN_SECRET_LENGTH,
+  isLeaseTokenFormat,
+  leaseTokenSchema,
+  parseLeaseToken,
+} from "./lease-token.js";
+export type {
+  LeaseTokenParseFailure,
+  LeaseTokenParseResult,
+} from "./lease-token.js";
+
+export {
+  PHASE4_WORK_ITEM_STATUSES,
+  WORK_ITEM_TRIGGERS,
+  WORK_ITEM_TRIGGER_EDGES,
+  applyWorkItemTrigger,
+  isWorkItemTerminal,
+  transitionWorkItemPhase4,
+} from "./work-item-lifecycle.js";
+export type {
+  WorkItemLifecycleDenialReason,
+  WorkItemTrigger,
+  WorkItemTriggerResult,
+} from "./work-item-lifecycle.js";
+
+export {
+  CONTENT_HASH_REGEX,
+  MAX_SUBMISSION_CONTENT_BYTES,
+  SUBMISSION_SCHEMA_IDS,
+  SUBMISSION_TYPES,
+  WORK_ITEM_SUBMISSION_TYPES,
+  checkSubmissionBase,
+  checkSubmissionTypeMatches,
+  contentHashSchema,
+  requiredSubmissionType,
+  submissionTypeSchema,
+  submitWorkCommandSchema,
+} from "./submission.js";
+export type {
+  SubmissionBaseDenialReason,
+  SubmissionType,
+  SubmissionTypeDenialReason,
+  SubmitWorkCommand,
+} from "./submission.js";
