@@ -2,8 +2,9 @@
 
 Decisions binding for Phase 0+. Format: MADR-ish (Status / Context / Decision
 / Consequences). Section references cite `AUTHORBOT_PROJECT_DESIGN.md`
-(design), `docs/phase0-contract.md` (contract), and
-`docs/phase1-contract.md` (phase1-contract). ADRs 0001–0012 record the
+(design), `docs/phase0-contract.md` (contract), `docs/phase1-contract.md`
+(phase1-contract), and `docs/phase2-contract.md` (phase2-contract). ADRs
+0001–0012 record the
 design §26.1 defaults adopted by the Phase 0 contract (contract §6.5);
 later ADRs record per-phase decisions.
 
@@ -22,6 +23,10 @@ later ADRs record per-phase decisions.
 | [0011](0011-aggregate-vote-export.md) | Aggregate-only vote export by default | design §26.1(5) |
 | [0012](0012-zod-v4-single-schema-source.md) | Zod v4 single schema source, generated JSON Schema | contract §1 |
 | [0013](0013-astro-static-publisher-zero-client-js.md) | Astro static publisher, programmatic build, zero client JS in Phase 1 | design §1.1, §16.1, §23; phase1-contract §1, §4 |
+| [0014](0014-database-portability-layer.md) | Database portability layer: `SqlDatabase` with D1 + better-sqlite3 adapters, plain-SQL migrations | design §9.2, §18.3, §21.3; phase2-contract §2 |
+| [0015](0015-identity-provider-interface-dev-login.md) | `IdentityProvider` interface with dev-mode login, never mounted in github mode | design §19.1, §19.3; phase2-contract §3, §7.2 |
+| [0016](0016-transactional-outbox-inline-processor.md) | Transactional outbox + inline processor for Phase 2 Git mirroring, Durable Object wiring in Phase 5 | design §7.3, §14.3, §20.1–20.2; phase2-contract §5 |
+| [0017](0017-agent-token-format-hash-only-storage.md) | Agent-token format `authorbot_<base64url>` with hash-only storage | design §19.2, §19.3; phase2-contract §3, §7.5 |
 
 New ADRs: next number, same format, add a row here. Superseding an ADR: mark
 the old one `Superseded by ADR NNNN` in its Status line.

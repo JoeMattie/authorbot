@@ -19,6 +19,12 @@ info:
       an operation id resolvable at `/v1/projects/{projectId}/operations/{operationId}`.
     - Humans (GitHub-backed session cookie) and agents (bearer token) are
       treated identically after authorization.
+
+    Implementation status: operations marked `x-implementation-status: planned`
+    are design skeleton for later phases and are not served yet. Everything
+    else matches the Phase 2 implementation (`apps/api`). Operations marked
+    `x-dev-only: true` exist only when the deployment runs `AUTH_MODE=dev`;
+    operations marked `x-auth-mode: github` only under `AUTH_MODE=github`.
   license:
     name: UNLICENSED
     identifier: LicenseRef-Authorbot-Internal
@@ -48,7 +54,7 @@ paths:
     get:
       operationId: getMe
       tags: [identity]
-      summary: Return the authenticated actor and project memberships.
+      summary: Return the authenticated actor, memberships, and effective scopes.
       responses:
         "200":
           description: The current actor.
@@ -59,7 +65,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [actor]
+                required: [actor, memberships, scopes, authKind]
                 properties:
                   actor:
                     $ref: "#/components/schemas/Actor"
@@ -67,10 +73,102 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Membership"
+                  scopes:
+                    type: array
+                    description: Effective scopes (role bundle for sessions, token ∩ bundle for agents).
+                    items:
+                      $ref: "#/components/schemas/Scope"
+                  authKind:
+                    type: string
+                    enum: [session, token]
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/dev/login:
+    post:
+      operationId: devLogin
+      tags: [identity]
+      summary: Create or load a dev actor + membership and issue a session cookie.
+      description: |
+        Mounted ONLY when the deployment runs `AUTH_MODE=dev`; the route does
+        not exist under `AUTH_MODE=github`. Creates/loads the actor
+        (`github:<login>`), replaces its membership with the requested role,
+        and sets the `authorbot_session` cookie.
+      x-dev-only: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, role]
+              properties:
+                login:
+                  type: string
+                  pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+                role:
+                  type: string
+                  enum: [reader, contributor, editor, maintainer]
+      responses:
+        "200":
+          description: Session issued; `Set-Cookie` carries the signed session.
+          headers:
+            Set-Cookie:
+              description: "`authorbot_session=<id>.<hmac>; HttpOnly; Secure; SameSite=Lax`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [actor, membership, scopes]
+                properties:
+                  actor:
+                    $ref: "#/components/schemas/Actor"
+                  membership:
+                    $ref: "#/components/schemas/Membership"
+                  scopes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Scope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /v1/auth/github:
+    get:
+      operationId: startGithubLogin
+      tags: [identity]
+      summary: Begin the GitHub OAuth web flow (github mode only).
+      x-auth-mode: github
+      security: []
+      responses:
+        "302":
+          description: Redirect to GitHub's authorize URL; sets a signed state cookie.
+
+  /v1/auth/github/callback:
+    get:
+      operationId: finishGithubLogin
+      tags: [identity]
+      summary: Complete the GitHub OAuth web flow and issue a session (github mode only).
+      x-auth-mode: github
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Session issued via `Set-Cookie`; redirects to `/`.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/projects/{projectId}:
     parameters:
@@ -92,8 +190,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/members:
     parameters:
@@ -117,7 +213,16 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Membership"
+                      allOf:
+                        - $ref: "#/components/schemas/Membership"
+                        - type: object
+                          required: [actor]
+                          properties:
+                            actor:
+                              description: The member's actor, or null when the row is dangling.
+                              oneOf:
+                                - $ref: "#/components/schemas/Actor"
+                                - type: "null"
                   nextCursor:
                     $ref: "#/components/schemas/NextCursor"
         "401":
@@ -126,8 +231,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/agent-tokens:
     parameters:
@@ -144,31 +247,41 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [name, scopes]
               properties:
                 name:
                   type: string
+                  minLength: 1
+                  maxLength: 100
                 scopes:
                   type: array
                   minItems: 1
+                  description: Requested scopes; effective scopes are capped by the agent's pinned `editor` membership bundle.
                   items:
                     $ref: "#/components/schemas/Scope"
-                expiresAt:
-                  $ref: "#/components/schemas/Timestamp"
+                expiresInDays:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  default: 30
       responses:
         "201":
-          description: Token created; the secret is returned exactly once.
+          description: Token created; the secret appears exactly once, here.
           content:
             application/json:
               schema:
-                type: object
-                required: [token, agentToken]
-                properties:
-                  token:
-                    type: string
-                    description: Opaque bearer secret; only its hash is stored.
-                  agentToken:
-                    $ref: "#/components/schemas/AgentToken"
+                allOf:
+                  - $ref: "#/components/schemas/AgentToken"
+                  - type: object
+                    required: [token]
+                    properties:
+                      token:
+                        type: string
+                        description: >-
+                          Opaque bearer secret (`authorbot_<43 chars base64url>`);
+                          only its SHA-256 hash is stored. Idempotent replays
+                          return `tokenRedacted: true` instead.
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -179,10 +292,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/agent-tokens/{tokenId}:
     parameters:
@@ -196,21 +305,19 @@ paths:
       operationId: revokeAgentToken
       tags: [identity]
       summary: Revoke an agent token.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
-        "200":
-          description: Token revoked.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentToken"
+        "204":
+          description: Token revoked (no body).
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/chapters:
     parameters:
@@ -222,11 +329,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
-        - name: status
-          in: query
-          required: false
-          schema:
-            $ref: "#/components/schemas/ChapterStatus"
       responses:
         "200":
           description: A page of chapters.
@@ -248,8 +350,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/chapters/{chapterId}:
     parameters:
@@ -258,21 +358,10 @@ paths:
     get:
       operationId: getChapter
       tags: [chapters]
-      summary: Return one chapter projection, optionally with Markdown source.
-      parameters:
-        - name: include
-          in: query
-          required: false
-          description: Set to `source` to include the Markdown source.
-          schema:
-            type: string
-            enum: [source]
+      summary: Return one chapter projection.
       responses:
         "200":
-          description: The chapter. `ETag` reflects the current revision.
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
+          description: The chapter.
           content:
             application/json:
               schema:
@@ -283,14 +372,13 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/chapter-submissions:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
     post:
       operationId: createChapterSubmission
+      x-implementation-status: planned
       tags: [chapters]
       summary: Submit a full chapter draft or revision outside the work-item flow.
       parameters:
@@ -352,6 +440,7 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: getStoryOutline
+      x-implementation-status: planned
       tags: [chapters]
       summary: Return the story graph (authorbot.story-graph/v1 projection).
       responses:
@@ -375,6 +464,7 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: getStoryTimeline
+      x-implementation-status: planned
       tags: [chapters]
       summary: Return the timeline (authorbot.timeline/v1 projection).
       responses:
@@ -398,6 +488,7 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: listStoryCharacters
+      x-implementation-status: planned
       tags: [chapters]
       summary: List character records.
       parameters:
@@ -438,11 +529,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
-        - name: status
-          in: query
-          required: false
-          schema:
-            $ref: "#/components/schemas/AnnotationStatus"
       responses:
         "200":
           description: A page of annotations.
@@ -464,12 +550,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
     post:
       operationId: createAnnotation
       tags: [annotations]
-      summary: Create a comment or suggestion on a chapter.
+      summary: Create a comment or suggestion on a chapter (queued for Git mirroring).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -478,7 +562,14 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [kind, scope, chapterRevision, body]
+              description: |
+                `target` is required for `range` scope (blockId + textPosition +
+                textQuote) and `block` scope (blockId only), and forbidden for
+                `chapter` scope. `chapterRevision` must equal the projected
+                revision (else 409). Body is Markdown ≤ 32 KiB passing the
+                Phase 0 safety rules (no raw HTML, allowed URL schemes only).
               properties:
                 kind:
                   $ref: "#/components/schemas/AnnotationKind"
@@ -492,16 +583,19 @@ paths:
                 body:
                   type: string
                   description: Markdown body. Untrusted content; sanitized on render.
-                proposedText:
-                  type: string
-                  description: Replacement text for suggestions.
       responses:
-        "201":
-          description: Annotation created.
+        "202":
+          description: Accepted; the record is `pending_git` until its operation commits.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Annotation"
+                allOf:
+                  - $ref: "#/components/schemas/AcceptedCommand"
+                  - type: object
+                    required: [annotationId]
+                    properties:
+                      annotationId:
+                        $ref: "#/components/schemas/Uuid"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -514,8 +608,6 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/annotations/{annotationId}/replies:
     parameters:
@@ -524,7 +616,7 @@ paths:
     post:
       operationId: createAnnotationReply
       tags: [annotations]
-      summary: Reply to an annotation.
+      summary: Reply to an annotation (queued for Git mirroring).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -533,19 +625,27 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [body]
               properties:
                 body:
                   type: string
+                  description: Markdown body ≤ 32 KiB, same safety rules as annotations.
                 parentReplyId:
                   $ref: "#/components/schemas/Uuid"
       responses:
-        "201":
-          description: Reply created.
+        "202":
+          description: Accepted; the reply is `pending_git` until its operation commits.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Reply"
+                allOf:
+                  - $ref: "#/components/schemas/AcceptedCommand"
+                  - type: object
+                    required: [replyId]
+                    properties:
+                      replyId:
+                        $ref: "#/components/schemas/Uuid"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -554,10 +654,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/annotations/{annotationId}/vote:
     parameters:
@@ -565,6 +665,7 @@ paths:
       - $ref: "#/components/parameters/AnnotationId"
     put:
       operationId: putAnnotationVote
+      x-implementation-status: planned
       tags: [annotations]
       summary: Create or replace the caller's current vote (one per actor).
       parameters:
@@ -614,25 +715,30 @@ paths:
     post:
       operationId: withdrawAnnotation
       tags: [annotations]
-      summary: Withdraw the caller's annotation.
+      summary: Withdraw an annotation (author or maintainer; queued for Git mirroring).
+      description: |
+        Queues a Git operation that rewrites the artifact's frontmatter
+        `status`; the record flips to `withdrawn` only after that operation
+        commits (until then it still reads `open`, and a failed operation
+        leaves it `open` and retryable). Annotations still in `pending_git`
+        cannot be withdrawn (409 `state-conflict`).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                reason:
-                  type: string
       responses:
-        "200":
-          description: Annotation withdrawn.
+        "202":
+          description: Accepted.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Annotation"
+                allOf:
+                  - $ref: "#/components/schemas/AcceptedCommand"
+                  - type: object
+                    required: [annotationId]
+                    properties:
+                      annotationId:
+                        $ref: "#/components/schemas/Uuid"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -641,10 +747,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/annotations/{annotationId}/reanchor:
     parameters:
@@ -652,6 +754,7 @@ paths:
       - $ref: "#/components/parameters/AnnotationId"
     post:
       operationId: reanchorAnnotation
+      x-implementation-status: planned
       tags: [annotations]
       summary: Manually re-anchor an orphaned or needs_reanchor annotation.
       description: Records algorithm version, confidence, and the acting user (design §10.3).
@@ -694,6 +797,7 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: listWorkItems
+      x-implementation-status: planned
       tags: [work]
       summary: List work items.
       parameters:
@@ -739,6 +843,7 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     get:
       operationId: getWorkItem
+      x-implementation-status: planned
       tags: [work]
       summary: Return one work item.
       responses:
@@ -763,6 +868,7 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: claimWorkItem
+      x-implementation-status: planned
       tags: [work]
       summary: Claim a ready work item; serialized compare-and-set (design §12.2).
       description: |
@@ -808,6 +914,7 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: renewWorkItemLease
+      x-implementation-status: planned
       tags: [work]
       summary: Renew the current lease; bounded by maximum total duration.
       parameters:
@@ -852,6 +959,7 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: releaseWorkItemLease
+      x-implementation-status: planned
       tags: [work]
       summary: Release the current lease and return the work item to ready.
       parameters:
@@ -894,6 +1002,7 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: createWorkItemSubmission
+      x-implementation-status: planned
       tags: [work]
       summary: Submit the completed edit for a leased work item (design §12.5).
       parameters:
@@ -979,14 +1088,13 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
 
   /v1/projects/{projectId}/events:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: streamProjectEvents
+      x-implementation-status: planned
       tags: [operations]
       summary: Server-Sent Events feed of project activity (design §15.5).
       description: |
@@ -1032,7 +1140,8 @@ paths:
       parameters:
         - name: X-GitHub-Event
           in: header
-          required: true
+          required: false
+          description: Event name; only `push` triggers a rebuild, others are recorded and ignored.
           schema:
             type: string
         - name: X-GitHub-Delivery
@@ -1043,6 +1152,7 @@ paths:
         - name: X-Hub-Signature-256
           in: header
           required: true
+          description: "`sha256=<hex hmac>` over the raw body with WEBHOOK_SECRET."
           schema:
             type: string
       requestBody:
@@ -1054,14 +1164,43 @@ paths:
               description: Raw GitHub webhook payload (opaque to this spec).
               additionalProperties: true
       responses:
-        "202":
-          description: Delivery accepted for reconciliation.
+        "200":
+          description: Delivery processed (or recognized as a duplicate / ignored event).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [duplicate]
+                properties:
+                  duplicate:
+                    type: boolean
+                  rebuilt:
+                    type: boolean
+                  event:
+                    type: string
+                    description: Present when the event was recorded but ignored.
+                  counts:
+                    type: object
+                    description: Rebuild result (present after a rebuild).
+                    properties:
+                      chapters:
+                        type: integer
+                      annotations:
+                        type: integer
+                      replies:
+                        type: integer
+                      preservedPending:
+                        type: integer
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: Projection rebuild failed; the delivery is recorded as `failed`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
 components:
   securitySchemes:
@@ -1086,8 +1225,11 @@ components:
       name: projectId
       in: path
       required: true
+      description: The project UUID or its slug (single-project deployment).
       schema:
-        $ref: "#/components/schemas/Uuid"
+        oneOf:
+          - $ref: "#/components/schemas/Uuid"
+          - $ref: "#/components/schemas/Slug"
     ChapterId:
       name: chapterId
       in: path
@@ -1117,12 +1259,12 @@ components:
       name: limit
       in: query
       required: false
-      description: Page size; server clamps to its configured maximum.
+      description: Page size; values outside 1..200 are rejected (400).
       schema:
         type: integer
         minimum: 1
-        maximum: 100
-        default: 25
+        maximum: 200
+        default: 50
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1134,7 +1276,9 @@ components:
       schema:
         type: string
         minLength: 1
-        maxLength: 255
+        # Matches the implemented limit (apps/api idempotency middleware
+        # MAX_KEY_LENGTH); longer keys are rejected with 400 validation-failed.
+        maxLength: 200
     IfMatch:
       name: If-Match
       in: header
@@ -1246,14 +1390,19 @@ components:
 
     Scope:
       type: string
-      description: Agent token scope (design §19.2).
+      description: |
+        Token/membership scope (design §19.2/§19.3). `votes:write` is deferred
+        with voting to Phase 3. `work:*`/`submissions:write` are granted now
+        and used from Phase 4.
       enum:
         - chapters:read
+        - annotations:read
         - annotations:write
-        - votes:write
         - work:read
         - work:claim
         - submissions:write
+        - tokens:manage
+        - members:manage
 
     NextCursor:
       description: Cursor for the next page, or null on the last page.
@@ -1289,19 +1438,20 @@ components:
     AcceptedCommand:
       type: object
       description: Envelope for commands queued for asynchronous Git integration.
-      required: [operationId]
+      required: [operationId, correlationId, status]
       properties:
         operationId:
           $ref: "#/components/schemas/Uuid"
         correlationId:
-          $ref: "#/components/schemas/Uuid"
+          type: string
+          description: This request's correlation id (client-supplied or generated).
         status:
           type: string
           enum: [queued]
 
     Actor:
       type: object
-      required: [id, type, displayName]
+      required: [id, type, displayName, externalIdentity, status, createdAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -1311,31 +1461,32 @@ components:
         displayName:
           type: string
         externalIdentity:
-          $ref: "#/components/schemas/ActorRef"
-        owner:
-          description: Owning human for agent actors, when known.
+          description: "`<namespace>:<identifier>` (e.g. `github:octocat`, `agent:<actorId>`), or null for out-of-band rows."
           oneOf:
             - $ref: "#/components/schemas/ActorRef"
             - type: "null"
         status:
           type: string
           enum: [active, suspended, revoked]
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
 
     Membership:
       type: object
-      required: [projectId, actor, role]
+      required: [id, projectId, actorId, role, scopes, createdAt, revokedAt]
       properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
         projectId:
           $ref: "#/components/schemas/Uuid"
-        actor:
-          $ref: "#/components/schemas/Actor"
+        actorId:
+          $ref: "#/components/schemas/Uuid"
         role:
           type: string
           enum: [reader, contributor, editor, maintainer]
-        voteGroup:
-          type: string
         scopes:
           type: array
+          description: The role's scope bundle at grant time.
           items:
             $ref: "#/components/schemas/Scope"
         createdAt:
@@ -1347,38 +1498,39 @@ components:
 
     Project:
       type: object
-      required: [id, slug, status]
+      required: [id, slug, repoProvider, repo, defaultBranch, status, createdAt, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
         slug:
           $ref: "#/components/schemas/Slug"
-        title:
+        repoProvider:
           type: string
-        repository:
-          type: object
-          properties:
-            provider:
-              type: string
-              enum: [github]
-            owner:
-              type: string
-            name:
-              type: string
-            defaultBranch:
-              type: string
+          enum: [github]
+        repo:
+          type: string
+          description: "`owner/name`, e.g. `JoeMattie/causal-projector`."
+        defaultBranch:
+          type: string
         status:
           type: string
           enum: [active, invalid, diverged, archived]
-        configurationVersion:
-          type: integer
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
 
     AgentToken:
       type: object
       description: Agent token metadata; the secret itself is never returned after minting.
-      required: [id, name, scopes, createdAt]
+      required: [id, projectId, actorId, name, scopes, createdBy, createdAt, expiresAt]
       properties:
         id:
+          $ref: "#/components/schemas/Uuid"
+        projectId:
+          $ref: "#/components/schemas/Uuid"
+        actorId:
+          description: The agent actor created for this token.
           $ref: "#/components/schemas/Uuid"
         name:
           type: string
@@ -1386,13 +1538,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Scope"
-        owner:
-          $ref: "#/components/schemas/ActorRef"
+        createdBy:
+          description: Actor id of the minting maintainer.
+          $ref: "#/components/schemas/Uuid"
         createdAt:
           $ref: "#/components/schemas/Timestamp"
         expiresAt:
           $ref: "#/components/schemas/Timestamp"
         lastUsedAt:
+          description: Updated at most once per minute.
           oneOf:
             - $ref: "#/components/schemas/Timestamp"
             - type: "null"
@@ -1407,16 +1561,19 @@ components:
 
     Chapter:
       type: object
-      description: Chapter projection (design §9.1) with optional Markdown source.
-      required: [id, slug, title, status, revision]
+      description: Chapter projection (design §9.1), rebuilt from the book repository.
+      required:
+        [id, projectId, path, slug, title, status, revision, contentHash, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
-        slug:
-          $ref: "#/components/schemas/Slug"
+        projectId:
+          $ref: "#/components/schemas/Uuid"
         path:
           type: string
-          description: Repo-relative path, e.g. `chapters/01-arrival.md`.
+          description: Repo-relative path, e.g. `chapters/001-baseline.md`.
+        slug:
+          $ref: "#/components/schemas/Slug"
         title:
           type: string
         status:
@@ -1424,30 +1581,24 @@ components:
         revision:
           type: integer
           minimum: 1
-        order:
-          type: number
         contentHash:
           $ref: "#/components/schemas/ContentHash"
         headCommit:
-          type: string
-          description: Git commit SHA of the current integrated revision.
+          description: Git commit SHA of the current integrated revision, when known.
+          oneOf:
+            - type: string
+            - type: "null"
         lastPublishedCommit:
           oneOf:
             - type: string
             - type: "null"
-        authors:
-          type: array
-          items:
-            type: object
-            required: [actor]
-            properties:
-              actor:
-                $ref: "#/components/schemas/ActorRef"
-        source:
-          type: string
-          description: Full Markdown source; present when requested via `include=source`.
         updatedAt:
           $ref: "#/components/schemas/Timestamp"
+        blockIds:
+          type: array
+          description: Valid block ids of this revision (persisted on the chapter projection).
+          items:
+            $ref: "#/components/schemas/Uuid"
 
     AnnotationKind:
       type: string
@@ -1459,7 +1610,11 @@ components:
 
     AnnotationStatus:
       type: string
+      description: |
+        `pending_git` is API/DB-only: the command is accepted but its Git
+        operation has not committed yet. Artifact frontmatter never carries it.
       enum:
+        - pending_git
         - open
         - work_item_created
         - accepted
@@ -1528,44 +1683,71 @@ components:
 
     Annotation:
       type: object
-      required: [id, kind, scope, chapterId, chapterRevision, author, status, createdAt]
+      required:
+        [
+          id,
+          projectId,
+          chapterId,
+          kind,
+          scope,
+          chapterRevision,
+          target,
+          authorActorId,
+          body,
+          status,
+          gitOperationId,
+          supersededBy,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id:
+          $ref: "#/components/schemas/Uuid"
+        projectId:
+          $ref: "#/components/schemas/Uuid"
+        chapterId:
           $ref: "#/components/schemas/Uuid"
         kind:
           $ref: "#/components/schemas/AnnotationKind"
         scope:
           $ref: "#/components/schemas/AnnotationScope"
-        chapterId:
-          $ref: "#/components/schemas/Uuid"
         chapterRevision:
           type: integer
           minimum: 1
         target:
-          $ref: "#/components/schemas/AnnotationTarget"
-        author:
-          $ref: "#/components/schemas/ActorRef"
+          description: Null for chapter-scoped annotations.
+          oneOf:
+            - $ref: "#/components/schemas/AnnotationTarget"
+            - type: "null"
+        authorActorId:
+          $ref: "#/components/schemas/Uuid"
         body:
           type: string
           description: Markdown body. Untrusted content.
-        proposedText:
-          type: string
         status:
           $ref: "#/components/schemas/AnnotationStatus"
-        voteSummary:
-          $ref: "#/components/schemas/VoteSummary"
+        gitOperationId:
+          description: The most recent Git operation mirroring this record.
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
         supersededBy:
           oneOf:
             - $ref: "#/components/schemas/Uuid"
             - type: "null"
         createdAt:
           $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
 
     Reply:
       type: object
-      required: [id, annotationId, author, body, createdAt]
+      required:
+        [id, projectId, annotationId, parentReplyId, authorActorId, body, status, gitOperationId, createdAt, updatedAt]
       properties:
         id:
+          $ref: "#/components/schemas/Uuid"
+        projectId:
           $ref: "#/components/schemas/Uuid"
         annotationId:
           $ref: "#/components/schemas/Uuid"
@@ -1573,13 +1755,19 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Uuid"
             - type: "null"
-        author:
-          $ref: "#/components/schemas/ActorRef"
+        authorActorId:
+          $ref: "#/components/schemas/Uuid"
         body:
           type: string
         status:
           type: string
-          enum: [visible, hidden, deleted]
+          # Mirrors the replies.status DB CHECK constraint; `withdrawn` is not
+          # produced by any implemented endpoint yet but is a legal state.
+          enum: [pending_git, open, withdrawn]
+        gitOperationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
         createdAt:
           $ref: "#/components/schemas/Timestamp"
         updatedAt:
@@ -1785,14 +1973,16 @@ components:
     Operation:
       type: object
       description: Asynchronous Git operation (design §9.1 GitOperation, §20.2 states).
-      required: [id, projectId, state]
+      required:
+        [id, projectId, correlationId, state, attempts, commitSha, error, createdAt, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
         projectId:
           $ref: "#/components/schemas/Uuid"
         correlationId:
-          $ref: "#/components/schemas/Uuid"
+          type: string
+          description: Correlation id of the accepted command (client-supplied or generated).
         state:
           type: string
           enum:
@@ -1802,7 +1992,6 @@ components:
             - committed
             - verified
             - conflict
-            - reconcile
             - failed
         attempts:
           type: integer
@@ -1811,14 +2000,10 @@ components:
           oneOf:
             - type: string
             - type: "null"
-        failure:
+        error:
+          description: Terminal or most recent failure message, when any.
           oneOf:
-            - type: object
-              properties:
-                code:
-                  type: string
-                message:
-                  type: string
+            - type: string
             - type: "null"
         createdAt:
           $ref: "#/components/schemas/Timestamp"
