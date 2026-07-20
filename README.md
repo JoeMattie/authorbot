@@ -98,6 +98,16 @@ Signed-out readers get a "Sign in with GitHub" link (dev builds can surface
 the dev-login form via the programmatic `buildSite({ devLogin: true })`
 option — never emitted otherwise).
 
+## Roadmap
+
+| Phase | Scope | State |
+|---|---|---|
+| 0–4 | contracts, publisher, API, governance, leases & submissions | complete |
+| 5 | GitHub App reader/writer, coordinator, publication tracking | in progress |
+| 6 | guided onboarding wizard + "New chapter" authoring | contracted |
+| 7 | hardening: rate limits, restore drill, reviews, load testing | contracted |
+| 8 | installable collaborator skill for agent fleets | contracted |
+
 ## Status
 
 Phases 0–2b complete (contracts, publisher, collaboration API, inline
