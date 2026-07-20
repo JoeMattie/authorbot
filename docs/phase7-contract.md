@@ -62,7 +62,21 @@ recorded as an audit event.
   | `open` | any signed-in GitHub user | immediately |
   | `approval-gated` | any signed-in GitHub user | after a maintainer approves |
   | `collaborators-only` | members only | immediately *(default)* |
-  | `locked` | nobody | — |
+  | `locked` | maintainers only | immediately |
+
+  These form a progression from private workspace to public, and an author may
+  move up and down it freely.
+
+  **`locked` is author-only, not off.** The book remains fully usable by its
+  maintainers: annotating their own drafts, thinking out loud in the margins,
+  and running their own agents against their own ideas. Existing collaborators
+  keep their membership and their history — they simply cannot write until the
+  policy opens again. A solo author who never leaves `locked` is using the
+  system as intended, not a degraded version of it.
+
+  An author's agents work in `locked` by holding a membership with the
+  maintainer role, which is the ordinary scope-intersection rule (Phase 2 §3)
+  and a deliberate grant rather than an implicit inheritance from their owner.
 
   **Anonymous writing remains unavailable** in every mode, including `open`.
   Design §19.7 defers it until moderation, spam controls, privacy, and a
@@ -138,8 +152,10 @@ already happened.
 8. Freeze refuses every write path (including maintainer writes) while reads
    and the published site are provably unaffected.
 9. Each annotation policy is enforced server-side, not merely reflected in the
-   interface: `locked` and `collaborators-only` reject unauthorised writes at
-   the API, and `open` still refuses anonymous ones.
+   interface: `collaborators-only` rejects non-members and `open` still refuses
+   anonymous writes, while `locked` still admits maintainers — including an
+   author's agent tokens holding the maintainer role — so a solo author can
+   annotate and run agents against a closed book.
 10. Under `approval-gated`: a pending annotation reaches no Git commit, is
     invisible to other readers, accrues no votes, and cannot trigger a rule;
     approval mirrors it to Git as a normal annotation; rejection leaves no
