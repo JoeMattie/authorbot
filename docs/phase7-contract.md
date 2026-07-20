@@ -53,18 +53,54 @@ recorded as an audit event.
 
 - **Change a role** (reader / contributor / editor / maintainer), with the
   scope consequences stated in plain language rather than as scope names.
-- **Book access mode**, a single obvious control:
-  - `open` — any signed-in GitHub user may comment and suggest.
-  - `invite-only` — only members may write. *(Default; already the Phase 2
-    §19.7 behaviour, now visible and changeable.)*
-  - `frozen` — no writes at all: no annotations, votes, claims, or
-    submissions, from anyone including maintainers. **Reads are unaffected**
-    and the site keeps serving. Intended for "something is wrong, stop
-    everything while I look."
+
+- **Annotation policy** — who may comment and suggest, and whether it appears
+  immediately:
+
+  | Mode | Who may write | Appears |
+  |---|---|---|
+  | `open` | any signed-in GitHub user | immediately |
+  | `approval-gated` | any signed-in GitHub user | after a maintainer approves |
+  | `collaborators-only` | members only | immediately *(default)* |
+  | `locked` | nobody | — |
+
+  **Anonymous writing remains unavailable** in every mode, including `open`.
+  Design §19.7 defers it until moderation, spam controls, privacy, and a
+  deletion policy all exist; this phase supplies the first, not the rest.
+
+- **Freeze the book** — a separate emergency control, orthogonal to the policy
+  above: no writes at all, from anyone, including maintainers, across
+  annotations, votes, claims, and submissions. **Reads are unaffected** and
+  the published site keeps serving. This is "something is wrong, stop
+  everything while I look", not a moderation setting.
+
 - **Pause agents**: suspend every agent token at once while leaving human
   collaborators working. Agents are the population most likely to misbehave
   at volume, and an author should be able to stop them without dismantling
   their human collaboration.
+
+### Moderating (`approval-gated`)
+
+An approval queue is the only feature here that adds state, and it carries one
+non-obvious requirement:
+
+- **Pending annotations are not mirrored to Git.** They live in the
+  operational database until approved. Committing unreviewed submissions to
+  the permanent record would put spam in the book's history forever, where
+  removing it means rewriting history. Approval is what makes a comment
+  durable; that is the whole point of gating.
+- A pending annotation is visible to its author (badged as awaiting review)
+  and to maintainers. It is invisible to everyone else, accrues **no votes**,
+  and cannot trigger a governance rule — an unapproved suggestion must not be
+  able to manufacture work.
+- The queue shows the comment, its target passage, the author's history with
+  this book, and approve / reject actions. Rejection takes an optional reason,
+  notifies nobody, and retains the record in the database (never in Git) so a
+  mistake is recoverable and a pattern of abuse is visible.
+- Bulk approve and bulk reject, because a moderation queue nobody can clear is
+  a moderation queue nobody uses.
+- Switching a book from `approval-gated` to a permissive mode does **not**
+  retroactively approve what is queued; the queue is drained deliberately.
 
 ### Revoking
 
@@ -93,11 +129,18 @@ already happened.
    degrades reads-still-work, writes-refuse-clearly.
 5. Runbook sufficient for an operator who did not build the system.
 6. An author, signed in as maintainer and without touching a database or CLI,
-   can list collaborators and tokens, read who did what, change a role, switch
-   the book between open / invite-only / frozen, pause all agents, and revoke
-   a collaborator or token.
+   can list collaborators and tokens, read who did what, change a role, set the
+   annotation policy, freeze the book, pause all agents, and revoke a
+   collaborator or token.
 7. Revocation is effective on the next request, releases held leases, rejects
    the revoked actor's in-flight submissions, invalidates their sessions, and
    preserves their existing attribution — each asserted by test.
-8. `frozen` refuses every write path (including maintainer writes) while reads
+8. Freeze refuses every write path (including maintainer writes) while reads
    and the published site are provably unaffected.
+9. Each annotation policy is enforced server-side, not merely reflected in the
+   interface: `locked` and `collaborators-only` reject unauthorised writes at
+   the API, and `open` still refuses anonymous ones.
+10. Under `approval-gated`: a pending annotation reaches no Git commit, is
+    invisible to other readers, accrues no votes, and cannot trigger a rule;
+    approval mirrors it to Git as a normal annotation; rejection leaves no
+    trace in the repository.
