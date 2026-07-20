@@ -2,8 +2,28 @@
   "name": "@authorbot/repo-coordinator",
   "version": "0.1.0",
   "description": "Outbox processor and Git mirroring for Authorbot: byte-stable annotation/reply artifact rendering, BookRepoWriter with a LocalGitAdapter, and the queued-to-committed git_operations walker (Phase 2 contract section 5)",
+  "keywords": [
+    "authorbot",
+    "outbox",
+    "git"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "packages/repo-coordinator"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -18,10 +38,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

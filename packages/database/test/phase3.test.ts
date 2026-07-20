@@ -160,6 +160,77 @@ describe("votes (contract §2)", () => {
     db.close();
   });
 
+  /**
+   * Phase 6 contract §3.6. The two maintainer metrics come from a LEFT JOIN
+   * onto `project_memberships`, so what is being pinned here is that the join
+   * reads the voter's *current* role and narrows correctly: a non-maintainer
+   * voter must still count toward every other metric, and a revoked
+   * maintainer's approval must stop counting as one.
+   */
+  it("splits maintainer approvals by role and actor type (Phase 6 §3.6)", async () => {
+    const { db, repos, project, annotation } = await seedWithAnnotation();
+    const authorHuman = makeActor("human", "Author");
+    const authorAgent = makeActor("agent", "Author's agent");
+    const reader = makeActor("human", "A reader");
+    const formerMaintainer = makeActor("human", "Former maintainer");
+    for (const a of [authorHuman, authorAgent, reader, formerMaintainer]) {
+      await repos.actors.insert(a);
+    }
+    const member = async (
+      actorId: string,
+      role: string,
+      revokedAt: string | null,
+    ): Promise<void> => {
+      await repos.projectMemberships.insert({
+        id: uuidv7(),
+        projectId: project.id,
+        actorId,
+        role: role as "maintainer" | "contributor",
+        scopes: [],
+        createdAt: NOW,
+        revokedAt,
+      });
+    };
+    await member(authorHuman.id, "maintainer", null);
+    await member(authorAgent.id, "maintainer", null);
+    await member(reader.id, "contributor", null);
+    await member(formerMaintainer.id, "maintainer", NOW);
+
+    for (const actorId of [authorHuman.id, authorAgent.id, reader.id, formerMaintainer.id]) {
+      await repos.votes.upsert(makeVote(annotation.id, project.id, actorId, "approve"));
+    }
+
+    const tally = await repos.votes.tally(annotation.id);
+    expect(tally.approvals).toBe(4);
+    expect(tally.distinctVoters).toBe(4);
+    // Human maintainer + agent maintainer. The revoked one does not count.
+    expect(tally.maintainerApprovals).toBe(2);
+    // Only the human maintainer.
+    expect(tally.humanMaintainerApprovals).toBe(1);
+    db.close();
+  });
+
+  it("a maintainer's reject contributes to no maintainer approval metric", async () => {
+    const { db, repos, project, annotation } = await seedWithAnnotation();
+    const author = makeActor("human", "Author");
+    await repos.actors.insert(author);
+    await repos.projectMemberships.insert({
+      id: uuidv7(),
+      projectId: project.id,
+      actorId: author.id,
+      role: "maintainer",
+      scopes: [],
+      createdAt: NOW,
+      revokedAt: null,
+    });
+    await repos.votes.upsert(makeVote(annotation.id, project.id, author.id, "reject"));
+    const tally = await repos.votes.tally(annotation.id);
+    expect(tally.rejections).toBe(1);
+    expect(tally.maintainerApprovals).toBe(0);
+    expect(tally.humanMaintainerApprovals).toBe(0);
+    db.close();
+  });
+
   it("rejects vote values outside approve|reject|abstain", async () => {
     const { db, project, actor, annotation } = await seedWithAnnotation();
     await expect(
@@ -200,6 +271,9 @@ describe("votes (contract §2)", () => {
       distinctVoters: 5,
       humanApprovals: 1,
       agentApprovals: 1,
+      // No voter here holds a membership at all, let alone a maintainer one.
+      maintainerApprovals: 0,
+      humanMaintainerApprovals: 0,
     });
 
     // Re-vote replaces, never double-counts.
@@ -220,6 +294,8 @@ describe("votes (contract §2)", () => {
       distinctVoters: 0,
       humanApprovals: 0,
       agentApprovals: 0,
+      maintainerApprovals: 0,
+      humanMaintainerApprovals: 0,
     });
     db.close();
   });

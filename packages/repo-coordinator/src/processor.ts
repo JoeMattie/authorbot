@@ -33,6 +33,7 @@ import {
   type GitOperationState,
 } from "@authorbot/domain";
 import { appendAttributionEntry, attributionFilePath } from "./attribution-artifact.js";
+import { BOOK_CONFIG_PATH, mergeBookConfigArtifact } from "./book-config-artifact.js";
 import { applyChapterFrontmatterUpdate } from "./chapter-artifact.js";
 import { renderDecisionArtifact } from "./decision-artifact.js";
 import { renderAnnotationArtifact, renderReplyArtifact, type RenderedFile } from "./render.js";
@@ -45,6 +46,7 @@ import {
   ACTOR_TRAILER,
   ANNOTATION_TRAILER,
   BASE_REVISION_TRAILER,
+  CHAPTER_TRAILER,
   isGitWriteError,
   OPERATION_TRAILER,
   WORK_ITEM_TRAILER,
@@ -61,6 +63,8 @@ export const OUTBOX_KINDS = [
   "decision.update",
   "work_item.update",
   "submission.apply",
+  "chapter.write",
+  "book_config.update",
 ] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
 
@@ -75,6 +79,34 @@ export const SYSTEM_RULE_ENGINE_REF = "system:rule-engine";
  * work items — the apply pipeline itself creates them (design §12.6).
  */
 export const SYSTEM_APPLY_REF = "system:authorbot";
+
+/**
+ * Payload for `book_config.update` outbox rows (Phase 6 contract §3.6).
+ *
+ * `config` is the complete `authorbot.book/v1` document to write, not a patch:
+ * the commit must be reproducible from the row alone, and a patch would have
+ * to be replayed against whatever `book.yml` happens to be at HEAD when the
+ * drain runs.
+ *
+ * `changed` is the list of dotted field paths the maintainer edited, used only
+ * to write a commit message a human can read in `git log` without diffing.
+ */
+export interface BookConfigUpdatePayload {
+  /** The maintainer who made the change; credited in `Authorbot-Actor`. */
+  actorId: string;
+  config: unknown;
+  changed: string[];
+  /**
+   * The last committed config, restored to `book_configs` if this operation
+   * dead-letters. Without it a failed settings commit strands the row in
+   * `pending_git` forever: PATCH 409s on it, `projectBookConfig` defers to it,
+   * and `resolveRuleEntries` keeps *enforcing* governance from a `book.yml`
+   * that Git does not contain — the "second configuration store" §3.6 forbids.
+   */
+  previousConfig?: unknown;
+  /** `source_commit` of {@link previousConfig}, restored alongside it. */
+  previousSourceCommit?: string | null;
+}
 
 /** Payload for `annotation.create` outbox rows. */
 export interface AnnotationCreatePayload {
@@ -220,6 +252,73 @@ export interface SubmissionApplier {
   apply(context: SubmissionApplyContext): Promise<SubmissionApplyOutcome>;
 }
 
+/** What a `chapter.write` row asks for (Phase 6 contract §3.5). */
+export type ChapterWriteAction = "create" | "revise" | "publish" | "unpublish";
+
+/**
+ * Payload for `chapter.write` outbox rows — the direct authoring path
+ * (Phase 6 contract §3.5, design §15.2 `chapter-submissions`).
+ *
+ * The row carries the author's *intent*, never rendered bytes: the chapter
+ * file is composed at drain time by the injected {@link ChapterComposer},
+ * against the current branch head, for exactly the reason `submission.apply`
+ * resolves late. A create's slug and `order` and a revise's marker reuse all
+ * depend on what is committed right now, and a plan computed at request time
+ * would either clobber a chapter that landed in between or assign a slug that
+ * is no longer free. `intent` is opaque here: the processor never interprets
+ * it, so the vocabulary of the authoring path can grow without this package
+ * learning about prose.
+ */
+export interface ChapterWritePayload {
+  chapterId: string;
+  action: ChapterWriteAction;
+  /** Actor performing the write: commit trailer + attribution credit. */
+  actorId: string;
+  /** Composer-defined author intent (title, body, baseRevision, …). */
+  intent: Record<string, unknown>;
+}
+
+/** Everything the composer needs to render the chapter at branch head. */
+export interface ChapterComposeContext {
+  branch: string;
+  projectId: string;
+  payload: ChapterWritePayload;
+  /** Artifact actor reference (`github:octocat`) of the writing actor. */
+  actorRef: string;
+  /** Git-operation attempt this invocation belongs to. */
+  attempt: number;
+}
+
+/**
+ * The composed chapter file. A composer that cannot honour the intent
+ * against the current head (stale base revision, slug taken, chapter gone)
+ * throws: unlike a submission there is no second party whose text could be
+ * lost, so the honest outcome is a failed operation the author retries, not
+ * a conflict work item nobody asked for.
+ */
+export interface ChapterComposeOutcome {
+  /** Repo-relative path, e.g. `chapters/0030-the-ridge.md`. */
+  chapterPath: string;
+  /** Full chapter file bytes: frontmatter + marked body, final. */
+  content: string;
+  slug: string;
+  title: string;
+  status: "draft" | "proposed" | "published" | "archived";
+  /** Revision the composed file carries. */
+  revision: number;
+  /** `sha256:<hex>` of {@link content}. */
+  contentHash: string;
+  /** Valid block-marker ids in document order (projection row). */
+  blockIds: string[];
+  /** Commit subject line. */
+  message: string;
+}
+
+/** Drain-time chapter renderer, injected by the API layer (Phase 6 §3.5). */
+export interface ChapterComposer {
+  compose(context: ChapterComposeContext): Promise<ChapterComposeOutcome>;
+}
+
 export interface Clock {
   now(): Date;
 }
@@ -238,6 +337,11 @@ export interface CreateProcessorOptions {
    * rows fail with a clear error instead of guessing.
    */
   submissionApplier?: SubmissionApplier;
+  /**
+   * Required to process `chapter.write` rows (Phase 6 contract §3.5).
+   * Without it such rows fail with a clear error instead of guessing.
+   */
+  chapterComposer?: ChapterComposer;
   /**
    * Outbox kinds this drain must LEAVE ALONE, evaluated once per drain.
    *
@@ -278,6 +382,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   const clock = options.clock ?? SYSTEM_CLOCK;
   const maxAttempts = options.maxAttempts ?? MAX_GIT_ATTEMPTS;
   const applier = options.submissionApplier;
+  const chapterComposer = options.chapterComposer;
   const repos = createRepositories(db);
   const now = (): string => toTimestamp(clock.now());
 
@@ -477,9 +582,71 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       );
     }
     statements.push(...(await releaseFailedApplyStatements(row, ts, error)));
+    statements.push(...(await releaseFailedBookConfigStatements(row, ts)));
     statements.push(repos.outbox.markFailedStatement(row.id, ts));
     await db.batch(statements);
     return outcome(row, "failed", { error });
+  }
+
+  /**
+   * Statements returning a failed `book_config.update` row's `book_configs`
+   * entry to the last config that actually reached Git.
+   *
+   * Every other pending-state owner has a release path — `submission.apply`
+   * via {@link releaseFailedApplyStatements}, pending annotations and replies
+   * via the rebuild sweep — and `book_config` was the one that did not. A
+   * settings commit fails for ordinary reasons (an actor with no external
+   * identity, a revoked token, contention), and the row it left behind was
+   * terminal: `projectBookConfig` defers to `pending_git` so Git could never
+   * re-assert itself, the settings PATCH route 409s on the same status so the
+   * maintainer could not correct it, and `resolveRuleEntries` kept serving —
+   * and *enforcing* — governance rules from a document no commit contains.
+   *
+   * Guarded on `git_operation_id` so a later PATCH that already replaced this
+   * row is never reverted by its predecessor's failure.
+   */
+  async function releaseFailedBookConfigStatements(
+    row: OutboxRecord,
+    ts: string,
+  ): Promise<SqlStatement[]> {
+    if (row.kind !== "book_config.update" || row.gitOperationId === null) {
+      return [];
+    }
+    let payload: BookConfigUpdatePayload;
+    try {
+      payload = parseBookConfigPayload(row);
+    } catch {
+      return [];
+    }
+    const existing = await repos.bookConfigs.get(row.projectId);
+    if (
+      existing === null ||
+      existing.status !== "pending_git" ||
+      existing.gitOperationId !== row.gitOperationId
+    ) {
+      return [];
+    }
+    // No recorded predecessor means this was the book's first settings write,
+    // so there is no committed config to fall back to. Dropping the row is the
+    // honest state: the projection re-reads `book.yml` from Git on its next
+    // pass, settings reads report the book as unprojected rather than serving
+    // a document no commit contains, and governance falls back to the
+    // deployment's bootstrap rules — the *stricter* direction, so a failed
+    // commit can never leave a weakened rule in force.
+    if (payload.previousConfig === undefined || payload.previousConfig === null) {
+      return [repos.bookConfigs.deletePendingStatement(row.projectId, row.gitOperationId)];
+    }
+    return [
+      repos.bookConfigs.upsertStatement({
+        projectId: row.projectId,
+        config: payload.previousConfig,
+        status: "committed",
+        gitOperationId: null,
+        sourceCommit: payload.previousSourceCommit ?? null,
+        createdAt: existing.createdAt,
+        updatedAt: ts,
+      }),
+    ];
   }
 
   /**
@@ -655,6 +822,50 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       return buildSubmissionApplyPlan(row, op, branch);
     }
 
+    if (kind === "chapter.write") {
+      return buildChapterWritePlan(row, op, branch);
+    }
+
+    /**
+     * Settings write (Phase 6 contract §3.6). The config is carried IN the
+     * payload rather than re-read from `book_configs` at commit time: the row
+     * describes one specific revision of `book.yml`, and re-reading would let
+     * a later PATCH's config be committed under an earlier operation's
+     * message and trailers — two edits collapsing into one commit and losing
+     * the audit trail the contract requires each of them to leave.
+     */
+    if (kind === "book_config.update") {
+      const payload = parseBookConfigPayload(row);
+      const actingRef = await actorRef(payload.actorId);
+      // Only the paths the maintainer edited are written, onto the `book.yml`
+      // that is at the branch head right now. The payload's config comes from
+      // the `book_configs` projection, which can be arbitrarily stale (frozen
+      // while the project is diverged, or kept on an `invalid` projection
+      // outcome), so rendering the whole file from it silently reverted direct
+      // Git edits — including `content.raw_html`, which §3.6 declares belongs
+      // in a reviewed commit. It also preserves the author's comments.
+      //
+      // The head is resolved and pinned the same way `chapter.write` pins
+      // `composed.resolvedHead`: the merge below is computed against these
+      // exact bytes, so a commit landing between this read and the ref update
+      // must fail the precondition and recompute rather than replay onto a
+      // head it never saw. Pinning the *projection's* `source_commit` instead
+      // would be wrong — it is arbitrarily old, and every unrelated commit to
+      // the branch would dead-letter the settings write.
+      const resolvedHead = (await writer.resolveHead?.(branch)) ?? null;
+      const head = await mustReadFile(branch, BOOK_CONFIG_PATH);
+      return {
+        branch,
+        ...(resolvedHead === null ? {} : { expectedHead: resolvedHead }),
+        files: [mergeBookConfigArtifact(head, payload.config, payload.changed)],
+        message: `Update book settings (${payload.changed.join(", ")})`,
+        trailers: {
+          [ACTOR_TRAILER]: actingRef,
+          [OPERATION_TRAILER]: op.id,
+        },
+      };
+    }
+
     if (kind === "work_item.update") {
       const payload = parseWorkItemPayload(row);
       const workItem = await mustWorkItem(payload.workItemId);
@@ -819,6 +1030,146 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       message: `Record conflict on work item ${workItem.id}`,
       trailers,
     };
+  }
+
+  /**
+   * Build the atomic chapter commit for a `chapter.write` row (Phase 6
+   * contract §3.5). The injected composer renders the chapter against the
+   * CURRENT branch head; the outcome is persisted onto the payload before the
+   * commit and pinned to the head it was computed against, so a crash-recovery
+   * replay finalizes exactly what was committed and never lays a stale
+   * chapter over a newer one — the same discipline `submission.apply` uses.
+   *
+   * Two files, one commit: the chapter itself and its attribution append
+   * (design §14.2 — "an accepted edit updates all related artifacts in one
+   * commit"). Nothing else: a direct authoring write has no annotation, no
+   * work item, and no decision behind it.
+   */
+  async function buildChapterWritePlan(
+    row: OutboxRecord,
+    op: GitOperationRecord,
+    branch: string,
+  ): Promise<CommitPlan> {
+    const payload = parseChapterWritePayload(row);
+    const writerRef = await actorRef(payload.actorId);
+
+    let composed = readComposed(row);
+    if (composed === null || composed.attempt !== op.attempts) {
+      if (chapterComposer === undefined) {
+        throw new Error(
+          "chapter.write requires a ChapterComposer (createProcessor({ chapterComposer }))",
+        );
+      }
+      const resolvedHead = (await writer.resolveHead?.(branch)) ?? null;
+      const outcome = await chapterComposer.compose({
+        branch,
+        projectId: row.projectId,
+        payload,
+        actorRef: writerRef,
+        attempt: op.attempts,
+      });
+      if (outcome.content.length === 0) {
+        throw new Error(`chapter composer returned empty content for chapter ${payload.chapterId}`);
+      }
+      composed = {
+        attempt: op.attempts,
+        ...(resolvedHead === null ? {} : { resolvedHead }),
+        outcome,
+      };
+      await persistComposed(row, composed);
+    }
+
+    const outcome = composed.outcome;
+    // Idempotent on replay: `appendAttributionEntry` converges on identical
+    // bytes when the entry is already present.
+    const prior = await mustReadFile(branch, attributionFilePath(payload.chapterId));
+    const attribution = appendAttributionEntry(prior, payload.chapterId, {
+      revision: outcome.revision,
+      actor: writerRef,
+    });
+
+    const baseRevision = payload.intent["baseRevision"];
+    return {
+      branch,
+      ...(composed.resolvedHead === undefined ? {} : { expectedHead: composed.resolvedHead }),
+      files: [{ path: outcome.chapterPath, content: outcome.content }, attribution.file],
+      message: outcome.message,
+      trailers: {
+        [ACTOR_TRAILER]: writerRef,
+        [CHAPTER_TRAILER]: payload.chapterId,
+        ...(typeof baseRevision === "number"
+          ? { [BASE_REVISION_TRAILER]: String(baseRevision) }
+          : {}),
+        [OPERATION_TRAILER]: op.id,
+      },
+    };
+  }
+
+  /** Finalize statements for a committed `chapter.write` row. */
+  async function chapterWriteSyncStatements(
+    row: OutboxRecord,
+    commitSha: string | null,
+    ts: string,
+  ): Promise<SqlStatement[]> {
+    const payload = parseChapterWritePayload(row);
+    const composed = readComposed(row);
+    if (composed === null) {
+      throw new Error(`outbox row ${row.id}: committed chapter.write has no composed outcome`);
+    }
+    const outcome = composed.outcome;
+    const existing = await repos.chapters.getById(payload.chapterId);
+    return [
+      repos.chapters.upsertStatement({
+        id: payload.chapterId,
+        projectId: row.projectId,
+        path: outcome.chapterPath,
+        slug: outcome.slug,
+        title: outcome.title,
+        status: outcome.status,
+        revision: outcome.revision,
+        contentHash: outcome.contentHash,
+        headCommit: commitSha ?? existing?.headCommit ?? null,
+        lastPublishedCommit:
+          outcome.status === "published"
+            ? (commitSha ?? existing?.lastPublishedCommit ?? null)
+            : (existing?.lastPublishedCommit ?? null),
+        blockIds: outcome.blockIds,
+        updatedAt: ts,
+      }),
+      repos.events.appendStatement({
+        projectId: row.projectId,
+        type: CHAPTER_EVENT_TYPES[payload.action],
+        payload: {
+          chapterId: payload.chapterId,
+          slug: outcome.slug,
+          title: outcome.title,
+          status: outcome.status,
+          revision: outcome.revision,
+          path: outcome.chapterPath,
+        },
+        createdAt: ts,
+      }),
+    ];
+  }
+
+  function readComposed(row: OutboxRecord): ComposedChapter | null {
+    const payload = row.payload as { composed?: ComposedChapter | null } | null;
+    const composed = payload?.composed;
+    if (composed === undefined || composed === null) return null;
+    if (typeof composed.attempt !== "number" || typeof composed.outcome !== "object") {
+      throw new Error(`outbox row ${row.id}: malformed composed chapter outcome`);
+    }
+    return composed;
+  }
+
+  /** Persist the composed chapter before committing (see `persistResolved`). */
+  async function persistComposed(row: OutboxRecord, composed: ComposedChapter): Promise<void> {
+    const payload = { ...(row.payload as Record<string, unknown>), composed };
+    await db
+      .prepare(`UPDATE outbox SET payload = ? WHERE id = ?`)
+      .bind(JSON.stringify(payload), row.id)
+      .run();
+    row.payload = payload;
   }
 
   /** Turn an applier outcome into the persisted, commit-ready form. */
@@ -1053,6 +1404,9 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     if (kind === "submission.apply") {
       return submissionApplySyncStatements(row, commitSha, ts);
     }
+    if (kind === "chapter.write") {
+      return chapterWriteSyncStatements(row, commitSha, ts);
+    }
     if (kind === "annotation.create") {
       const payload = parseAnnotationPayload(row);
       return [repos.annotations.updateStatusStatement(payload.annotationId, "open", ts)];
@@ -1064,6 +1418,17 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     if (kind === "reply.create") {
       const payload = parseReplyPayload(row);
       return [repos.replies.updateStatusStatement(payload.replyId, "open", ts)];
+    }
+    if (kind === "book_config.update") {
+      // Guarded on this operation's id, so a settings write that superseded
+      // this one while it was in flight keeps its own `pending_git` status
+      // instead of being marked committed by its predecessor landing. A row
+      // with no git operation cannot have produced this commit, so there is
+      // nothing to mark.
+      if (row.gitOperationId === null) return [];
+      return [
+        repos.bookConfigs.markCommittedStatement(row.projectId, row.gitOperationId, commitSha, ts),
+      ];
     }
     // Decision and work-item rows have no `pending_git`-style mirror state
     // (their DB rows are final at command time, Phase 3 contract §4): the
@@ -1199,6 +1564,22 @@ function parseReplyPayload(row: OutboxRecord): ReplyCreatePayload {
   return payload as ReplyCreatePayload;
 }
 
+function parseBookConfigPayload(row: OutboxRecord): BookConfigUpdatePayload {
+  const payload = row.payload as Partial<BookConfigUpdatePayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.actorId !== "string" ||
+    typeof payload.config !== "object" ||
+    payload.config === null ||
+    !Array.isArray(payload.changed) ||
+    !payload.changed.every((field) => typeof field === "string")
+  ) {
+    throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
+  }
+  return payload as BookConfigUpdatePayload;
+}
+
 function parseDecisionPayload(row: OutboxRecord): DecisionCreatePayload {
   const payload = row.payload as Partial<DecisionCreatePayload> | null;
   if (
@@ -1249,6 +1630,41 @@ interface ResolvedApply {
         /** The fully-formed resolve_conflict row inserted at finalize. */
         conflictWorkItem: WorkItemRecord;
       };
+}
+
+/** Persisted composer outcome on a `chapter.write` row (crash recovery). */
+interface ComposedChapter {
+  attempt: number;
+  /** Branch head the outcome was composed against; pins the commit. */
+  resolvedHead?: string;
+  outcome: ChapterComposeOutcome;
+}
+
+/** Feed event emitted when a `chapter.write` row commits (Phase 6 §3.5). */
+const CHAPTER_EVENT_TYPES: Record<ChapterWriteAction, string> = {
+  create: "chapter_created",
+  revise: "chapter_revised",
+  publish: "chapter_published",
+  unpublish: "chapter_unpublished",
+};
+
+const CHAPTER_WRITE_ACTIONS = new Set<string>(["create", "revise", "publish", "unpublish"]);
+
+function parseChapterWritePayload(row: OutboxRecord): ChapterWritePayload {
+  const payload = row.payload as Partial<ChapterWritePayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.chapterId !== "string" ||
+    typeof payload.actorId !== "string" ||
+    typeof payload.action !== "string" ||
+    !CHAPTER_WRITE_ACTIONS.has(payload.action) ||
+    payload.intent === null ||
+    typeof payload.intent !== "object"
+  ) {
+    throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
+  }
+  return payload as ChapterWritePayload;
 }
 
 function parseSubmissionApplyPayload(row: OutboxRecord): SubmissionApplyPayload {

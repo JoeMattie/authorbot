@@ -33,6 +33,16 @@ export interface VoteTally {
   distinctVoters: number;
   humanApprovals: number;
   agentApprovals: number;
+  /**
+   * Approvals from actors holding the maintainer role (Phase 6 contract §3.6).
+   * Role is read from the voter's *current, unrevoked* membership, not from a
+   * snapshot taken when the vote was cast: governance asks "does this book's
+   * maintainer support this now?", and a revoked maintainer's stale approval
+   * must stop counting.
+   */
+  maintainerApprovals: number;
+  /** Maintainer approvals restricted to `actors.type = 'human'` (§3.6). */
+  humanMaintainerApprovals: number;
 }
 
 const TALLY_SQL = `
@@ -46,9 +56,21 @@ const TALLY_SQL = `
     COALESCE(SUM(CASE WHEN v.value = 'approve' AND a.type = 'human' THEN 1 ELSE 0 END), 0)
       AS human_approvals,
     COALESCE(SUM(CASE WHEN v.value = 'approve' AND a.type = 'agent' THEN 1 ELSE 0 END), 0)
-      AS agent_approvals
+      AS agent_approvals,
+    COALESCE(SUM(CASE WHEN v.value = 'approve' AND m.id IS NOT NULL THEN 1 ELSE 0 END), 0)
+      AS maintainer_approvals,
+    COALESCE(SUM(CASE WHEN v.value = 'approve' AND m.id IS NOT NULL AND a.type = 'human'
+                      THEN 1 ELSE 0 END), 0)
+      AS human_maintainer_approvals
   FROM votes v
   JOIN actors a ON a.id = v.actor_id
+  -- LEFT JOIN, and narrowed in the ON clause rather than the WHERE clause: a
+  -- non-maintainer voter must still contribute to every other metric.
+  LEFT JOIN project_memberships m
+    ON m.project_id = v.project_id
+   AND m.actor_id = v.actor_id
+   AND m.role = 'maintainer'
+   AND m.revoked_at IS NULL
   WHERE v.annotation_id = ?`;
 
 export class VotesRepository {
@@ -133,6 +155,8 @@ export class VotesRepository {
       distinctVoters: Number(row?.["distinct_voters"] ?? 0),
       humanApprovals: Number(row?.["human_approvals"] ?? 0),
       agentApprovals: Number(row?.["agent_approvals"] ?? 0),
+      maintainerApprovals: Number(row?.["maintainer_approvals"] ?? 0),
+      humanMaintainerApprovals: Number(row?.["human_maintainer_approvals"] ?? 0),
     };
   }
 }
@@ -310,6 +334,38 @@ export class DecisionsRepository {
       .bind(sourceAnnotationId, actionType, ruleVersion)
       .first();
     return row ? mapDecision(row) : null;
+  }
+
+  /**
+   * Highest `rule_version` ever recorded for each rule NAME in a project — the
+   * high-water mark a settings edit must stay above (Phase 6 §3.6).
+   *
+   * Rule versions were derived solely from the currently *effective* rules, and
+   * `governance.rules` replaces the map wholesale, so deleting a rule and
+   * re-adding it under the same name later restarted it at version 1. Decisions
+   * are keyed `(source_annotation_id, action_type, rule_version)` with no rule
+   * name, so the re-added rule's first evaluation collided with a decision row
+   * written by materially different semantics — the exact ambiguity the
+   * versioning scheme exists to prevent, and the one
+   * `DEFAULT_SUGGESTION_TO_WORK_ITEM_RULE` is pinned at version 2 to avoid.
+   *
+   * The decision rows are the durable record of which versions have been
+   * burned, so they are the authority here rather than a counter that a
+   * `book.yml` edit could reset.
+   */
+  async maxRuleVersions(projectId: string): Promise<Map<string, number>> {
+    const rows = await this.db
+      .prepare(
+        `SELECT rule, MAX(rule_version) AS max_version
+           FROM decisions WHERE project_id = ? GROUP BY rule`,
+      )
+      .bind(projectId)
+      .all();
+    const out = new Map<string, number>();
+    for (const row of rows) {
+      out.set(String(row["rule"]), Number(row["max_version"]));
+    }
+    return out;
   }
 
   async listByAnnotation(sourceAnnotationId: string): Promise<DecisionRecord[]> {

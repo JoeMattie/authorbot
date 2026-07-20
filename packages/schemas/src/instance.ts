@@ -43,6 +43,23 @@ export const declarativeRuleSchema = z.strictObject({
 });
 export type DeclarativeRule = z.infer<typeof declarativeRuleSchema>;
 
+/** Rule name: the key of a `rules` mapping (design sections 11.1 / 25). */
+export const ruleNameSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]*$/, "must be a snake_case rule name");
+
+/**
+ * The `rules` mapping — `{ "<rule_name>": { version, when, action } }`.
+ *
+ * Shared by `authorbot.instance/v1` (`rules`, the bootstrap default carried by
+ * the `RULES_JSON` environment variable) and `authorbot.book/v1`
+ * (`governance.rules`, the versioned per-book governance a maintainer edits in
+ * settings; Phase 6 contract section 3.6 "Amendment to Phase 3 section 3").
+ * One schema so the two can never diverge in shape.
+ */
+export const rulesMapSchema = z.record(ruleNameSchema, declarativeRuleSchema);
+export type RulesMap = z.infer<typeof rulesMapSchema>;
+
 /**
  * Instance (deployment) config — `authorbot.instance/v1` (design section 25).
  * Every section is optional: the file overrides defaults, and defaults are
@@ -79,9 +96,7 @@ export const instanceConfigSchema = z.strictObject({
       export: z.enum(["aggregate", "named", "pseudonymous"]).optional(),
     })
     .optional(),
-  rules: z
-    .record(z.string().regex(/^[a-z][a-z0-9_]*$/), declarativeRuleSchema)
-    .optional(),
+  rules: rulesMapSchema.optional(),
   leases: z
     .strictObject({
       duration: isoDurationSchema.optional(),

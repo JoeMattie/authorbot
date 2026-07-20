@@ -92,6 +92,13 @@ export const ANNOTATION_TRAILER = "Authorbot-Annotation";
 export const WORK_ITEM_TRAILER = "Authorbot-Work-Item";
 /** Base revision the applied submission targeted (design §14.3, Phase 4). */
 export const BASE_REVISION_TRAILER = "Authorbot-Base-Revision";
+/**
+ * Chapter a direct authoring write touched (Phase 6 contract §3.5). The
+ * §14.3 trailer set names the entities a commit is *about*; a chapter written
+ * through `chapter-submissions` has no annotation and no work item behind it,
+ * so without this the commit named nothing but its operation id.
+ */
+export const CHAPTER_TRAILER = "Authorbot-Chapter";
 
 export type GitWriteFailure =
   /** Branch head is not where the caller expected (retryable → `conflict`). */

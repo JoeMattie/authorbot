@@ -2,7 +2,28 @@
   "name": "@authorbot/schemas",
   "version": "0.1.0",
   "description": "Zod v4 schemas, inferred TypeScript types, and generated JSON Schemas for Authorbot book-repository artifacts (Phase 0 contract section 4)",
+  "keywords": [
+    "authorbot",
+    "zod",
+    "json-schema",
+    "schemas"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "packages/schemas"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -15,10 +36,13 @@
   },
   "files": [
     "dist",
-    "json"
+    "json",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node dist/scripts/generate-json-schemas.js",
+    "prepack": "node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

@@ -2,7 +2,28 @@
   "name": "@authorbot/database",
   "version": "0.1.0",
   "description": "SqlDatabase portability interface (D1 + better-sqlite3 adapters), SQL migrations runner, and typed repositories for Authorbot Phase 2 operational tables (Phase 2 contract section 2)",
+  "keywords": [
+    "authorbot",
+    "sqlite",
+    "d1",
+    "migrations"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "packages/database"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -13,10 +34,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

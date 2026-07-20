@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rulesMapSchema } from "./instance.js";
 import { slugSchema, uuidv7Schema } from "./primitives.js";
 
 /**
@@ -47,6 +48,28 @@ export const bookConfigSchema = z.strictObject({
       show_revision: z.boolean().optional(),
       show_attribution: z.boolean().optional(),
       show_public_annotations: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * Governance rules (Phase 6 contract section 3.6, amending Phase 3 section
+   * 3). Rules live here — versioned, diffable, and reviewable alongside the
+   * prose they govern, and therefore editable from the Settings view. The
+   * `RULES_JSON` environment variable remains a *bootstrap default* for a book
+   * that has not set them; once `governance.rules` exists it wins outright.
+   *
+   * Absent and `{}` are deliberately different: absent means "not configured,
+   * fall back to the environment/design default", while an explicit empty map
+   * is rejected below because a book with zero rules would silently never
+   * promote anything.
+   */
+  governance: z
+    .strictObject({
+      rules: rulesMapSchema
+        .refine(
+          (rules) => Object.keys(rules).length > 0,
+          "governance.rules must define at least one rule (omit the section to use the default)",
+        )
+        .optional(),
     })
     .optional(),
 });

@@ -2,7 +2,27 @@
   "name": "@authorbot/rule-engine",
   "version": "0.1.0",
   "description": "Pure declarative rule evaluation for Authorbot governance: vote-tally metric computation and threshold evaluation of the authorbot.instance/v1 rule shape (Phase 3 contract section 3). No user-supplied code is ever evaluated.",
+  "keywords": [
+    "authorbot",
+    "rules",
+    "governance"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "packages/rule-engine"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -13,10 +33,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

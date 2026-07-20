@@ -37,6 +37,8 @@ describe("computeVoteMetrics", () => {
       distinct_voters: 5,
       human_approvals: 1,
       agent_approvals: 2,
+      maintainer_approvals: 0,
+      human_maintainer_approvals: 0,
     });
   });
 
@@ -95,5 +97,80 @@ describe("computeVoteMetrics", () => {
 
   it("EMPTY_VOTE_METRICS is frozen", () => {
     expect(Object.isFrozen(EMPTY_VOTE_METRICS)).toBe(true);
+  });
+});
+
+/**
+ * Phase 6 contract §3.6. The whole point of the split is that an agent holding
+ * the maintainer role satisfies `maintainer_approvals` but NOT
+ * `human_maintainer_approvals`, so an author's own agent cannot manufacture the
+ * author's consent.
+ */
+describe("computeVoteMetrics — maintainer metrics (Phase 6 §3.6)", () => {
+  const maintainer = (
+    value: VoteTuple["value"],
+    actorType: VoteTuple["actorType"],
+  ): VoteTuple => ({ value, actorType, maintainer: true });
+
+  it("counts a human maintainer's approval in both maintainer metrics", () => {
+    const metrics = computeVoteMetrics([maintainer("approve", "human")]);
+    expect(metrics.maintainer_approvals).toBe(1);
+    expect(metrics.human_maintainer_approvals).toBe(1);
+    expect(metrics.human_approvals).toBe(1);
+  });
+
+  it("an AGENT with the maintainer role does not satisfy human_maintainer_approvals", () => {
+    const metrics = computeVoteMetrics([maintainer("approve", "agent")]);
+    expect(metrics.maintainer_approvals).toBe(1);
+    expect(metrics.human_maintainer_approvals).toBe(0);
+    expect(metrics.agent_approvals).toBe(1);
+  });
+
+  it("a human non-maintainer counts as neither", () => {
+    const metrics = computeVoteMetrics([vote("approve", "human")]);
+    expect(metrics.maintainer_approvals).toBe(0);
+    expect(metrics.human_maintainer_approvals).toBe(0);
+  });
+
+  it("a maintainer's reject or abstain contributes to no approval metric", () => {
+    const metrics = computeVoteMetrics([
+      maintainer("reject", "human"),
+      maintainer("abstain", "human"),
+    ]);
+    expect(metrics.maintainer_approvals).toBe(0);
+    expect(metrics.human_maintainer_approvals).toBe(0);
+  });
+
+  it("a system-type maintainer counts as a maintainer but not a human one", () => {
+    const metrics = computeVoteMetrics([maintainer("approve", "system")]);
+    expect(metrics.maintainer_approvals).toBe(1);
+    expect(metrics.human_maintainer_approvals).toBe(0);
+  });
+
+  it("an absent maintainer flag fails closed (reads as not a maintainer)", () => {
+    const metrics = computeVoteMetrics([{ value: "approve", actorType: "human" }]);
+    expect(metrics.maintainer_approvals).toBe(0);
+    expect(metrics.human_maintainer_approvals).toBe(0);
+  });
+
+  it("aggregates a mixed room correctly", () => {
+    const metrics = computeVoteMetrics([
+      maintainer("approve", "human"), // the author
+      maintainer("approve", "agent"), // the author's agent
+      vote("approve", "human"), // a reader
+      vote("approve", "agent"),
+      vote("reject", "human"),
+    ]);
+    expect(metrics).toEqual<VoteMetrics>({
+      approvals: 4,
+      rejections: 1,
+      abstentions: 0,
+      net_score: 3,
+      distinct_voters: 5,
+      human_approvals: 2,
+      agent_approvals: 2,
+      maintainer_approvals: 2,
+      human_maintainer_approvals: 1,
+    });
   });
 });

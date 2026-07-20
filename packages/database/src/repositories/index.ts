@@ -26,6 +26,7 @@ import {
   PublicationDeliveriesRepository,
   PublicationsRepository,
 } from "./publications.js";
+import { BookConfigsRepository } from "./settings.js";
 
 export * from "./identity.js";
 export * from "./content.js";
@@ -33,6 +34,7 @@ export * from "./operations.js";
 export * from "./collaboration.js";
 export * from "./leasing.js";
 export * from "./publications.js";
+export * from "./settings.js";
 
 /**
  * One repository per table (Phase 2 contract §2 plus the Phase 3 contract
@@ -63,6 +65,8 @@ export interface Repositories {
   publications: PublicationsRepository;
   /** Phase 5 §6: dedupe ledger for signed publication callbacks. */
   publicationDeliveries: PublicationDeliveriesRepository;
+  /** Phase 6 §3.6: projected `book.yml` (settings + in-book governance). */
+  bookConfigs: BookConfigsRepository;
 }
 
 export function createRepositories(db: SqlDatabase): Repositories {
@@ -89,5 +93,6 @@ export function createRepositories(db: SqlDatabase): Repositories {
     submissions: new SubmissionsRepository(db),
     publications: new PublicationsRepository(db),
     publicationDeliveries: new PublicationDeliveriesRepository(db),
+    bookConfigs: new BookConfigsRepository(db),
   };
 }

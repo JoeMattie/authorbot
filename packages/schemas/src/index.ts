@@ -114,13 +114,16 @@ export {
   ruleActionSchema,
   ruleConditionSchema,
   ruleMetricNameSchema,
+  ruleNameSchema,
   ruleWhenSchema,
+  rulesMapSchema,
 } from "./instance.js";
 export type {
   DeclarativeRule,
   InstanceConfig,
   RuleAction,
   RuleCondition,
+  RulesMap,
   RuleWhen,
 } from "./instance.js";
 

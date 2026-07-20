@@ -21,6 +21,7 @@ import {
   initGitRepo,
   nowIso,
   setupDatabase,
+  uuidv7,
   type SeededDatabase,
   type TempGitRepo,
 } from "./helpers.js";
@@ -333,5 +334,147 @@ describe("malformed work", () => {
     const { outcomes } = await processor.drain("00000000-0000-7000-8000-000000000000");
     expect(outcomes).toHaveLength(0);
     expect(await commitCount()).toBe(1);
+  });
+});
+
+/**
+ * Regression (Phase 6 §3.6). Every other pending-state owner has a release
+ * path — `submission.apply` via `releaseFailedApplyStatements`, pending
+ * annotations and replies via the rebuild sweep — and `book_config` was the
+ * one that did not.
+ *
+ * A settings PATCH writes the new config to `book_configs` as `pending_git` in
+ * the same batch as the outbox row, and ONLY a successful commit cleared it. So
+ * when a settings commit dead-lettered, the row was terminal: the PATCH route
+ * refuses further writes on that status, `projectBookConfig` short-circuits on
+ * it so Git could never re-assert the committed `book.yml`, and
+ * `resolveRuleEntries` kept reading — and therefore ENFORCING — governance
+ * rules from a document no commit contains. That is exactly the "second
+ * configuration store" §3.6 forbids, failing silently and permanently.
+ */
+describe("a dead-lettered book_config.update releases its projection row", () => {
+  const CONFIG = {
+    schema: "authorbot.book/v1",
+    id: "01900000-0000-7000-8000-0000000000bb",
+    title: "Committed Title",
+    slug: "a-book",
+    language: "en",
+  } as const;
+
+  /** Enqueue a settings write whose commit is guaranteed to fail. */
+  async function enqueueDoomedSettingsWrite(previous: unknown): Promise<{
+    operationId: string;
+    outboxId: string;
+  }> {
+    const ts = nowIso();
+    const operationId = uuidv7();
+    const outboxId = uuidv7();
+    await seed.db.batch([
+      seed.repos.gitOperations.insertStatement({
+        id: operationId,
+        projectId: seed.projectId,
+        correlationId: uuidv7(),
+        expectedHead: null,
+        state: "queued",
+        attempts: 0,
+        commitSha: null,
+        error: null,
+        createdAt: ts,
+        updatedAt: ts,
+      }),
+      seed.repos.bookConfigs.upsertStatement({
+        projectId: seed.projectId,
+        config: { ...CONFIG, title: "Uncommitted Title" },
+        status: "pending_git",
+        gitOperationId: operationId,
+        sourceCommit: null,
+        createdAt: ts,
+        updatedAt: ts,
+      }),
+      seed.repos.outbox.insertStatement({
+        id: outboxId,
+        projectId: seed.projectId,
+        gitOperationId: operationId,
+        kind: "book_config.update",
+        payload: {
+          // An actor id with no external identity: a failure mode
+          // `failOperation`'s own doc comment names.
+          actorId: "01900000-0000-7000-8000-00000000dead",
+          config: { ...CONFIG, title: "Uncommitted Title" },
+          changed: ["title"],
+          ...(previous === undefined ? {} : { previousConfig: previous }),
+        },
+        status: "pending",
+        attempts: 0,
+        createdAt: ts,
+        processedAt: null,
+      }),
+    ]);
+    return { operationId, outboxId };
+  }
+
+  it("restores the last committed config so settings and governance recover", async () => {
+    await enqueueDoomedSettingsWrite(CONFIG);
+
+    const { outcomes } = await processor.drain(seed.projectId);
+    expect(outcomes[0]?.result).toBe("failed");
+
+    const row = await seed.repos.bookConfigs.get(seed.projectId);
+    // Not stranded in `pending_git`: the PATCH route and `projectBookConfig`
+    // both key off this status, so leaving it would brick both permanently.
+    expect(row?.status).toBe("committed");
+    expect(row?.gitOperationId).toBeNull();
+    // And the config in force is the one that actually reached Git — not the
+    // one whose commit failed.
+    expect((row?.config as { title: string }).title).toBe("Committed Title");
+  });
+
+  it("drops the row when there is no committed config to fall back to", async () => {
+    // A book's FIRST settings write has no predecessor. Dropping the row is
+    // the honest state: the projection re-reads book.yml from Git, and
+    // governance falls back to the deployment's bootstrap rules — the
+    // stricter direction, so a failed commit can never leave a weakened rule
+    // in force.
+    await enqueueDoomedSettingsWrite(undefined);
+
+    const { outcomes } = await processor.drain(seed.projectId);
+    expect(outcomes[0]?.result).toBe("failed");
+    expect(await seed.repos.bookConfigs.get(seed.projectId)).toBeNull();
+  });
+
+  it("does not revert a later settings write that already replaced the row", async () => {
+    const { operationId } = await enqueueDoomedSettingsWrite(CONFIG);
+
+    // A second PATCH lands on the row before the first one's failure is
+    // processed — the compare-and-swap `markCommittedStatement` also relies on.
+    const later = uuidv7();
+    await seed.repos.gitOperations.insertStatement({
+      id: later,
+      projectId: seed.projectId,
+      correlationId: uuidv7(),
+      expectedHead: null,
+      state: "queued",
+      attempts: 0,
+      commitSha: null,
+      error: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    }).run();
+    await seed.repos.bookConfigs.upsert({
+      projectId: seed.projectId,
+      config: { ...CONFIG, title: "Newer Title" },
+      status: "pending_git",
+      gitOperationId: later,
+      sourceCommit: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    });
+
+    await processor.drain(seed.projectId);
+
+    const row = await seed.repos.bookConfigs.get(seed.projectId);
+    expect(row?.gitOperationId).toBe(later);
+    expect((row?.config as { title: string }).title).toBe("Newer Title");
+    expect(operationId).not.toBe(later);
   });
 });

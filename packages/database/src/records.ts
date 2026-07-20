@@ -463,3 +463,22 @@ export interface AuditEventRecord {
   metadata: unknown;
   createdAt: string;
 }
+
+/**
+ * Projected `book.yml` for a project (Phase 6 contract §3.6, migration 0006).
+ * `config` is the parsed `authorbot.book/v1` document; the database layer
+ * keeps it `unknown` and leaves validation to `@authorbot/schemas` at the
+ * boundary, exactly as `AuditEventRecord.metadata` does.
+ */
+export interface BookConfigRecord {
+  projectId: string;
+  config: unknown;
+  status: BookConfigStatus;
+  gitOperationId: string | null;
+  sourceCommit: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `pending_git` until the outbox commits `book.yml`; then `committed`. */
+export type BookConfigStatus = "pending_git" | "committed";

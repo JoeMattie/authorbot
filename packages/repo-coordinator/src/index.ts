@@ -32,6 +32,11 @@ export {
   type ReplyArtifactInput,
 } from "./render.js";
 export {
+  BOOK_CONFIG_PATH,
+  orderBookConfig,
+  renderBookConfigArtifact,
+} from "./book-config-artifact.js";
+export {
   decisionFilePath,
   parseDecisionArtifact,
   renderDecisionArtifact,
@@ -76,6 +81,7 @@ export {
   ACTOR_TRAILER,
   ANNOTATION_TRAILER,
   BASE_REVISION_TRAILER,
+  CHAPTER_TRAILER,
   formatCommitMessage,
   GitWriteError,
   isGitWriteError,
@@ -97,6 +103,12 @@ export {
   SYSTEM_RULE_ENGINE_REF,
   type AnnotationCreatePayload,
   type AnnotationWithdrawPayload,
+  type BookConfigUpdatePayload,
+  type ChapterComposeContext,
+  type ChapterComposeOutcome,
+  type ChapterComposer,
+  type ChapterWriteAction,
+  type ChapterWritePayload,
   type Clock,
   type CreateProcessorOptions,
   type DecisionCreatePayload,
