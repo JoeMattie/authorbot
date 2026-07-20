@@ -314,6 +314,77 @@ export interface EventRecord {
 /** Input for appending an event; the database assigns the monotonic id. */
 export type NewEventRecord = Omit<EventRecord, "id">;
 
+/**
+ * Phase 4 contract §2, design §12. Operational-only (never in Git; does not
+ * survive a fresh-DB rebuild).
+ *
+ * Two distinct notions, defined in migration 0004:
+ * - ACTIVE — `releasedAt === null && revokedAt === null`; the lease occupies
+ *   its work item's single slot (partial-unique-index predicate).
+ * - LIVE — active AND `expiresAt > now` at query time; only a live lease may
+ *   renew or submit. Expired ⇔ `expiresAt <= now` (same boundary as
+ *   human_sessions).
+ *
+ * `tokenHash` is the SHA-256 hex of the opaque lease token; the plaintext is
+ * returned exactly once at claim time and never stored or logged.
+ * Verification is a constant-time hash compare in the API layer.
+ */
+export interface LeaseRecord {
+  id: string;
+  projectId: string;
+  workItemId: string;
+  /** The holder. */
+  actorId: string;
+  /** SHA-256 hex of the lease token. Plaintext is never stored. */
+  tokenHash: string;
+  issuedAt: string;
+  expiresAt: string;
+  /** issuedAt + maximum total duration; renewals never extend past this. */
+  maxExpiresAt: string;
+  renewalCount: number;
+  /** Voluntary release by holder or maintainer. */
+  releasedAt: string | null;
+  /** Involuntary end: lazy/swept expiry or administrative revocation. */
+  revokedAt: string | null;
+}
+
+/** Phase 4 contract §1: the three Phase 4 submission types. */
+export type SubmissionType =
+  | "range_replacement"
+  | "block_replacement"
+  | "chapter_replacement";
+
+/**
+ * Phase 4 submission lifecycle: `received → applying → applied | conflicted`;
+ * `rejected` records a post-insert verification failure.
+ */
+export type SubmissionState =
+  | "received"
+  | "applying"
+  | "applied"
+  | "conflicted"
+  | "rejected";
+
+/** Phase 4 contract §4, design §12.5. Content retained per contract §6. */
+export interface SubmissionRecord {
+  id: string;
+  projectId: string;
+  workItemId: string;
+  leaseId: string;
+  actorId: string;
+  type: SubmissionType;
+  baseRevision: number;
+  /** `sha256:<hex>` of the chapter at baseRevision (task-bundle echo). */
+  baseContentHash: string;
+  content: string;
+  summary: string | null;
+  notes: string | null;
+  state: SubmissionState;
+  gitOperationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AuditEventRecord {
   id: string;
   projectId: string;

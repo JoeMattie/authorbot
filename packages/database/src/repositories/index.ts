@@ -21,15 +21,17 @@ import {
   VotesRepository,
   WorkItemsRepository,
 } from "./collaboration.js";
+import { LeasesRepository, SubmissionsRepository } from "./leasing.js";
 
 export * from "./identity.js";
 export * from "./content.js";
 export * from "./operations.js";
 export * from "./collaboration.js";
+export * from "./leasing.js";
 
 /**
  * One repository per table (Phase 2 contract §2 plus the Phase 3 contract
- * §2/§4/§5 tables), sharing a `SqlDatabase`.
+ * §2/§4/§5 and Phase 4 contract §2/§4 tables), sharing a `SqlDatabase`.
  */
 export interface Repositories {
   projects: ProjectsRepository;
@@ -50,6 +52,8 @@ export interface Repositories {
   decisions: DecisionsRepository;
   workItems: WorkItemsRepository;
   events: EventsRepository;
+  leases: LeasesRepository;
+  submissions: SubmissionsRepository;
 }
 
 export function createRepositories(db: SqlDatabase): Repositories {
@@ -72,5 +76,7 @@ export function createRepositories(db: SqlDatabase): Repositories {
     decisions: new DecisionsRepository(db),
     workItems: new WorkItemsRepository(db),
     events: new EventsRepository(db),
+    leases: new LeasesRepository(db),
+    submissions: new SubmissionsRepository(db),
   };
 }

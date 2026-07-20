@@ -20,6 +20,8 @@ const EXPECTED_TABLES = [
   "idempotency_keys",
   "webhook_deliveries",
   "audit_events",
+  "leases",
+  "submissions",
 ];
 
 describe("migration runner", () => {
