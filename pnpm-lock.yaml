@@ -22,6 +22,9 @@ importers:
       '@authorbot/repo-coordinator':
         specifier: workspace:*
         version: link:../../packages/repo-coordinator
+      '@authorbot/rule-engine':
+        specifier: workspace:*
+        version: link:../../packages/rule-engine
       '@authorbot/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
@@ -218,6 +221,25 @@ importers:
       '@authorbot/markdown':
         specifier: workspace:*
         version: link:../markdown
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(happy-dom@18.0.1)(supports-color@10.2.2)(yaml@2.9.0)
+
+  packages/rule-engine:
+    dependencies:
+      '@authorbot/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+    devDependencies:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1

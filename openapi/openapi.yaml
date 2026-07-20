@@ -695,9 +695,16 @@ paths:
       - $ref: "#/components/parameters/AnnotationId"
     put:
       operationId: putAnnotationVote
-      x-implementation-status: planned
       tags: [annotations]
       summary: Create or replace the caller's current vote (one per actor).
+      description: |
+        Requires `votes:write` (the contributor role bundle and above; agents
+        vote only when their membership grants it). Votes are accepted on
+        suggestions only — a comment returns 422. Recording the vote runs the
+        declarative rule engine in the same serialized command: a threshold
+        crossing creates a sticky decision and a `ready` work item, both
+        surfaced in `decision`. Tallies are aggregate-only; per-voter identity
+        is never returned (design §26.1).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -712,17 +719,11 @@ paths:
                   $ref: "#/components/schemas/VoteValue"
       responses:
         "200":
-          description: Vote recorded; returns the vote and refreshed aggregate.
+          description: Vote recorded; returns the refreshed aggregate and any decision.
           content:
             application/json:
               schema:
-                type: object
-                required: [vote, voteSummary]
-                properties:
-                  vote:
-                    $ref: "#/components/schemas/Vote"
-                  voteSummary:
-                    $ref: "#/components/schemas/VoteSummary"
+                $ref: "#/components/schemas/VoteResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -737,6 +738,144 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+    delete:
+      operationId: deleteAnnotationVote
+      tags: [annotations]
+      summary: Clear the caller's current vote.
+      description: |
+        Removes the caller's current vote (idempotent — clearing a non-existent
+        vote still returns 200) and re-evaluates the rule. Dropping below a
+        satisfied rule marks the existing decision `support_changed`; the
+        decision and its work item are never deleted (design §11.3).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Vote cleared; returns the refreshed aggregate and any decision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoteResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/annotations/{annotationId}/reject:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+    post:
+      operationId: rejectSuggestion
+      tags: [annotations]
+      summary: Maintainer override — reject an open suggestion.
+      description: |
+        Maintainer-only. Transitions an `open` suggestion to `rejected` and
+        records a sticky override decision (`rule_version: 0`) carrying the
+        required `reason` as `override_reason`. Audited. A non-open suggestion
+        returns 409.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        $ref: "#/components/requestBodies/OverrideReason"
+      responses:
+        "200":
+          description: Suggestion rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnotationOverrideResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/annotations/{annotationId}/reopen:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+    post:
+      operationId: reopenSuggestion
+      tags: [annotations]
+      summary: Maintainer override — reopen a rejected suggestion.
+      description: |
+        Maintainer-only. Transitions a `rejected` suggestion back to `open` and
+        records an override decision (`rule_version: 0`) with the required
+        `reason`. Audited.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        $ref: "#/components/requestBodies/OverrideReason"
+      responses:
+        "200":
+          description: Suggestion reopened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnotationOverrideResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/annotations/{annotationId}/force-create-work-item:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+    post:
+      operationId: forceCreateWorkItem
+      tags: [annotations]
+      summary: Maintainer override — force-create a work item bypassing the rule.
+      description: |
+        Maintainer-only. Creates a `ready` work item for a suggestion without a
+        satisfied rule, recorded as an override decision on the same uniqueness
+        key `(sourceAnnotationId, create_work_item, rule_version 0)` — a second
+        call returns 409. The annotation transitions to `work_item_created`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        $ref: "#/components/requestBodies/OverrideReason"
+      responses:
+        "201":
+          description: Work item force-created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AnnotationOverrideResult"
+                  - type: object
+                    required: [workItemId]
+                    properties:
+                      workItemId:
+                        $ref: "#/components/schemas/Uuid"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/annotations/{annotationId}/withdraw:
     parameters:
@@ -827,9 +966,11 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: listWorkItems
-      x-implementation-status: planned
       tags: [work]
       summary: List work items.
+      description: |
+        Read-only in Phase 3 (contract §6). Requires `work:read` (editor role
+        and above). Each item embeds an aggregate `support` tally.
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -873,7 +1014,6 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     get:
       operationId: getWorkItem
-      x-implementation-status: planned
       tags: [work]
       summary: Return one work item.
       responses:
@@ -891,6 +1031,54 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/work-items/{workItemId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/WorkItemId"
+    post:
+      operationId: cancelWorkItem
+      tags: [work]
+      summary: Maintainer override — cancel a ready work item before integration.
+      description: |
+        Maintainer-only. Transitions the work item to `cancelled` and records a
+        sticky override decision (`rule_version: 0`) with the required `reason`.
+        Audited; the source suggestion's decision is preserved.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        $ref: "#/components/requestBodies/OverrideReason"
+      responses:
+        "200":
+          description: Work item cancelled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workItemId, status, decisionId, operationIds, correlationId]
+                properties:
+                  workItemId:
+                    $ref: "#/components/schemas/Uuid"
+                  status:
+                    $ref: "#/components/schemas/WorkItemStatus"
+                  decisionId:
+                    $ref: "#/components/schemas/Uuid"
+                  operationIds:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Uuid"
+                  correlationId:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/work-items/{workItemId}/claim:
     parameters:
@@ -1124,24 +1312,45 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: streamProjectEvents
-      x-implementation-status: planned
       tags: [operations]
       summary: Server-Sent Events feed of project activity (design §15.5).
       description: |
-        Emits `text/event-stream` events for annotation creation, vote
-        aggregate changes, work-item creation, lease state changes, Git
-        operation completion, and publication completion. Events are
-        notifications only; clients must refetch authoritative resources
-        after reconnecting. Supports resumption via `Last-Event-ID`.
+        Emits `text/event-stream` frames from a monotonic, cursor-ordered
+        `events` table. Event types (Phase 3 contract §5): `annotation_created`,
+        `vote_aggregate`, `decision_created`, `decision_support_changed`,
+        `work_item_created`, `operation_completed`. A 15s heartbeat comment
+        keeps the connection warm. Events are notifications only; clients MUST
+        refetch authoritative resources after reconnecting. Resume without loss
+        via `Last-Event-ID` (or the `after` query parameter).
+
+        Auth mirrors annotation reads: on a public book the stream is readable
+        by anonymous callers (public events only); otherwise it is member-only.
       parameters:
         - name: Last-Event-ID
           in: header
           required: false
           schema:
             type: string
+        - name: after
+          in: query
+          required: false
+          description: Resume cursor (event id); alternative to `Last-Event-ID`.
+          schema:
+            type: integer
+            minimum: 0
+        - name: poll
+          in: query
+          required: false
+          description: |
+            When `1`, returns a JSON page of events after the cursor instead of
+            an SSE stream — the simple-agent fallback (§26.1).
+          schema:
+            type: integer
+            enum: [1]
       responses:
         "200":
-          description: An open SSE stream.
+          description: |
+            An open SSE stream, or — with `poll=1` — a JSON page of events.
           content:
             text/event-stream:
               schema:
@@ -1149,6 +1358,20 @@ paths:
                 description: |
                   Stream of `event:`/`id:`/`data:` frames; `data` is a JSON
                   object matching #/components/schemas/Event.
+            application/json:
+              schema:
+                type: object
+                required: [items, latestId]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  latestId:
+                    type: integer
+                    description: Highest event id in this page (the next cursor).
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1249,6 +1472,20 @@ components:
         Named, scoped, revocable, expiring agent token (design §19.2). Only a
         hash is stored server-side. Humans and agents are treated identically
         after authorization.
+
+  requestBodies:
+    OverrideReason:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [reason]
+            properties:
+              reason:
+                type: string
+                minLength: 1
+                description: Required audit rationale recorded on the override decision.
 
   parameters:
     ProjectId:
@@ -1421,13 +1658,15 @@ components:
     Scope:
       type: string
       description: |
-        Token/membership scope (design §19.2/§19.3). `votes:write` is deferred
-        with voting to Phase 3. `work:*`/`submissions:write` are granted now
-        and used from Phase 4.
+        Token/membership scope (design §19.2/§19.3). `votes:write` is granted
+        in Phase 3 as part of the contributor role bundle (and every role above
+        it); agents vote only when their membership grants it (§11.2).
+        `work:*`/`submissions:write` are granted now and used from Phase 4.
       enum:
         - chapters:read
         - annotations:read
         - annotations:write
+        - votes:write
         - work:read
         - work:claim
         - submissions:write
@@ -1852,6 +2091,90 @@ components:
         effectiveAt:
           $ref: "#/components/schemas/Timestamp"
         overrideReason:
+          type: string
+
+    DecisionSummary:
+      type: object
+      description: |
+        Decision projection embedded in vote and work-item responses (Phase 3
+        contract §4). Aggregate metrics only — never per-voter data (§26.1).
+      required:
+        [id, sourceAnnotationId, actionType, rule, ruleVersion, metrics, result, supportChanged, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        sourceAnnotationId:
+          $ref: "#/components/schemas/Uuid"
+        actionType:
+          type: string
+          enum: [create_work_item, reject_suggestion, reopen_suggestion, cancel_work_item]
+        rule:
+          type: string
+        ruleVersion:
+          type: integer
+          minimum: 0
+          description: 0 marks a maintainer override; >= 1 is a rule crossing.
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+        result:
+          type: string
+          enum: [create_work_item, rejected, support_changed, overridden]
+        supportChanged:
+          type: boolean
+        overrideReason:
+          oneOf:
+            - type: string
+            - type: "null"
+        workItemId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
+
+    VoteResult:
+      type: object
+      description: Response to casting or clearing a vote (Phase 3 contract §2–§4).
+      required: [annotationId, value, votes, ruleSatisfied, decision]
+      properties:
+        annotationId:
+          $ref: "#/components/schemas/Uuid"
+        value:
+          description: The caller's new current vote, or null after a clear.
+          oneOf:
+            - $ref: "#/components/schemas/VoteValue"
+            - type: "null"
+        votes:
+          $ref: "#/components/schemas/VoteSummary"
+        ruleSatisfied:
+          type: boolean
+          description: Whether the rule is currently satisfied for this suggestion.
+        decision:
+          description: The sticky decision, if one exists for this suggestion.
+          oneOf:
+            - $ref: "#/components/schemas/DecisionSummary"
+            - type: "null"
+
+    AnnotationOverrideResult:
+      type: object
+      description: Response to a maintainer suggestion override (Phase 3 contract §4).
+      required: [annotationId, status, decisionId, operationIds, correlationId]
+      properties:
+        annotationId:
+          $ref: "#/components/schemas/Uuid"
+        status:
+          $ref: "#/components/schemas/AnnotationStatus"
+        decisionId:
+          $ref: "#/components/schemas/Uuid"
+        operationIds:
+          type: array
+          items:
+            $ref: "#/components/schemas/Uuid"
+        correlationId:
           type: string
 
     WorkItemType:
