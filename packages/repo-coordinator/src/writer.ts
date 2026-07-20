@@ -49,6 +49,7 @@ export interface BookRepoWriter {
 export const OPERATION_TRAILER = "Authorbot-Operation";
 export const ACTOR_TRAILER = "Authorbot-Actor";
 export const ANNOTATION_TRAILER = "Authorbot-Annotation";
+export const WORK_ITEM_TRAILER = "Authorbot-Work-Item";
 
 export type GitWriteFailure =
   /** Branch head is not where the caller expected (retryable → `conflict`). */

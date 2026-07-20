@@ -17,11 +17,13 @@
 import {
   createRepositories,
   type AnnotationRecord,
+  type DecisionRecord,
   type GitOperationRecord,
   type OutboxRecord,
   type Repositories,
   type SqlDatabase,
   type SqlStatement,
+  type WorkItemRecord,
 } from "@authorbot/database";
 import {
   MAX_GIT_ATTEMPTS,
@@ -29,19 +31,35 @@ import {
   transitionGitOperation,
   type GitOperationState,
 } from "@authorbot/domain";
-import { renderAnnotationArtifact, renderReplyArtifact } from "./render.js";
+import { renderDecisionArtifact } from "./decision-artifact.js";
+import { renderAnnotationArtifact, renderReplyArtifact, type RenderedFile } from "./render.js";
+import { renderWorkItemArtifact } from "./work-item-artifact.js";
 import {
   ACTOR_TRAILER,
   ANNOTATION_TRAILER,
   isGitWriteError,
   OPERATION_TRAILER,
+  WORK_ITEM_TRAILER,
   type BookRepoWriter,
   type CommitFile,
 } from "./writer.js";
 
 /** Outbox row kinds this processor understands (the API writes these). */
-export const OUTBOX_KINDS = ["annotation.create", "reply.create", "annotation.withdraw"] as const;
+export const OUTBOX_KINDS = [
+  "annotation.create",
+  "reply.create",
+  "annotation.withdraw",
+  "decision.create",
+  "decision.update",
+  "work_item.update",
+] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
+
+/**
+ * Artifact actor reference credited when no acting actor is supplied — rule
+ * crossings are performed by the rule engine itself (design §13).
+ */
+export const SYSTEM_RULE_ENGINE_REF = "system:rule-engine";
 
 /** Payload for `annotation.create` outbox rows. */
 export interface AnnotationCreatePayload {
@@ -61,6 +79,55 @@ export interface ReplyCreatePayload {
 export interface AnnotationWithdrawPayload {
   annotationId: string;
   actorId?: string;
+}
+
+/**
+ * Payload for `decision.create` (Phase 3 contract §4) and `decision.update`
+ * outbox rows.
+ *
+ * `decision.create` renders the decision YAML and — when the decision row
+ * carries a `workItemId` — the linked work-item Markdown **in the same
+ * commit** (one crossing = one logical mutation = one commit). This covers
+ * rule crossings, force-creates, and work-item cancellations (whose override
+ * decision also references the work item, re-rendering it with its new
+ * status).
+ *
+ * `decision.update` re-renders the decision YAML alone — the
+ * `support_changed` mark/clear path (design §11.3); no new decision row
+ * exists, so only the `result` line of the artifact changes.
+ *
+ * - `actorId`: the acting actor (maintainer overrides), credited in the
+ *   `Authorbot-Actor` trailer; defaults to `system:rule-engine`.
+ * - `createdByActorId`: the actor recorded as the work item's `created_by`
+ *   frontmatter. Omitted for rule crossings (`system:rule-engine`); set to
+ *   the maintainer for force-creates. Rows that re-render a force-created
+ *   work item must pass the *original* creator here so re-renders stay
+ *   byte-identical outside the `status` line (`work_items` has no
+ *   `created_by` column — flagged to the database owner).
+ */
+export interface DecisionCreatePayload {
+  decisionId: string;
+  actorId?: string;
+  createdByActorId?: string;
+}
+
+/** Payload for `decision.update` outbox rows (see {@link DecisionCreatePayload}). */
+export interface DecisionUpdatePayload {
+  decisionId: string;
+  actorId?: string;
+}
+
+/**
+ * Payload for `work_item.update` outbox rows: re-render the work-item
+ * Markdown after a status change that carries no decision of its own
+ * (Phase 4 lease transitions; Phase 3 cancels normally ride the cancel
+ * decision's `decision.create` row instead). See
+ * {@link DecisionCreatePayload} for `actorId`/`createdByActorId`.
+ */
+export interface WorkItemUpdatePayload {
+  workItemId: string;
+  actorId?: string;
+  createdByActorId?: string;
 }
 
 export interface Clock {
@@ -154,7 +221,11 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         case "verified": {
           // Crash-recovery path: commit exists, record/outbox not yet final.
           const sync = await buildSyncStatements(row);
-          await db.batch([...sync, repos.outbox.markDoneStatement(row.id, now())]);
+          await db.batch([
+            ...sync,
+            completionEventStatement(row, op),
+            repos.outbox.markDoneStatement(row.id, now()),
+          ]);
           return outcome(row, "committed", op.commitSha === null ? {} : { commitSha: op.commitSha });
         }
         case "failed": {
@@ -222,6 +293,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
               error: null,
             }),
             ...(await buildSyncStatements(row)),
+            completionEventStatement(row, op),
             repos.outbox.markDoneStatement(row.id, ts),
           ]);
           return outcome(row, "committed", { commitSha });
@@ -312,6 +384,55 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       };
     }
 
+    if (kind === "decision.create" || kind === "decision.update") {
+      const payload = parseDecisionPayload(row);
+      const decision = await mustDecision(payload.decisionId);
+      const actingRef =
+        payload.actorId === undefined ? SYSTEM_RULE_ENGINE_REF : await actorRef(payload.actorId);
+      const files: RenderedFile[] = [renderDecisionFile(decision)];
+      const trailers: Record<string, string> = {
+        [ACTOR_TRAILER]: actingRef,
+        [ANNOTATION_TRAILER]: decision.sourceAnnotationId,
+      };
+      let message =
+        kind === "decision.create"
+          ? `Record decision ${decision.id}`
+          : `Update decision ${decision.id}`;
+      // One crossing = one commit: the create row also renders the linked
+      // work item so both artifacts land as one logical mutation (task/
+      // contract §4). Cancel decisions re-render the item with its new
+      // status the same way.
+      if (kind === "decision.create" && decision.workItemId !== null) {
+        const workItem = await mustWorkItem(decision.workItemId);
+        files.push(await renderWorkItemFile(workItem, payload.createdByActorId));
+        trailers[WORK_ITEM_TRAILER] = workItem.id;
+        message =
+          workItem.status === "ready"
+            ? `Create work item ${workItem.id}`
+            : `Update work item ${workItem.id}`;
+      }
+      trailers[OPERATION_TRAILER] = op.id;
+      return { branch, files, message, trailers };
+    }
+
+    if (kind === "work_item.update") {
+      const payload = parseWorkItemPayload(row);
+      const workItem = await mustWorkItem(payload.workItemId);
+      const actingRef =
+        payload.actorId === undefined ? SYSTEM_RULE_ENGINE_REF : await actorRef(payload.actorId);
+      return {
+        branch,
+        files: [await renderWorkItemFile(workItem, payload.createdByActorId)],
+        message: `Update work item ${workItem.id}`,
+        trailers: {
+          [ACTOR_TRAILER]: actingRef,
+          [ANNOTATION_TRAILER]: workItem.sourceAnnotationId,
+          [WORK_ITEM_TRAILER]: workItem.id,
+          [OPERATION_TRAILER]: op.id,
+        },
+      };
+    }
+
     // reply.create
     const payload = parseReplyPayload(row);
     const reply = await repos.replies.getById(payload.replyId);
@@ -337,6 +458,20 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     };
   }
 
+  /**
+   * The `operation_completed` feed event (contract §5): appended in the same
+   * finalize batch that marks the operation committed and the outbox row done,
+   * so the stream reflects `pending_git → committed` transitions.
+   */
+  function completionEventStatement(row: OutboxRecord, op: GitOperationRecord): SqlStatement {
+    return repos.events.appendStatement({
+      projectId: row.projectId,
+      type: "operation_completed",
+      payload: { operationId: op.id, kind: row.kind },
+      createdAt: now(),
+    });
+  }
+
   /** Statements that move the mirrored record out of `pending_git` (idempotent). */
   async function buildSyncStatements(row: OutboxRecord): Promise<SqlStatement[]> {
     const kind = parseKind(row);
@@ -349,14 +484,81 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       const payload = parseAnnotationPayload(row);
       return [repos.annotations.updateStatusStatement(payload.annotationId, "withdrawn", ts)];
     }
-    const payload = parseReplyPayload(row);
-    return [repos.replies.updateStatusStatement(payload.replyId, "open", ts)];
+    if (kind === "reply.create") {
+      const payload = parseReplyPayload(row);
+      return [repos.replies.updateStatusStatement(payload.replyId, "open", ts)];
+    }
+    // Decision and work-item rows have no `pending_git`-style mirror state
+    // (their DB rows are final at command time, Phase 3 contract §4): the
+    // finalize batch only marks the operation committed and the row done.
+    return [];
+  }
+
+  /** Render the decision YAML from its projection row (contract §4). */
+  function renderDecisionFile(decision: DecisionRecord): RenderedFile {
+    return renderDecisionArtifact({
+      id: decision.id,
+      sourceAnnotationId: decision.sourceAnnotationId,
+      rule: decision.rule,
+      ruleVersion: decision.ruleVersion,
+      metrics: decision.metrics,
+      result: decision.result,
+      supportChanged: decision.supportChanged,
+      workItemId: decision.workItemId,
+      effectiveAt: decision.createdAt,
+      overrideReason: decision.overrideReason,
+    });
+  }
+
+  /**
+   * Render the work-item Markdown from its projection row plus its source
+   * annotation (Context = annotation body per Phase 3 contract §4; Original
+   * text = the target snapshot's quote). Deterministic per work item so a
+   * status re-render changes only the frontmatter `status` line.
+   */
+  async function renderWorkItemFile(
+    workItem: WorkItemRecord,
+    createdByActorId: string | undefined,
+  ): Promise<RenderedFile> {
+    const annotation = await mustAnnotation(workItem.sourceAnnotationId);
+    const createdBy =
+      createdByActorId === undefined ? SYSTEM_RULE_ENGINE_REF : await actorRef(createdByActorId);
+    return renderWorkItemArtifact({
+      id: workItem.id,
+      type: workItem.type,
+      status: workItem.status,
+      sourceAnnotationId: workItem.sourceAnnotationId,
+      chapterId: workItem.chapterId,
+      baseRevision: workItem.baseRevision,
+      priority: workItem.priority,
+      createdBy,
+      createdAt: workItem.createdAt,
+      context: annotation.body,
+      originalText: quoteExact(workItem.target),
+      // The voted proposal is the annotation body, which the contract pins
+      // to the Context section; Requested change references it rather than
+      // duplicating the prose (design §13: "without pretending it is
+      // already the final prose").
+      requestedChange: `Apply the change proposed in suggestion ${workItem.sourceAnnotationId} (see Context).`,
+    });
   }
 
   async function mustAnnotation(id: string): Promise<AnnotationRecord> {
     const annotation = await repos.annotations.getById(id);
     if (!annotation) throw new Error(`annotation ${id} not found`);
     return annotation;
+  }
+
+  async function mustDecision(id: string): Promise<DecisionRecord> {
+    const decision = await repos.decisions.getById(id);
+    if (!decision) throw new Error(`decision ${id} not found`);
+    return decision;
+  }
+
+  async function mustWorkItem(id: string): Promise<WorkItemRecord> {
+    const workItem = await repos.workItems.getById(id);
+    if (!workItem) throw new Error(`work item ${id} not found`);
+    return workItem;
   }
 
   /** Resolve an actor id to its artifact actor reference (`github:octocat`). */
@@ -406,6 +608,43 @@ function parseReplyPayload(row: OutboxRecord): ReplyCreatePayload {
     throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
   }
   return payload as ReplyCreatePayload;
+}
+
+function parseDecisionPayload(row: OutboxRecord): DecisionCreatePayload {
+  const payload = row.payload as Partial<DecisionCreatePayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.decisionId !== "string" ||
+    (payload.actorId !== undefined && typeof payload.actorId !== "string") ||
+    (payload.createdByActorId !== undefined && typeof payload.createdByActorId !== "string")
+  ) {
+    throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
+  }
+  return payload as DecisionCreatePayload;
+}
+
+function parseWorkItemPayload(row: OutboxRecord): WorkItemUpdatePayload {
+  const payload = row.payload as Partial<WorkItemUpdatePayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.workItemId !== "string" ||
+    (payload.actorId !== undefined && typeof payload.actorId !== "string") ||
+    (payload.createdByActorId !== undefined && typeof payload.createdByActorId !== "string")
+  ) {
+    throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
+  }
+  return payload as WorkItemUpdatePayload;
+}
+
+/** Extract the exact quote from a stored target snapshot, when present. */
+function quoteExact(target: unknown): string {
+  if (target === null || typeof target !== "object") return "";
+  const textQuote = (target as { textQuote?: unknown }).textQuote;
+  if (textQuote === null || typeof textQuote !== "object") return "";
+  const exact = (textQuote as { exact?: unknown }).exact;
+  return typeof exact === "string" ? exact : "";
 }
 
 function errorMessage(error: unknown): string {

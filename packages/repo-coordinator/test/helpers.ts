@@ -15,11 +15,13 @@ import {
   createRepositories,
   openSqliteDatabase,
   type AnnotationRecord,
+  type DecisionRecord,
   type GitOperationRecord,
   type OutboxRecord,
   type Repositories,
   type ReplyRecord,
   type SqliteAdapter,
+  type WorkItemRecord,
 } from "@authorbot/database";
 import { toTimestamp } from "@authorbot/domain";
 
@@ -271,6 +273,162 @@ export async function enqueueReplyCreate(
     repos.outbox.insertStatement(outbox),
   ]);
   return { replyId, operationId, outboxId };
+}
+
+function newOperation(seed: SeededDatabase, operationId: string, ts: string): GitOperationRecord {
+  return {
+    id: operationId,
+    projectId: seed.projectId,
+    correlationId: uuidv7(),
+    expectedHead: null,
+    state: "queued",
+    attempts: 0,
+    commitSha: null,
+    error: null,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+export interface EnqueuedCrossing {
+  annotationId: string;
+  decisionId: string;
+  workItemId: string;
+  operationId: string;
+  outboxId: string;
+}
+
+/**
+ * Phase 3 contract §4 crossing batch (the parts the processor consumes):
+ * decision row + work-item row + annotation transition + one outbox row for
+ * both Git artifacts. `metrics`/`ruleVersion`/`overrideReason` overridable
+ * for force-create shapes.
+ */
+export async function enqueueDecisionCreate(
+  seed: SeededDatabase,
+  options: {
+    annotationId?: string;
+    workItem?: boolean;
+    workItemStatus?: WorkItemRecord["status"];
+    decision?: Partial<DecisionRecord>;
+    payloadExtra?: Record<string, unknown>;
+  } = {},
+): Promise<EnqueuedCrossing> {
+  const { db, repos, projectId, chapterId } = seed;
+  const ts = nowIso();
+  const annotationId =
+    options.annotationId ?? (await enqueueAnnotationCreate(seed)).annotationId;
+  const decisionId = uuidv7();
+  const workItemId = uuidv7();
+  const operationId = uuidv7();
+  const outboxId = uuidv7();
+  const withWorkItem = options.workItem ?? true;
+
+  const annotation = await repos.annotations.getById(annotationId);
+  const decision: DecisionRecord = {
+    id: decisionId,
+    projectId,
+    sourceAnnotationId: annotationId,
+    actionType: "create_work_item",
+    rule: "suggestion_to_work_item",
+    ruleVersion: 1,
+    metrics: { approvals: 3, net_score: 2, human_approvals: 1 },
+    result: "create_work_item",
+    supportChanged: false,
+    overrideReason: null,
+    workItemId: withWorkItem ? workItemId : null,
+    createdAt: ts,
+    updatedAt: ts,
+    ...options.decision,
+  };
+  const workItem: WorkItemRecord = {
+    id: workItemId,
+    projectId,
+    type: "revise_range",
+    status: options.workItemStatus ?? "ready",
+    sourceAnnotationId: annotationId,
+    chapterId,
+    baseRevision: 2,
+    target: annotation?.target ?? null,
+    priority: "normal",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  const outbox: OutboxRecord = {
+    id: outboxId,
+    projectId,
+    gitOperationId: operationId,
+    kind: "decision.create",
+    payload: { decisionId, ...options.payloadExtra },
+    status: "pending",
+    attempts: 0,
+    createdAt: ts,
+    processedAt: null,
+  };
+  await db.batch([
+    repos.gitOperations.insertStatement(newOperation(seed, operationId, ts)),
+    repos.decisions.insertStatement(decision),
+    ...(withWorkItem ? [repos.workItems.insertStatement(workItem)] : []),
+    repos.annotations.updateStatusStatement(annotationId, "work_item_created", ts),
+    repos.outbox.insertStatement(outbox),
+  ]);
+  return { annotationId, decisionId, workItemId, operationId, outboxId };
+}
+
+/** Enqueue a `decision.update` re-render row (support_changed toggles). */
+export async function enqueueDecisionUpdate(
+  seed: SeededDatabase,
+  decisionId: string,
+  payloadExtra: Record<string, unknown> = {},
+): Promise<{ operationId: string; outboxId: string }> {
+  const { db, repos, projectId } = seed;
+  const ts = nowIso();
+  const operationId = uuidv7();
+  const outboxId = uuidv7();
+  const outbox: OutboxRecord = {
+    id: outboxId,
+    projectId,
+    gitOperationId: operationId,
+    kind: "decision.update",
+    payload: { decisionId, ...payloadExtra },
+    status: "pending",
+    attempts: 0,
+    createdAt: ts,
+    processedAt: null,
+  };
+  await db.batch([
+    repos.gitOperations.insertStatement(newOperation(seed, operationId, ts)),
+    repos.outbox.insertStatement(outbox),
+  ]);
+  return { operationId, outboxId };
+}
+
+/** Enqueue a `work_item.update` re-render row. */
+export async function enqueueWorkItemUpdate(
+  seed: SeededDatabase,
+  workItemId: string,
+  payloadExtra: Record<string, unknown> = {},
+): Promise<{ operationId: string; outboxId: string }> {
+  const { db, repos, projectId } = seed;
+  const ts = nowIso();
+  const operationId = uuidv7();
+  const outboxId = uuidv7();
+  const outbox: OutboxRecord = {
+    id: outboxId,
+    projectId,
+    gitOperationId: operationId,
+    kind: "work_item.update",
+    payload: { workItemId, ...payloadExtra },
+    status: "pending",
+    attempts: 0,
+    createdAt: ts,
+    processedAt: null,
+  };
+  await db.batch([
+    repos.gitOperations.insertStatement(newOperation(seed, operationId, ts)),
+    repos.outbox.insertStatement(outbox),
+  ]);
+  return { operationId, outboxId };
 }
 
 /** API-shaped withdraw command batch (new operation + outbox row). */

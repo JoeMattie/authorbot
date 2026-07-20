@@ -28,7 +28,7 @@ export interface RenderedFile {
 }
 
 /** Pinned YAML options — changing these changes committed bytes. */
-const YAML_OPTIONS = {
+export const YAML_OPTIONS = {
   indent: 2,
   lineWidth: 0,
   aliasDuplicateObjects: false,
@@ -137,9 +137,10 @@ export function renderReplyArtifact(input: ReplyArtifactInput): RenderedFile {
 
 /**
  * Assemble the artifact bytes: frontmatter fence, one blank line, normalized
- * body, exactly one trailing newline.
+ * body, exactly one trailing newline. Shared by every frontmatter-bearing
+ * artifact renderer in this package.
  */
-function renderArtifact(frontmatter: unknown, body: string): string {
+export function renderArtifact(frontmatter: unknown, body: string): string {
   const yamlText = stringify(frontmatter, YAML_OPTIONS); // ends with "\n"
   const normalizedBody = body.replace(/\r\n/g, "\n").trim();
   if (normalizedBody === "") {
