@@ -208,7 +208,26 @@ reviewable alongside the prose they govern — and therefore editable here. The
 environment variable remains as a bootstrap default for a book that has not
 set them.
 
-### 3.7 `agent` — invite an agent (optional)
+### 3.7 `upgrade` — moving to a newer Authorbot (ADR-0021)
+
+`create-authorbot upgrade`, also exposed as `authorbot upgrade`, implementing
+ADR-0021 §3: resolve the current pin against the target release, run that
+release's book-repo migrations, validate before and after, **open a pull
+request rather than pushing**, apply pending D1 migrations, redeploy, and
+verify health. `--dry-run` and `--check` are required; `--check` must be
+usable from a scheduled job.
+
+Also in this phase, because it is a live gap rather than a future one: the
+publish workflow gains a `wrangler d1 migrations apply` step ordered **before**
+the Worker deploy (ADR-0021 §4). Today nothing applies database migrations, so
+an author bumping their pin can deploy a Worker expecting schema their
+database does not have. The template workflow and the production book's
+workflow both get it.
+
+Release tagging (ADR-0021 §1) starts here: this repository publishes semver
+tags, and generated book repositories pin to a tag rather than a raw commit.
+
+### 3.8 `agent` — invite an agent (optional)
 
 Mints a scoped agent token, printing it exactly once with a plain warning, and
 writes a ready-to-paste prompt for the user's coding agent that includes the
@@ -315,4 +334,7 @@ the repository, this replaces the separate OAuth App. Requirements:
     commit to `book.yml`, and guarded fields require confirmation while
     never-editable fields are absent from the interface.
 11. No GitHub Pages code, workflow step, or documentation remains.
-12. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+12. `upgrade` moves a book across a release that includes a book-format
+    migration, producing a pull request that validates before and after; the
+    publish workflow applies pending D1 migrations before deploying.
+13. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
