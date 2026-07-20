@@ -72,10 +72,23 @@ Prompts: title, slug (offered, derived from title, editable), author name,
 license (with a plain-language summary of each option, not just SPDX ids),
 and whether to start from the template or an existing directory.
 
-Generates: `book.yml` with a real UUIDv7, the `story/` scaffold, a first
-chapter stub with valid frontmatter and block markers, `.github/workflows/`,
-`README.md`, `.gitignore`. Runs `authorbot validate` and does not proceed
-until it passes. Initialises git and makes the first commit.
+Generates: `book.yml` with a real UUIDv7, an empty `story/` scaffold,
+`.github/workflows/`, `README.md`, `.gitignore`. Runs `authorbot validate`
+and does not proceed until it passes. Initialises git and makes the first
+commit.
+
+**No chapters, and no sample content.** The wizard must never ask an author to
+begin by hand-writing frontmatter or block markers — that is the job of the
+"New chapter" button (§3.5). A book with zero chapters is a first-class state:
+it validates, builds, and publishes, and the site says so plainly rather than
+rendering a broken index. (Verified: a chapterless book already validates,
+builds, and renders "No chapters published yet.")
+
+`templates/book-repo` is corrected to match: it ships **blank** — empty
+`nodes: []` outline, empty `events: []` timeline, no chapters, and therefore
+no dangling references. (Today its story files reference its sample chapter,
+so deleting that chapter makes the template invalid.) The rich worked example
+stays at `examples/book-repo`, which is what tests and documentation use.
 
 Offers to create the GitHub repository via `gh repo create` (asking public or
 private, explaining the consequence for a work-in-progress novel).
@@ -106,7 +119,42 @@ costs (a Cloudflare account; free tier suffices).
 - Sets `publication.api_url` and rebuilds **only after** health checks pass —
   never leaving sign-in buttons that lead nowhere.
 
-### 3.5 `agent` — invite an agent (optional)
+### 3.5 The "New chapter" button — what setup hands you
+
+Setup finishes at a **blank slate the author can sign into and start writing
+in**. That requires one capability the collaboration phases deliberately did
+not cover: authoring from nothing. Phases 2b–4 give a reader ways to *react*
+to existing prose (annotate, vote, claim work). None of that helps an author
+facing an empty book, and routing a book's own author through
+annotation → vote → work item to write chapter one would be absurd — there is
+nobody to vote.
+
+So: a **direct authoring path for editors and maintainers**, which the design
+already anticipates as `POST /v1/projects/{p}/chapter-submissions` (§15.2,
+currently marked planned in the OpenAPI document).
+
+- **API**: create a chapter (title, optional slug/order, body) and revise an
+  existing one, requiring `submissions:write` plus the editor or maintainer
+  role. The server generates the chapter id and block markers — an author
+  writes prose, never UUIDs. It assigns `order` (last + 10), defaults
+  `status: draft`, validates the result exactly as any other write, and
+  commits through the same outbox and coordinator path with attribution.
+  Every guarantee from earlier phases still applies: base-revision checks,
+  one commit per logical mutation, no force updates.
+- **UI**: a "New chapter" button in the site's collaboration islands, visible
+  only to actors who may use it, opening a plain title-and-prose composer
+  (Markdown, no frontmatter, no marker syntax). Saving creates a draft;
+  publishing is a separate explicit action. Editing an existing chapter uses
+  the same composer.
+- Story documents (outline nodes, character files) get the same treatment
+  where cheap; if effort forces a choice, **chapters come first** — an author
+  with no outline can still write, but an author who cannot write is stuck.
+
+This is what makes the wizard's promise true. Without it, setup produces a
+book the author cannot add to except by editing files in a text editor, which
+is the exact problem this phase exists to remove.
+
+### 3.6 `agent` — invite an agent (optional)
 
 Mints a scoped agent token, printing it exactly once with a plain warning, and
 writes a ready-to-paste prompt for the user's coding agent that includes the
@@ -188,15 +236,22 @@ the repository, this replaces the separate OAuth App. Requirements:
 
 1. On a clean machine with only Node and git, `npx @authorbot/create`
    produces a validated book repository and a live reading site, with no
-   manual file editing.
-2. The collaborate stage produces a deployed API that passes its own health
+   manual file editing and **without the author writing a single line of
+   frontmatter, YAML, or Markdown**.
+2. The end state is a working blank slate: the author signs in with GitHub,
+   clicks **New chapter**, writes prose in a plain composer, saves, and the
+   chapter exists as a draft — committed, attributed, and validated — having
+   never seen a UUID or a block marker.
+3. The collaborate stage produces a deployed API that passes its own health
    checks, with the operator never having typed or seen a secret.
-3. Interrupting at any stage boundary and re-running resumes without
+4. Interrupting at any stage boundary and re-running resumes without
    duplicate resources.
-4. `--dry-run` changes nothing; `--non-interactive` completes from a config
+5. `--dry-run` changes nothing; `--non-interactive` completes from a config
    file; both are tested.
-5. Redaction property test passes: no secret reaches stdout, journal, or
+6. Redaction property test passes: no secret reaches stdout, journal, or
    error output.
-6. Existing OAuth-App deployments (the current production one) continue to
+7. Existing OAuth-App deployments (the current production one) continue to
    work unchanged.
-7. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+8. A chapterless book validates, builds, publishes, and renders a welcoming
+   empty state; `templates/book-repo` ships blank and self-consistent.
+9. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
