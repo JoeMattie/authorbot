@@ -22,20 +22,64 @@
  *   the committed state).
  */
 import type { Repositories, SqlDatabase, SqlRow, SqlStatement } from "@authorbot/database";
-import type { ActorRecord, ProjectRecord } from "@authorbot/database";
+import type {
+  ActorRecord,
+  DecisionRecord,
+  ProjectRecord,
+  WorkItemRecord,
+} from "@authorbot/database";
 import type { Clock } from "../deps.js";
 import { uuidv7 } from "../ids.js";
 import { toTimestamp } from "@authorbot/domain";
-import type { BookRepoReader } from "./reader.js";
+import type { BookRepoReader, RepoDecisionSnapshot } from "./reader.js";
 
 export interface RebuildResult {
   chapters: number;
   annotations: number;
   replies: number;
+  /** Decisions restored from `.authorbot/decisions/` (Phase 3 §4). */
+  decisions: number;
+  /** Work items restored from `.authorbot/work-items/` (Phase 3 §4). */
+  workItems: number;
   /** Operational (pending_git/orphaned) rows left in place, as observed. */
   preservedPending: number;
   /** pending_git annotations flipped to `orphaned` (chapter left the repo), as observed. */
   orphaned: number;
+}
+
+/**
+ * Recover a decision's `action_type` (the uniqueness key part, absent from the
+ * `authorbot.decision/v1` artifact) from its recoverable fields (Phase 3
+ * contract §4). The decision's *stored result* disambiguates every case
+ * without consulting the referenced work item's mutable current status:
+ *
+ * - `rule_version >= 1` ⇒ a rule crossing ⇒ `create_work_item`.
+ * - `result === "rejected"` ⇒ `reject_suggestion`.
+ * - `result === "create_work_item"` (with `rule_version 0`) ⇒ a maintainer
+ *   force-create ⇒ `create_work_item`.
+ * - `result === "overridden"` ⇒ a cancel (work-item link present) or a reopen
+ *   (no link).
+ *
+ * This distinguishes the force-create-then-cancel history (a force-create
+ * decision keeps `result: create_work_item`; the cancel decision on the SAME
+ * work item is a separate row with `result: overridden`), which an earlier
+ * status-based heuristic collapsed onto one `action_type` and so failed to
+ * rebuild.
+ */
+function deriveDecisionActionType(parsed: RepoDecisionSnapshot["parsed"]): string {
+  const { artifact, result } = parsed;
+  if (artifact.rule_version >= 1) {
+    return "create_work_item";
+  }
+  if (result === "rejected") {
+    return "reject_suggestion";
+  }
+  if (result === "create_work_item") {
+    // Maintainer force-create (rule_version 0), never a cancel/reopen.
+    return "create_work_item";
+  }
+  // result === "overridden" (rule_version 0 cancel or reopen).
+  return artifact.work_item_id === undefined ? "reopen_suggestion" : "cancel_work_item";
 }
 
 interface RebuildContext {
@@ -300,6 +344,78 @@ export async function rebuildProjection(
     replyCount += 1;
   }
 
+  // ---- Phase 3: decisions and work items (contract §4 rebuildability) ------
+  // `decisions.source_annotation_id`/`work_items.{source_annotation_id,
+  // chapter_id}` are deliberately NOT foreign keys (migration 0002), so these
+  // sticky rows restore unconditionally from their artifacts. Upsert-by-id:
+  // decisions/work items are append-only in the repo (a status change is a
+  // re-render of the SAME file), so no stale-delete pass is needed.
+  const snapshotWorkItems = snapshot.workItems ?? [];
+  const snapshotDecisions = snapshot.decisions ?? [];
+
+  // The work item's `target` is a snapshot of the source annotation selector
+  // (contract §4); the artifact carries only the quoted text, so reconstruct
+  // the full selector from the restored annotation (null for chapter scope or
+  // when the annotation is absent).
+  const annotationTargetById = new Map<string, unknown>();
+  for (const { record } of keptAnnotations) {
+    annotationTargetById.set(record.id, record.scope === "chapter" ? null : record.target);
+  }
+
+  let workItemCount = 0;
+  for (const { parsed } of snapshotWorkItems) {
+    const wi = parsed.record;
+    // Phase 3 only produces `revise_*` items, which always carry these fields;
+    // skip any future type lacking a NOT NULL column rather than abort.
+    if (
+      wi.source_annotation_id === undefined ||
+      wi.chapter_id === undefined ||
+      wi.base_revision === undefined
+    ) {
+      continue;
+    }
+    const target =
+      wi.type === "revise_chapter"
+        ? null
+        : (annotationTargetById.get(wi.source_annotation_id) ?? null);
+    const record: WorkItemRecord = {
+      id: wi.id,
+      projectId: project.id,
+      type: wi.type,
+      status: wi.status,
+      sourceAnnotationId: wi.source_annotation_id,
+      chapterId: wi.chapter_id,
+      baseRevision: wi.base_revision,
+      target,
+      priority: wi.priority,
+      createdAt: wi.created_at,
+      updatedAt: now,
+    };
+    statements.push(repos.workItems.upsertStatement(record));
+    workItemCount += 1;
+  }
+
+  let decisionCount = 0;
+  for (const { parsed } of snapshotDecisions) {
+    const record: DecisionRecord = {
+      id: parsed.artifact.id,
+      projectId: project.id,
+      sourceAnnotationId: parsed.artifact.source_annotation_id,
+      actionType: deriveDecisionActionType(parsed),
+      rule: parsed.artifact.rule,
+      ruleVersion: parsed.artifact.rule_version,
+      metrics: parsed.artifact.metrics,
+      result: parsed.result,
+      supportChanged: parsed.supportChanged,
+      overrideReason: parsed.artifact.override_reason ?? null,
+      workItemId: parsed.artifact.work_item_id ?? null,
+      createdAt: parsed.artifact.effective_at,
+      updatedAt: now,
+    };
+    statements.push(repos.decisions.upsertStatement(record));
+    decisionCount += 1;
+  }
+
   // Observed-only counts for the result/audit metadata (the batch statements
   // above are authoritative under concurrency).
   const preservedPending =
@@ -326,6 +442,8 @@ export async function rebuildProjection(
         chapters: snapshot.chapters.length,
         annotations: annotationCount,
         replies: replyCount,
+        decisions: decisionCount,
+        workItems: workItemCount,
         preservedPending,
         orphaned,
       },
@@ -339,6 +457,8 @@ export async function rebuildProjection(
     chapters: snapshot.chapters.length,
     annotations: annotationCount,
     replies: replyCount,
+    decisions: decisionCount,
+    workItems: workItemCount,
     preservedPending,
     orphaned,
   };

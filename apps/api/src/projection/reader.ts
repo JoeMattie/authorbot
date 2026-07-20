@@ -5,6 +5,10 @@
  * arrives with Phase 5. Readers return raw snapshots already validated
  * against `@authorbot/schemas`.
  */
+import type {
+  ParsedDecisionArtifact,
+  ParsedWorkItemArtifact,
+} from "@authorbot/repo-coordinator";
 import type { Annotation, ChapterFrontmatter, Reply } from "@authorbot/schemas";
 
 export interface RepoChapterSnapshot {
@@ -28,10 +32,27 @@ export interface RepoReplySnapshot {
   body: string;
 }
 
+/** A parsed `.authorbot/decisions/<id>.yml` for rebuild (Phase 3 §4). */
+export interface RepoDecisionSnapshot {
+  parsed: ParsedDecisionArtifact;
+}
+
+/** A parsed `.authorbot/work-items/<id>.md` for rebuild (Phase 3 §4). */
+export interface RepoWorkItemSnapshot {
+  parsed: ParsedWorkItemArtifact;
+}
+
 export interface BookRepoSnapshot {
   chapters: RepoChapterSnapshot[];
   annotations: RepoAnnotationSnapshot[];
   replies: RepoReplySnapshot[];
+  /**
+   * Committed Phase 3 decision artifacts (Phase 3 contract §4 rebuildability).
+   * Optional so pre-Phase-3 snapshot fixtures stay valid; absent ⇒ none.
+   */
+  decisions?: RepoDecisionSnapshot[];
+  /** Committed Phase 3 work-item artifacts (Phase 3 contract §4). */
+  workItems?: RepoWorkItemSnapshot[];
   /** Head commit the snapshot was read at, when known. */
   headCommit?: string;
 }

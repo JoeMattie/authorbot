@@ -5,7 +5,8 @@
  * better-sqlite3 + fakes).
  */
 import type { SqlDatabase, Repositories, ActorRecord, ProjectMembershipRecord } from "@authorbot/database";
-import type { Role, Scope } from "@authorbot/domain";
+import type { Role } from "@authorbot/domain";
+import type { ApiScope } from "./api-scopes.js";
 import type { IdentityProvider } from "./identity/provider.js";
 import type { IdempotencyClaim } from "./idempotency.js";
 import type { BookRepoReader } from "./projection/reader.js";
@@ -54,6 +55,17 @@ export interface AppConfig {
    * Default false: anonymous reads stay 401.
    */
   publicAnnotations?: boolean;
+  /**
+   * Rule configuration (Phase 3 contract §3): the JSON text of the
+   * `authorbot.instance/v1` `rules` mapping, from the RULES_JSON env.
+   * Validated at boot (`createApi` throws on invalid input); absent selects
+   * the design §25 default rule.
+   */
+  rulesJson?: string;
+  /** SSE new-row poll interval (ms). Default 1000; tests shrink it. */
+  ssePollMs?: number;
+  /** SSE heartbeat-comment interval (ms). Contract §5: default 15000. */
+  sseHeartbeatMs?: number;
 }
 
 export interface AppDeps {
@@ -84,7 +96,7 @@ export interface AuthContext {
   membership: ProjectMembershipRecord | null;
   role: Role | null;
   /** Effective scopes: role bundle for sessions, token ∩ bundle for tokens. */
-  scopes: Scope[];
+  scopes: ApiScope[];
   /** Present for token auth. */
   tokenId?: string;
   /** Present for session auth. */

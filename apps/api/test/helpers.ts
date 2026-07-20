@@ -209,6 +209,28 @@ export function jsonRequest(
   };
 }
 
+/**
+ * Create a suggestion annotation via the API and force it to `open` (skipping
+ * the async git mirror), returning its id — the starting point for vote and
+ * override tests.
+ */
+export async function createOpenSuggestion(
+  harness: TestHarness,
+  cookie: string,
+  overrides: Record<string, unknown> = {},
+): Promise<string> {
+  const res = await harness.app.request(
+    `/v1/projects/${harness.projectId}/chapters/${CHAPTER_ID}/annotations`,
+    jsonRequest("POST", { ...validAnnotationPayload(), ...overrides }, { Cookie: cookie }),
+  );
+  if (res.status !== 202) {
+    throw new Error(`create suggestion failed with status ${res.status}`);
+  }
+  const { annotationId } = (await res.json()) as { annotationId: string };
+  await harness.repos.annotations.updateStatus(annotationId, "open", "2026-07-19T18:30:00Z");
+  return annotationId;
+}
+
 export function validAnnotationPayload(): Record<string, unknown> {
   return {
     kind: "suggestion",

@@ -13,14 +13,11 @@ import { getCookie } from "hono/cookie";
 import type { ProjectRecord, Repositories } from "@authorbot/database";
 import {
   checkTokenActive,
-  effectiveScopes,
   isAgentTokenFormat,
-  requireScope,
-  roleScopes,
   shouldUpdateLastUsed,
   toTimestamp,
-  type Scope,
 } from "@authorbot/domain";
+import { apiEffectiveScopes, apiRoleScopes, type ApiScope } from "./api-scopes.js";
 import { sha256Hex, timingSafeEqual } from "./crypto.js";
 import type { AppEnv, AuthContext, Clock } from "./deps.js";
 import { csrfOriginAllowed } from "./origins.js";
@@ -85,7 +82,7 @@ async function authenticateBearer(
     actorRef: actorRefOf(actor),
     membership,
     role: membership?.role ?? null,
-    scopes: membership !== null ? effectiveScopes(token.scopes as Scope[], membership.role) : [],
+    scopes: membership !== null ? apiEffectiveScopes(token.scopes, membership.role) : [],
     tokenId: token.id,
   };
 }
@@ -123,7 +120,7 @@ async function authenticateSession(
     actorRef: actorRefOf(actor),
     membership,
     role: membership?.role ?? null,
-    scopes: membership !== null ? [...roleScopes(membership.role)] : [],
+    scopes: membership !== null ? [...apiRoleScopes(membership.role)] : [],
     sessionId: session.id,
   };
 }
@@ -210,7 +207,7 @@ export function authOf(c: Context<AppEnv>): AuthContext {
 export async function requireProjectScope(
   c: Context<AppEnv>,
   services: AuthServices,
-  scope: Scope | null,
+  scope: ApiScope | null,
 ): Promise<{ project: ProjectRecord } | { response: Response }> {
   const project = await services.getProject();
   const param = c.req.param("projectId");
@@ -223,11 +220,10 @@ export async function requireProjectScope(
       response: problem(c, "forbidden", { detail: "actor is not a member of this project" }),
     };
   }
-  if (scope !== null) {
-    const decision = requireScope(auth.scopes, scope);
-    if (!decision.allowed) {
-      return { response: problem(c, "forbidden", { detail: decision.message }) };
-    }
+  if (scope !== null && !auth.scopes.includes(scope)) {
+    return {
+      response: problem(c, "forbidden", { detail: `actor lacks required scope "${scope}"` }),
+    };
   }
   return { project };
 }

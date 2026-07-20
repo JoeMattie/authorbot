@@ -34,6 +34,7 @@
     "@authorbot/domain": "workspace:*",
     "@authorbot/markdown": "workspace:*",
     "@authorbot/repo-coordinator": "workspace:*",
+    "@authorbot/rule-engine": "workspace:*",
     "@authorbot/schemas": "workspace:*",
     "hono": "^4.6.0",
     "zod": "^4.0.0"

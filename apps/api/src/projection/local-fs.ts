@@ -15,6 +15,10 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseChapterMarkdown } from "@authorbot/markdown";
+import {
+  parseDecisionArtifact,
+  parseWorkItemArtifact,
+} from "@authorbot/repo-coordinator";
 import { annotationSchema, chapterFrontmatterSchema, replySchema } from "@authorbot/schemas";
 import { sha256Hex } from "../crypto.js";
 import type {
@@ -22,7 +26,9 @@ import type {
   BookRepoSnapshot,
   RepoAnnotationSnapshot,
   RepoChapterSnapshot,
+  RepoDecisionSnapshot,
   RepoReplySnapshot,
+  RepoWorkItemSnapshot,
 } from "./reader.js";
 
 /** Strip a leading YAML frontmatter block; returns the Markdown body. */
@@ -54,7 +60,47 @@ export class LocalFsBookRepoReader implements BookRepoReader {
 
   async readSnapshot(): Promise<BookRepoSnapshot> {
     const { annotations, replies } = await this.readAnnotationDirs();
-    return { chapters: await this.readChapters(), annotations, replies };
+    return {
+      chapters: await this.readChapters(),
+      annotations,
+      replies,
+      decisions: await this.readDecisions(),
+      workItems: await this.readWorkItems(),
+    };
+  }
+
+  /** `.authorbot/decisions/<id>.yml` → parsed decision artifacts (§4). */
+  private async readDecisions(): Promise<RepoDecisionSnapshot[]> {
+    const dir = join(this.repoPath, ".authorbot", "decisions");
+    const decisions: RepoDecisionSnapshot[] = [];
+    for (const name of (await listDir(dir)).filter((n) => n.endsWith(".yml")).sort()) {
+      const source = await readFile(join(dir, name), "utf8");
+      try {
+        decisions.push({ parsed: parseDecisionArtifact(source) });
+      } catch (error) {
+        throw new Error(
+          `.authorbot/decisions/${name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return decisions;
+  }
+
+  /** `.authorbot/work-items/<id>.md` → parsed work-item artifacts (§4). */
+  private async readWorkItems(): Promise<RepoWorkItemSnapshot[]> {
+    const dir = join(this.repoPath, ".authorbot", "work-items");
+    const workItems: RepoWorkItemSnapshot[] = [];
+    for (const name of (await listDir(dir)).filter((n) => n.endsWith(".md")).sort()) {
+      const source = await readFile(join(dir, name), "utf8");
+      try {
+        workItems.push({ parsed: parseWorkItemArtifact(source) });
+      } catch (error) {
+        throw new Error(
+          `.authorbot/work-items/${name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return workItems;
   }
 
   private async readChapters(): Promise<RepoChapterSnapshot[]> {

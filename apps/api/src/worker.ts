@@ -44,6 +44,12 @@ export interface WorkerBindings {
    * API-side mirror of the book's `publication.show_public_annotations`.
    */
   PUBLIC_ANNOTATIONS?: string;
+  /**
+   * Rule configuration (Phase 3 contract §3): JSON text of the
+   * `authorbot.instance/v1` `rules` mapping. Validated at boot; absent
+   * selects the design §25 default rule.
+   */
+  RULES_JSON?: string;
 }
 
 function required(bindings: WorkerBindings, name: keyof WorkerBindings): string {
@@ -80,6 +86,9 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
     allowedOrigins: parseAllowedOrigins(bindings.ALLOWED_ORIGINS),
     publicAnnotations: bindings.PUBLIC_ANNOTATIONS === "true",
   };
+  if (bindings.RULES_JSON !== undefined && bindings.RULES_JSON.length > 0) {
+    config.rulesJson = bindings.RULES_JSON;
+  }
   if (bindings.DEFAULT_BRANCH !== undefined && bindings.DEFAULT_BRANCH.length > 0) {
     config.defaultBranch = bindings.DEFAULT_BRANCH;
   }

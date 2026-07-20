@@ -36,7 +36,13 @@ describe("authentication and authorization", () => {
       authKind: string;
     };
     expect(body.actor.externalIdentity).toBe("github:alice");
-    expect(body.scopes).toEqual(["chapters:read", "annotations:read", "annotations:write"]);
+    // Phase 3: the contributor bundle gains votes:write (contract §2).
+    expect(body.scopes).toEqual([
+      "chapters:read",
+      "annotations:read",
+      "annotations:write",
+      "votes:write",
+    ]);
     expect(body.authKind).toBe("session");
   });
 

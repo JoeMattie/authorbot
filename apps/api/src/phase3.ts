@@ -1,0 +1,1171 @@
+/**
+ * Phase 3 routes: votes, the serialized vote command with rule evaluation and
+ * idempotent work generation, maintainer overrides, work-queue reads, and the
+ * event feed (Phase 3 contract §2–§5).
+ *
+ * Concurrency model: every vote/override command runs inside a per-project
+ * serial queue (contract §3 "the same serialized command"), and the decision
+ * batch carries the `(source_annotation_id, action_type, rule_version)`
+ * unique key (contract §4) — so even racing writers outside the queue
+ * collapse to exactly one decision: a loser's batch aborts atomically on the
+ * key, is rebuilt against the now-existing decision, and proceeds
+ * idempotently.
+ */
+import type { Context, Hono, MiddlewareHandler } from "hono";
+import {
+  isConstraintError,
+  type AnnotationRecord,
+  type DecisionRecord,
+  type ProjectRecord,
+  type Repositories,
+  type SqlStatement,
+  type VoteTally,
+  type WorkItemRecord,
+} from "@authorbot/database";
+import {
+  DECISION_SUPPORT_CHANGED_EVENT,
+  FORCE_CREATE_RULE_VERSION,
+  authorizeCancelWorkItem,
+  authorizeForceCreateWorkItem,
+  authorizeRejectSuggestion,
+  authorizeReopenSuggestion,
+  authorizeVote,
+  cancelWorkItemCommandSchema,
+  castVoteCommandSchema,
+  clearVoteCommandSchema,
+  forceCreateWorkItemCommandSchema,
+  rejectSuggestionCommandSchema,
+  reopenSuggestionCommandSchema,
+  resolveSupportChange,
+  type AnnotationStatus,
+  type VoteValue,
+} from "@authorbot/domain";
+import { evaluate, workTypeForScope } from "@authorbot/rule-engine";
+import { z } from "zod";
+import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
+import type { AppDeps, AppEnv, Clock } from "./deps.js";
+import { uuidv7 } from "./ids.js";
+import { annotationJson } from "./json.js";
+import { problem } from "./problems.js";
+import type { RuleEntry } from "./rules.js";
+import {
+  DEFAULT_SSE_HEARTBEAT_MS,
+  DEFAULT_SSE_POLL_MS,
+  eventJson,
+  sseResponse,
+} from "./sse.js";
+import { adjustTally, tallyJson, tallyToMetrics, type VoterActorType } from "./tally.js";
+
+/**
+ * Outbox kinds Phase 3 emits, matching the @authorbot/repo-coordinator
+ * processor's vocabulary: a single `decision.create` row renders the decision
+ * YAML and (when the decision references a work item) the work-item Markdown
+ * in one commit; `decision.update` re-renders the decision alone for the
+ * `support_changed` mark/clear path.
+ */
+export const PHASE3_OUTBOX_KINDS = ["decision.create", "decision.update"] as const;
+
+/** Rule/override name recorded on override decisions. */
+export const OVERRIDE_RULE_NAME = "maintainer_override";
+
+/** The wiring `createApi` hands this module (closures over its own state). */
+export interface Phase3Context {
+  app: Hono<AppEnv>;
+  deps: AppDeps;
+  repos: Repositories;
+  clock: Clock;
+  services: AuthServices;
+  rules: RuleEntry[];
+  auth: MiddlewareHandler<AppEnv>;
+  maybeAuth: MiddlewareHandler<AppEnv>;
+  idem: MiddlewareHandler<AppEnv>;
+  requireReadOrPublic(
+    c: Context<AppEnv>,
+  ): Promise<{ project: ProjectRecord } | { response: Response }>;
+  claimStatements(c: Context<AppEnv>, status: number, body: unknown): SqlStatement[];
+  commandStatements(input: {
+    project: ProjectRecord;
+    correlationId: string;
+    actorId: string;
+    action: string;
+    targetType: string;
+    targetId: string;
+    outboxKind: string;
+    outboxPayload: unknown;
+    metadata?: unknown;
+  }): { operationId: string; statements: SqlStatement[] };
+  readJson(c: Context<AppEnv>): Promise<unknown | Response>;
+  parseLimit(c: Context<AppEnv>): number | Response;
+  notifyMutation(projectId: string): Promise<void>;
+  now(): string;
+}
+
+/**
+ * Decision summary for the "Queued as work item" badge and the member
+ * decision views. `overrideReason` is maintainer-authored free text and is
+ * member-only (contract §2 threat model: member data on public books); it is
+ * omitted when `includeOverrideReason` is false — the anonymous public-read
+ * path passes false so a signed-out reader never sees the maintainer's private
+ * rationale, only the public result/support fields.
+ */
+export function decisionSummaryJson(
+  d: DecisionRecord,
+  includeOverrideReason = true,
+): Record<string, unknown> {
+  return {
+    id: d.id,
+    sourceAnnotationId: d.sourceAnnotationId,
+    actionType: d.actionType,
+    rule: d.rule,
+    ruleVersion: d.ruleVersion,
+    metrics: d.metrics,
+    result: d.result,
+    supportChanged: d.supportChanged,
+    ...(includeOverrideReason ? { overrideReason: d.overrideReason } : {}),
+    workItemId: d.workItemId,
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+  };
+}
+
+export function workItemJson(w: WorkItemRecord): Record<string, unknown> {
+  return {
+    id: w.id,
+    projectId: w.projectId,
+    type: w.type,
+    status: w.status,
+    sourceAnnotationId: w.sourceAnnotationId,
+    chapterId: w.chapterId,
+    baseRevision: w.baseRevision,
+    target: w.target,
+    priority: w.priority,
+    createdAt: w.createdAt,
+    updatedAt: w.updatedAt,
+  };
+}
+
+/**
+ * Annotation JSON + collaboration data (Phase 3 contract §2/§6): aggregate
+ * tally for everyone the annotation is readable by; `myVote` only for
+ * authenticated members (per-voter identity is member-only); the
+ * `create_work_item` decision summary for the "Queued as work item" badge.
+ */
+export async function annotationCollabJson(
+  repos: Repositories,
+  annotation: AnnotationRecord,
+  viewerActorId: string | null,
+): Promise<Record<string, unknown>> {
+  const tally = await repos.votes.tally(annotation.id);
+  const decisions = await repos.decisions.listByAnnotation(annotation.id);
+  const decision = decisions.find((d) => d.actionType === "create_work_item") ?? null;
+  // Anonymous (public-book) readers never see the maintainer's override reason.
+  const isMember = viewerActorId !== null;
+  const base: Record<string, unknown> = {
+    ...annotationJson(annotation),
+    votes: tallyJson(tally),
+    decision: decision === null ? null : decisionSummaryJson(decision, isMember),
+  };
+  if (isMember) {
+    const mine = await repos.votes.getCurrent(annotation.id, viewerActorId);
+    base["myVote"] = mine?.value ?? null;
+  }
+  return base;
+}
+
+/** Statuses a suggestion may be voted on (sticky semantics keep votes legal after crossing). */
+const VOTABLE_STATUSES = new Set(["open", "work_item_created"]);
+
+export function registerPhase3Routes(ctx: Phase3Context): void {
+  const { app, deps, repos, clock, services, auth, maybeAuth, idem, now } = ctx;
+
+  // Per-project serial command queue (contract §3). Single-process guarantee;
+  // the DB unique key backstops anything outside it.
+  const chains = new Map<string, Promise<unknown>>();
+  const serialize = <T>(projectId: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = chains.get(projectId) ?? Promise.resolve();
+    const next = previous.then(fn, fn);
+    chains.set(
+      projectId,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
+  };
+
+  const appendEventStatement = (
+    projectId: string,
+    type: string,
+    payload: unknown,
+  ): SqlStatement =>
+    repos.events.appendStatement({ projectId, type, payload, createdAt: now() });
+
+  const auditStatement = (input: {
+    projectId: string;
+    actorId: string | null;
+    action: string;
+    targetType: string;
+    targetId: string;
+    correlationId: string;
+    metadata?: unknown;
+  }): SqlStatement =>
+    repos.auditEvents.insertStatement({
+      id: uuidv7(clock.now()),
+      projectId: input.projectId,
+      actorId: input.actorId,
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      correlationId: input.correlationId,
+      metadata: input.metadata ?? null,
+      createdAt: now(),
+    });
+
+  /** Load an annotation scoped to the project, or a 404 response. */
+  const findAnnotation = async (
+    c: Context<AppEnv>,
+    project: ProjectRecord,
+  ): Promise<AnnotationRecord | Response> => {
+    const annotation = await repos.annotations.getById(c.req.param("annotationId") ?? "");
+    if (annotation === null || annotation.projectId !== project.id) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    return annotation;
+  };
+
+  /**
+   * Statements + ids for creating the decision/work-item pair: the contract
+   * §4 one-DB-batch (decision row, work-item row, annotation transition,
+   * audit events, one `decision.create` outbox row rendering BOTH Git
+   * artifacts in a single commit, feed events).
+   *
+   * `actingActorId`/`createdByActorId` are omitted for rule crossings (the
+   * repo-coordinator credits `system:rule-engine`) and set to the maintainer
+   * for force-creates.
+   */
+  const buildCreationStatements = async (input: {
+    c: Context<AppEnv>;
+    project: ProjectRecord;
+    annotation: AnnotationRecord;
+    actorId: string;
+    ruleName: string;
+    ruleVersion: number;
+    actionType: string;
+    metrics: Record<string, number>;
+    overrideReason: string | null;
+    actingActorId?: string;
+    createdByActorId?: string;
+  }): Promise<{ decisionId: string; workItemId: string; operationIds: string[]; statements: SqlStatement[] }> => {
+    const { c, project, annotation } = input;
+    const correlationId = c.get("correlationId");
+    const timestamp = now();
+    const decisionId = uuidv7(clock.now());
+    const workItemId = uuidv7(clock.now());
+
+    // Base = CURRENT chapter revision (contract §4), falling back to the
+    // annotation's revision if the chapter projection row is missing.
+    const chapter = await repos.chapters.getById(annotation.chapterId);
+    const baseRevision = chapter?.revision ?? annotation.chapterRevision;
+
+    // One outbox row → one commit rendering the decision YAML AND the linked
+    // work-item Markdown (repo-coordinator decision.create semantics).
+    const decisionCommand = ctx.commandStatements({
+      project,
+      correlationId,
+      actorId: input.actorId,
+      action: "decision.create",
+      targetType: "decision",
+      targetId: decisionId,
+      outboxKind: "decision.create",
+      outboxPayload: {
+        decisionId,
+        ...(input.actingActorId !== undefined ? { actorId: input.actingActorId } : {}),
+        ...(input.createdByActorId !== undefined
+          ? { createdByActorId: input.createdByActorId }
+          : {}),
+      },
+      metadata: { rule: input.ruleName, ruleVersion: input.ruleVersion, result: "create_work_item", workItemId },
+    });
+
+    const workItemType = workTypeForScope(annotation.scope);
+    const statements: SqlStatement[] = [
+      repos.decisions.insertStatement({
+        id: decisionId,
+        projectId: project.id,
+        sourceAnnotationId: annotation.id,
+        actionType: input.actionType,
+        rule: input.ruleName,
+        ruleVersion: input.ruleVersion,
+        metrics: input.metrics,
+        result: "create_work_item",
+        supportChanged: false,
+        overrideReason: input.overrideReason,
+        workItemId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+      repos.workItems.insertStatement({
+        id: workItemId,
+        projectId: project.id,
+        type: workItemType,
+        status: "ready",
+        sourceAnnotationId: annotation.id,
+        chapterId: annotation.chapterId,
+        baseRevision,
+        // Target snapshot of the annotation selector incl. quote (contract §4).
+        target: annotation.target,
+        priority: "normal",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+      // Annotation transition open -> work_item_created (contract §4), as an
+      // optimistic compare-and-swap: if a concurrent writer already moved the
+      // annotation off `open` (e.g. a maintainer reject), this aborts the batch
+      // so the loser never clobbers that transition (Findings 1/2).
+      repos.annotations.casStatusStatement(annotation.id, "open", "work_item_created", timestamp),
+      ...decisionCommand.statements,
+      appendEventStatement(project.id, "decision_created", {
+        decisionId,
+        annotationId: annotation.id,
+        result: "create_work_item",
+        rule: input.ruleName,
+        ruleVersion: input.ruleVersion,
+        workItemId,
+      }),
+      appendEventStatement(project.id, "work_item_created", {
+        workItemId,
+        annotationId: annotation.id,
+        chapterId: annotation.chapterId,
+        type: workItemType,
+        baseRevision,
+      }),
+    ];
+    return {
+      decisionId,
+      workItemId,
+      operationIds: [decisionCommand.operationId],
+      statements,
+    };
+  };
+
+  // ---- votes (contract §2, §3, §4) ------------------------------------------
+
+  const voteHandler = (mode: "cast" | "clear") => async (c: Context<AppEnv>) => {
+    const guard = await requireProjectScope(c, services, "votes:write");
+    if ("response" in guard) {
+      return guard.response;
+    }
+
+    let value: VoteValue | null = null;
+    if (mode === "cast") {
+      const body = await ctx.readJson(c);
+      if (body instanceof Response) {
+        return body;
+      }
+      const parsed = castVoteCommandSchema.safeParse(
+        typeof body === "object" && body !== null
+          ? { ...body, annotationId: c.req.param("annotationId") }
+          : body,
+      );
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+      value = parsed.data.value;
+    } else {
+      const parsed = clearVoteCommandSchema.safeParse({
+        annotationId: c.req.param("annotationId"),
+      });
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+    }
+
+    return serialize(guard.project.id, async () => {
+      const a = authOf(c);
+      const actorType = a.actor.type as VoterActorType;
+
+      /**
+       * One full attempt at the command as a single atomic batch. Fresh reads
+       * of the annotation and the actor's current vote are taken HERE (not once
+       * per request) so a retry after a governance-race constraint abort runs
+       * against current truth, not the status read at command start (contract
+       * §4). A crossing decision only forms when no `create_work_item` decision
+       * yet exists for the annotation (across any rule_version) and the
+       * annotation is still `open`; the decision uniqueness index and the
+       * status compare-and-swap in `buildCreationStatements` are the
+       * cross-isolate backstops.
+       */
+      const attempt = async (): Promise<Response> => {
+        const annotation = await findAnnotation(c, guard.project);
+        if (annotation instanceof Response) {
+          return annotation;
+        }
+        // Suggestion-only (contract §2: comments -> 422).
+        const voteDecision = authorizeVote({ annotationKind: annotation.kind });
+        if (!voteDecision.allowed) {
+          return problem(c, "domain-rule-failed", { detail: voteDecision.message });
+        }
+        if (!VOTABLE_STATUSES.has(annotation.status)) {
+          return problem(c, "state-conflict", {
+            detail: `cannot vote on an annotation with status "${annotation.status}"`,
+          });
+        }
+
+        const previous = await repos.votes.getCurrent(annotation.id, a.actor.id);
+        const previousValue = previous?.value ?? null;
+
+        const respond = async (
+          tally: VoteTally,
+          ruleSatisfied: boolean,
+          decision: DecisionRecord | null,
+          extraStatements: SqlStatement[],
+        ): Promise<Response> => {
+          const responseBody = {
+            annotationId: annotation.id,
+            value: mode === "cast" ? value : null,
+            votes: tallyJson(tally),
+            ruleSatisfied,
+            decision: decision === null ? null : decisionSummaryJson(decision),
+            correlationId: c.get("correlationId"),
+          };
+          const statements = [...extraStatements, ...ctx.claimStatements(c, 200, responseBody)];
+          if (statements.length > 0) {
+            await deps.db.batch(statements);
+          }
+          return c.json(responseBody, 200);
+        };
+
+        const currentDecision = (): Promise<DecisionRecord | null> =>
+          repos.decisions.getWorkItemCreation(annotation.id);
+
+        // No-op: same value re-vote, or clearing an absent vote. Nothing is
+        // recorded (no vote_event, no aggregate event) — the aggregate did not
+        // change — but the idempotency claim still commits.
+        if (previousValue === (mode === "cast" ? value : null)) {
+          return respond(
+            await repos.votes.tally(annotation.id),
+            false,
+            await currentDecision(),
+            [],
+          );
+        }
+
+        const timestamp = now();
+        const base = await repos.votes.tally(annotation.id);
+        const nextValue = mode === "cast" ? value : null;
+        const tally = adjustTally(base, actorType, previousValue, nextValue);
+        const metrics = tallyToMetrics(tally);
+        const correlationId = c.get("correlationId");
+
+        const statements: SqlStatement[] = [];
+        if (mode === "cast" && value !== null) {
+          statements.push(
+            repos.votes.upsertStatement({
+              id: uuidv7(clock.now()),
+              projectId: guard.project.id,
+              annotationId: annotation.id,
+              actorId: a.actor.id,
+              value,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            }),
+          );
+        } else {
+          statements.push(repos.votes.deleteStatement(annotation.id, a.actor.id));
+        }
+        statements.push(
+          repos.voteEvents.insertStatement({
+            id: uuidv7(clock.now()),
+            projectId: guard.project.id,
+            annotationId: annotation.id,
+            actorId: a.actor.id,
+            value: nextValue,
+            previousValue,
+            createdAt: timestamp,
+          }),
+          auditStatement({
+            projectId: guard.project.id,
+            actorId: a.actor.id,
+            action: mode === "cast" ? "vote.cast" : "vote.clear",
+            targetType: "annotation",
+            targetId: annotation.id,
+            correlationId,
+            metadata: { value: nextValue, previousValue },
+          }),
+          appendEventStatement(guard.project.id, "vote_aggregate", {
+            annotationId: annotation.id,
+            chapterId: annotation.chapterId,
+            votes: tallyJson(tally),
+          }),
+        );
+
+        let ruleSatisfied = false;
+        let decision: DecisionRecord | null = null;
+        let createdWorkItem = false;
+        let stickyMirror = false;
+
+        for (const entry of ctx.rules) {
+          const evaluation = evaluate(entry.rule, metrics);
+          if (evaluation.satisfied) {
+            ruleSatisfied = true;
+          }
+          const existing = await repos.decisions.getByKey(
+            annotation.id,
+            entry.rule.action.type,
+            entry.rule.version,
+          );
+          if (existing === null) {
+            // First threshold crossing (only from `open`; a force-created
+            // work item already moved the annotation on). Guard on ANY existing
+            // create_work_item decision (any rule_version), so a rule crossing
+            // never races a force-create into a second work item (Finding 1) —
+            // the uniqueness index backstops the cross-isolate window.
+            if (
+              evaluation.satisfied &&
+              annotation.status === "open" &&
+              decision === null &&
+              (await currentDecision()) === null
+            ) {
+              const creation = await buildCreationStatements({
+                c,
+                project: guard.project,
+                annotation,
+                actorId: a.actor.id,
+                ruleName: entry.name,
+                ruleVersion: entry.rule.version,
+                actionType: entry.rule.action.type,
+                metrics,
+                overrideReason: null,
+              });
+              statements.push(...creation.statements);
+              createdWorkItem = true;
+              decision = {
+                id: creation.decisionId,
+                projectId: guard.project.id,
+                sourceAnnotationId: annotation.id,
+                actionType: entry.rule.action.type,
+                rule: entry.name,
+                ruleVersion: entry.rule.version,
+                metrics,
+                result: "create_work_item",
+                supportChanged: false,
+                overrideReason: null,
+                workItemId: creation.workItemId,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              };
+            }
+          } else {
+            // Sticky decision (contract §4): never deleted; only the
+            // support_changed mark flips, with an event on each flip.
+            // Force-created decisions (rule_version 0) are keyed separately
+            // and are not support-tracked (no rule defined them).
+            const outcome = resolveSupportChange({
+              supportChanged: existing.supportChanged,
+              ruleSatisfied: evaluation.satisfied,
+            });
+            if (outcome.emitEvent) {
+              // Re-render the decision artifact (support_changed line) via a
+              // `decision.update` outbox row (repo-coordinator).
+              const updateCommand = ctx.commandStatements({
+                project: guard.project,
+                correlationId,
+                actorId: a.actor.id,
+                action: "decision.support_changed",
+                targetType: "decision",
+                targetId: existing.id,
+                outboxKind: "decision.update",
+                outboxPayload: { decisionId: existing.id },
+                metadata: { supportChanged: outcome.supportChanged },
+              });
+              statements.push(
+                repos.decisions.setSupportChangedStatement(
+                  existing.id,
+                  outcome.supportChanged,
+                  timestamp,
+                ),
+                ...updateCommand.statements,
+                appendEventStatement(guard.project.id, DECISION_SUPPORT_CHANGED_EVENT, {
+                  decisionId: existing.id,
+                  annotationId: annotation.id,
+                  supportChanged: outcome.supportChanged,
+                  transition: outcome.transition,
+                }),
+              );
+              stickyMirror = true;
+            }
+            decision = { ...existing, supportChanged: outcome.supportChanged };
+          }
+        }
+
+        // Force-created decision visible in the response even when no rule
+        // decision exists.
+        if (decision === null) {
+          decision = await currentDecision();
+        }
+
+        const response = await respond(tally, ruleSatisfied, decision, statements);
+        if (createdWorkItem || stickyMirror) {
+          await ctx.notifyMutation(guard.project.id);
+        }
+        return response;
+      };
+
+      // Contract §4: a concurrent governance write (a rival crossing/force-
+      // create on the decision uniqueness index, or a status transition losing
+      // the annotation compare-and-swap) rolls the whole batch back atomically.
+      // Re-run against fresh state: the next pass finds the existing decision
+      // and proceeds as already-decided, or sees the new status and responds
+      // with the correct state-conflict — losers treat the violation as
+      // already-done, not error. Bounded so a genuine persistent constraint
+      // error still surfaces.
+      const MAX_ATTEMPTS = 5;
+      for (let i = 1; ; i += 1) {
+        try {
+          return await attempt();
+        } catch (error) {
+          if (isConstraintError(error) && i < MAX_ATTEMPTS) {
+            continue;
+          }
+          throw error;
+        }
+      }
+    });
+  };
+
+  app.put("/v1/projects/:projectId/annotations/:annotationId/vote", auth, idem, voteHandler("cast"));
+  app.delete(
+    "/v1/projects/:projectId/annotations/:annotationId/vote",
+    auth,
+    idem,
+    voteHandler("clear"),
+  );
+
+  // ---- maintainer overrides (contract §4) -----------------------------------
+
+  const overrideDenied = (
+    c: Context<AppEnv>,
+    decision: { allowed: false; reason: string; message: string },
+  ): Response => {
+    if (decision.reason === "not-maintainer") {
+      return problem(c, "forbidden", { detail: decision.message });
+    }
+    if (decision.reason === "not-a-suggestion") {
+      return problem(c, "domain-rule-failed", { detail: decision.message });
+    }
+    return problem(c, "state-conflict", { detail: decision.message });
+  };
+
+  /**
+   * Record (or refresh, on repeated reject/reopen cycles) an override
+   * decision row keyed `(annotation, actionType, rule_version 0)`.
+   */
+  const overrideDecisionStatement = async (input: {
+    project: ProjectRecord;
+    sourceAnnotationId: string;
+    actionType: string;
+    result: DecisionRecord["result"];
+    metrics: Record<string, number>;
+    reason: string;
+    workItemId: string | null;
+  }): Promise<{ decisionId: string; statement: SqlStatement }> => {
+    const timestamp = now();
+    const existing = await repos.decisions.getByKey(
+      input.sourceAnnotationId,
+      input.actionType,
+      FORCE_CREATE_RULE_VERSION,
+    );
+    const record: DecisionRecord = {
+      id: existing?.id ?? uuidv7(clock.now()),
+      projectId: input.project.id,
+      sourceAnnotationId: input.sourceAnnotationId,
+      actionType: input.actionType,
+      rule: OVERRIDE_RULE_NAME,
+      ruleVersion: FORCE_CREATE_RULE_VERSION,
+      metrics: input.metrics,
+      result: input.result,
+      supportChanged: existing?.supportChanged ?? false,
+      overrideReason: input.reason,
+      workItemId: input.workItemId,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    };
+    return { decisionId: record.id, statement: repos.decisions.upsertStatement(record) };
+  };
+
+  const suggestionOverride = (
+    action: "reject" | "reopen",
+  ): ((c: Context<AppEnv>) => Promise<Response>) => {
+    const schema = action === "reject" ? rejectSuggestionCommandSchema : reopenSuggestionCommandSchema;
+    const authorize = action === "reject" ? authorizeRejectSuggestion : authorizeReopenSuggestion;
+    const nextStatus = action === "reject" ? "rejected" : "open";
+    const fromStatus = action === "reject" ? "open" : "rejected";
+    return async (c: Context<AppEnv>) => {
+      const guard = await requireProjectScope(c, services, null);
+      if ("response" in guard) {
+        return guard.response;
+      }
+      const body = await ctx.readJson(c);
+      if (body instanceof Response) {
+        return body;
+      }
+      const parsed = schema.safeParse(
+        typeof body === "object" && body !== null
+          ? { ...body, annotationId: c.req.param("annotationId") }
+          : body,
+      );
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+      const reason = parsed.data.reason;
+
+      return serialize(guard.project.id, async () => {
+        const a = authOf(c);
+        // One attempt; re-reads the annotation so a retry after a status
+        // compare-and-swap abort re-authorizes against current truth (a reject
+        // that lost the `open` state to a concurrent crossing then denies with
+        // an illegal-transition state conflict instead of clobbering it).
+        const attempt = async (): Promise<Response> => {
+          const annotation = await findAnnotation(c, guard.project);
+          if (annotation instanceof Response) {
+            return annotation;
+          }
+          if (annotation.status === "pending_git") {
+            return problem(c, "state-conflict", {
+              detail: "annotation is still being committed; retry once its operation completes",
+            });
+          }
+          const decision = authorize({
+            actorRole: a.role ?? "reader",
+            annotationKind: annotation.kind,
+            annotationStatus: annotation.status as AnnotationStatus,
+          });
+          if (!decision.allowed) {
+            return overrideDenied(c, decision);
+          }
+
+          const correlationId = c.get("correlationId");
+          const timestamp = now();
+          const metrics = tallyToMetrics(await repos.votes.tally(annotation.id));
+          const override = await overrideDecisionStatement({
+            project: guard.project,
+            sourceAnnotationId: annotation.id,
+            actionType: action === "reject" ? "reject_suggestion" : "reopen_suggestion",
+            result: action === "reject" ? "rejected" : "overridden",
+            metrics,
+            reason,
+            workItemId: null,
+          });
+          // The override decision is the durable Git record (contract §4:
+          // "recorded as decisions with override_reason"). Its `decision.create`
+          // row renders the decision YAML (no work item → decision only). The
+          // annotation status change is DB-side; the decision artifact carries
+          // the rejection/reopen for rebuild.
+          const decisionCommand = ctx.commandStatements({
+            project: guard.project,
+            correlationId,
+            actorId: a.actor.id,
+            action: `annotation.${action}`,
+            targetType: "decision",
+            targetId: override.decisionId,
+            outboxKind: "decision.create",
+            outboxPayload: { decisionId: override.decisionId, actorId: a.actor.id },
+            metadata: { override: action, reason },
+          });
+
+          const responseBody = {
+            annotationId: annotation.id,
+            status: nextStatus,
+            decisionId: override.decisionId,
+            operationIds: [decisionCommand.operationId],
+            correlationId,
+          };
+          await deps.db.batch([
+            override.statement,
+            // Optimistic transition: aborts the batch if a concurrent writer
+            // already moved the annotation off `fromStatus` (Finding 2).
+            repos.annotations.casStatusStatement(annotation.id, fromStatus, nextStatus, timestamp),
+            ...decisionCommand.statements,
+            appendEventStatement(guard.project.id, "decision_created", {
+              decisionId: override.decisionId,
+              annotationId: annotation.id,
+              result: action === "reject" ? "rejected" : "overridden",
+              override: action,
+            }),
+            ...ctx.claimStatements(c, 200, responseBody),
+          ]);
+          await ctx.notifyMutation(guard.project.id);
+          return c.json(responseBody, 200);
+        };
+
+        const MAX_ATTEMPTS = 5;
+        for (let i = 1; ; i += 1) {
+          try {
+            return await attempt();
+          } catch (error) {
+            if (isConstraintError(error) && i < MAX_ATTEMPTS) {
+              continue;
+            }
+            throw error;
+          }
+        }
+      });
+    };
+  };
+
+  app.post(
+    "/v1/projects/:projectId/annotations/:annotationId/reject",
+    auth,
+    idem,
+    suggestionOverride("reject"),
+  );
+  app.post(
+    "/v1/projects/:projectId/annotations/:annotationId/reopen",
+    auth,
+    idem,
+    suggestionOverride("reopen"),
+  );
+
+  app.post(
+    "/v1/projects/:projectId/annotations/:annotationId/force-create-work-item",
+    auth,
+    idem,
+    async (c) => {
+      const guard = await requireProjectScope(c, services, null);
+      if ("response" in guard) {
+        return guard.response;
+      }
+      const body = await ctx.readJson(c);
+      if (body instanceof Response) {
+        return body;
+      }
+      const parsed = forceCreateWorkItemCommandSchema.safeParse(
+        typeof body === "object" && body !== null
+          ? { ...body, annotationId: c.req.param("annotationId") }
+          : body,
+      );
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+      const reason = parsed.data.reason;
+
+      return serialize(guard.project.id, async () => {
+        const annotation = await findAnnotation(c, guard.project);
+        if (annotation instanceof Response) {
+          return annotation;
+        }
+        if (annotation.status === "pending_git") {
+          return problem(c, "state-conflict", {
+            detail: "annotation is still being committed; retry once its operation completes",
+          });
+        }
+        const a = authOf(c);
+        const decision = authorizeForceCreateWorkItem({
+          actorRole: a.role ?? "reader",
+          annotationKind: annotation.kind,
+          annotationStatus: annotation.status as AnnotationStatus,
+        });
+        if (!decision.allowed) {
+          return overrideDenied(c, decision);
+        }
+        // Force-create shares ONE work-item-creation uniqueness domain with
+        // rule crossings (contract §4). Reject fast if ANY create_work_item
+        // decision already exists for this annotation (rule crossing OR a prior
+        // force-create), not only the rule_version-0 one; the partial unique
+        // index backstops the cross-isolate race window (Finding 1).
+        const existingCreate = await repos.decisions.getWorkItemCreation(annotation.id);
+        if (existingCreate !== null) {
+          return problem(c, "state-conflict", {
+            detail: "a work item already exists for this suggestion",
+          });
+        }
+
+        const metrics = tallyToMetrics(await repos.votes.tally(annotation.id));
+        const creation = await buildCreationStatements({
+          c,
+          project: guard.project,
+          annotation,
+          actorId: a.actor.id,
+          ruleName: OVERRIDE_RULE_NAME,
+          ruleVersion: FORCE_CREATE_RULE_VERSION,
+          actionType: "create_work_item",
+          metrics,
+          overrideReason: reason,
+          // Force-create is a maintainer act: credit them in the commit and
+          // as the work item's created_by (repo-coordinator).
+          actingActorId: a.actor.id,
+          createdByActorId: a.actor.id,
+        });
+        const correlationId = c.get("correlationId");
+        const responseBody = {
+          annotationId: annotation.id,
+          status: "work_item_created",
+          decisionId: creation.decisionId,
+          workItemId: creation.workItemId,
+          operationIds: creation.operationIds,
+          correlationId,
+        };
+        try {
+          await deps.db.batch([
+            ...creation.statements,
+            auditStatement({
+              projectId: guard.project.id,
+              actorId: a.actor.id,
+              action: "work_item.force_create",
+              targetType: "annotation",
+              targetId: annotation.id,
+              correlationId,
+              metadata: { reason, decisionId: creation.decisionId, workItemId: creation.workItemId },
+            }),
+            ...ctx.claimStatements(c, 201, responseBody),
+          ]);
+        } catch (error) {
+          // A concurrent governance write won the race: either a rival
+          // create_work_item decision took the uniqueness index, or the
+          // annotation left `open` and the status compare-and-swap aborted.
+          if (isConstraintError(error)) {
+            const raced = await repos.decisions.getWorkItemCreation(annotation.id);
+            if (raced !== null) {
+              return problem(c, "state-conflict", {
+                detail: "a work item already exists for this suggestion",
+              });
+            }
+            const fresh = await repos.annotations.getById(annotation.id);
+            if (fresh !== null && fresh.status !== "open") {
+              return problem(c, "state-conflict", {
+                detail: `the suggestion is no longer open (status "${fresh.status}")`,
+              });
+            }
+          }
+          throw error;
+        }
+        await ctx.notifyMutation(guard.project.id);
+        return c.json(responseBody, 201);
+      });
+    },
+  );
+
+  app.post("/v1/projects/:projectId/work-items/:workItemId/cancel", auth, idem, async (c) => {
+    const guard = await requireProjectScope(c, services, null);
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const body = await ctx.readJson(c);
+    if (body instanceof Response) {
+      return body;
+    }
+    const parsed = cancelWorkItemCommandSchema.safeParse(
+      typeof body === "object" && body !== null
+        ? { ...body, workItemId: c.req.param("workItemId") }
+        : body,
+    );
+    if (!parsed.success) {
+      return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+    }
+    const reason = parsed.data.reason;
+
+    return serialize(guard.project.id, async () => {
+      const workItem = await repos.workItems.getById(parsed.data.workItemId);
+      if (workItem === null || workItem.projectId !== guard.project.id) {
+        return problem(c, "not-found", { detail: "unknown work item" });
+      }
+      const a = authOf(c);
+      const decision = authorizeCancelWorkItem({
+        actorRole: a.role ?? "reader",
+        workItemStatus: workItem.status,
+      });
+      if (!decision.allowed) {
+        return overrideDenied(c, decision);
+      }
+
+      const correlationId = c.get("correlationId");
+      const timestamp = now();
+      const metrics = tallyToMetrics(await repos.votes.tally(workItem.sourceAnnotationId));
+      const override = await overrideDecisionStatement({
+        project: guard.project,
+        sourceAnnotationId: workItem.sourceAnnotationId,
+        actionType: "cancel_work_item",
+        result: "overridden",
+        metrics,
+        reason,
+        workItemId: workItem.id,
+      });
+      // The cancel override decision references the work item, so its single
+      // `decision.create` row re-renders the work-item Markdown with its new
+      // `cancelled` status (status frontmatter, Phase 0 §4 stable paths) in
+      // the same commit — a rebuild restores `cancelled`.
+      const decisionCommand = ctx.commandStatements({
+        project: guard.project,
+        correlationId,
+        actorId: a.actor.id,
+        action: "work_item.cancel",
+        targetType: "decision",
+        targetId: override.decisionId,
+        outboxKind: "decision.create",
+        outboxPayload: { decisionId: override.decisionId, actorId: a.actor.id },
+        metadata: { override: "cancel", reason, workItemId: workItem.id },
+      });
+
+      const responseBody = {
+        workItemId: workItem.id,
+        status: "cancelled",
+        decisionId: override.decisionId,
+        operationIds: [decisionCommand.operationId],
+        correlationId,
+      };
+      await deps.db.batch([
+        override.statement,
+        repos.workItems.updateStatusStatement(workItem.id, "cancelled", timestamp),
+        ...decisionCommand.statements,
+        appendEventStatement(guard.project.id, "decision_created", {
+          decisionId: override.decisionId,
+          annotationId: workItem.sourceAnnotationId,
+          result: "overridden",
+          override: "cancel",
+          workItemId: workItem.id,
+        }),
+        ...ctx.claimStatements(c, 200, responseBody),
+      ]);
+      await ctx.notifyMutation(guard.project.id);
+      return c.json(responseBody, 200);
+    });
+  });
+
+  // ---- work-queue reads (contract §1: work items stop at `ready`) -----------
+
+  const workItemStatusSchema = z.enum([
+    "ready",
+    "leased",
+    "submitted",
+    "applying",
+    "completed",
+    "conflict",
+    "failed",
+    "cancelled",
+  ]);
+
+  app.get("/v1/projects/:projectId/work-items", auth, async (c) => {
+    const guard = await requireProjectScope(c, services, "work:read");
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const limit = ctx.parseLimit(c);
+    if (limit instanceof Response) {
+      return limit;
+    }
+    const statusRaw = c.req.query("status");
+    let status: z.infer<typeof workItemStatusSchema> | undefined;
+    if (statusRaw !== undefined) {
+      const parsed = workItemStatusSchema.safeParse(statusRaw);
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { detail: "unknown work item status" });
+      }
+      status = parsed.data;
+    }
+    const cursor = c.req.query("cursor");
+    const items = await repos.workItems.listByProject(guard.project.id, {
+      limit,
+      ...(cursor !== undefined ? { afterId: cursor } : {}),
+      ...(status !== undefined ? { status } : {}),
+    });
+    const serialized = await Promise.all(
+      items.map(async (item) => ({
+        ...workItemJson(item),
+        support: tallyJson(await repos.votes.tally(item.sourceAnnotationId)),
+      })),
+    );
+    return c.json({
+      items: serialized,
+      nextCursor: items.length === limit ? (items[items.length - 1]?.id ?? null) : null,
+    });
+  });
+
+  app.get("/v1/projects/:projectId/work-items/:workItemId", auth, async (c) => {
+    const guard = await requireProjectScope(c, services, "work:read");
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const workItem = await repos.workItems.getById(c.req.param("workItemId"));
+    if (workItem === null || workItem.projectId !== guard.project.id) {
+      return problem(c, "not-found", { detail: "unknown work item" });
+    }
+    const decisions = await repos.decisions.listByAnnotation(workItem.sourceAnnotationId);
+    const decision = decisions.find((d) => d.workItemId === workItem.id) ?? null;
+    return c.json({
+      ...workItemJson(workItem),
+      support: tallyJson(await repos.votes.tally(workItem.sourceAnnotationId)),
+      decision: decision === null ? null : decisionSummaryJson(decision),
+    });
+  });
+
+  // ---- events (contract §5) -------------------------------------------------
+
+  app.get("/v1/projects/:projectId/events", maybeAuth, async (c) => {
+    // Auth identical to annotation reads, incl. anonymous on public books.
+    const guard = await ctx.requireReadOrPublic(c);
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const project = guard.project;
+
+    const parseCursor = (raw: string | undefined): number | null | Response => {
+      if (raw === undefined || raw.length === 0) {
+        return null;
+      }
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 0) {
+        return problem(c, "validation-failed", {
+          detail: "event cursor must be a non-negative integer",
+        });
+      }
+      return value;
+    };
+    const afterParam = parseCursor(c.req.query("after"));
+    if (afterParam instanceof Response) {
+      return afterParam;
+    }
+    const lastEventId = parseCursor(c.req.header("last-event-id"));
+    if (lastEventId instanceof Response) {
+      return lastEventId;
+    }
+
+    if (c.req.query("poll") === "1") {
+      // JSON fallback for simple agents (§26.1). Same rows as the stream.
+      const after = afterParam ?? lastEventId ?? 0;
+      const limit = ctx.parseLimit(c);
+      if (limit instanceof Response) {
+        return limit;
+      }
+      const items = await repos.events.listAfter(project.id, after, limit);
+      const latest = items.length > 0 ? (items[items.length - 1]?.id ?? after) : after;
+      return c.json({ items: items.map(eventJson), latestId: latest });
+    }
+
+    // SSE. Without a cursor the stream starts at the current head (clients
+    // fetch authoritative state first, then stream deltas).
+    const initialCursor = afterParam ?? lastEventId ?? (await repos.events.latestId(project.id));
+    const headers = new Headers();
+    const correlationId = c.get("correlationId");
+    if (correlationId !== undefined) {
+      headers.set("X-Correlation-Id", correlationId);
+    }
+    return sseResponse(
+      {
+        listAfter: (afterId, limit) => repos.events.listAfter(project.id, afterId, limit),
+        initialCursor,
+        pollMs: deps.config.ssePollMs ?? DEFAULT_SSE_POLL_MS,
+        heartbeatMs: deps.config.sseHeartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS,
+      },
+      headers,
+    );
+  });
+}
+
+/** Zod error → safe, stable issue list (same shape as app.ts). */
+function issueList(error: z.ZodError): { path: string; message: string }[] {
+  return error.issues.map((issue) => ({
+    path: issue.path.map(String).join("."),
+    message: issue.message,
+  }));
+}

@@ -16,7 +16,6 @@ import {
   authorizeAnnotationWithdraw,
   createAnnotationCommandSchema,
   createReplyCommandSchema,
-  mintAgentTokenCommandSchema,
   resolveSessionExpiry,
   resolveTokenExpiry,
   roleSchema,
@@ -24,6 +23,9 @@ import {
   toTimestamp,
   AGENT_TOKEN_PREFIX,
 } from "@authorbot/domain";
+import { apiRoleScopes, mintAgentTokenApiCommandSchema } from "./api-scopes.js";
+import { parseRuleEntries } from "./rules.js";
+import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
 import { parseChapterMarkdown, scanSafety } from "@authorbot/markdown";
 import { z } from "zod";
 import {
@@ -82,6 +84,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 export function createApi(deps: AppDeps): AuthorbotApi {
   const repos = createRepositories(deps.db);
   const clock: Clock = deps.clock ?? SYSTEM_CLOCK;
+
+  // Boot-time rule validation (Phase 3 contract §3): invalid RULES_JSON
+  // throws here — never degrades to the default at runtime.
+  const rules = parseRuleEntries(deps.config.rulesJson);
 
   let cachedProject: ProjectRecord | null = null;
   const getProject = async (): Promise<ProjectRecord | null> => {
@@ -386,7 +392,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (body instanceof Response) {
       return body;
     }
-    const parsed = mintAgentTokenCommandSchema.safeParse(body);
+    const parsed = mintAgentTokenApiCommandSchema.safeParse(body);
     if (!parsed.success) {
       return problem(c, "validation-failed", { issues: issueList(parsed.error) });
     }
@@ -436,7 +442,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         projectId: guard.project.id,
         actorId: agentActorId,
         role: "editor",
-        scopes: [...roleScopes("editor")],
+        scopes: [...apiRoleScopes("editor")],
         createdAt: timestamp,
         revokedAt: null,
       }),
@@ -540,7 +546,34 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       limit,
       ...(cursor !== undefined ? { afterId: cursor } : {}),
     });
-    return c.json(page(annotations, limit, annotationJson));
+    // Phase 3 contract §2/§6: embed aggregate vote tallies (public: counts
+    // only) plus the create_work_item decision badge; members also see their
+    // own current vote (`myVote`). The viewer id is null for anonymous reads.
+    const viewerActorId = c.get("auth")?.actor.id ?? null;
+    const items = await Promise.all(
+      annotations.map((a) => annotationCollabJson(repos, a, viewerActorId)),
+    );
+    const last = annotations[annotations.length - 1];
+    return c.json({
+      items,
+      nextCursor: annotations.length === limit && last !== undefined ? last.id : null,
+    });
+  });
+
+  // Single-annotation read with the same collaboration embedding (contract
+  // §2: "annotation list/get responses"). Anonymous read follows the same
+  // public-annotations gate as the list.
+  app.get("/v1/projects/:projectId/annotations/:annotationId", maybeAuth, async (c) => {
+    const guard = await requireReadOrPublic(c);
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const annotation = await repos.annotations.getById(c.req.param("annotationId"));
+    if (annotation === null || annotation.projectId !== guard.project.id) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    const viewerActorId = c.get("auth")?.actor.id ?? null;
+    return c.json(await annotationCollabJson(repos, annotation, viewerActorId));
   });
 
   app.post(
@@ -639,6 +672,19 @@ export function createApi(deps: AppDeps): AuthorbotApi {
           updatedAt: timestamp,
         }),
         ...command202.statements.slice(1),
+        // Live feed (contract §5): a second viewer sees a newly created
+        // suggestion appear without a manual reload.
+        repos.events.appendStatement({
+          projectId: guard.project.id,
+          type: "annotation_created",
+          payload: {
+            annotationId,
+            chapterId: chapter.id,
+            kind: command.kind,
+            scope: command.scope,
+          },
+          createdAt: timestamp,
+        }),
         ...claimStatements(c, 202, responseBody),
       ]);
       await notifyMutation(guard.project.id);
@@ -1167,6 +1213,26 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return c.redirect(destination, 302);
     });
   }
+
+  // ---- Phase 3 routes (votes, decisions, work items, events) --------------
+  registerPhase3Routes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    rules,
+    auth,
+    maybeAuth,
+    idem,
+    requireReadOrPublic,
+    claimStatements,
+    commandStatements,
+    readJson,
+    parseLimit,
+    notifyMutation,
+    now,
+  });
 
   return { app, repos, bootstrap, rebuild };
 }
