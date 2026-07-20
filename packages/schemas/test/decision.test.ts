@@ -34,9 +34,15 @@ describe("decisionSchema", () => {
     expectInvalid(decisionSchema, bad);
   });
 
-  it("rejects rule_version 0", () => {
+  it("accepts rule_version 0 (maintainer force-create, contract §4)", () => {
+    const forceCreate = clone(validDecision);
+    forceCreate.rule_version = 0;
+    expectValid(decisionSchema, forceCreate);
+  });
+
+  it("rejects a negative rule_version", () => {
     const bad = clone(validDecision);
-    bad.rule_version = 0;
+    bad.rule_version = -1;
     expectInvalid(decisionSchema, bad);
   });
 

@@ -1,0 +1,32 @@
+{
+  "name": "@authorbot/rule-engine",
+  "version": "0.1.0",
+  "description": "Pure declarative rule evaluation for Authorbot governance: vote-tally metric computation and threshold evaluation of the authorbot.instance/v1 rule shape (Phase 3 contract section 3). No user-supplied code is ever evaluated.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@authorbot/schemas": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

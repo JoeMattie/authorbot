@@ -15,10 +15,15 @@ describe("annotation state machine", () => {
     expect([...ANNOTATION_TRANSITIONS.open].sort()).toEqual([...NON_OPEN_STATUSES].sort());
   });
 
+  it("rejected -> open is the only non-open outgoing edge (Phase 3 maintainer reopen)", () => {
+    expect(ANNOTATION_TRANSITIONS.rejected).toEqual(["open"]);
+  });
+
   // Exhaustive: every ordered pair of statuses.
   for (const from of ANNOTATION_STATUSES) {
     for (const to of ANNOTATION_STATUSES) {
-      const legal = from === "open" && to !== "open";
+      const legal =
+        (from === "open" && to !== "open") || (from === "rejected" && to === "open");
       it(`${from} -> ${to} is ${legal ? "legal" : "illegal"}`, () => {
         expect(canTransitionAnnotation(from, to)).toBe(legal);
         const decision = transitionAnnotation(from, to);

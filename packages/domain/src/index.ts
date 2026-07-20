@@ -65,6 +65,63 @@ export type {
 } from "./commands.js";
 
 export {
+  VOTE_VALUES,
+  authorizeVote,
+  castVoteCommandSchema,
+  clearVoteCommandSchema,
+  voteValueSchema,
+} from "./vote.js";
+export type { CastVoteCommand, ClearVoteCommand, VoteDenialReason, VoteValue } from "./vote.js";
+
+export {
+  DECISION_RESULTS,
+  DECISION_SUPPORT_CHANGED_EVENT,
+  decisionResultSchema,
+  resolveSupportChange,
+} from "./decision-support.js";
+export type {
+  DecisionResult,
+  SupportChangeOutcome,
+  SupportChangeTransition,
+} from "./decision-support.js";
+
+export {
+  PHASE3_WORK_ITEM_STATUSES,
+  WORK_ITEM_STATUSES,
+  WORK_ITEM_TRANSITIONS,
+  canTransitionWorkItem,
+  isPhase3WorkItemStatus,
+  transitionWorkItem,
+} from "./work-item-state.js";
+export type {
+  WorkItemStatus,
+  WorkItemTransitionDenialReason,
+} from "./work-item-state.js";
+
+export {
+  FORCE_CREATE_RULE_VERSION,
+  MAX_OVERRIDE_REASON_LENGTH,
+  MIN_OVERRIDE_REASON_LENGTH,
+  authorizeCancelWorkItem,
+  authorizeForceCreateWorkItem,
+  authorizeRejectSuggestion,
+  authorizeReopenSuggestion,
+  cancelWorkItemCommandSchema,
+  forceCreateWorkItemCommandSchema,
+  overrideReasonSchema,
+  rejectSuggestionCommandSchema,
+  reopenSuggestionCommandSchema,
+} from "./overrides.js";
+export type {
+  CancelWorkItemCommand,
+  ForceCreateWorkItemCommand,
+  RejectSuggestionCommand,
+  ReopenSuggestionCommand,
+  SuggestionOverrideDenialReason,
+  WorkItemOverrideDenialReason,
+} from "./overrides.js";
+
+export {
   AGENT_TOKEN_PREFIX,
   AGENT_TOKEN_REGEX,
   AGENT_TOKEN_SECRET_LENGTH,

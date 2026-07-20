@@ -21,7 +21,9 @@ export const decisionSchema = z.strictObject({
   id: uuidv7Schema,
   source_annotation_id: uuidv7Schema,
   rule: z.string().min(1),
-  rule_version: z.number().int().min(1),
+  // `rule_version: 0` is reserved for maintainer force-create decisions
+  // (contract §4); rule crossings use versions >= 1.
+  rule_version: z.number().int().min(0),
   /** Aggregate metric snapshot, e.g. `{ approvals: 3, net_score: 2 }`. */
   metrics: z.record(z.string(), z.number()),
   result: decisionResultSchema,

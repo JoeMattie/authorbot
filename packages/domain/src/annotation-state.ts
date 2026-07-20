@@ -7,10 +7,10 @@ export type { AnnotationStatus };
 
 /**
  * Annotation state machine (design section 9.4; statuses per Phase 0 contract
- * section 4). In this phase only `open` has outgoing transitions; every other
- * status is terminal. The reanchor flow (`needs_reanchor -> open`) arrives
- * with the Phase 3 `/reanchor` endpoint and is intentionally not legal yet —
- * adding transitions later is additive.
+ * section 4). `open` fans out; `rejected -> open` is the Phase 3 maintainer
+ * reopen override (Phase 3 contract section 4); every other status is
+ * terminal. The reanchor flow (`needs_reanchor -> open`) is intentionally not
+ * legal yet — adding transitions later is additive.
  */
 export const ANNOTATION_TRANSITIONS: Readonly<
   Record<AnnotationStatus, readonly AnnotationStatus[]>
@@ -28,7 +28,7 @@ export const ANNOTATION_TRANSITIONS: Readonly<
   work_item_created: [],
   accepted: [],
   resolved: [],
-  rejected: [],
+  rejected: ["open"],
   withdrawn: [],
   superseded: [],
   orphaned: [],
