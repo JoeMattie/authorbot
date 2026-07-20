@@ -204,8 +204,42 @@ revertable, audited. There is no second configuration store.
 - Publication display: show revision, show attribution, show public
   annotations.
 - Governance thresholds — the vote rule from Phase 3, in author-facing terms
-  ("how many approvals before a suggestion becomes work?"), with the
-  human-approval requirement explained rather than merely rendered.
+  ("how many approvals before a suggestion becomes work?"), with each
+  requirement explained rather than merely rendered.
+
+**Amendment to Phase 3 §3 — the author's approval is required by default.**
+
+Two metrics join the vocabulary:
+
+- `maintainer_approvals` — approvals from any actor holding the maintainer
+  role.
+- `human_maintainer_approvals` — approvals from **human** maintainers only.
+
+The default rule gains `human_maintainer_approvals >= 1`, so nothing becomes
+work on the author's book without the author agreeing to it.
+
+The distinction is load-bearing rather than pedantic. Phase 7 lets an author
+grant maintainer role to their own agent tokens (so a locked book stays
+usable), which means a plain `maintainer_approvals` clause could be satisfied
+by an agent the author owns — reintroducing exactly the manufactured-consensus
+hole that the human-approval requirement exists to prevent. The default counts
+human maintainers.
+
+Editable in settings alongside the other thresholds, and removable: an author
+running a genuinely collaborative project may not want a personal veto on
+every change, and that is their call to make.
+
+**Force-promote.** Phase 3 already implements a maintainer override that
+creates a work item regardless of the tally (recorded as a decision with
+`rule_version: 0`, subject to the same one-work-item uniqueness). This phase
+surfaces it: a "Promote to work" action on any open suggestion, requiring a
+reason, shown alongside the current tally so the author sees what they are
+overriding. The inverse — rejecting a suggestion that did cross the threshold
+— is the existing reject override and is surfaced the same way.
+
+For a solo author the practical effect is that voting is optional: they
+promote what they want to work on, and the thresholds only start mattering
+when other people arrive.
 
 **Guarded, with the consequence stated before the change is accepted:**
 
@@ -346,8 +380,11 @@ the repository, this replaces the separate OAuth App. Requirements:
    empty state; `templates/book-repo` ships blank and self-consistent.
 9. No CORS header is emitted under any configuration; a book deployed under a
    base path works end to end (site, API, sign-in, and islands).
-10. A maintainer changes the book's title, license, display options, and vote
-    threshold entirely in the browser; each lands as a validated, attributed
+10. A maintainer changes the book's title, license, display options, and
+    governance thresholds entirely in the browser, and can promote or reject a
+    suggestion against its tally with a recorded reason; a suggestion reaching
+    the numeric threshold without a human maintainer's approval does **not**
+    become work under the default rule; each lands as a validated, attributed
     commit to `book.yml`, and guarded fields require confirmation while
     never-editable fields are absent from the interface.
 11. No GitHub Pages code, workflow step, or documentation remains.
