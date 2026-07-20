@@ -22,12 +22,17 @@ import {
   WorkItemsRepository,
 } from "./collaboration.js";
 import { LeasesRepository, SubmissionsRepository } from "./leasing.js";
+import {
+  PublicationDeliveriesRepository,
+  PublicationsRepository,
+} from "./publications.js";
 
 export * from "./identity.js";
 export * from "./content.js";
 export * from "./operations.js";
 export * from "./collaboration.js";
 export * from "./leasing.js";
+export * from "./publications.js";
 
 /**
  * One repository per table (Phase 2 contract §2 plus the Phase 3 contract
@@ -54,6 +59,10 @@ export interface Repositories {
   events: EventsRepository;
   leases: LeasesRepository;
   submissions: SubmissionsRepository;
+  /** Phase 5 §6 / design §17.3: CI-reported publication state. */
+  publications: PublicationsRepository;
+  /** Phase 5 §6: dedupe ledger for signed publication callbacks. */
+  publicationDeliveries: PublicationDeliveriesRepository;
 }
 
 export function createRepositories(db: SqlDatabase): Repositories {
@@ -78,5 +87,7 @@ export function createRepositories(db: SqlDatabase): Repositories {
     events: new EventsRepository(db),
     leases: new LeasesRepository(db),
     submissions: new SubmissionsRepository(db),
+    publications: new PublicationsRepository(db),
+    publicationDeliveries: new PublicationDeliveriesRepository(db),
   };
 }

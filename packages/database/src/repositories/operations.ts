@@ -160,14 +160,36 @@ export class OutboxRepository {
     return row ? mapOutbox(row) : null;
   }
 
-  /** Oldest pending row for the project (the per-project serial drain order). */
-  async nextPending(projectId: string): Promise<OutboxRecord | null> {
+  /**
+   * The oldest pending row (the per-project serial drain order), optionally ignoring some kinds or ids.
+   *
+   * `excludeKinds` lets a drain leave a paused kind (`submission.apply` while
+   * the project is diverged) `pending` while still draining everything queued
+   * behind it; `excludeIds` lets the drain step past a row it could not claim
+   * instead of asking for the same one forever.
+   */
+  async nextPending(
+    projectId: string,
+    options: { excludeKinds?: readonly string[]; excludeIds?: readonly string[] } = {},
+  ): Promise<OutboxRecord | null> {
+    const excludeKinds = options.excludeKinds ?? [];
+    const excludeIds = options.excludeIds ?? [];
+    const clauses: string[] = [`project_id = ?`, `status = 'pending'`];
+    const bindings: string[] = [projectId];
+    if (excludeKinds.length > 0) {
+      clauses.push(`kind NOT IN (${excludeKinds.map(() => "?").join(", ")})`);
+      bindings.push(...excludeKinds);
+    }
+    if (excludeIds.length > 0) {
+      clauses.push(`id NOT IN (${excludeIds.map(() => "?").join(", ")})`);
+      bindings.push(...excludeIds);
+    }
     const row = await this.db
       .prepare(
-        `SELECT * FROM outbox WHERE project_id = ? AND status = 'pending'
+        `SELECT * FROM outbox WHERE ${clauses.join(" AND ")}
          ORDER BY created_at, id LIMIT 1`,
       )
-      .bind(projectId)
+      .bind(...bindings)
       .first();
     return row ? mapOutbox(row) : null;
   }

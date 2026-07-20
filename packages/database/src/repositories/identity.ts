@@ -31,8 +31,10 @@ export class ProjectsRepository {
     return this.db
       .prepare(
         `INSERT INTO projects
-           (id, slug, repo_provider, repo, default_branch, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, slug, repo_provider, repo, default_branch, status,
+            projection_stale, projected_commit, divergence_reason, diverged_at,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
@@ -41,6 +43,12 @@ export class ProjectsRepository {
         record.repo,
         record.defaultBranch,
         record.status,
+        record.projectionStale ? 1 : 0,
+        record.projectedCommit,
+        record.divergenceReason === null || record.divergenceReason === undefined
+          ? null
+          : JSON.stringify(record.divergenceReason),
+        record.divergedAt,
         record.createdAt,
         record.updatedAt,
       );
@@ -59,6 +67,104 @@ export class ProjectsRepository {
     const row = await this.db.prepare(`SELECT * FROM projects WHERE slug = ?`).bind(slug).first();
     return row ? mapProject(row) : null;
   }
+
+  // ---- Phase 5 §6: projection staleness and divergence ---------------------
+
+  /**
+   * Mark the projection stale (a verified default-branch push arrived).
+   * Deliberately unconditional and idempotent: two pushes racing must both
+   * leave the flag set, and setting it is always safe — the worst outcome is
+   * one redundant refresh.
+   */
+  markProjectionStaleStatement(projectId: string, at: string): SqlStatement {
+    return this.db
+      .prepare(`UPDATE projects SET projection_stale = 1, updated_at = ? WHERE id = ?`)
+      .bind(at, projectId);
+  }
+
+  /**
+   * Record a completed refresh: store the commit it was built from and clear
+   * the stale flag — but ONLY if no newer push arrived meanwhile.
+   *
+   * `observedStaleAt` is the `updated_at` the row carried when the refresh
+   * began. If a push bumped it since, the flag stays set and the next refresh
+   * picks the newer head up. Clearing unconditionally would drop that push
+   * (the refresh read a snapshot taken before it).
+   */
+  completeProjectionRefreshStatement(input: {
+    projectId: string;
+    projectedCommit: string | null;
+    observedUpdatedAt: string;
+    at: string;
+  }): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE projects
+            SET projected_commit = ?,
+                projection_stale = CASE WHEN updated_at = ? THEN 0 ELSE projection_stale END,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(input.projectedCommit, input.observedUpdatedAt, input.at, input.projectId);
+  }
+
+  /**
+   * Mark the project diverged (design §14.5). Idempotent on `diverged_at`: the
+   * FIRST detection's timestamp is kept, because that is when the repository
+   * actually broke, while `divergence_reason` always reflects the most recent
+   * detection so a maintainer sees the current explanation.
+   */
+  markDivergedStatement(input: {
+    projectId: string;
+    reason: unknown;
+    at: string;
+  }): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE projects
+            SET status = 'diverged',
+                divergence_reason = ?,
+                diverged_at = COALESCE(diverged_at, ?),
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(JSON.stringify(input.reason ?? null), input.at, input.at, input.projectId);
+  }
+
+  /**
+   * Clear divergence (maintainer recovery, contract §6). The clearing reason
+   * replaces the detection record so the row explains its own current state;
+   * the audit event carries the full history.
+   */
+  clearDivergenceStatement(input: {
+    projectId: string;
+    reason: unknown;
+    at: string;
+  }): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE projects
+            SET status = 'active',
+                divergence_reason = ?,
+                diverged_at = NULL,
+                updated_at = ?
+          WHERE id = ? AND status = 'diverged'`,
+      )
+      .bind(JSON.stringify(input.reason ?? null), input.at, input.projectId);
+  }
+}
+
+function parseJsonColumn(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    // A hand-edited or pre-JSON value is still worth surfacing as text rather
+    // than failing every project read.
+    return String(value);
+  }
 }
 
 function mapProject(row: SqlRow): ProjectRecord {
@@ -69,9 +175,17 @@ function mapProject(row: SqlRow): ProjectRecord {
     repo: String(row["repo"]),
     defaultBranch: String(row["default_branch"]),
     status: String(row["status"]),
+    projectionStale: Number(row["projection_stale"] ?? 0) !== 0,
+    projectedCommit: nullableText(row["projected_commit"]),
+    divergenceReason: parseJsonColumn(row["divergence_reason"]),
+    divergedAt: nullableText(row["diverged_at"]),
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
   };
+}
+
+function nullableText(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
 }
 
 export class ActorsRepository {

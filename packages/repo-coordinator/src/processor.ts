@@ -238,6 +238,18 @@ export interface CreateProcessorOptions {
    * rows fail with a clear error instead of guessing.
    */
   submissionApplier?: SubmissionApplier;
+  /**
+   * Outbox kinds this drain must LEAVE ALONE, evaluated once per drain.
+   *
+   * Rows of a paused kind are neither claimed nor failed: they stay `pending`
+   * so the backlog resumes by itself when the pause lifts. The coordinator
+   * uses it to stop `submission.apply` while the project is `diverged` — a
+   * submission accepted moments before a webhook reconciliation marked the
+   * project diverged would otherwise still commit prose to a repository
+   * Authorbot knows it mis-models, because the divergence guard sat only at
+   * request intake and nothing on the drain path read `projects.status`.
+   */
+  pausedKinds?(projectId: string): Promise<readonly string[]>;
 }
 
 export interface DrainRowOutcome {
@@ -271,6 +283,10 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
 
   async function drain(projectId: string): Promise<DrainResult> {
     const outcomes: DrainRowOutcome[] = [];
+    // Read once per drain, before anything is claimed: a pause that begins
+    // mid-drain is honoured by the next drain, and the set cannot change
+    // under the loop.
+    const paused = new Set(await (options.pausedKinds?.(projectId) ?? Promise.resolve([])));
 
     // Resume rows a crashed drain left `processing` (single drainer per
     // project: any processing row at drain entry is a crash leftover).
@@ -283,17 +299,29 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       .all();
     for (const stuckRow of stuck) {
       const row = await repos.outbox.getById(String(stuckRow["id"]));
-      if (row) {
+      if (row && !paused.has(row.kind)) {
         outcomes.push(await processRow(row));
       }
     }
 
-    // Claim and process pending rows in insertion order.
+    // Claim and process pending rows in insertion order. A paused kind is
+    // skipped rather than claimed — and the loop CONTINUES past it, so a
+    // paused prose row does not stall the annotation and work-item rows
+    // queued behind it.
+    const skipped = new Set<string>();
     for (;;) {
-      const row = await repos.outbox.nextPending(projectId);
+      const row = await repos.outbox.nextPending(projectId, {
+        ...(paused.size === 0 ? {} : { excludeKinds: [...paused] }),
+        ...(skipped.size === 0 ? {} : { excludeIds: [...skipped] }),
+      });
       if (!row) break;
       const claimed = await repos.outbox.markProcessing(row.id);
-      if (!claimed) continue; // raced away; nextPending will move on
+      if (!claimed) {
+        // Raced away (or otherwise no longer pending): exclude it explicitly
+        // so `nextPending` cannot hand back the same row forever.
+        skipped.add(row.id);
+        continue;
+      }
       outcomes.push(await processRow({ ...row, status: "processing", attempts: row.attempts + 1 }));
     }
 
@@ -359,13 +387,26 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           }
           let commitSha: string;
           const expectedHead = plan.expectedHead ?? op.expectedHead ?? undefined;
+          // A SHA left on the row while the operation is still `committing` is
+          // an ATTEMPT, not a landing: `committed`/`verified` are the states
+          // that mean the ref moved. Handing it back lets the writer settle
+          // "did my commit land?" by ancestry — an answer that holds however
+          // many commits a third party pushed between the crash and this
+          // replay, unlike the bounded trailer scan.
+          const attemptedCommitSha = op.commitSha ?? undefined;
+          // Captured non-null so the `onCommitCreated` closure below does not
+          // defeat the narrowing on `op`.
+          const committingOp = op;
           try {
             const result = await writer.commitFiles({
               branch: plan.branch,
               ...(expectedHead === undefined ? {} : { expectedHeadOverride: expectedHead }),
+              ...(attemptedCommitSha === undefined ? {} : { attemptedCommitSha }),
               files: plan.files,
               message: plan.message,
               trailers: plan.trailers,
+              onCommitCreated: (created: string): Promise<void> =>
+                persistCommitAttempt(committingOp, created),
             });
             commitSha = result.commitSha;
           } catch (error) {
@@ -485,6 +526,28 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         createdAt: ts,
       }),
     ];
+  }
+
+  /**
+   * Record the commit object an in-flight attempt just created, leaving the
+   * operation in `committing`.
+   *
+   * Written before the ref update, so the row survives the one window where
+   * the commit can land without us learning that it did: the `PATCH` is
+   * applied and the connection drops, the isolate is evicted, the process
+   * dies. On the replay this SHA comes back as `attemptedCommitSha` and the
+   * writer settles it by ancestry instead of committing a second time.
+   */
+  async function persistCommitAttempt(
+    op: GitOperationRecord,
+    commitSha: string,
+  ): Promise<void> {
+    await repos.gitOperations.updateState(op.id, {
+      state: "committing",
+      updatedAt: now(),
+      attempts: op.attempts,
+      commitSha,
+    });
   }
 
   async function persistTransition(

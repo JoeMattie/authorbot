@@ -49,6 +49,14 @@ export type OutboxStatus = "pending" | "processing" | "done" | "failed";
 
 export type WebhookDeliveryStatus = "received" | "processed" | "ignored" | "failed";
 
+/**
+ * Phase 5 contract §6 / design §14.5. `diverged` means the repository broke an
+ * invariant Authorbot cannot reconcile deterministically (a chapter revision
+ * moved backwards, or block ids referenced by live annotations vanished).
+ * Prose writes are refused while diverged; reads are unaffected.
+ */
+export type ProjectStatus = "active" | "diverged";
+
 export interface ProjectRecord {
   id: string;
   slug: string;
@@ -56,9 +64,67 @@ export interface ProjectRecord {
   /** Repository coordinates, e.g. `JoeMattie/causal-projector`. */
   repo: string;
   defaultBranch: string;
+  /** {@link ProjectStatus} in practice; kept `string` so 0001-era rows widen. */
   status: string;
+  /**
+   * Phase 5 §6: a verified `push` marked the projection stale. Set BEFORE the
+   * refresh is attempted and cleared only by one that finished, so a dropped
+   * refresh is recoverable by the coordinator's periodic alarm.
+   */
+  projectionStale: boolean;
+  /**
+   * Repository commit the current projection was built from (design §20.3
+   * "repository head versus projected head"). This is the *integrated* commit
+   * against which a publication's `deployedCommit` is compared.
+   */
+  projectedCommit: string | null;
+  /**
+   * JSON detection record explaining `status = 'diverged'` (kind + offending
+   * chapter/annotation ids), or the maintainer's clearing reason. Null when
+   * the project has never diverged.
+   */
+  divergenceReason: unknown;
+  /** When divergence was detected; null once cleared. */
+  divergedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** CI build lifecycle as reported by the publisher (design §17.3). */
+export type PublicationBuildStatus = "queued" | "building" | "succeeded" | "failed";
+
+/**
+ * Publication state per design §17.3. Written ONLY from signed CI callbacks —
+ * never inferred from a successful Git commit. One row per integrated commit.
+ */
+export interface PublicationRecord {
+  id: string;
+  projectId: string;
+  /** Repository commit CI built from. */
+  integratedCommit: string;
+  buildStatus: PublicationBuildStatus;
+  /** Commit actually serving the public site, per CI. Null until deployed. */
+  deployedCommit: string | null;
+  publicUrl: string | null;
+  deployedAt: string | null;
+  publisherVersion: string | null;
+  /** Delivery id of the callback that last advanced this row. */
+  lastDeliveryId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PublicationDeliveryStatus = WebhookDeliveryStatus;
+
+/** Dedupe ledger for signed `POST /v1/publications` callbacks (§6). */
+export interface PublicationDeliveryRecord {
+  id: string;
+  projectId: string;
+  deliveryId: string;
+  publicationId: string | null;
+  status: PublicationDeliveryStatus;
+  receivedAt: string;
+  processedAt: string | null;
 }
 
 export interface ActorRecord {

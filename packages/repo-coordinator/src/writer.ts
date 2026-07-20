@@ -29,6 +29,29 @@ export interface CommitFilesInput {
    * order as `Key: value` lines in the trailer block.
    */
   trailers: Readonly<Record<string, string>>;
+  /**
+   * A commit object this operation created on an earlier attempt whose ref
+   * update was never confirmed (the process died, or the `PATCH` response
+   * never arrived). If it turns out to be an ancestor of the branch head, it
+   * LANDED and its SHA is returned instead of committing again.
+   *
+   * This is what makes replay idempotency depend on operation *identity*
+   * rather than on how many commits a third party happened to push: the
+   * `Authorbot-Operation` trailer scan is bounded by `operationScanDepth`, so
+   * six commits pushed between the crash and the replay hid the landed commit
+   * and produced either a duplicate audit commit or a spurious conflict.
+   * Adapters that cannot test ancestry ignore this field.
+   */
+  attemptedCommitSha?: string;
+  /**
+   * Called with the new commit's SHA after the commit object exists but
+   * BEFORE the ref update. Persisting it here is what lets a later replay
+   * pass it back as `attemptedCommitSha`; the window this closes is exactly
+   * the one between "the commit object exists" and "we know whether the ref
+   * moved". Failures propagate — a SHA we could not record is a SHA a replay
+   * cannot recognise, so committing anyway would recreate the defect.
+   */
+  onCommitCreated?(commitSha: string): Promise<void>;
 }
 
 export interface CommitFilesResult {

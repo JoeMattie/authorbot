@@ -53,6 +53,10 @@ export async function seedBasics(): Promise<Seeded> {
     repo: "JoeMattie/causal-projector",
     defaultBranch: "main",
     status: "active",
+    projectionStale: false,
+    projectedCommit: null,
+    divergenceReason: null,
+    divergedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
   };

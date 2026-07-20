@@ -75,6 +75,11 @@ export async function setupDatabase(): Promise<SeededDatabase> {
     repo: "JoeMattie/causal-projector",
     defaultBranch: "main",
     status: "active",
+    // Phase 5 migration 0005 columns, at their pre-Phase-5 defaults.
+    projectionStale: false,
+    projectedCommit: null,
+    divergenceReason: null,
+    divergedAt: null,
     createdAt: ts,
     updatedAt: ts,
   });

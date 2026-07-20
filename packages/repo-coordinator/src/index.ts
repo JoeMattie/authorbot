@@ -1,3 +1,25 @@
+/**
+ * `@authorbot/repo-coordinator` — artifact rendering, the outbox processor,
+ * and the `BookRepoWriter` seam.
+ *
+ * **Every module reachable from this barrel is pure**: top-level code
+ * declares constants, functions and classes and nothing else — no
+ * registration, no I/O, no global mutation at import time. `package.json`
+ * therefore declares `"sideEffects": false`, and that declaration is load
+ * bearing rather than cosmetic:
+ *
+ * `apps/api` imports the processor and the artifact renderers through this
+ * barrel, which also re-exports `LocalGitAdapter` from `local-git.js`, which
+ * imports `node:child_process`. Nothing on the Worker path ever *calls* the
+ * adapter (the Durable Object commits through `GitHubBookRepoWriter`), but
+ * without the side-effect declaration the bundler must assume the module
+ * matters and ships it — putting a node-only module inside a Worker that can
+ * never legally run it. With it, `local-git.js` is dropped entirely.
+ *
+ * So: if a module here ever acquires genuine import-time behaviour, remove
+ * the `sideEffects` flag in the same change, or the bundler will silently
+ * discard it.
+ */
 export {
   annotationDirectory,
   annotationFilePath,
