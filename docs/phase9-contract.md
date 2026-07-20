@@ -134,6 +134,13 @@ screenshot conveys most of the value at a fraction of the cost.
 
 ## 10. Sequencing note
 
-The **README rewrite does not depend on this phase** and should land as soon as
-the wizard exists — it is cheap, and it is the first thing anyone sees. The
-site needs Phase 6 complete so its screenshots show the real onboarding path.
+**This phase runs last, including the README rewrite.** An earlier draft
+suggested landing the README as soon as the wizard existed. That was wrong:
+it would need revising when npm distribution replaces the clone-and-build
+instructions (Phase 6 / ADR-0022), again when the collaborator skill adds an
+install path for agent users (Phase 8), and again for the site's own links.
+Writing it once, against a settled surface, costs less and reads better.
+
+Accepted consequence: the README stays engineer-facing until then. That is
+honest — until Phase 6 the tool is not installable by a novelist, so the only
+audience who can act on it today is the one it currently addresses.
