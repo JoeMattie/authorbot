@@ -1,43 +1,98 @@
-# Authorbot validation workflow skeleton (design section 17.1).
+# Authorbot validation workflow (design §17.1).
 #
-# This file is intentionally fully commented out: uncomment and adapt it once
-# your project has access to the `authorbot` CLI. It runs on pull requests and
-# pushes that touch book content and fails the build on any validation error.
+# Runs on pull requests and pushes that touch book content or collaboration
+# records and fails on any validation error. Annotation traffic runs
+# validation only — it never rebuilds the book (design §7.4); publication is
+# publish.yml's job.
 #
 # What validation covers:
 #   - book.yml and all frontmatter schemas
-#   - unique chapter IDs, slugs, and order values
+#   - unique chapter IDs, slugs, order values, and chapter routes
 #   - block ID presence, uniqueness, and UUIDv7 format
 #   - annotation selectors and cross-references (story graph, timeline,
 #     characters, work items, decisions, releases, attribution)
 #   - raw HTML and unsafe URL schemes in prose
 #   - work-item original-text delimiter integrity
 #
-# name: validate
+# After validating, the site is built to a throwaway directory (design
+# §17.1: the validation workflow also builds the site) so a change that
+# validates but cannot build — or would emit colliding routes — fails here,
+# on the pull request, instead of on main after merge. Nothing is deployed;
+# link and accessibility checks over real output run in the Authorbot
+# toolchain's own e2e suite.
 #
-# on:
-#   push:
-#     paths:
-#       - "book.yml"
-#       - "chapters/**"
-#       - "story/**"
-#       - ".authorbot/**"
-#   pull_request:
-#     paths:
-#       - "book.yml"
-#       - "chapters/**"
-#       - "story/**"
-#       - ".authorbot/**"
-#
-# jobs:
-#   validate:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-node@v4
-#         with:
-#           node-version: 22
-#       - name: Install the Authorbot CLI
-#         run: npm install --global @authorbot/cli
-#       - name: Validate the book repository
-#         run: authorbot validate . --json
+# One-time setup: optionally set the AUTHORBOT_REF repository variable to an
+# exact commit SHA or release tag of JoeMattie/authorbot (shared with
+# publish.yml so validation and publication use the same toolchain);
+# without it, both workflows track that repository's main branch.
+
+name: validate
+
+on:
+  push:
+    paths:
+      - "book.yml"
+      - "chapters/**"
+      - "story/**"
+      - ".authorbot/**"
+  pull_request:
+    paths:
+      - "book.yml"
+      - "chapters/**"
+      - "story/**"
+      - ".authorbot/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the book repository
+        uses: actions/checkout@v4
+
+      - name: Check out the Authorbot toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: JoeMattie/authorbot
+          # The AUTHORBOT_REF repository variable when set (an exact commit
+          # SHA is preferred; keep it in lockstep with publish.yml), falling
+          # back to main so the template's first push validates cleanly.
+          ref: ${{ vars.AUTHORBOT_REF || 'main' }}
+          path: authorbot
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: authorbot/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: authorbot/pnpm-lock.yaml
+
+      - name: Install and build the Authorbot toolchain
+        working-directory: authorbot
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Put the authorbot CLI on PATH
+        run: |
+          install -d "$RUNNER_TEMP/authorbot-bin"
+          printf '#!/usr/bin/env bash\nexec node "%s" "$@"\n' \
+            "$GITHUB_WORKSPACE/authorbot/apps/cli/dist/bin.js" \
+            > "$RUNNER_TEMP/authorbot-bin/authorbot"
+          chmod +x "$RUNNER_TEMP/authorbot-bin/authorbot"
+          echo "$RUNNER_TEMP/authorbot-bin" >> "$GITHUB_PATH"
+
+      - name: Validate the book repository
+        run: authorbot validate .
+
+      # Build smoke test (design §17.1): catches anything that validates but
+      # cannot publish before it lands on main. Nothing is deployed.
+      - name: Build the site (dry run)
+        run: authorbot build . --out "$RUNNER_TEMP/site"

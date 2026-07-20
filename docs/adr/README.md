@@ -2,8 +2,10 @@
 
 Decisions binding for Phase 0+. Format: MADR-ish (Status / Context / Decision
 / Consequences). Section references cite `AUTHORBOT_PROJECT_DESIGN.md`
-(design) and `docs/phase0-contract.md` (contract). These ADRs record the
-design §26.1 defaults adopted by the Phase 0 contract (contract §6.5).
+(design), `docs/phase0-contract.md` (contract), and
+`docs/phase1-contract.md` (phase1-contract). ADRs 0001–0012 record the
+design §26.1 defaults adopted by the Phase 0 contract (contract §6.5);
+later ADRs record per-phase decisions.
 
 | ADR | Title | Resolves |
 |---|---|---|
@@ -19,6 +21,7 @@ design §26.1 defaults adopted by the Phase 0 contract (contract §6.5).
 | [0010](0010-membership-authority-database.md) | Membership authority in database, manifest export to Git | design §26.1(3) |
 | [0011](0011-aggregate-vote-export.md) | Aggregate-only vote export by default | design §26.1(5) |
 | [0012](0012-zod-v4-single-schema-source.md) | Zod v4 single schema source, generated JSON Schema | contract §1 |
+| [0013](0013-astro-static-publisher-zero-client-js.md) | Astro static publisher, programmatic build, zero client JS in Phase 1 | design §1.1, §16.1, §23; phase1-contract §1, §4 |
 
 New ADRs: next number, same format, add a row here. Superseding an ADR: mark
 the old one `Superseded by ADR NNNN` in its Status line.

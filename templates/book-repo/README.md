@@ -25,7 +25,7 @@ book-repo/
 │   ├── attribution/          # per-chapter revision attribution
 │   ├── releases/             # release manifests
 │   └── exports/              # optional vote/event exports
-└── .github/workflows/        # commented CI skeletons: validate + publish
+└── .github/workflows/        # CI: validate on every change, publish to GitHub Pages
 ```
 
 ## Conventions that matter
@@ -50,6 +50,38 @@ book-repo/
 - **No secrets.** Tokens, webhook secrets, and deployment credentials never
   belong in this repository.
 
+## Publishing
+
+The repository publishes itself as a static reading site via GitHub Pages:
+
+- `.github/workflows/validate.yml` runs `authorbot validate .` plus a
+  build smoke test (nothing is deployed) on pull requests and pushes that
+  touch book content or `.authorbot/` records, so a change that validates
+  but cannot publish fails before it lands on `main`.
+- `.github/workflows/publish.yml` runs on pushes to `main` that change public
+  content (`book.yml`, `chapters/**`, `story/**`, releases) or the workflow
+  itself. It validates, builds with `--base-url` set to the URL GitHub Pages
+  resolves for your repository (project sites live under
+  `https://<owner>.github.io/<repo>/`, and every internal link honors that
+  prefix), and deploys `_site/` to GitHub Pages. The build refuses to publish
+  a repository with validation errors, and the output includes
+  `authorbot-build.json` recording the commit, chapter revisions, and build
+  timestamp.
+
+To enable it:
+
+1. In your repository's **Settings → Pages**, set **Source** to
+   **GitHub Actions**.
+2. (Recommended) In **Settings → Secrets and variables → Actions →
+   Variables**, set `AUTHORBOT_REF` to an exact commit SHA (or release tag)
+   of `JoeMattie/authorbot`; both workflows use it. Without it they track
+   that repository's `main` branch — which works out of the box, but pinning
+   keeps builds reproducible; bump the ref deliberately, as its own commit.
+
+Both workflows check out the Authorbot toolchain at that ref, build it with
+pnpm, and run the `authorbot` CLI from that checkout — the book repository
+itself needs no Node toolchain.
+
 ## First steps
 
 1. Edit `book.yml`: title, slug, language, license, and a fresh `id`.
@@ -57,5 +89,5 @@ book-repo/
    slug/title, your actor ref), and write prose with block markers.
 3. Grow `story/outline.yml`, `story/timeline.yml`, and `story/characters/` as
    the story develops.
-4. Uncomment and adapt the workflows under `.github/workflows/` when the
-   Authorbot CLI is available to your CI.
+4. Set up publishing (previous section): enable GitHub Pages and pin the
+   Authorbot ref in the workflows.

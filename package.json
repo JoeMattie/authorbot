@@ -12,6 +12,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "validate:example": "pnpm --filter @authorbot/cli start validate examples/book-repo"
+    "validate:example": "pnpm --filter @authorbot/cli start validate examples/book-repo",
+    "build:example": "pnpm --filter @authorbot/cli start build examples/book-repo --out _site"
   }
 }

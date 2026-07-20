@@ -1,44 +1,116 @@
-# Authorbot publication workflow skeleton (design section 17.2).
+# Authorbot publication workflow (design §17.2, phase1-contract §5).
 #
-# This file is intentionally fully commented out: uncomment and adapt it once
-# your project has a publisher and a static host configured. It should run
-# only when public content changes (path filters below) or on manual release,
-# never on raw collaboration traffic (design section 7.4).
+# Publishes the book as a static GitHub Pages site whenever public content
+# changes on main. It never runs on raw collaboration traffic (design §7.4):
+# annotations and votes are validated by validate.yml without rebuilding the
+# book.
 #
-# Steps, per design section 17.2:
-#   1. Checkout the exact commit.
-#   2. Validate.
-#   3. Build static output.
-#   4. Generate authorbot-build.json (commit, chapter revisions, timestamp).
-#   5. Deploy to the configured static host.
-#   6. Notify Authorbot of the deployment result (signed callback) or let it
-#      reconcile deployment status through the provider API.
-#
-# name: publish
-#
-# on:
-#   push:
-#     branches: [main]
-#     paths:
-#       - "book.yml"
-#       - "chapters/**"
-#       - "story/**"
-#       - ".authorbot/releases/**"
-#   workflow_dispatch: {}
-#
-# jobs:
-#   publish:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-node@v4
-#         with:
-#           node-version: 22
-#       - name: Install the Authorbot toolchain
-#         run: npm install --global @authorbot/cli
-#       - name: Validate the book repository
-#         run: authorbot validate .
-#       - name: Build the static site and build manifest
-#         run: authorbot build . --out dist
-#       - name: Deploy
-#         run: echo "Deploy ./dist to your static host here"
+# One-time setup for your repository:
+#   1. In Settings → Pages, set "Source" to "GitHub Actions".
+#   2. (Recommended) In Settings → Secrets and variables → Actions →
+#      Variables, set AUTHORBOT_REF to an exact commit SHA (preferred) or
+#      release tag of JoeMattie/authorbot. Without it the workflow tracks
+#      that repository's main branch, which works out of the box but is not
+#      reproducible; pin it, and bump it deliberately as its own commit.
+
+name: publish
+
+on:
+  push:
+    branches: [main]
+    # Path filters per design §7.4: chapters, story data, book.yml, and
+    # publisher configuration trigger a public rebuild. Releases are included
+    # so a manual release commit republishes; other .authorbot/** records do
+    # not trigger publication.
+    paths:
+      - "book.yml"
+      - "chapters/**"
+      - "story/**"
+      - ".authorbot/releases/**"
+      - ".github/workflows/publish.yml"
+  # Manual release / redeploy.
+  workflow_dispatch: {}
+
+# GitHub Pages deployment via OIDC needs exactly these scopes.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; let a queued deploy of a newer commit finish
+# rather than cancelling it mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Check out the book repository
+        uses: actions/checkout@v4
+
+      - name: Check out the Authorbot toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: JoeMattie/authorbot
+          # Toolchain ref: the AUTHORBOT_REF repository variable when set
+          # (an exact commit SHA is preferred — pinning makes builds
+          # reproducible and keeps a toolchain change from silently altering
+          # your published site), falling back to main so a repository
+          # created from this template deploys on its very first push.
+          ref: ${{ vars.AUTHORBOT_REF || 'main' }}
+          path: authorbot
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: authorbot/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: authorbot/pnpm-lock.yaml
+
+      - name: Install and build the Authorbot toolchain
+        working-directory: authorbot
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Put the authorbot CLI on PATH
+        run: |
+          install -d "$RUNNER_TEMP/authorbot-bin"
+          printf '#!/usr/bin/env bash\nexec node "%s" "$@"\n' \
+            "$GITHUB_WORKSPACE/authorbot/apps/cli/dist/bin.js" \
+            > "$RUNNER_TEMP/authorbot-bin/authorbot"
+          chmod +x "$RUNNER_TEMP/authorbot-bin/authorbot"
+          echo "$RUNNER_TEMP/authorbot-bin" >> "$GITHUB_PATH"
+
+      - name: Validate the book repository
+        run: authorbot validate .
+
+      # Resolves where Pages will serve this repository. Project sites live
+      # under https://<owner>.github.io/<repo>/, so the build must prefix
+      # every internal link and the stylesheet with the repo path — without
+      # it the deployed site is unstyled and un-navigable.
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build the static site and build manifest
+        run: authorbot build . --out _site --base-url "${{ steps.pages.outputs.base_url }}"
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
