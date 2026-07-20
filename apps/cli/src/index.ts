@@ -7,6 +7,7 @@
  */
 
 export { runCli, type CliIo } from "./cli.js";
+export { runBuild, BUILD_USAGE } from "./build.js";
 export {
   DEFAULT_BOOK_SETTINGS,
   FindingCollector,

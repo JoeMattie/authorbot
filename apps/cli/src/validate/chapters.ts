@@ -1,6 +1,6 @@
 import { scanSafety, type MalformedMarker } from "@authorbot/markdown";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
-import type { BookSettings } from "./book.js";
+import { chapterRouteUnsafeReason, type BookSettings } from "./book.js";
 import {
   emitSchemaIssues,
   linePointer,
@@ -120,6 +120,23 @@ export async function loadChapters(
         const reason = unsafePathReason(fm.slug);
         if (reason !== null) {
           findings.error("PATH_UNSAFE", rel, `chapter slug "${fm.slug}" ${reason}`, "/slug");
+        } else if (
+          book.chapterUrl.includes("{slug}") &&
+          chapterRouteUnsafeReason(book.chapterUrl, "sample") === null
+        ) {
+          // Pattern-level problems are reported once against book.yml; this
+          // catches routes that only THIS slug makes unusable — e.g.
+          // chapter_url "/{slug}/" with a chapter slugged "story", which the
+          // build would otherwise silently shadow with a static page.
+          const routeReason = chapterRouteUnsafeReason(book.chapterUrl, fm.slug);
+          if (routeReason !== null) {
+            findings.error(
+              "PATH_UNSAFE",
+              rel,
+              `publication.chapter_url "${book.chapterUrl}" with slug "${fm.slug}" ${routeReason}`,
+              "/slug",
+            );
+          }
         }
       }
       if (typeof fm.order === "number") {

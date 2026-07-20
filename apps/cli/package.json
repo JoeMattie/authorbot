@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@authorbot/markdown": "workspace:*",
+    "@authorbot/publisher": "workspace:*",
     "@authorbot/schemas": "workspace:*",
     "yaml": "^2.5.0",
     "zod": "^4.0.0"

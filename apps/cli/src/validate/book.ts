@@ -18,6 +18,8 @@ export interface BookSettings {
   charactersGlob: string;
   outlinePath: string;
   timelinePath: string;
+  /** `publication.chapter_url` (default `/chapters/{slug}/`). */
+  chapterUrl: string;
 }
 
 export const DEFAULT_BOOK_SETTINGS: BookSettings = {
@@ -26,7 +28,70 @@ export const DEFAULT_BOOK_SETTINGS: BookSettings = {
   charactersGlob: "story/characters/*.md",
   outlinePath: "story/outline.yml",
   timelinePath: "story/timeline.yml",
+  chapterUrl: "/chapters/{slug}/",
 };
+
+/**
+ * Chapter-route rules mirrored from the publisher's `chapterRoutePath`
+ * (imported logic would drag the Astro dependency into `validate`): the
+ * validate gate must reject exactly what the build hard-errors on, so a
+ * green `authorbot validate` is never followed by a failing (or silently
+ * colliding) `authorbot build`.
+ */
+const SAFE_ROUTE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const RESERVED_TOP_SEGMENTS: ReadonlySet<string> = new Set([
+  "story",
+  "_astro",
+  "authorbot-build.json",
+  "index.html",
+]);
+
+/**
+ * Why the route expanded from `publication.chapter_url` for `slug` is
+ * unusable, or null when it is safe (mirrors `@authorbot/publisher`).
+ */
+export function chapterRouteUnsafeReason(pattern: string, slug: string): string | null {
+  const segments = pattern
+    .replaceAll("{slug}", slug)
+    .split("/")
+    .filter((segment) => segment.length > 0);
+  if (segments.length === 0) {
+    return "expands to an empty path";
+  }
+  for (const segment of segments) {
+    if (!SAFE_ROUTE_SEGMENT.test(segment) || segment === "..") {
+      return `produces unsafe path segment "${segment}"`;
+    }
+  }
+  const first = segments[0];
+  if (first !== undefined && RESERVED_TOP_SEGMENTS.has(first.toLowerCase())) {
+    return `routes chapters under the reserved path "${first}/"`;
+  }
+  return null;
+}
+
+/** Pattern-level `publication.chapter_url` checks (per-slug checks live in chapters.ts). */
+function checkChapterUrlPattern(findings: FindingCollector, pattern: string): void {
+  const pointer = "/publication/chapter_url";
+  if (!pattern.includes("{slug}")) {
+    findings.error(
+      "BOOK_CONFIG_INVALID",
+      "book.yml",
+      `publication.chapter_url "${pattern}" does not contain {slug}: every chapter would share one route`,
+      pointer,
+    );
+    return;
+  }
+  const reason = chapterRouteUnsafeReason(pattern, "sample");
+  if (reason !== null) {
+    findings.error(
+      "PATH_UNSAFE",
+      "book.yml",
+      `publication.chapter_url "${pattern}" ${reason}`,
+      pointer,
+    );
+  }
+}
 
 function settingPath(
   findings: FindingCollector,
@@ -100,6 +165,11 @@ export async function loadBookConfig(
       settings.timelinePath,
       "/planning/timeline",
     );
+    const publication = isRecord(data.publication) ? data.publication : {};
+    if (typeof publication.chapter_url === "string" && publication.chapter_url.length > 0) {
+      settings.chapterUrl = publication.chapter_url;
+      checkChapterUrlPattern(findings, publication.chapter_url);
+    }
   }
 
   const result = bookConfigSchema.safeParse(parsed.data);

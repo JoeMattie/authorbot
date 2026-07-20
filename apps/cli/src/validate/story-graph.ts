@@ -122,6 +122,49 @@ export async function checkStoryGraph(
     }
   }
 
+  // Parent cycles: every parent can resolve while no chain ever reaches a
+  // root, leaving the cycle's nodes (and everything below them) reachable
+  // from no root — the outline page would silently lose them at build time.
+  const parentOf = new Map<string, string>();
+  for (const node of nodes) {
+    if (isRecord(node) && typeof node.id === "string" && typeof node.parent === "string") {
+      parentOf.set(node.id, node.parent);
+    }
+  }
+  const safe = new Set<string>(); // chain reaches a root or an unresolved parent
+  const inCycle = new Set<string>();
+  for (const [index, node] of nodes.entries()) {
+    if (!isRecord(node) || typeof node.id !== "string") {
+      continue;
+    }
+    const chain: string[] = [];
+    const chainSet = new Set<string>();
+    let current: string | undefined = node.id;
+    while (current !== undefined && !safe.has(current) && !inCycle.has(current)) {
+      if (chainSet.has(current)) {
+        const cycle = chain.slice(chain.indexOf(current));
+        for (const member of cycle) {
+          inCycle.add(member);
+        }
+        findings.error(
+          "STORY_GRAPH_INVALID",
+          rel,
+          `parent cycle ${[...cycle, current].join(" -> ")}: no node in the cycle is reachable from a root`,
+          `/nodes/${index}/parent`,
+        );
+        break;
+      }
+      chainSet.add(current);
+      chain.push(current);
+      current = parentOf.get(current);
+    }
+    if (current === undefined || safe.has(current)) {
+      for (const id of chain) {
+        safe.add(id);
+      }
+    }
+  }
+
   const links = Array.isArray(parsed.data.links) ? parsed.data.links : [];
   for (const [index, link] of links.entries()) {
     if (!isRecord(link)) {

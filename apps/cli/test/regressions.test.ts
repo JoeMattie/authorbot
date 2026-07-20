@@ -418,6 +418,170 @@ describe("location:*/concept:* unresolved-reference severity (contract section 5
   });
 });
 
+describe("publication.chapter_url is validated like the build routes it (validate/build agreement)", () => {
+  async function setChapterUrl(root: string, pattern: string): Promise<void> {
+    const bookPath = path.join(root, "book.yml");
+    await writeFile(
+      bookPath,
+      `${await readFile(bookPath, "utf8")}publication:\n  chapter_url: "${pattern}"\n`,
+      "utf8",
+    );
+  }
+
+  it("rejects a pattern without {slug} (all chapters would share one route)", async () => {
+    const root = await makeRepo();
+    await setChapterUrl(root, "/chapters/all/");
+    const report = await validateBookRepo(root);
+    expect(
+      report.errors.some(
+        (f) =>
+          f.code === "BOOK_CONFIG_INVALID" &&
+          f.pointer === "/publication/chapter_url" &&
+          f.message.includes("{slug}"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a pattern producing unsafe path segments", async () => {
+    const root = await makeRepo();
+    await setChapterUrl(root, "/a b/{slug}/");
+    const report = await validateBookRepo(root);
+    expect(
+      report.errors.some(
+        (f) => f.code === "PATH_UNSAFE" && f.message.includes('unsafe path segment "a b"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a pattern routing chapters under the reserved story/ path", async () => {
+    const root = await makeRepo();
+    await setChapterUrl(root, "/story/{slug}/");
+    const report = await validateBookRepo(root);
+    expect(
+      report.errors.some(
+        (f) => f.code === "PATH_UNSAFE" && f.message.includes('reserved path "story/"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a chapter whose slug expands the pattern into a reserved route", async () => {
+    const root = await makeRepo();
+    await setChapterUrl(root, "/{slug}/");
+    const chapterPath = path.join(root, "chapters", "001-solitary.md");
+    await writeFile(
+      chapterPath,
+      (await readFile(chapterPath, "utf8")).replace("slug: solitary", "slug: story"),
+      "utf8",
+    );
+    const report = await validateBookRepo(root);
+    expect(
+      report.errors.some(
+        (f) =>
+          f.code === "PATH_UNSAFE" &&
+          f.path === "chapters/001-solitary.md" &&
+          f.message.includes('reserved path "story/"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts the default-shaped pattern", async () => {
+    const root = await makeRepo();
+    await setChapterUrl(root, "/read/{slug}/");
+    const report = await validateBookRepo(root);
+    expect(report.errors).toEqual([]);
+  });
+});
+
+describe("duplicate character ids", () => {
+  it("reports two character records declaring the same id", async () => {
+    const root = await makeRepo();
+    await mkdir(path.join(root, "story", "characters"), { recursive: true });
+    const character = (name: string): string =>
+      [
+        "---",
+        "schema: authorbot.character/v1",
+        "id: character:mara",
+        `name: ${name}`,
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n");
+    await writeFile(path.join(root, "story", "characters", "aa-real.md"), character("Real Mara"), "utf8");
+    await writeFile(
+      path.join(root, "story", "characters", "zz-impostor.md"),
+      character("Impostor Mara"),
+      "utf8",
+    );
+    const report = await validateBookRepo(root);
+    expect(
+      report.errors.some(
+        (f) =>
+          f.code === "CHARACTER_FILE_INVALID" &&
+          f.path === "story/characters/zz-impostor.md" &&
+          f.message.includes("already declared by story/characters/aa-real.md"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("story-graph parent cycles", () => {
+  it("reports a cycle even though every parent reference resolves", async () => {
+    const root = await makeRepo();
+    await mkdir(path.join(root, "story"), { recursive: true });
+    await writeFile(
+      path.join(root, "story", "outline.yml"),
+      [
+        "schema: authorbot.story-graph/v1",
+        "nodes:",
+        "  - id: premise:main",
+        "    type: premise",
+        "    title: Premise",
+        "    parent: part:one",
+        "    order: 1",
+        "  - id: part:one",
+        "    type: part",
+        "    title: Part One",
+        "    parent: premise:main",
+        "    order: 2",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const report = await validateBookRepo(root);
+    expect(
+      report.errors.some(
+        (f) => f.code === "STORY_GRAPH_INVALID" && f.message.includes("parent cycle"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not report acyclic parent chains", async () => {
+    const root = await makeRepo();
+    await mkdir(path.join(root, "story"), { recursive: true });
+    await writeFile(
+      path.join(root, "story", "outline.yml"),
+      [
+        "schema: authorbot.story-graph/v1",
+        "nodes:",
+        "  - id: premise:main",
+        "    type: premise",
+        "    title: Premise",
+        "    order: 1",
+        "  - id: part:one",
+        "    type: part",
+        "    title: Part One",
+        "    parent: premise:main",
+        "    order: 2",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const report = await validateBookRepo(root);
+    expect(report.errors).toEqual([]);
+  });
+});
+
 describe("per-type work-item field requirements", () => {
   it("accepts write_chapter and planning items without revision references", async () => {
     const root = await makeRepo();

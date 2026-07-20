@@ -1,4 +1,5 @@
 import path from "node:path";
+import { BUILD_USAGE, runBuild } from "./build.js";
 import type { Finding, ValidationReport } from "./validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "./validate/index.js";
 
@@ -15,6 +16,14 @@ Exit codes:
   0  valid (warnings allowed)
   1  one or more error findings
   2  usage or I/O error`;
+
+const TOP_USAGE = `Usage: authorbot <command> [options]
+
+Commands:
+  validate <path>   validate a book repository (Phase 0 contract)
+  build <repo>      build the static reading site (Phase 1 contract)
+
+Run "authorbot <command> --help" for command options.`;
 
 export interface CliIo {
   out: (line: string) => void;
@@ -65,15 +74,18 @@ function renderHuman(target: string, report: ValidationReport, quiet: boolean): 
 export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined) {
-    io.err(USAGE);
+    io.err(TOP_USAGE);
     return 2;
   }
   if (command === "-h" || command === "--help" || command === "help") {
-    io.out(USAGE);
+    io.out(`${TOP_USAGE}\n\n${USAGE}\n\n${BUILD_USAGE}`);
     return 0;
   }
+  if (command === "build") {
+    return runBuild(rest, io);
+  }
   if (command !== "validate") {
-    io.err(`authorbot: unknown command "${command}"\n\n${USAGE}`);
+    io.err(`authorbot: unknown command "${command}"\n\n${TOP_USAGE}`);
     return 2;
   }
 

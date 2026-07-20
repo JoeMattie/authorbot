@@ -54,6 +54,8 @@ async function loadCharacters(
   findings: FindingCollector,
 ): Promise<Set<string>> {
   const ids = new Set<string>();
+  /** Character id -> repo-relative path of the record that declared it first. */
+  const ownerById = new Map<string, string>();
   for (const abs of await expandGlob(root, book.charactersGlob)) {
     const rel = repoRelative(root, abs);
     const source = await readTextIfExists(abs);
@@ -72,6 +74,19 @@ async function loadCharacters(
     }
     // Harvest leniently so one bad field does not cascade into ref errors.
     if (typeof fm.id === "string") {
+      // Two records sharing an id would collapse onto one character page
+      // (last record silently replacing the first at build time).
+      const owner = ownerById.get(fm.id);
+      if (owner !== undefined) {
+        findings.error(
+          "CHARACTER_FILE_INVALID",
+          rel,
+          `character id "${fm.id}" is already declared by ${owner}`,
+          "/id",
+        );
+      } else {
+        ownerById.set(fm.id, rel);
+      }
       ids.add(fm.id);
     }
     const result = characterSchema.safeParse(fm);
