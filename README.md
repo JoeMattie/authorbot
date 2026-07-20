@@ -9,6 +9,10 @@ chapter submissions, inline annotations, votes, deterministic governance rules,
 leased work items, and atomic Git integration — without ever invoking an LLM
 itself.
 
+**New here?** [How it works](./docs/how-it-works.md) explains the system with
+diagrams; [Getting started](./docs/getting-started.md) walks through launching
+your own book project end to end.
+
 The full design is in [AUTHORBOT_PROJECT_DESIGN.md](./AUTHORBOT_PROJECT_DESIGN.md).
 Architecture decisions live in [docs/adr](./docs/adr).
 
