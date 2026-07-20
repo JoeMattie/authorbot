@@ -20,6 +20,8 @@ export const ENV = {
   apiUrl: "AB_E2E_API_URL",
   plainDir: "AB_E2E_PLAIN_DIR",
   repoDir: "AB_E2E_REPO_DIR",
+  /** The served build directory — the Phase 4 flow rebuilds it in place. */
+  siteDir: "AB_E2E_SITE_DIR",
 } as const;
 
 function requireEnv(name: string): string {
@@ -35,7 +37,11 @@ export const apiUrl = (): string => requireEnv(ENV.apiUrl);
 export const plainDir = (): string => requireEnv(ENV.plainDir);
 export const repoDir = (): string => requireEnv(ENV.repoDir);
 
+export const siteDir = (): string => requireEnv(ENV.siteDir);
+
 export const chapterUrl = (slug = "baseline"): string => `${siteUrl()}/chapters/${slug}/`;
+
+export const workUrl = (): string => `${siteUrl()}/work/`;
 
 // ---- static file server ----------------------------------------------------
 
@@ -273,6 +279,159 @@ export async function voteViaApi(
   if (response.status !== 200) {
     throw new Error(`vote failed: ${response.status} ${await response.text()}`);
   }
+}
+
+// ---- Phase 4 helpers (leases, work items, rebuild) -------------------------
+
+/** Chapter id, revision and the first block's id/text, read from the built page. */
+export async function chapterFacts(chapterSlug = "baseline"): Promise<{
+  chapterId: string;
+  revision: number;
+  blockId: string;
+  blockText: string;
+}> {
+  const html = await (await fetch(chapterUrl(chapterSlug))).text();
+  const mount = /<authorbot-collab[^>]*>/.exec(html)?.[0] ?? "";
+  const chapterId = /data-chapter-id="([^"]+)"/.exec(mount)?.[1];
+  const revision = Number(/data-chapter-revision="([^"]+)"/.exec(mount)?.[1]);
+  const block = /id="b-([0-9a-f-]{36})"[^>]*>([^<]*)</.exec(html);
+  if (chapterId === undefined || block?.[1] === undefined || !Number.isInteger(revision)) {
+    throw new Error("could not extract chapter data from the built page");
+  }
+  return { chapterId, revision, blockId: block[1], blockText: block[2] ?? "" };
+}
+
+/**
+ * Seed a **range**-scoped suggestion over `exact` inside the chapter's first
+ * block — the shape that votes into a `revise_range` work item, which is the
+ * work-item type both the human (Playwright) and agent (script) paths must
+ * complete end to end (contract §7 / §27.5).
+ */
+export async function seedRangeSuggestion(options: {
+  login: string;
+  body: string;
+  exact: string;
+  chapterSlug?: string;
+}): Promise<{ annotationId: string; chapterId: string; blockId: string; cookie: string }> {
+  const cookie = await loginCookie(options.login, "contributor");
+  const facts = await chapterFacts(options.chapterSlug ?? "baseline");
+  const start = facts.blockText.indexOf(options.exact);
+  if (start === -1) {
+    throw new Error(`"${options.exact}" is not in the first block of the built chapter`);
+  }
+  const end = start + options.exact.length;
+  const response = await fetch(
+    `${apiUrl()}/v1/projects/${PROJECT}/chapters/${facts.chapterId}/annotations`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: siteUrl(),
+        cookie,
+        "idempotency-key": crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        kind: "suggestion",
+        scope: "range",
+        chapterRevision: facts.revision,
+        target: {
+          blockId: facts.blockId,
+          textPosition: { start, end },
+          textQuote: {
+            exact: options.exact,
+            prefix: facts.blockText.slice(Math.max(0, start - 32), start),
+            suffix: facts.blockText.slice(end, end + 32),
+          },
+        },
+        body: options.body,
+      }),
+    },
+  );
+  if (response.status !== 202) {
+    throw new Error(`seed range suggestion failed: ${response.status} ${await response.text()}`);
+  }
+  const accepted = (await response.json()) as { annotationId?: string };
+  if (typeof accepted.annotationId !== "string") {
+    throw new Error("seed range suggestion response had no annotationId");
+  }
+  await waitForAnnotationOpen(accepted.annotationId, cookie);
+  return {
+    annotationId: accepted.annotationId,
+    chapterId: facts.chapterId,
+    blockId: facts.blockId,
+    cookie,
+  };
+}
+
+/**
+ * Approve a suggestion with three distinct human contributors — exactly the
+ * default rule (design §25: approvals ≥ 3, net ≥ 2, human approvals ≥ 1).
+ */
+export async function voteToThreshold(annotationId: string, prefix: string): Promise<void> {
+  for (const name of ["a", "b", "c"]) {
+    const cookie = await loginCookie(`${prefix}-${name}`, "contributor");
+    await voteViaApi(cookie, annotationId, "approve");
+  }
+}
+
+interface WorkItemJson {
+  id: string;
+  type: string;
+  status: string;
+  sourceAnnotationId: string;
+  baseRevision: number;
+}
+
+/** Poll `/work-items` until the item created from `annotationId` shows up. */
+export async function waitForWorkItem(
+  cookie: string,
+  annotationId: string,
+  status = "ready",
+): Promise<WorkItemJson> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const response = await fetch(
+      `${apiUrl()}/v1/projects/${PROJECT}/work-items?status=${status}&limit=50`,
+      { headers: { cookie } },
+    );
+    if (response.ok) {
+      const body = (await response.json()) as { items: WorkItemJson[] };
+      const found = body.items.find((item) => item.sourceAnnotationId === annotationId);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`no ${status} work item appeared for annotation ${annotationId} within 20s`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/** The chapter file's current text, straight from the temp repo's work tree. */
+export async function chapterFileText(fileName: string): Promise<string> {
+  return readFile(path.join(repoDir(), "chapters", fileName), "utf8");
+}
+
+/**
+ * Rebuild the served site from the (now committed) book repo — the publish
+ * step a real deployment runs after Authorbot commits an accepted edit.
+ */
+export async function rebuildSite(): Promise<void> {
+  const script = path.join(path.dirname(new URL(import.meta.url).pathname), "build-sites.mjs");
+  await execFileAsync(
+    process.execPath,
+    [
+      script,
+      JSON.stringify({
+        repoDir: repoDir(),
+        siteDir: siteDir(),
+        plainDir: plainDir(),
+        apiUrl: apiUrl(),
+      }),
+    ],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
 }
 
 /**

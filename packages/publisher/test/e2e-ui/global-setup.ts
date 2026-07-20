@@ -118,6 +118,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       INITIAL_MAINTAINER: "github:JoeMattie",
       SQLITE_PATH: path.join(tmp, "e2e.sqlite"),
       MIRROR_MODE: "inline",
+      // Phase 4 short-lease test config (contract §7): a 5m10s lease sits
+      // just above the PT5M renewal-prompt threshold, so the prompt appears
+      // ~10 seconds after a claim and the e2e can watch it happen for real
+      // instead of mocking the clock.
+      LEASE_DURATION: "PT5M10S",
+      LEASE_RENEWAL_DURATION: "PT30M",
+      LEASE_MAX_TOTAL_DURATION: "PT4H",
       ALLOWED_ORIGINS: site.origin,
       // Mirror of examples/book-repo book.yml `show_public_annotations: true`
       // (contract §2.1): signed-out readers get read-only annotation lists.
@@ -141,6 +148,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env[ENV.apiUrl] = apiOrigin;
   process.env[ENV.plainDir] = plainDir;
   process.env[ENV.repoDir] = repoDir;
+  process.env[ENV.siteDir] = siteDir;
 
   return teardown;
   }

@@ -588,6 +588,185 @@ main.ab-enabled {
   color: var(--muted);
 }
 
+.ab-work-actions {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ab-work-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* ---- claim + edit view (Phase 4 contract §7) ------------------------------ */
+
+.ab-claim {
+  margin: 0 0 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--link);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ab-claim-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.ab-claim-meta {
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ab-lease {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.ab-lease-remaining {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Outline + weight, never colour alone (§16.6 / Phase 2b §4). */
+.ab-lease-soon {
+  outline: 2px solid #a03434;
+  outline-offset: 2px;
+  color: #a03434;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-lease-soon {
+    outline-color: #e09a9a;
+    color: #e09a9a;
+  }
+}
+
+.ab-lease-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ab-lease-prompt {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ab-claim-section {
+  margin-top: 1rem;
+}
+
+.ab-claim-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.ab-untrusted-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ab-claim-request,
+.ab-original-text {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--border);
+  background: var(--bg);
+  white-space: pre-wrap;
+}
+
+.ab-claim-summary,
+.ab-claim-refs {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ab-claim-refs {
+  padding-left: 1.1rem;
+}
+
+.ab-submit-form {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ab-textarea {
+  min-height: 9rem;
+  font: inherit;
+  white-space: pre-wrap;
+  resize: vertical;
+}
+
+.ab-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ab-submit-status {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ab-submit-syncing {
+  border-style: dashed;
+}
+
+.ab-submit-completed {
+  border-color: var(--link);
+  color: var(--link);
+}
+
+.ab-submit-conflict,
+.ab-submit-expired {
+  border-color: #a03434;
+  color: #a03434;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-submit-conflict,
+  .ab-submit-expired {
+    border-color: #e09a9a;
+    color: #e09a9a;
+  }
+}
+
+.ab-conflict-line {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+.ab-conflict-id {
+  word-break: break-all;
+}
+
+@media (pointer: coarse) {
+  .ab-textarea,
+  .ab-claim .ab-input {
+    min-height: 44px;
+  }
+}
+
 /* ---- motion --------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: no-preference) {

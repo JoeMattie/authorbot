@@ -111,6 +111,37 @@ export interface Operation {
   id: string;
   state: string;
   error: string | null;
+  /** Present once the operation has committed (Phase 2 contract §5). */
+  commitSha?: string | null;
+}
+
+/**
+ * Read the Phase 4 `submission-conflict` problem out of a git operation's
+ * `error` column (JSON-encoded by the apply pipeline). Returns null for a
+ * clean operation or any other failure, so callers keep their normal
+ * "committed" / "failed" branches.
+ */
+export function parseSubmissionConflict(error: string | null | undefined): SubmissionConflict | null {
+  if (typeof error !== "string" || error.length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(error) as Record<string, unknown>;
+    if (parsed["code"] !== "submission-conflict") {
+      return null;
+    }
+    const conflictWorkItemId = parsed["conflictWorkItemId"];
+    const reason = parsed["reason"];
+    return {
+      code: "submission-conflict",
+      ...(typeof parsed["submissionId"] === "string" ? { submissionId: parsed["submissionId"] } : {}),
+      ...(typeof parsed["workItemId"] === "string" ? { workItemId: parsed["workItemId"] } : {}),
+      conflictWorkItemId: typeof conflictWorkItemId === "string" ? conflictWorkItemId : null,
+      reason: typeof reason === "string" && reason !== "" ? reason : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface Accepted {
@@ -126,7 +157,89 @@ export interface VoteResult {
   decision: DecisionSummary | null;
 }
 
-export type ApiResult<T> = { ok: true; value: T } | { ok: false; status: number; message: string };
+// ---- Phase 4: leases, task bundle, submissions ------------------------------
+
+/** `target` of the §15.3 task bundle (absent for chapter-scope items). */
+export interface BundleTarget {
+  blockId: string;
+  exact?: string;
+  start?: number;
+  end?: number;
+}
+
+/**
+ * The claim response — design §15.3 / Phase 4 contract §3, verbatim.
+ *
+ * SECURITY: every string under `context`, `document.source` and
+ * `workItem.acceptanceCriteria` is **untrusted project prose** (design
+ * §19.6). It is rendered exclusively through `textContent` and is never
+ * interpreted as markup or as an instruction by this client.
+ */
+export interface TaskBundle {
+  workItem: { id: string; type: string; acceptanceCriteria: string[]; priority: string };
+  /** `token` is returned exactly once by the API and is never logged. */
+  lease: { id: string; token: string; expiresAt: string; maxExpiresAt: string };
+  document: { chapterId: string; revision: number; contentHash: string; source: string };
+  target?: BundleTarget;
+  context: { annotationBody: string; chapterSummary: string; storyRefs: string[] };
+  submissionSchema: string | null;
+}
+
+/** 200 body of `POST .../lease/renew` (contract §2). */
+export interface LeaseRenewal {
+  leaseId: string;
+  workItemId: string;
+  expiresAt: string;
+  maxExpiresAt: string;
+  renewalCount: number;
+  renewalPromptAt: string;
+}
+
+/** 202 body of `POST .../submissions` (contract §4). */
+export interface SubmissionAccepted {
+  submissionId: string;
+  operationId: string;
+  correlationId: string;
+  status: string;
+}
+
+/** Phase 4 submission types (contract §4). */
+export type SubmissionType = "range_replacement" | "block_replacement" | "chapter_replacement";
+
+export interface SubmitBody {
+  leaseId: string;
+  leaseToken: string;
+  type: SubmissionType;
+  baseRevision: number;
+  baseContentHash: string;
+  content: string;
+  summary?: string;
+  notes?: string;
+}
+
+/**
+ * The `submission-conflict` problem the pipeline records on the git operation
+ * (Phase 4 contract §5): the operation still **commits** (its commit is the
+ * conflict record), so a committed operation carrying this error means the
+ * submission conflicted and a `resolve_conflict` work item exists.
+ */
+export interface SubmissionConflict {
+  code: "submission-conflict";
+  submissionId?: string;
+  workItemId?: string;
+  conflictWorkItemId: string | null;
+  /** The applier's deterministic reason, when the API recorded one. */
+  reason: string | null;
+}
+
+export type ApiResult<T> =
+  | { ok: true; value: T }
+  /**
+   * `problem` carries the parsed `application/problem+json` body when the API
+   * returned one, so callers can use its typed extensions (e.g. the claim
+   * 409's holder display name) instead of re-parsing `detail`.
+   */
+  | { ok: false; status: number; message: string; problem?: Record<string, unknown> };
 
 interface PageBody {
   items: unknown[];
@@ -379,6 +492,92 @@ export class CollabApi {
     }
     const body = (await response.json()) as { items: WorkItem[]; nextCursor: string | null };
     return { ok: true, value: { items: body.items, nextCursor: body.nextCursor ?? null } };
+  }
+
+  /** One work item by id (status refresh after a claim/release). */
+  async workItem(workItemId: string): Promise<ApiResult<WorkItem>> {
+    return this.jsonResult<WorkItem>(
+      (async () => this.get(this.projectUrl(`/work-items/${encodeURIComponent(workItemId)}`)))(),
+      [200],
+    );
+  }
+
+  // ---- Phase 4: leases + submissions (contract §2-§4) ----------------------
+
+  private workItemUrl(workItemId: string, suffix: string): string {
+    return this.projectUrl(`/work-items/${encodeURIComponent(workItemId)}${suffix}`);
+  }
+
+  /**
+   * Shared response funnel: `status: 0` means "unreachable" (the islands' cue
+   * to stay quiet), any HTTP error carries the parsed problem body.
+   */
+  private async jsonResult<T>(
+    pending: Promise<Response>,
+    okStatuses: readonly number[],
+  ): Promise<ApiResult<T>> {
+    let response: Response;
+    try {
+      response = await pending;
+    } catch {
+      return { ok: false, status: 0, message: "network error — is the API reachable?" };
+    }
+    if (!okStatuses.includes(response.status)) {
+      let body: Record<string, unknown> | undefined;
+      try {
+        body = (await response.json()) as Record<string, unknown>;
+      } catch {
+        body = undefined;
+      }
+      const message =
+        (typeof body?.["detail"] === "string" ? body["detail"] : undefined) ??
+        (typeof body?.["title"] === "string" ? body["title"] : undefined) ??
+        `request failed (${response.status})`;
+      return {
+        ok: false,
+        status: response.status,
+        message,
+        ...(body === undefined ? {} : { problem: body }),
+      };
+    }
+    return { ok: true, value: (await response.json()) as T };
+  }
+
+  /**
+   * Claim a work item (contract §2): 201 with the §15.3 task bundle whose
+   * `lease.token` is returned exactly once. The loser of a simultaneous claim
+   * gets 409 `lease-held` with the holder's display name only.
+   */
+  async claim(workItemId: string): Promise<ApiResult<TaskBundle>> {
+    return this.jsonResult<TaskBundle>(this.post(this.workItemUrl(workItemId, "/claim"), {}), [201]);
+  }
+
+  /** Renew the lease (holder + current token, contract §2). */
+  async renewLease(
+    workItemId: string,
+    leaseId: string,
+    leaseToken: string,
+  ): Promise<ApiResult<LeaseRenewal>> {
+    return this.jsonResult<LeaseRenewal>(
+      this.post(this.workItemUrl(workItemId, "/lease/renew"), { leaseId, leaseToken }),
+      [200],
+    );
+  }
+
+  /** Release the lease — holder or maintainer; no token required (contract §2). */
+  async releaseLease(workItemId: string, leaseId?: string): Promise<ApiResult<{ status: string }>> {
+    return this.jsonResult<{ status: string }>(
+      this.post(this.workItemUrl(workItemId, "/lease/release"), leaseId === undefined ? {} : { leaseId }),
+      [200],
+    );
+  }
+
+  /** Submit the edit (contract §4): 202 + the operation to poll. */
+  async submitWork(workItemId: string, body: SubmitBody): Promise<ApiResult<SubmissionAccepted>> {
+    return this.jsonResult<SubmissionAccepted>(
+      this.post(this.workItemUrl(workItemId, "/submissions"), body),
+      [202],
+    );
   }
 
   // ---- event feed (Phase 3 contract §5) ------------------------------------

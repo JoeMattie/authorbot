@@ -169,6 +169,36 @@ Assets live at `${base}_astro/authorbot-collab.js|.css`. Key selectors:
 pairing (`ALLOWED_ORIGINS`, CSRF, `return_to` validation) is documented in
 `apps/api/README.md`; the end-to-end local recipe is in the root `README.md`.
 
+## The `/work/` page (work queue + claim-and-edit)
+
+Collab builds emit one extra route, `/work/`, mounting
+`<authorbot-work-queue data-api-base data-project data-chapters>`. Phase 3
+listed ready work items; Phase 4 adds the claim-and-edit flow:
+
+- **Claim** — shown only to actors whose `/v1/me` scopes include
+  `work:claim`; everyone else gets a plain hint, never a dead button.
+  A lost race renders the API's 409 `lease-held` holder *display name* only.
+- **Edit view** (`.ab-claim`) — the §15.3 task bundle: request, chapter
+  summary and story refs (all labelled untrusted project content), acceptance
+  criteria, original text, and a textarea prefilled with the target.
+- **Lease** — `.ab-lease-remaining` counts down every second;
+  `.ab-lease-prompt` appears in the last five minutes (design §25 default,
+  a UI-side constant), with `.ab-lease-renew` / `.ab-lease-release`.
+- **Submit** — `.ab-submit-status` walks `Submitting → Syncing → Completed`,
+  or `.ab-submit-conflict` when the pipeline reports `submission-conflict` on
+  the operation: the chapter was left untouched and the created
+  `resolve_conflict` work item is named in `.ab-conflict-id`.
+
+The lease token (returned exactly once by the claim) is kept in
+**sessionStorage** — per-tab, dropped when the tab closes — so a refresh
+resumes the claim and the draft instead of stranding the lease. It is never
+rendered, never logged, never placed in localStorage or a URL, and is deleted
+the moment the lease is released, submitted, or expires.
+
+`examples/agent-workflow.mjs` drives the same endpoints from a zero-dependency
+Node script (claim → print bundle → submit → poll → report commit); the
+Playwright suite runs both paths over the same `revise_range` work-item type.
+
 ## Chapter selection
 
 `status: published` is included by default; `--include-drafts` adds
