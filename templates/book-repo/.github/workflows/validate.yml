@@ -29,6 +29,8 @@
 name: validate
 
 on:
+  # Manual re-run (e.g. after a GitHub Actions incident).
+  workflow_dispatch: {}
   push:
     paths:
       - "book.yml"
