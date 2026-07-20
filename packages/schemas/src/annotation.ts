@@ -32,10 +32,20 @@ export const textPositionSchema = z.strictObject({
 });
 export type TextPosition = z.infer<typeof textPositionSchema>;
 
+/** Contract 2b §2.2: quote context is at most 32 characters each side. */
+export const MAX_QUOTE_CONTEXT = 32;
+/**
+ * Server-side ceiling for `textQuote.exact` (a selection within a single
+ * semantic block, so far below the 32 KiB body limit). Enforced here so an
+ * attacker-chosen selector can never smuggle megabytes into the annotations
+ * row and the committed `.authorbot/annotations/<id>/annotation.md` artifact.
+ */
+export const MAX_QUOTE_EXACT = 8 * 1024;
+
 export const textQuoteSchema = z.strictObject({
-  exact: z.string().min(1),
-  prefix: z.string().optional(),
-  suffix: z.string().optional(),
+  exact: z.string().min(1).max(MAX_QUOTE_EXACT),
+  prefix: z.string().max(MAX_QUOTE_CONTEXT).optional(),
+  suffix: z.string().max(MAX_QUOTE_CONTEXT).optional(),
 });
 export type TextQuote = z.infer<typeof textQuoteSchema>;
 

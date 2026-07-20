@@ -1,5 +1,10 @@
 import { describe, it } from "vitest";
-import { annotationSchema, replySchema } from "../src/index.js";
+import {
+  MAX_QUOTE_CONTEXT,
+  MAX_QUOTE_EXACT,
+  annotationSchema,
+  replySchema,
+} from "../src/index.js";
 import { clone, expectInvalid, expectValid } from "./helpers.js";
 import {
   BAD_UUID_V4,
@@ -48,6 +53,25 @@ describe("annotationSchema", () => {
       text_quote: bad.target.textQuote,
     };
     expectInvalid(annotationSchema, bad);
+  });
+
+  it("enforces the contract 2b §2.2 textQuote bounds (prefix/suffix ≤ 32, bounded exact)", () => {
+    const longPrefix = clone(validRangeAnnotation);
+    longPrefix.target.textQuote.prefix = "x".repeat(MAX_QUOTE_CONTEXT + 1);
+    expectInvalid(annotationSchema, longPrefix);
+
+    const longSuffix = clone(validRangeAnnotation);
+    longSuffix.target.textQuote.suffix = "x".repeat(MAX_QUOTE_CONTEXT + 1);
+    expectInvalid(annotationSchema, longSuffix);
+
+    const hugeExact = clone(validRangeAnnotation);
+    hugeExact.target.textQuote.exact = "x".repeat(MAX_QUOTE_EXACT + 1);
+    expectInvalid(annotationSchema, hugeExact);
+
+    const maxed = clone(validRangeAnnotation);
+    maxed.target.textQuote.prefix = "x".repeat(MAX_QUOTE_CONTEXT);
+    maxed.target.textQuote.suffix = "x".repeat(MAX_QUOTE_CONTEXT);
+    expectValid(annotationSchema, maxed);
   });
 
   it("rejects a block target with extra selector fields", () => {

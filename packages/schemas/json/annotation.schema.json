@@ -87,13 +87,16 @@
               "properties": {
                 "exact": {
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "maxLength": 8192
                 },
                 "prefix": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 32
                 },
                 "suffix": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 32
                 }
               },
               "required": [

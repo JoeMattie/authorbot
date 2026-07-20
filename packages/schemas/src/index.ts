@@ -58,6 +58,8 @@ export type { Character } from "./character.js";
 export {
   ANNOTATION_KINDS,
   ANNOTATION_STATUSES,
+  MAX_QUOTE_CONTEXT,
+  MAX_QUOTE_EXACT,
   annotationKindSchema,
   annotationSchema,
   annotationStatusSchema,

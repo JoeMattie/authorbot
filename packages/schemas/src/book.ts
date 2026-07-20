@@ -38,6 +38,12 @@ export const bookConfigSchema = z.strictObject({
   publication: z
     .strictObject({
       chapter_url: z.string().min(1).optional(),
+      /**
+       * Collaboration API base URL (Phase 2b contract §1); enables the
+       * annotation islands at build time. `authorbot build --api-url`
+       * overrides.
+       */
+      api_url: z.string().min(1).optional(),
       show_revision: z.boolean().optional(),
       show_attribution: z.boolean().optional(),
       show_public_annotations: z.boolean().optional(),

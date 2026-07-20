@@ -127,9 +127,10 @@ export const validRangeAnnotation = {
     blockId: UUIDS.block2,
     textPosition: { start: 118, end: 163 },
     textQuote: {
+      // prefix/suffix are pinned at ≤ 32 characters (contract 2b §2.2).
       exact: "the text selected by the contributor",
-      prefix: "roughly 32 normalized characters before ",
-      suffix: " and roughly 32 normalized characters after",
+      prefix: "up to 32 normalized chars before",
+      suffix: " and up to 32 normalized after",
     },
   },
 };

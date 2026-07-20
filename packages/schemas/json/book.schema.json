@@ -79,6 +79,10 @@
           "type": "string",
           "minLength": 1
         },
+        "api_url": {
+          "type": "string",
+          "minLength": 1
+        },
         "show_revision": {
           "type": "boolean"
         },
