@@ -21,6 +21,13 @@ import { uuidv7 } from "../src/ids.js";
 export const MIGRATIONS_DIR = fileURLToPath(new URL("../../../migrations", import.meta.url));
 
 export const SESSION_SECRET = "test-session-secret";
+
+/**
+ * `Hono#request` builds requests against http://localhost, so this is the
+ * API's own origin — cookie-authed mutations send it to satisfy the Phase 2b
+ * CSRF origin check (contract 2b §3).
+ */
+export const API_ORIGIN = "http://localhost";
 export const WEBHOOK_SECRET = "test-webhook-secret";
 export const PROJECT_SLUG = "hollow-creek-anomaly";
 export const INITIAL_MAINTAINER = "github:initial-maintainer";
@@ -145,7 +152,7 @@ export async function devLogin(
 ): Promise<string> {
   const response = await harness.app.request("/v1/dev/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: API_ORIGIN },
     body: JSON.stringify({ login, role }),
   });
   if (response.status !== 200) {
@@ -172,6 +179,7 @@ export async function mintToken(
       headers: {
         "Content-Type": "application/json",
         Cookie: cookie,
+        Origin: API_ORIGIN,
         "Idempotency-Key": uuidv7(),
       },
       body: JSON.stringify({ name, scopes }),
@@ -194,6 +202,7 @@ export function jsonRequest(
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": uuidv7(),
+      Origin: API_ORIGIN,
       ...headers,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

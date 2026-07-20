@@ -41,6 +41,19 @@ export interface AppConfig {
   defaultBranch?: string;
   github?: GitHubOAuthConfig;
   mirrorMode?: MirrorMode;
+  /**
+   * Exact origins allowed for CORS, CSRF, and OAuth `return_to` (Phase 2b
+   * contract §3). Parsed/validated at boot from ALLOWED_ORIGINS; empty means
+   * same-origin deployment (no CORS headers, SameSite=Lax session cookie).
+   */
+  allowedOrigins?: string[];
+  /**
+   * Serve annotation/reply reads to credential-less requests (Phase 2b
+   * contract §2.1). The API-side mirror of the book's
+   * `publication.show_public_annotations`; set via PUBLIC_ANNOTATIONS=true.
+   * Default false: anonymous reads stay 401.
+   */
+  publicAnnotations?: boolean;
 }
 
 export interface AppDeps {

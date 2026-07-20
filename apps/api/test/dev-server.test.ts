@@ -51,6 +51,20 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
     ).rejects.toThrow(/DEV_LOGIN_ENABLED/);
   });
 
+  it("fails closed in github mode without OAuth config — never falls back to dev auth", async () => {
+    await expect(
+      createNodeDevApi({
+        ...BASE_ENV,
+        AUTH_MODE: "github",
+        DEV_LOGIN_ENABLED: undefined,
+        GITHUB_CLIENT_ID: undefined,
+        GITHUB_CLIENT_SECRET: undefined,
+        GITHUB_REDIRECT_URI: undefined,
+        BOOK_REPO_PATH: clone.workTreePath,
+      }),
+    ).rejects.toThrow(/GITHUB_CLIENT_ID|GitHub OAuth/);
+  });
+
   it("bootstraps the projection from the repo and mirrors mutations inline over HTTP", async () => {
     const server = serveNodeDevApi(dev, 0);
     try {
@@ -59,7 +73,7 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
 
       const login = await fetch(`${base}/v1/dev/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Origin: base },
         body: JSON.stringify({ login: "devuser", role: "contributor" }),
       });
       expect(login.status).toBe(200);
@@ -82,6 +96,7 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
             "Content-Type": "application/json",
             Cookie: cookie,
             "Idempotency-Key": "dev-server-test-1",
+            Origin: base,
           },
           body: JSON.stringify({
             kind: "comment",

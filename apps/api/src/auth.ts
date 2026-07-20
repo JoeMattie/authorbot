@@ -23,6 +23,7 @@ import {
 } from "@authorbot/domain";
 import { sha256Hex, timingSafeEqual } from "./crypto.js";
 import type { AppEnv, AuthContext, Clock } from "./deps.js";
+import { csrfOriginAllowed } from "./origins.js";
 import { problem } from "./problems.js";
 import { SESSION_COOKIE, verifySessionCookieValue } from "./sessions.js";
 
@@ -30,8 +31,13 @@ export interface AuthServices {
   repos: Repositories;
   clock: Clock;
   sessionSecret: string;
+  /** Exact origins allowed for CSRF checks (Phase 2b contract §3). */
+  allowedOrigins: string[];
   getProject(): Promise<ProjectRecord | null>;
 }
+
+/** Methods exempt from the CSRF origin check (no state change). */
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function actorRefOf(actor: { id: string; externalIdentity: string | null }): string {
   // Every actor this API creates has an external identity; the fallback keeps
@@ -141,9 +147,49 @@ export function requireAuth(services: AuthServices): MiddlewareHandler<AppEnv> {
       if (auth === null) {
         return problem(c, "unauthorized", { detail: "missing or invalid credential" });
       }
+      // CSRF (Phase 2b contract §3): cookie-authenticated mutations must
+      // present an Origin (or Referer) matching ALLOWED_ORIGINS or the API's
+      // own origin; missing/foreign fails closed. Bearer requests are exempt
+      // (no ambient credential) — they took the branch above.
+      if (!CSRF_SAFE_METHODS.has(c.req.method)) {
+        const apiOrigin = new URL(c.req.url).origin;
+        const ok = csrfOriginAllowed(
+          c.req.header("origin"),
+          c.req.header("referer"),
+          apiOrigin,
+          services.allowedOrigins,
+        );
+        if (!ok) {
+          return problem(c, "csrf-origin-mismatch", {
+            detail:
+              "cookie-authenticated mutations require an Origin or Referer header " +
+              "matching an allowed origin",
+          });
+        }
+      }
     }
     c.set("auth", auth);
     await next();
+  };
+}
+
+/**
+ * Optional authentication (Phase 2b public reads): a request presenting a
+ * credential goes through the full `requireAuth` pipeline (invalid
+ * credentials still 401); a credential-less request proceeds anonymously with
+ * no `auth` context set. Handlers behind this middleware decide whether an
+ * anonymous read is allowed (e.g. `PUBLIC_ANNOTATIONS`).
+ */
+export function optionalAuth(services: AuthServices): MiddlewareHandler<AppEnv> {
+  const required = requireAuth(services);
+  return async (c, next) => {
+    const hasCredential =
+      c.req.header("authorization") !== undefined || getCookie(c, SESSION_COOKIE) !== undefined;
+    if (!hasCredential) {
+      await next();
+      return;
+    }
+    return required(c, next);
   };
 }
 

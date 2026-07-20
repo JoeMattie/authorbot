@@ -26,7 +26,15 @@ import {
 } from "@authorbot/domain";
 import { parseChapterMarkdown, scanSafety } from "@authorbot/markdown";
 import { z } from "zod";
-import { authOf, requireAuth, requireProjectScope, type AuthServices } from "./auth.js";
+import {
+  authOf,
+  optionalAuth,
+  requireAuth,
+  requireProjectScope,
+  type AuthServices,
+} from "./auth.js";
+import { cors } from "./cors.js";
+import { csrfOriginAllowed, isValidReturnTo } from "./origins.js";
 import { randomBase64Url, sha256Hex, timingSafeEqual, hmacSha256Hex } from "./crypto.js";
 import { SYSTEM_CLOCK, type AppDeps, type AppEnv, type Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
@@ -40,6 +48,7 @@ import {
   operationJson,
   page,
   projectJson,
+  replyJson,
 } from "./json.js";
 import { problem } from "./problems.js";
 import { rebuildProjection, type RebuildResult } from "./projection/rebuild.js";
@@ -47,6 +56,8 @@ import { seedProject } from "./seed.js";
 import {
   clearOauthStateCookieHeader,
   oauthStateCookieHeader,
+  packOauthState,
+  unpackOauthState,
   OAUTH_STATE_COOKIE,
   sessionCookieHeader,
   signSessionCookieValue,
@@ -80,10 +91,15 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return cachedProject;
   };
 
+  const allowedOrigins = deps.config.allowedOrigins ?? [];
+  /** Cross-origin site configured → SameSite=None session cookie (2b §3). */
+  const cookieOptions = { crossOrigin: allowedOrigins.length > 0 };
+
   const services: AuthServices & { repos: Repositories; clock: Clock } = {
     repos,
     clock,
     sessionSecret: deps.config.sessionSecret,
+    allowedOrigins,
     getProject,
   };
 
@@ -128,6 +144,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     c.res.headers.set("X-Correlation-Id", correlationId);
   });
 
+  // CORS (Phase 2b contract §3): exact-origin allow-list, credentialed,
+  // preflight short-circuit. Pass-through when ALLOWED_ORIGINS is empty.
+  app.use("*", cors(allowedOrigins));
+
   app.onError((error, c) => {
     // Never echo internals (they may contain SQL values); the correlation id
     // is the log key.
@@ -139,6 +159,35 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
   const auth = requireAuth(services);
   const idem = idempotency(services);
+
+  /**
+   * Anonymous read support (Phase 2b contract §2.1: "Public visibility
+   * follows publication.show_public_annotations"): when the deployment sets
+   * PUBLIC_ANNOTATIONS=true (the API-side mirror of the book's
+   * `publication.show_public_annotations`), credential-less GETs on the
+   * annotation read routes are served read-only. Requests presenting a
+   * credential still go through the full auth + membership + scope checks.
+   */
+  const publicAnnotations = deps.config.publicAnnotations === true;
+  const maybeAuth = optionalAuth(services);
+  const requireReadOrPublic = async (
+    c: Context<AppEnv>,
+  ): Promise<{ project: ProjectRecord } | { response: Response }> => {
+    if (c.get("auth") !== undefined) {
+      return requireProjectScope(c, services, "annotations:read");
+    }
+    if (!publicAnnotations) {
+      return {
+        response: problem(c, "unauthorized", { detail: "missing or invalid credential" }),
+      };
+    }
+    const project = await getProject();
+    const param = c.req.param("projectId");
+    if (project === null || (param !== project.id && param !== project.slug)) {
+      return { response: problem(c, "not-found", { detail: "unknown project" }) };
+    }
+    return { project };
+  };
 
   const now = (): string => toTimestamp(clock.now());
 
@@ -240,6 +289,16 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   };
 
   const readJson = async (c: Context<AppEnv>): Promise<unknown | Response> => {
+    // Require a JSON content type before parsing (Phase 2b §3 defense in
+    // depth): a cross-site `text/plain` "simple request" (no CORS preflight)
+    // must never reach a JSON handler; declaring application/json forces a
+    // preflight that the exact-origin CORS allow-list controls.
+    const contentType = c.req.header("content-type") ?? "";
+    if (!/^application\/json\s*(;|$)/i.test(contentType.trim())) {
+      return problem(c, "bad-request", {
+        detail: "request body must be application/json",
+      });
+    }
     try {
       return (await c.req.json()) as unknown;
     } catch {
@@ -463,8 +522,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
   // ---- annotations -------------------------------------------------------------
 
-  app.get("/v1/projects/:projectId/chapters/:chapterId/annotations", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "annotations:read");
+  app.get("/v1/projects/:projectId/chapters/:chapterId/annotations", maybeAuth, async (c) => {
+    const guard = await requireReadOrPublic(c);
     if ("response" in guard) {
       return guard.response;
     }
@@ -587,6 +646,31 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return c.json(responseBody, 202);
     },
   );
+
+  // Threaded replies list (contract §2.3/§5: "reply → reload → both persist
+  // (API-backed)") — the read complement of the POST below, same page
+  // envelope as the annotations list. Anonymous read follows the same
+  // public-annotations gate as the annotations list.
+  app.get("/v1/projects/:projectId/annotations/:annotationId/replies", maybeAuth, async (c) => {
+    const guard = await requireReadOrPublic(c);
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const annotation = await repos.annotations.getById(c.req.param("annotationId"));
+    if (annotation === null || annotation.projectId !== guard.project.id) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    const limit = parseLimit(c);
+    if (limit instanceof Response) {
+      return limit;
+    }
+    const cursor = c.req.query("cursor");
+    const replies = await repos.replies.listByAnnotation(annotation.id, {
+      limit,
+      ...(cursor !== undefined ? { afterId: cursor } : {}),
+    });
+    return c.json(page(replies, limit, replyJson));
+  });
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/replies", auth, idem, async (c) => {
     const guard = await requireProjectScope(c, services, "annotations:write");
@@ -860,6 +944,23 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     });
 
     app.post("/v1/dev/login", async (c) => {
+      // CSRF (Phase 2b contract §3): this route sits before requireAuth (it
+      // mints the session), so it applies the same Origin/Referer check the
+      // auth middleware applies to cookie-authenticated mutations — otherwise
+      // any web page could drive a login CSRF against a developer's local API
+      // and destructively replace membership rows.
+      const csrfOk = csrfOriginAllowed(
+        c.req.header("origin"),
+        c.req.header("referer"),
+        new URL(c.req.url).origin,
+        allowedOrigins,
+      );
+      if (!csrfOk) {
+        return problem(c, "csrf-origin-mismatch", {
+          detail:
+            "dev login requires an Origin or Referer header matching an allowed origin",
+        });
+      }
       const body = await readJson(c);
       if (body instanceof Response) {
         return body;
@@ -943,7 +1044,13 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         }),
       ]);
 
-      c.header("Set-Cookie", sessionCookieHeader(await signSessionCookieValue(deps.config.sessionSecret, sessionId)));
+      c.header(
+        "Set-Cookie",
+        sessionCookieHeader(
+          await signSessionCookieValue(deps.config.sessionSecret, sessionId),
+          cookieOptions,
+        ),
+      );
       return c.json({
         actor: actorJson(actor),
         membership: membershipJson(membership),
@@ -954,9 +1061,27 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const provider = deps.identityProvider;
 
     app.get("/v1/auth/github", async (c) => {
+      // return_to (Phase 2b contract §3): only URLs inside ALLOWED_ORIGINS or
+      // the API's own origin (the same-origin deployment; mirrors the CSRF
+      // check) may round-trip through the state cookie — never
+      // javascript:/data: schemes, never a foreign host (open redirect).
+      const returnToRaw = c.req.query("return_to");
+      let returnTo: string | null = null;
+      if (returnToRaw !== undefined && returnToRaw.length > 0) {
+        if (!isValidReturnTo(returnToRaw, new URL(c.req.url).origin, allowedOrigins)) {
+          return problem(c, "validation-failed", {
+            detail: "return_to must be an absolute http(s) URL within an allowed origin",
+          });
+        }
+        returnTo = returnToRaw;
+      }
       const state = randomBase64Url(16);
-      const signed = `${state}.${await hmacSha256Hex(deps.config.sessionSecret, state)}`;
-      c.header("Set-Cookie", oauthStateCookieHeader(signed));
+      c.header(
+        "Set-Cookie",
+        oauthStateCookieHeader(
+          await packOauthState(deps.config.sessionSecret, { state, returnTo }),
+        ),
+      );
       return c.redirect(provider.authorizeUrl(state), 302);
     });
 
@@ -967,11 +1092,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       if (code === undefined || state === undefined || cookie === undefined) {
         return problem(c, "unauthorized", { detail: "missing OAuth state or code" });
       }
-      const dot = cookie.indexOf(".");
-      const cookieState = dot === -1 ? "" : cookie.slice(0, dot);
-      const cookieSig = dot === -1 ? "" : cookie.slice(dot + 1);
-      const expectedSig = await hmacSha256Hex(deps.config.sessionSecret, cookieState);
-      if (!timingSafeEqual(cookieSig, expectedSig) || !timingSafeEqual(cookieState, state)) {
+      const statePayload = await unpackOauthState(deps.config.sessionSecret, cookie);
+      if (statePayload === null || !timingSafeEqual(statePayload.state, state)) {
         return problem(c, "unauthorized", { detail: "OAuth state mismatch" });
       }
 
@@ -1029,10 +1151,20 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
       c.header(
         "Set-Cookie",
-        sessionCookieHeader(await signSessionCookieValue(deps.config.sessionSecret, sessionId)),
+        sessionCookieHeader(
+          await signSessionCookieValue(deps.config.sessionSecret, sessionId),
+          cookieOptions,
+        ),
       );
       c.header("Set-Cookie", clearOauthStateCookieHeader(), { append: true });
-      return c.redirect("/", 302);
+      // Re-validate the (signed) return_to before redirecting: defense in
+      // depth against config changes between start and callback.
+      const destination =
+        statePayload.returnTo !== null &&
+        isValidReturnTo(statePayload.returnTo, new URL(c.req.url).origin, allowedOrigins)
+          ? statePayload.returnTo
+          : "/";
+      return c.redirect(destination, 302);
     });
   }
 

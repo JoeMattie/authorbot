@@ -163,7 +163,7 @@ describe("projection rebuild", () => {
     });
     const login = await readerless.app.request("/v1/dev/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Origin: "http://localhost" },
       body: JSON.stringify({ login: "worker-user", role: "contributor" }),
     });
     expect(login.status).toBe(200);

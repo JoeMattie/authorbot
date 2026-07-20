@@ -127,6 +127,29 @@ describe("annotation, reply, and withdraw commands", () => {
     expect(res.status).toBe(400);
   });
 
+  it("400 on oversized textQuote selectors (server-side §2.2 bounds)", async () => {
+    // The 32 KiB cap applies to `body`; the selector has its own bounds so an
+    // attacker cannot smuggle megabytes (or spoofed context) through target.
+    const bigExact = validAnnotationPayload();
+    (bigExact["target"] as { textQuote: { exact: string } }).textQuote.exact =
+      "x".repeat(9 * 1024);
+    const exactRes = await h.app.request(
+      path(),
+      jsonRequest("POST", bigExact, { Cookie: cookie }),
+    );
+    expect(exactRes.status).toBe(400);
+    expect(((await exactRes.json()) as { code: string }).code).toBe("validation-failed");
+
+    const bigPrefix = validAnnotationPayload();
+    (bigPrefix["target"] as { textQuote: { prefix?: string } }).textQuote.prefix =
+      "x".repeat(33);
+    const prefixRes = await h.app.request(
+      path(),
+      jsonRequest("POST", bigPrefix, { Cookie: cookie }),
+    );
+    expect(prefixRes.status).toBe(400);
+  });
+
   it("chapter-scope annotations reject a target", async () => {
     const res = await h.app.request(
       path(),
@@ -186,6 +209,103 @@ describe("annotation, reply, and withdraw commands", () => {
         ),
       );
       expect(badParent.status).toBe(422);
+    });
+
+    it("GET lists an annotation's replies (page envelope) — reply persistence is readable (§5)", async () => {
+      const { annotationId } = await createAnnotation();
+      const first = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies`,
+        jsonRequest("POST", { body: "good point" }, { Cookie: cookie }),
+      );
+      const { replyId } = (await first.json()) as { replyId: string };
+      const second = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies`,
+        jsonRequest("POST", { body: "threaded", parentReplyId: replyId }, { Cookie: cookie }),
+      );
+      expect(second.status).toBe(202);
+
+      const list = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies`,
+        { headers: { Cookie: cookie } },
+      );
+      expect(list.status).toBe(200);
+      const body = (await list.json()) as {
+        items: { id: string; body: string; parentReplyId: string | null }[];
+        nextCursor: string | null;
+      };
+      expect(body.items).toHaveLength(2);
+      expect(body.items.map((r) => r.body).sort()).toEqual(["good point", "threaded"]);
+      expect(body.items.find((r) => r.body === "threaded")?.parentReplyId).toBe(replyId);
+      expect(body.nextCursor).toBeNull();
+    });
+
+    it("GET replies 404s for an unknown annotation and a reader role can read", async () => {
+      const missing = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/01900000-0000-7000-8000-00000000beef/replies`,
+        { headers: { Cookie: cookie } },
+      );
+      expect(missing.status).toBe(404);
+
+      const { annotationId } = await createAnnotation();
+      const readerCookie = await devLogin(h, "reply-reader", "reader");
+      const list = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies`,
+        { headers: { Cookie: readerCookie } },
+      );
+      expect(list.status).toBe(200);
+    });
+  });
+
+  describe("anonymous public reads (contract 2b §2.1)", () => {
+    it("401 for credential-less reads by default (PUBLIC_ANNOTATIONS unset)", async () => {
+      const anonymous = await h.app.request(path());
+      expect(anonymous.status).toBe(401);
+    });
+
+    it("serves annotations and replies read-only to signed-out visitors when PUBLIC_ANNOTATIONS=true", async () => {
+      const pub = await makeHarness({ config: { publicAnnotations: true } });
+      try {
+        const pubCookie = await devLogin(pub, "author", "contributor");
+        const create = await pub.app.request(
+          `/v1/projects/${pub.projectId}/chapters/${CHAPTER_ID}/annotations`,
+          jsonRequest("POST", validAnnotationPayload(), { Cookie: pubCookie }),
+        );
+        expect(create.status).toBe(202);
+        const { annotationId } = (await create.json()) as { annotationId: string };
+        await pub.app.request(
+          `/v1/projects/${pub.projectId}/annotations/${annotationId}/replies`,
+          jsonRequest("POST", { body: "public reply" }, { Cookie: pubCookie }),
+        );
+
+        // Signed-out list reads succeed…
+        const annotations = await pub.app.request(
+          `/v1/projects/${pub.projectId}/chapters/${CHAPTER_ID}/annotations`,
+        );
+        expect(annotations.status).toBe(200);
+        const annBody = (await annotations.json()) as { items: { id: string }[] };
+        expect(annBody.items.map((a) => a.id)).toContain(annotationId);
+
+        const replies = await pub.app.request(
+          `/v1/projects/${pub.projectId}/annotations/${annotationId}/replies`,
+        );
+        expect(replies.status).toBe(200);
+        expect(((await replies.json()) as { items: unknown[] }).items).toHaveLength(1);
+
+        // …but writes stay authenticated, and a presented-but-invalid
+        // credential still 401s (optionalAuth never weakens real auth).
+        const write = await pub.app.request(
+          `/v1/projects/${pub.projectId}/chapters/${CHAPTER_ID}/annotations`,
+          jsonRequest("POST", validAnnotationPayload()),
+        );
+        expect(write.status).toBe(401);
+        const badCookie = await pub.app.request(
+          `/v1/projects/${pub.projectId}/chapters/${CHAPTER_ID}/annotations`,
+          { headers: { Cookie: "authorbot_session=forged" } },
+        );
+        expect(badCookie.status).toBe(401);
+      } finally {
+        pub.close();
+      }
     });
   });
 

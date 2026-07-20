@@ -86,7 +86,7 @@ describe("idempotency and revision conflicts (integration)", () => {
   it("a mutation without Idempotency-Key is rejected", async () => {
     const response = await app.app.request(annotationsPath(), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookie },
+      headers: { "Content-Type": "application/json", Cookie: cookie, Origin: "http://localhost" },
       body: JSON.stringify(rangeSuggestionPayload()),
     });
     expect(response.status).toBe(400);

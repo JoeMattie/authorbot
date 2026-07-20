@@ -41,15 +41,97 @@ export async function verifySessionCookieValue(
   return timingSafeEqual(signature, expected) ? sessionId : null;
 }
 
-export function sessionCookieHeader(value: string): string {
+/**
+ * Session cookie attributes (Phase 2b contract §3): `SameSite=None; Secure`
+ * only when a cross-origin site is configured (ALLOWED_ORIGINS non-empty);
+ * `SameSite=Lax` otherwise. Always HttpOnly + Secure.
+ */
+export function sessionCookieHeader(value: string, options: { crossOrigin: boolean }): string {
+  const sameSite = options.crossOrigin ? "None" : "Lax";
   return (
     `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}; ` +
-    "HttpOnly; Secure; SameSite=Lax"
+    `HttpOnly; Secure; SameSite=${sameSite}`
   );
 }
 
 /** Short-lived signed OAuth state cookie (github mode). */
 export const OAUTH_STATE_COOKIE = "authorbot_oauth_state";
+
+/**
+ * OAuth state cookie payload (Phase 2b contract §3): the CSRF state plus the
+ * validated `return_to` propagated from the start route. Packed as
+ * `base64url(JSON).hmacHex` — signed with the session secret, so the callback
+ * trusts only what the start route wrote.
+ */
+export interface OauthStatePayload {
+  state: string;
+  returnTo: string | null;
+}
+
+export async function packOauthState(
+  sessionSecret: string,
+  payload: OauthStatePayload,
+): Promise<string> {
+  const encoded = utf8ToBase64Url(JSON.stringify(payload));
+  const signature = await hmacSha256Hex(sessionSecret, encoded);
+  return `${encoded}.${signature}`;
+}
+
+/** Verify + decode a state cookie value; null on any mismatch. Never throws. */
+export async function unpackOauthState(
+  sessionSecret: string,
+  value: string,
+): Promise<OauthStatePayload | null> {
+  const dot = value.indexOf(".");
+  if (dot === -1) {
+    return null;
+  }
+  const encoded = value.slice(0, dot);
+  const signature = value.slice(dot + 1);
+  const expected = await hmacSha256Hex(sessionSecret, encoded);
+  if (!timingSafeEqual(signature, expected)) {
+    return null;
+  }
+  const json = base64UrlToUtf8(encoded);
+  if (json === null) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(json) as { state?: unknown; returnTo?: unknown };
+    if (typeof parsed.state !== "string") {
+      return null;
+    }
+    return {
+      state: parsed.state,
+      returnTo: typeof parsed.returnTo === "string" ? parsed.returnTo : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function utf8ToBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  // btoa exists in Workers and Node >= 16.
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
+}
+
+function base64UrlToUtf8(value: string): string | null {
+  if (!/^[A-Za-z0-9_-]*$/.test(value)) {
+    return null;
+  }
+  try {
+    const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
+    const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
 
 export function oauthStateCookieHeader(value: string): string {
   return `${OAUTH_STATE_COOKIE}=${value}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Lax`;

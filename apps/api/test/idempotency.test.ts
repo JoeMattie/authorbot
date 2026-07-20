@@ -14,6 +14,7 @@ import { createDevIdentityProvider } from "../src/identity/provider.js";
 import { sha256Hex } from "../src/crypto.js";
 import { uuidv7 } from "../src/ids.js";
 import {
+  API_ORIGIN,
   CHAPTER_ID,
   FakeReader,
   MIGRATIONS_DIR,
@@ -36,6 +37,7 @@ describe("Idempotency-Key middleware", () => {
       headers: {
         "Content-Type": "application/json",
         Cookie: cookie,
+        Origin: API_ORIGIN,
         ...(key !== null ? { "Idempotency-Key": key } : {}),
       },
       body: JSON.stringify(body),
@@ -152,7 +154,7 @@ describe("Idempotency-Key middleware", () => {
     }
     const login = await api.app.request("/v1/dev/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Origin: "http://localhost" },
       body: JSON.stringify({ login: "racer", role: "contributor" }),
     });
     const raceCookie = (login.headers.get("set-cookie") ?? "").split(";")[0] as string;
@@ -163,6 +165,7 @@ describe("Idempotency-Key middleware", () => {
         headers: {
           "Content-Type": "application/json",
           Cookie: raceCookie,
+          Origin: "http://localhost",
           "Idempotency-Key": "race-key",
         },
         body: JSON.stringify(validAnnotationPayload()),
@@ -195,6 +198,7 @@ describe("Idempotency-Key middleware", () => {
         headers: {
           "Content-Type": "application/json",
           Cookie: maintainer,
+          Origin: API_ORIGIN,
           "Idempotency-Key": "mint-key",
         },
         body: JSON.stringify({ name: "once-only", scopes: ["chapters:read"] }),

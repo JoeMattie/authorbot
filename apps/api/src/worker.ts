@@ -12,6 +12,7 @@ import { createApi, type AuthorbotApi } from "./app.js";
 import type { AppConfig, AppDeps } from "./deps.js";
 import { createDevIdentityProvider, type IdentityProvider } from "./identity/provider.js";
 import { createGitHubIdentityProvider } from "./identity/github.js";
+import { parseAllowedOrigins } from "./origins.js";
 
 export interface WorkerBindings {
   DB: D1DatabaseLike;
@@ -33,6 +34,16 @@ export interface WorkerBindings {
   INITIAL_MAINTAINER?: string;
   DEFAULT_BRANCH?: string;
   MIRROR_MODE?: string;
+  /**
+   * Comma-separated exact origins allowed for CORS / CSRF / OAuth return_to
+   * (Phase 2b contract §3). Optional: absent means same-origin deployment.
+   */
+  ALLOWED_ORIGINS?: string;
+  /**
+   * "true" to serve annotation/reply reads anonymously (Phase 2b §2.1) — the
+   * API-side mirror of the book's `publication.show_public_annotations`.
+   */
+  PUBLIC_ANNOTATIONS?: string;
 }
 
 function required(bindings: WorkerBindings, name: keyof WorkerBindings): string {
@@ -64,6 +75,10 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
     projectRepo: required(bindings, "PROJECT_REPO"),
     initialMaintainer: required(bindings, "INITIAL_MAINTAINER"),
     mirrorMode: bindings.MIRROR_MODE === "inline" ? "inline" : "queue",
+    // Boot-time validation (contract 2b §3): an invalid entry throws here,
+    // never silently widens CORS at runtime.
+    allowedOrigins: parseAllowedOrigins(bindings.ALLOWED_ORIGINS),
+    publicAnnotations: bindings.PUBLIC_ANNOTATIONS === "true",
   };
   if (bindings.DEFAULT_BRANCH !== undefined && bindings.DEFAULT_BRANCH.length > 0) {
     config.defaultBranch = bindings.DEFAULT_BRANCH;
@@ -78,7 +93,13 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
   return config;
 }
 
-function identityProviderFor(config: AppConfig): IdentityProvider {
+/**
+ * Provider selection shared by every entry point (worker and Node dev
+ * server): fail closed — a github-mode deployment without OAuth configuration
+ * must throw, never fall back to dev auth (which would mount the
+ * unauthenticated /v1/dev/login).
+ */
+export function identityProviderFor(config: AppConfig): IdentityProvider {
   if (config.authMode === "github") {
     if (config.github === undefined) {
       throw new Error("AUTH_MODE=github requires GitHub OAuth configuration");

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { devLogin, makeHarness, mintToken, type TestHarness } from "./helpers.js";
+import { API_ORIGIN, devLogin, makeHarness, mintToken, type TestHarness } from "./helpers.js";
 
 describe("agent token storage and lifecycle", () => {
   let h: TestHarness;
@@ -41,6 +41,7 @@ describe("agent token storage and lifecycle", () => {
         "Content-Type": "application/json",
         Cookie: maintainer,
         "Idempotency-Key": "k-bad-scope",
+        Origin: API_ORIGIN,
       },
       body: JSON.stringify({ name: "x", scopes: ["not-a-scope"] }),
     });
@@ -52,6 +53,7 @@ describe("agent token storage and lifecycle", () => {
         "Content-Type": "application/json",
         Cookie: maintainer,
         "Idempotency-Key": "k-bad-ttl",
+        Origin: API_ORIGIN,
       },
       body: JSON.stringify({ name: "x", scopes: ["chapters:read"], expiresInDays: 91 }),
     });
@@ -65,6 +67,7 @@ describe("agent token storage and lifecycle", () => {
         "Content-Type": "application/json",
         Cookie: maintainer,
         "Idempotency-Key": "k-meta",
+        Origin: API_ORIGIN,
       },
       body: JSON.stringify({ name: "meta-agent", scopes: ["chapters:read"], expiresInDays: 10 }),
     });
@@ -98,7 +101,10 @@ describe("agent token storage and lifecycle", () => {
   it("DELETE 404s on an unknown token id", async () => {
     const res = await h.app.request(
       `/v1/projects/${h.projectId}/agent-tokens/01900000-0000-7000-8000-00000000f00d`,
-      { method: "DELETE", headers: { Cookie: maintainer, "Idempotency-Key": "k-del-404" } },
+      {
+        method: "DELETE",
+        headers: { Cookie: maintainer, "Idempotency-Key": "k-del-404", Origin: API_ORIGIN },
+      },
     );
     expect(res.status).toBe(404);
   });

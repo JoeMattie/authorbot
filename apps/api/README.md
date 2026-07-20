@@ -39,9 +39,12 @@ pnpm --filter @authorbot/api smoke
 Dev-login and first requests by hand:
 
 ```sh
-# login as a maintainer (dev mode only; the route does not exist in github mode)
+# login as a maintainer (dev mode only; the route does not exist in github
+# mode). Like every cookie-minting/cookie-authed mutation it requires an
+# Origin header matching an allowed origin or the API's own origin (CSRF).
 curl -c /tmp/authorbot.jar -X POST http://127.0.0.1:8787/v1/dev/login \
   -H 'Content-Type: application/json' \
+  -H 'Origin: http://127.0.0.1:8787' \
   -d '{"login":"joe","role":"maintainer"}'
 
 curl -b /tmp/authorbot.jar http://127.0.0.1:8787/v1/me
@@ -49,10 +52,12 @@ curl -b /tmp/authorbot.jar http://127.0.0.1:8787/v1/me
 # {projectId} accepts the project UUID or its slug
 curl -b /tmp/authorbot.jar http://127.0.0.1:8787/v1/projects/hollow-creek-anomaly/chapters
 
-# mint an agent token (plaintext appears exactly once in this response)
+# mint an agent token (plaintext appears exactly once in this response).
+# Cookie-authed mutations need an Origin header (CSRF check, contract 2b §3):
 curl -b /tmp/authorbot.jar -X POST \
   http://127.0.0.1:8787/v1/projects/hollow-creek-anomaly/agent-tokens \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
+  -H 'Origin: http://127.0.0.1:8787' \
   -d '{"name":"my-agent","scopes":["chapters:read","annotations:read","annotations:write"]}'
 
 # use it
@@ -75,7 +80,9 @@ SESSION_SECRET=dev WEBHOOK_SECRET=dev PROJECT_SLUG=hollow-creek-anomaly \
 PROJECT_REPO=JoeMattie/causal-projector INITIAL_MAINTAINER=github:JoeMattie \
 pnpm --filter @authorbot/api dev:node          # http://127.0.0.1:8788
 # optional: SQLITE_PATH=/tmp/authorbot-dev.sqlite (default is in-memory),
-#           MIRROR_MODE=queue, PORT=8788
+#           MIRROR_MODE=queue, PORT=8788,
+#           ALLOWED_ORIGINS=http://127.0.0.1:4321 (site origin, for pairing
+#           with a published site's collaboration islands — see below)
 ```
 
 Note: mutations commit to the work tree at `BOOK_REPO_PATH` — point it at a
@@ -84,10 +91,58 @@ rather than your checkout if you don't want dev commits in it.
 
 Configuration (contract §6): vars in `wrangler.jsonc` (`AUTH_MODE`,
 `PROJECT_SLUG`, `PROJECT_REPO`, `INITIAL_MAINTAINER`, `DEFAULT_BRANCH`,
-`MIRROR_MODE`); secrets via `wrangler secret put SESSION_SECRET` /
-`WEBHOOK_SECRET` / `GITHUB_CLIENT_SECRET` (github mode adds
+`MIRROR_MODE`, `ALLOWED_ORIGINS`); secrets via `wrangler secret put
+SESSION_SECRET` / `WEBHOOK_SECRET` / `GITHUB_CLIENT_SECRET` (github mode adds
 `GITHUB_CLIENT_ID`, `GITHUB_REDIRECT_URI`). `.dev.vars` holds throwaway
 dev-only values.
+
+## Site ↔ API pairing: CORS + CSRF (Phase 2b contract §3, ADR-0018)
+
+A site built with `authorbot build --api-url <this API>` (or
+`publication.api_url` in `book.yml`) mounts annotation islands on chapter
+pages that call this API with `credentials: "include"` — see the root
+`README.md` for the end-to-end local-dev recipe and
+`packages/publisher/README.md` for the build side.
+
+The recommended deployment is **same-origin** (published site and API on one
+host, root-relative `api_url`): leave `ALLOWED_ORIGINS` unset — no CORS
+headers are emitted and the session cookie stays `SameSite=Lax`.
+
+For the cross-origin case (e.g. site on GitHub Pages, API elsewhere), set
+`ALLOWED_ORIGINS` to a comma-separated list of **exact origins** (no
+wildcards, no paths — e.g.
+`ALLOWED_ORIGINS=https://joe.github.io,http://localhost:4321`). The value is
+validated at boot; an invalid entry fails startup. When configured:
+
+- **CORS**: preflights and responses for listed origins get
+  `Access-Control-Allow-Origin: <origin>` +
+  `Access-Control-Allow-Credentials: true`; allowed request headers include
+  `Content-Type`, `Authorization`, and `Idempotency-Key`; `X-Correlation-Id`
+  is exposed to the page. Unlisted origins get no CORS headers at all.
+- **Session cookie** becomes `SameSite=None; Secure` (required for
+  cross-origin `fetch` with credentials).
+- **OAuth `return_to`**: `GET /v1/auth/github?return_to=<url>` accepts only
+  URLs inside an allowed origin **or the API's own origin** (exact origin
+  prefix match; `javascript:` and open-redirect shapes are rejected with 400)
+  and redirects there after the callback. The same-origin deployment
+  (`ALLOWED_ORIGINS` unset) therefore works out of the box: the site origin
+  IS the API origin.
+
+**CSRF** (always on, configured or not): cookie-authenticated mutations —
+and `POST /v1/dev/login`, which mints the cookie — must send an `Origin` (or
+`Referer`) header matching `ALLOWED_ORIGINS` or the API's own origin —
+missing or foreign origins get a 403 `csrf-origin-mismatch` problem.
+Browsers send `Origin` automatically; non-browser cookie clients (curl) must
+add it explicitly. JSON routes additionally require
+`Content-Type: application/json`, so cross-site `text/plain` "simple
+requests" never reach a handler. Bearer-token requests are exempt (no
+ambient credential).
+
+**Public annotation reads**: set `PUBLIC_ANNOTATIONS=true` (the API-side
+mirror of the book's `publication.show_public_annotations`) to serve the
+annotation and reply list GETs to credential-less requests, read-only.
+Default off: anonymous reads get 401. Requests presenting a credential
+always go through the full auth/membership/scope checks.
 
 ## Deps contract
 

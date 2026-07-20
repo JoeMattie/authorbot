@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  API_ORIGIN,
   devLogin,
   jsonRequest,
   makeHarness,
@@ -90,6 +91,7 @@ describe("authentication and authorization", () => {
       headers: {
         "Content-Type": "application/json",
         "Idempotency-Key": "k-mint-denied",
+        Origin: API_ORIGIN,
         Cookie: contributor,
       },
       body: JSON.stringify({ name: "nope", scopes: ["chapters:read"] }),
@@ -176,7 +178,7 @@ describe("authentication and authorization", () => {
         `/v1/projects/${h.projectId}/agent-tokens/${tokenId}`,
         {
           method: "DELETE",
-          headers: { Cookie: maintainerCookie, "Idempotency-Key": "k-revoke-1" },
+          headers: { Cookie: maintainerCookie, "Idempotency-Key": "k-revoke-1", Origin: API_ORIGIN },
         },
       );
       expect(del.status).toBe(204);
@@ -209,6 +211,7 @@ describe("authentication and authorization", () => {
       headers: {
         "Content-Type": "application/json",
         "Idempotency-Key": "k-audit-1",
+        Origin: API_ORIGIN,
         Cookie: cookie,
       },
       body: JSON.stringify(validAnnotationPayload()),

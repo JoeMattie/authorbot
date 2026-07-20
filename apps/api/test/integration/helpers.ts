@@ -168,7 +168,9 @@ export async function devLogin(
 ): Promise<string> {
   const response = await target.app.request("/v1/dev/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // Origin satisfies the dev-login CSRF check (API's own origin;
+    // Hono#request targets http://localhost).
+    headers: { "Content-Type": "application/json", Origin: "http://localhost" },
     body: JSON.stringify({ login, role }),
   });
   if (response.status !== 200) {
@@ -209,6 +211,9 @@ export function jsonRequest(
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": uuidv7(),
+      // The API's own origin under Hono#request — satisfies the Phase 2b
+      // CSRF origin check on cookie-authed mutations (contract 2b §3).
+      Origin: "http://localhost",
       ...headers,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

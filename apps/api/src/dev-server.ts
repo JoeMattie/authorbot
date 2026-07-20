@@ -28,9 +28,8 @@ import { fileURLToPath } from "node:url";
 import { applyMigrations, openSqliteDatabase, type SqliteAdapter } from "@authorbot/database";
 import { createApi, type AuthorbotApi } from "./app.js";
 import type { AppDeps } from "./deps.js";
-import { configFromBindings, type WorkerBindings } from "./worker.js";
-import { createDevIdentityProvider, type IdentityProvider } from "./identity/provider.js";
-import { createGitHubIdentityProvider } from "./identity/github.js";
+import { configFromBindings, identityProviderFor, type WorkerBindings } from "./worker.js";
+import type { IdentityProvider } from "./identity/provider.js";
 import { createInlineMirror, type InlineMirror } from "./mirror.js";
 import { LocalFsBookRepoReader } from "./projection/local-fs.js";
 
@@ -65,10 +64,9 @@ export async function createNodeDevApi(env: NodeJS.ProcessEnv = process.env): Pr
   const db = openSqliteDatabase(env["SQLITE_PATH"] ?? ":memory:");
   await applyMigrations(db, env["MIGRATIONS_DIR"] ?? MIGRATIONS_DIR);
 
-  const identityProvider: IdentityProvider =
-    config.authMode === "github" && config.github !== undefined
-      ? createGitHubIdentityProvider(config.github)
-      : createDevIdentityProvider();
+  // Same fail-closed selection as the Worker entry (worker.ts): github mode
+  // without OAuth config throws — it must never fall back to dev auth.
+  const identityProvider: IdentityProvider = identityProviderFor(config);
 
   const mirror =
     config.mirrorMode === "queue" ? null : createInlineMirror({ db, workTreePath: bookRepoPath });

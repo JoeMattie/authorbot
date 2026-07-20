@@ -14,6 +14,10 @@ export const PROBLEM_TYPES = {
   "bad-request": { status: 400, title: "Malformed request" },
   unauthorized: { status: 401, title: "Missing or invalid credential" },
   forbidden: { status: 403, title: "Actor lacks required scope or role" },
+  "csrf-origin-mismatch": {
+    status: 403,
+    title: "Cookie-authenticated mutation from a disallowed origin",
+  },
   "not-found": { status: 404, title: "Resource not found" },
   "revision-conflict": { status: 409, title: "Stale chapter revision" },
   "idempotency-key-mismatch": {

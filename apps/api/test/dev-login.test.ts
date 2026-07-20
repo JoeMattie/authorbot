@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { devLogin, makeHarness, type TestHarness } from "./helpers.js";
+import { API_ORIGIN, devLogin, makeHarness, type TestHarness } from "./helpers.js";
 
 describe("dev identity provider gating (contract §3, ADR 0015)", () => {
   let h: TestHarness;
@@ -9,7 +9,7 @@ describe("dev identity provider gating (contract §3, ADR 0015)", () => {
     h = await makeHarness();
     const res = await h.app.request("/v1/dev/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Origin: API_ORIGIN },
       body: JSON.stringify({ login: "dave", role: "editor" }),
     });
     expect(res.status).toBe(200);
@@ -26,7 +26,7 @@ describe("dev identity provider gating (contract §3, ADR 0015)", () => {
     h = await makeHarness({ githubMode: true });
     const res = await h.app.request("/v1/dev/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Origin: API_ORIGIN },
       body: JSON.stringify({ login: "dave", role: "maintainer" }),
     });
     expect(res.status).toBe(404);
@@ -57,11 +57,59 @@ describe("dev identity provider gating (contract §3, ADR 0015)", () => {
     expect(body.memberships[0]?.role).toBe("maintainer");
   });
 
-  it("validates the login shape", async () => {
+  it("403 csrf-origin-mismatch for a foreign Origin (drive-by dev login)", async () => {
+    h = await makeHarness();
+    const res = await h.app.request("/v1/dev/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: JSON.stringify({ login: "attacker", role: "maintainer" }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("csrf-origin-mismatch");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("403 when Origin and Referer are both missing (fails closed)", async () => {
     h = await makeHarness();
     const res = await h.app.request("/v1/dev/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: "curl-user", role: "maintainer" }),
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("400 for a text/plain body (cross-site simple request shape)", async () => {
+    h = await makeHarness();
+    const res = await h.app.request("/v1/dev/login", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Origin: API_ORIGIN },
+      body: JSON.stringify({ login: "attacker", role: "maintainer" }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("a rejected cross-site login never touches an existing membership", async () => {
+    h = await makeHarness();
+    const cookie = await devLogin(h, "seeded", "maintainer");
+    const res = await h.app.request("/v1/dev/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
+      body: JSON.stringify({ login: "seeded", role: "reader" }),
+    });
+    expect(res.status).toBe(403);
+    const me = await h.app.request("/v1/me", { headers: { Cookie: cookie } });
+    const body = (await me.json()) as { memberships: { role: string }[] };
+    expect(body.memberships[0]?.role).toBe("maintainer");
+  });
+
+  it("validates the login shape", async () => {
+    h = await makeHarness();
+    const res = await h.app.request("/v1/dev/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: API_ORIGIN },
       body: JSON.stringify({ login: "bad login!", role: "reader" }),
     });
     expect(res.status).toBe(400);
