@@ -72,6 +72,7 @@ import {
   verifyLeaseToken,
 } from "./leases.js";
 import { problem } from "./problems.js";
+import { proseWriteBlocked } from "./reconcile.js";
 import { sha256Hex } from "./crypto.js";
 import type { ProjectSerializer } from "./serializer.js";
 
@@ -641,6 +642,26 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
     return serialize(guard.project.id, async () => {
       const a = authOf(c);
+
+      // Phase 5 §6 / design §14.5: a diverged repository blocks PROSE writes.
+      // Checked inside the serializer and re-read from the row, not from the
+      // cached project the guard returned — divergence is set by a webhook
+      // reconciliation that can land between this request's auth check and
+      // its command, and a submission accepted against a projection known to
+      // disagree with the repository is precisely the clobber this refuses.
+      //
+      // Only this route is gated. Annotations, replies, votes, and the lease
+      // lifecycle record *intent about* prose rather than rewriting it, so
+      // refusing them would turn a repository problem into a total outage for
+      // collaborators who have no way to fix it.
+      const currentProject = await repos.projects.getById(guard.project.id);
+      if (currentProject !== null) {
+        const blocked = proseWriteBlocked(c, currentProject);
+        if (blocked !== null) {
+          return blocked;
+        }
+      }
+
       const workItem = await findWorkItem(c, guard.project);
       if (workItem instanceof Response) {
         return workItem;

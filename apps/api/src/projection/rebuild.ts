@@ -31,7 +31,7 @@ import type {
 import type { Clock } from "../deps.js";
 import { uuidv7 } from "../ids.js";
 import { toTimestamp } from "@authorbot/domain";
-import type { BookRepoReader, RepoDecisionSnapshot } from "./reader.js";
+import type { BookRepoReader, BookRepoSnapshot, RepoDecisionSnapshot } from "./reader.js";
 
 export interface RebuildResult {
   chapters: number;
@@ -111,15 +111,28 @@ function chunked(ids: string[]): string[][] {
   return chunks;
 }
 
+export interface RebuildOptions {
+  /**
+   * Snapshot the caller already read (Phase 5 §6). Reconciliation classifies
+   * a snapshot before deciding whether to project it, so passing it back in
+   * avoids a second repository read AND — more importantly — guarantees the
+   * bytes that were classified are the bytes that get projected. Re-reading
+   * would open a window in which a push between the two reads is projected
+   * without ever being checked for divergence.
+   */
+  snapshot?: BookRepoSnapshot;
+}
+
 export async function rebuildProjection(
   ctx: RebuildContext,
   project: ProjectRecord,
   reader: BookRepoReader,
   correlationId: string,
+  options: RebuildOptions = {},
 ): Promise<RebuildResult> {
   const { db, repos, clock } = ctx;
   const now = toTimestamp(clock.now());
-  const snapshot = await reader.readSnapshot();
+  const snapshot = options.snapshot ?? (await reader.readSnapshot());
 
   const chapterIds = new Set(snapshot.chapters.map((chapter) => chapter.frontmatter.id));
   // Snapshot annotations kept: chapter must be present (repo-side orphan

@@ -16,6 +16,7 @@ import type { AppConfig, AppDeps, AppEnv } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
 import { createGitHubIdentityProvider } from "../src/identity/github.js";
 import type { BookRepoReader, BookRepoSnapshot } from "../src/projection/reader.js";
+import type { ProjectionRefresher } from "../src/reconcile.js";
 import { uuidv7 } from "../src/ids.js";
 
 export const MIGRATIONS_DIR = fileURLToPath(new URL("../../../migrations", import.meta.url));
@@ -109,6 +110,11 @@ export async function makeHarness(options: {
   clock?: { now(): Date };
   /** Override the default mutation hook (e.g. wire a real inline mirror). */
   onMutationCommitted?: (projectId: string) => Promise<void>;
+  /**
+   * Phase 5 §6 seam: stand in for the `ProjectCoordinator` Durable Object.
+   * Present ⇒ the webhook hands the refresh over instead of rebuilding inline.
+   */
+  projectionRefresher?: ProjectionRefresher;
 } = {}): Promise<TestHarness> {
   const db = openSqliteDatabase(":memory:");
   await applyMigrations(db, MIGRATIONS_DIR);
@@ -138,6 +144,9 @@ export async function makeHarness(options: {
         : createDevIdentityProvider(),
     ...(reader !== undefined ? { reader } : {}),
     ...(options.clock !== undefined ? { clock: options.clock } : {}),
+    ...(options.projectionRefresher !== undefined
+      ? { projectionRefresher: options.projectionRefresher }
+      : {}),
     onMutationCommitted: async (projectId) => {
       await mutationHook(projectId);
     },

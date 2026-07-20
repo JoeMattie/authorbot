@@ -55,7 +55,18 @@ import {
   replyJson,
 } from "./json.js";
 import { problem } from "./problems.js";
-import { rebuildProjection, type RebuildResult } from "./projection/rebuild.js";
+import { type RebuildResult } from "./projection/rebuild.js";
+import {
+  clearDivergence,
+  divergenceFindingsOf,
+  isDiverged,
+  markStaleAndRequestRefresh,
+  reconcileProjection,
+  type ReconcileContext,
+  type ReconcileOptions,
+  type ReconcileResult,
+} from "./reconcile.js";
+import { publicationStatusJson, registerPublicationRoutes } from "./publications.js";
 import { seedProject } from "./seed.js";
 import {
   clearOauthStateCookieHeader,
@@ -68,6 +79,17 @@ import {
 } from "./sessions.js";
 import { getCookie } from "hono/cookie";
 
+/**
+ * Body of `POST /v1/projects/{id}/divergence/clear` (Phase 5 §6). The reason
+ * is mandatory and stored on the project row plus the audit event: a recovery
+ * that nobody can explain later is how a divergence becomes folklore.
+ */
+const clearDivergenceSchema = z.strictObject({
+  reason: z.string().min(1).max(2000),
+  /** Re-project the repository as truth (default true). */
+  resync: z.boolean().optional(),
+});
+
 /** The app plus the handles tests and the Worker entry need. */
 export interface AuthorbotApi {
   app: Hono<AppEnv>;
@@ -76,6 +98,13 @@ export interface AuthorbotApi {
   bootstrap(): Promise<{ project: ProjectRecord; rebuild: RebuildResult | null }>;
   /** Rebuild the projection now (null when no reader is configured). */
   rebuild(correlationId?: string): Promise<RebuildResult | null>;
+  /**
+   * Phase 5 §6: one reconciliation pass — classify the repository snapshot,
+   * then diverge or project + re-anchor. The `ProjectCoordinator` Durable
+   * Object calls this for its `refreshProjection()`; `rebuild()` is the thin
+   * Phase 2-shaped wrapper over it.
+   */
+  reconcile(options?: Partial<ReconcileOptions>): Promise<ReconcileResult | null>;
 }
 
 /** Contract-shaped entry point: deps in, Hono app out. */
@@ -111,20 +140,41 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     getProject,
   };
 
-  const rebuild = async (correlationId?: string): Promise<RebuildResult | null> => {
-    if (deps.reader === undefined) {
-      return null;
-    }
+  const reconcileCtx = (): ReconcileContext => ({ db: deps.db, repos, clock });
+
+  /**
+   * Phase 5 §6: every projection write now goes through reconciliation, which
+   * classifies the snapshot before applying it. `rebuild()` keeps its Phase 2
+   * signature (boot, tests, the webhook) and returns null when the pass
+   * refused to project — no reader, no project, or a diverged repository.
+   */
+  const reconcile = async (
+    options: Partial<ReconcileOptions> = {},
+  ): Promise<ReconcileResult | null> => {
     const project = await getProject();
     if (project === null) {
       return null;
     }
-    return rebuildProjection(
-      { db: deps.db, repos, clock },
-      project,
-      deps.reader,
-      correlationId ?? uuidv7(clock.now()),
+    // Re-read: `getProject` caches, and divergence/staleness live on the row.
+    const fresh = (await repos.projects.getById(project.id)) ?? project;
+    cachedProject = fresh;
+    return reconcileProjection(reconcileCtx(), fresh, deps.reader, {
+      correlationId: options.correlationId ?? uuidv7(clock.now()),
+      ...(options.acceptRepository !== undefined
+        ? { acceptRepository: options.acceptRepository }
+        : {}),
+      ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+    });
+  };
+
+  const rebuild = async (correlationId?: string): Promise<RebuildResult | null> => {
+    if (deps.reader === undefined) {
+      return null;
+    }
+    const result = await reconcile(
+      correlationId !== undefined ? { correlationId } : {},
     );
+    return result?.rebuild ?? null;
   };
 
   const bootstrap = async (): Promise<{
@@ -273,9 +323,11 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   };
 
   const notifyMutation = async (projectId: string): Promise<void> => {
-    // MIRROR_MODE=queue (contract §5): outbox rows are recorded but not
-    // drained in-process — a later drain (Phase 5 Durable Object alarm, or a
-    // manual `InlineMirror.drain`) picks them up.
+    // MIRROR_MODE=queue (Phase 2 contract §5): outbox rows are recorded but
+    // not drained here — a later drain (the coordinator alarm, or a manual
+    // `InlineMirror.drain`) picks them up. `inline` drains in-process;
+    // `durable` (Phase 5 contract §5) asks the project's Durable Object to
+    // drain now that the batch has committed. Both go through the same hook.
     if (deps.onMutationCommitted === undefined || deps.config.mirrorMode === "queue") {
       return;
     }
@@ -347,7 +399,108 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if ("response" in guard) {
       return guard.response;
     }
-    return c.json(projectJson(guard.project));
+    // `gitIntegration` (Phase 5 contract §2) makes the degraded state
+    // visible: `unconfigured` is a deployment with no GitHub App, where
+    // reads work and mutations queue rather than commit. Status only — no
+    // credential value is ever exposed.
+    //
+    // Phase 5 §6 adds the rest of the operator's picture: whether the
+    // projection is behind the repository, whether the repository diverged,
+    // and — the design §17.3 point — whether what is DEPLOYED is what was
+    // integrated. Read the row fresh rather than using the cached one: all
+    // three move without a request ever touching this handler.
+    const project = (await repos.projects.getById(guard.project.id)) ?? guard.project;
+    const [latest, latestDeployed] = await Promise.all([
+      repos.publications.getLatest(project.id),
+      repos.publications.getLatestDeployed(project.id),
+    ]);
+    const findings = divergenceFindingsOf(project);
+    return c.json({
+      ...projectJson(project),
+      gitIntegration: deps.config.gitIntegration ?? "unconfigured",
+      projection: {
+        commit: project.projectedCommit,
+        stale: project.projectionStale,
+      },
+      divergence: isDiverged(project)
+        ? {
+            state: "diverged",
+            divergedAt: project.divergedAt,
+            kinds: [...new Set(findings.map((f) => f.kind))].sort(),
+            chapters: findings.map((f) => ({
+              chapterId: f.chapterId,
+              path: f.chapterPath,
+              kind: f.kind,
+              projectedRevision: f.projectedRevision,
+              snapshotRevision: f.snapshotRevision,
+            })),
+          }
+        : { state: "ok" },
+      publication: publicationStatusJson(project, latest, latestDeployed),
+    });
+  });
+
+  /**
+   * Divergence recovery (Phase 5 §6). Maintainer-only, audited, and — by
+   * default — resynchronizing: clearing the flag alone would leave the
+   * projection and the repository still disagreeing, so the very next push
+   * would diverge again. `resync` (default true) accepts the repository as
+   * truth, re-projects it, and re-anchors, which is the only action that
+   * actually ends the divergence. `resync: false` exists for the maintainer
+   * who intends to fix the repository instead and just wants writes open.
+   */
+  app.post("/v1/projects/:projectId/divergence/clear", auth, async (c) => {
+    const guard = await requireProjectScope(c, services, "chapters:read");
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const a = authOf(c);
+    if (a.role !== "maintainer") {
+      return problem(c, "forbidden", { detail: "only a maintainer may clear divergence" });
+    }
+    const body = await readJson(c);
+    if (body instanceof Response) {
+      return body;
+    }
+    const parsed = clearDivergenceSchema.safeParse(body);
+    if (!parsed.success) {
+      return problem(c, "validation-failed", {
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      });
+    }
+    const project = (await repos.projects.getById(guard.project.id)) ?? guard.project;
+    if (!isDiverged(project)) {
+      return problem(c, "state-conflict", { detail: "project is not diverged" });
+    }
+    const outcome = await clearDivergence(reconcileCtx(), project, {
+      reason: parsed.data.reason,
+      actorId: a.actor.id,
+      correlationId: c.get("correlationId"),
+    });
+    cachedProject = null;
+    let resync: ReconcileResult | null = null;
+    if (parsed.data.resync !== false) {
+      resync = await reconcile({
+        correlationId: c.get("correlationId"),
+        acceptRepository: true,
+      });
+    }
+    return c.json({
+      cleared: outcome.cleared,
+      clearedFindings: outcome.priorFindings,
+      resync:
+        resync === null
+          ? null
+          : {
+              outcome: resync.outcome,
+              rebuild: resync.rebuild,
+              reanchored: resync.reanchored,
+              projectedCommit: resync.projectedCommit,
+            },
+    });
   });
 
   app.get("/v1/projects/:projectId/members", auth, async (c) => {
@@ -968,15 +1121,88 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       redelivery = true;
     }
 
-    if (event !== "push" || deps.reader === undefined) {
+    if (event !== "push") {
       await repos.webhookDeliveries.setStatus(rowId, "ignored", now());
       return c.json({ duplicate: false, rebuilt: false, event });
     }
 
-    try {
-      const result = await rebuild(c.get("correlationId"));
+    // Contract §6: `push` ON THE DEFAULT BRANCH. A push to a feature branch
+    // must not mark the projection stale — the projection tracks the default
+    // branch, so a topic-branch push would schedule a refresh that finds
+    // nothing new and, worse, could clear a stale flag a real push set.
+    //
+    // A payload with no `ref` is NOT filtered out: it means this is a shape
+    // we do not recognize, and dropping a real push is worse than one
+    // redundant refresh.
+    const pushedRef = pushRef(rawBody);
+    const projectRow = await getProject();
+    const defaultBranch = projectRow?.defaultBranch ?? deps.config.defaultBranch ?? "main";
+    if (pushedRef !== null && pushedRef !== `refs/heads/${defaultBranch}`) {
+      await repos.webhookDeliveries.setStatus(rowId, "ignored", now());
+      return c.json({ duplicate: false, rebuilt: false, event, ref: pushedRef });
+    }
+
+    // Phase 5 §6: mark stale FIRST, then ask for a refresh.
+    //
+    // The flag is the durable record that a push is owed a projection; the
+    // refresh request is best-effort. Ordering them the other way — refresh,
+    // then flag — loses the push whenever the refresh fails, because nothing
+    // durable would remember it was ever needed. This runs even with no
+    // reader configured (the deployed Worker's state today), so a deployment
+    // that later gains repository access finds the backlog waiting rather
+    // than silently starting from whatever the head happens to be then.
+    const project = await getProject();
+    if (project === null) {
+      await repos.webhookDeliveries.setStatus(rowId, "ignored", now());
+      return c.json({ duplicate: false, rebuilt: false, event, reason: "no project" });
+    }
+    cachedProject = null;
+    const headCommit = pushHeadCommit(rawBody);
+    const staleness = await markStaleAndRequestRefresh(
+      reconcileCtx(),
+      project,
+      deps.projectionRefresher,
+      {
+        reason: "webhook-push",
+        correlationId: c.get("correlationId"),
+        deliveryId,
+        ...(headCommit !== null ? { headCommit } : {}),
+      },
+    );
+
+    // With a coordinator wired, the refresh belongs to it: doing it here as
+    // well would run two concurrent projection writes for one push, exactly
+    // the serialization the Durable Object exists to provide. Without one,
+    // this handler stays the refresher — which is what the deployment does
+    // today, so absent-coordinator behaviour is unchanged.
+    if (staleness.delegated) {
       await repos.webhookDeliveries.setStatus(rowId, "processed", now());
-      return c.json({ duplicate: false, redelivery, rebuilt: result !== null, counts: result });
+      return c.json({
+        duplicate: false,
+        redelivery,
+        rebuilt: false,
+        refreshRequested: staleness.refreshRequested,
+        stale: true,
+      });
+    }
+
+    if (deps.reader === undefined) {
+      await repos.webhookDeliveries.setStatus(rowId, "ignored", now());
+      return c.json({ duplicate: false, rebuilt: false, event, stale: true });
+    }
+
+    try {
+      const result = await reconcile({ correlationId: c.get("correlationId") });
+      await repos.webhookDeliveries.setStatus(rowId, "processed", now());
+      return c.json({
+        duplicate: false,
+        redelivery,
+        rebuilt: result?.rebuild != null,
+        counts: result?.rebuild ?? null,
+        diverged: result?.outcome === "diverged",
+        externalEdits: result?.externalEdits.length ?? 0,
+        reanchored: result?.reanchored ?? { kept: 0, needsReanchor: 0 },
+      });
     } catch {
       await repos.webhookDeliveries.setStatus(rowId, "failed", now());
       return problem(c, "internal", { detail: "projection rebuild failed" });
@@ -1262,7 +1488,44 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     now,
   });
 
-  return { app, repos, bootstrap, rebuild };
+  // ---- Phase 5 routes (publication tracking, design §17.3) -----------------
+  registerPublicationRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    getProject,
+    auth,
+    requireRead: (c) => requireProjectScope(c, services, "chapters:read"),
+  });
+
+  return { app, repos, bootstrap, rebuild, reconcile };
+}
+
+/** The `ref` a `push` payload names, when the payload has a recognizable one. */
+function pushRef(rawBody: string): string | null {
+  try {
+    const payload = JSON.parse(rawBody) as { ref?: unknown };
+    return typeof payload.ref === "string" && payload.ref.length > 0 ? payload.ref : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort head commit from a `push` payload, for the refresh request's
+ * logs. Never trusted for correctness — the refresh always re-reads the ref —
+ * so a malformed or unexpected payload just yields null.
+ */
+function pushHeadCommit(rawBody: string): string | null {
+  try {
+    const payload = JSON.parse(rawBody) as { after?: unknown };
+    return typeof payload.after === "string" && /^[0-9a-f]{7,64}$/.test(payload.after)
+      ? payload.after
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function sessionExpiry(clock: Clock): string {

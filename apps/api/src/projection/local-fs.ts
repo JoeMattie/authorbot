@@ -98,10 +98,12 @@ export class LocalFsBookRepoReader implements BookRepoReader {
 
   async readSnapshot(): Promise<BookRepoSnapshot> {
     const { annotations, replies } = await this.readAnnotationDirs();
+    const files = new Map<string, string>();
     return {
-      chapters: await this.readChapters(),
+      chapters: await this.readChapters(files),
       annotations,
       replies,
+      files,
       decisions: await this.readDecisions(),
       workItems: await this.readWorkItems(),
     };
@@ -141,7 +143,9 @@ export class LocalFsBookRepoReader implements BookRepoReader {
     return workItems;
   }
 
-  private async readChapters(): Promise<RepoChapterSnapshot[]> {
+  private async readChapters(
+    files: Map<string, string>,
+  ): Promise<RepoChapterSnapshot[]> {
     const dir = join(this.repoPath, "chapters");
     const chapters: RepoChapterSnapshot[] = [];
     for (const name of (await listDir(dir)).filter((n) => n.endsWith(".md")).sort()) {
@@ -155,6 +159,9 @@ export class LocalFsBookRepoReader implements BookRepoReader {
       if (!frontmatter.success) {
         throw new Error(`${path}: invalid chapter frontmatter`);
       }
+      // Retained on the snapshot so reconciliation re-anchors against the
+      // bytes it classified, rather than re-reading live disk mid-pass.
+      files.set(path, source);
       chapters.push({
         frontmatter: frontmatter.data,
         path,

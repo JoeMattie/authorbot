@@ -210,8 +210,83 @@ async function reanchorChapterAnnotations(
   if (source === null) {
     return;
   }
-  const newRevision = chapter.revision;
-  const blockSet = new Set(chapter.blockIds);
+  await reanchorChapterFromSource(
+    { db, clock },
+    {
+      projectId: workItem.projectId,
+      chapterId: workItem.chapterId,
+      source,
+      revision: chapter.revision,
+      blockIds: chapter.blockIds,
+      correlationId: workItem.id,
+      skipAnnotationId: workItem.sourceAnnotationId,
+    },
+    ts,
+  );
+}
+
+/** Outcome tally of one §10.3 pass, for callers that report on it. */
+export interface ReanchorPassResult {
+  /** Annotations whose anchor survived (revision bumped). */
+  kept: number;
+  /** Annotations flagged `needs_reanchor`. */
+  needsReanchor: number;
+}
+
+/**
+ * The §10.3 deterministic re-anchor pass over one chapter, driven by source
+ * text the caller already has.
+ *
+ * Split out of {@link reanchorChapterAnnotations} for Phase 5 §6: webhook
+ * reconciliation has the externally-edited chapter's source in hand from the
+ * repository snapshot and no `BookRepoWriter` at all (the Worker's read path
+ * is a `BookRepoReader`), so routing it through a writer would have meant
+ * either a second remote read or a fake writer. The algorithm, the audit
+ * record, and the `annotation_needs_reanchor` event are identical in both
+ * callers by construction — there is exactly one implementation.
+ *
+ * `force` exists for the external-edit case specifically. The Phase 4 caller
+ * relies on `chapter_revision >= revision` to make replays converge, but an
+ * external editor can change prose *without* touching frontmatter `revision`;
+ * the annotations are then already "at" the new revision while their anchors
+ * may be stale, which is precisely the §10.2 step 6 hazard. With `force` the
+ * skip is dropped and every live annotation is re-decided against the new
+ * source. It stays convergent because the decision is a pure function of
+ * (annotation target, source): re-running it produces the same answer.
+ */
+export async function reanchorChapterFromSource(
+  options: { db: SqlDatabase; clock: Clock },
+  input: {
+    projectId: string;
+    chapterId: string;
+    source: string;
+    revision: number;
+    blockIds: readonly string[];
+    /** Correlation id recorded on every audit row of this pass. */
+    correlationId: string;
+    /** Annotation to exclude (the applied work item's own source annotation). */
+    skipAnnotationId?: string;
+    /** Re-decide annotations already at `revision` (external edits). */
+    force?: boolean;
+    /** Audit metadata `trigger`; defaults to `submission_applied`. */
+    trigger?: string;
+  },
+  ts: string,
+): Promise<ReanchorPassResult> {
+  const { db, clock } = options;
+  const repos = createRepositories(db);
+  const workItem = {
+    id: input.correlationId,
+    projectId: input.projectId,
+    chapterId: input.chapterId,
+    sourceAnnotationId: input.skipAnnotationId ?? "",
+  };
+  const source = input.source;
+  const newRevision = input.revision;
+  const force = input.force === true;
+  const trigger = input.trigger ?? "submission_applied";
+  const result: ReanchorPassResult = { kept: 0, needsReanchor: 0 };
+  const blockSet = new Set(input.blockIds);
   let blocks: ReturnType<typeof listMarkedBlocks> | null = null;
 
   // Page through EVERY annotation on the chapter. A single capped read left
@@ -224,12 +299,17 @@ async function reanchorChapterAnnotations(
   for await (const a of eachAnnotation(repos, workItem.chapterId)) {
     if (a.id === workItem.sourceAnnotationId) continue;
     if (a.status !== "open" && a.status !== "work_item_created") continue;
-    if (a.chapterRevision >= newRevision) continue; // already re-anchored
+    if (!force && a.chapterRevision >= newRevision) continue; // already re-anchored
 
     const kept = keptByDeterministicReanchor(a, source, blockSet, () => {
       blocks ??= listMarkedBlocks(source);
       return blocks;
     });
+    if (kept) {
+      result.kept += 1;
+    } else {
+      result.needsReanchor += 1;
+    }
 
     statements.push(
       kept
@@ -255,6 +335,7 @@ async function reanchorChapterAnnotations(
           algorithmVersion: REANCHOR_ALGORITHM_VERSION,
           fromRevision: a.chapterRevision,
           toRevision: newRevision,
+          trigger,
         },
         createdAt: ts,
       }),
@@ -285,6 +366,7 @@ async function reanchorChapterAnnotations(
   if (statements.length > 0) {
     await db.batch(statements);
   }
+  return result;
 }
 
 /** Statement budget per re-anchor transaction. */

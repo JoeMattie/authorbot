@@ -609,6 +609,36 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  /v1/projects/{projectId}/annotations/{annotationId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+    get:
+      operationId: getAnnotation
+      tags: [annotations]
+      summary: Return one annotation with its collaboration state.
+      description: >
+        The single-annotation read complement of `listAnnotations`, returning
+        the same `Annotation` shape (including the caller's own vote, when
+        authenticated). Follows the same anonymous-read gate as the chapter
+        annotations list: readable without a session only when the project
+        publishes annotations publicly.
+      responses:
+        "200":
+          description: The annotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Annotation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /v1/projects/{projectId}/annotations/{annotationId}/replies:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -1412,6 +1442,232 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /v1/projects/{projectId}/divergence/clear:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: clearProjectDivergence
+      tags: [operations]
+      summary: Clear a diverged project and (by default) resynchronize from the repository.
+      description: |
+        Maintainer-only recovery path for design §14.5 divergence. Clearing the
+        flag alone would leave the projection and the repository still
+        disagreeing, so by default this also re-projects the repository as
+        truth and re-anchors annotations against it (Phase 4 §5 rules); pass
+        `resync: false` to only reopen prose writes. Always audited with the
+        supplied reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  description: Why the maintainer is clearing divergence. Stored and audited.
+                resync:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Divergence cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cleared]
+                properties:
+                  cleared:
+                    type: boolean
+                  clearedFindings:
+                    type: array
+                    items:
+                      type: object
+                  resync:
+                    description: Present when `resync` was not disabled.
+                    oneOf:
+                      - type: object
+                      - type: "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The project is not diverged.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /v1/projects/{projectId}/publications:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listPublications
+      tags: [operations]
+      summary: List reported publications, newest first.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Publication history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Publication"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/publications:
+    post:
+      operationId: reportPublication
+      tags: [operations]
+      summary: Signed CI callback reporting build and deployment state.
+      description: |
+        Authenticated by `X-Authorbot-Signature-256`, an HMAC-SHA256 with
+        WEBHOOK_SECRET over `<delivery-id>.<timestamp>.<raw-body>` — not by
+        session or bearer credentials. The delivery id and timestamp are part
+        of the signed material precisely because the delivery id is the replay
+        suppression key: signing the body alone would let anyone holding one
+        captured request resubmit it indefinitely under fresh delivery ids.
+
+        `X-Authorbot-Timestamp` must be within 5 minutes of server time, so a
+        captured request expires independently of the delivery ledger.
+        Deliveries are additionally deduplicated on `X-Authorbot-Delivery`; a
+        repeat delivery is a no-op regardless of its content.
+
+        Example (bash):
+
+            BODY='{"integratedCommit":"...","buildStatus":"succeeded"}'
+            DELIVERY=$(uuidgen)
+            TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            SIG=$(printf '%s.%s.%s' "$DELIVERY" "$TS" "$BODY" \
+              | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -r | cut -d' ' -f1)
+
+        This is the ONLY writer of publication state. Design §17.3: a revision
+        is never marked published merely because its Git commit succeeded.
+
+        A single commit's publication advances through several callbacks
+        (`queued` → `building` → `succeeded` → deployed). Fields omitted from a
+        callback keep their stored value; an explicit `null` clears one.
+      security: []
+      parameters:
+        - name: X-Authorbot-Delivery
+          in: header
+          required: true
+          description: Unique delivery id; replays are suppressed.
+          schema:
+            type: string
+            maxLength: 200
+        - name: X-Authorbot-Timestamp
+          in: header
+          required: true
+          description: >
+            RFC 3339 instant the callback was signed at. Must be within 5
+            minutes of server time and is covered by the signature.
+          schema:
+            type: string
+            maxLength: 64
+        - name: X-Authorbot-Signature-256
+          in: header
+          required: true
+          description: >
+            `sha256=<hex hmac>` over `<delivery-id>.<timestamp>.<raw-body>`
+            with WEBHOOK_SECRET.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [integratedCommit, buildStatus]
+              additionalProperties: false
+              properties:
+                projectSlug:
+                  type: string
+                  description: >
+                    Optional guard. When present it must name this deployment's
+                    project, so a callback aimed elsewhere is rejected rather
+                    than silently applied here.
+                integratedCommit:
+                  type: string
+                  pattern: "^[0-9a-f]{7,64}$"
+                buildStatus:
+                  type: string
+                  enum: [queued, building, succeeded, failed]
+                deployedCommit:
+                  oneOf:
+                    - type: string
+                      pattern: "^[0-9a-f]{7,64}$"
+                    - type: "null"
+                publicUrl:
+                  description: Absolute http(s) URL only.
+                  oneOf:
+                    - type: string
+                      format: uri
+                    - type: "null"
+                deployedAt:
+                  oneOf:
+                    - $ref: "#/components/schemas/Timestamp"
+                    - type: "null"
+                publisherVersion:
+                  oneOf:
+                    - type: string
+                    - type: "null"
+      responses:
+        "200":
+          description: Applied to an existing publication row, or recognized as a duplicate delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicationCallbackResult"
+        "201":
+          description: First report for this integrated commit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicationCallbackResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Missing or invalid callback signature.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /v1/webhooks/github:
     post:
       operationId: receiveGithubWebhook
@@ -1796,6 +2052,107 @@ components:
             - $ref: "#/components/schemas/Timestamp"
             - type: "null"
 
+    PublicationCallbackResult:
+      type: object
+      required: [duplicate, applied]
+      properties:
+        duplicate:
+          type: boolean
+          description: The delivery id had already been seen; nothing was applied.
+        applied:
+          type: boolean
+        publicationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        publication:
+          oneOf:
+            - $ref: "#/components/schemas/Publication"
+            - type: "null"
+
+    Publication:
+      type: object
+      description: >
+        One integrated commit's publication state as reported by CI
+        (design §17.3). Never inferred from a successful Git commit.
+      required: [id, integratedCommit, buildStatus, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        integratedCommit:
+          type: string
+          description: Repository commit CI built from.
+        buildStatus:
+          type: string
+          enum: [queued, building, succeeded, failed]
+        deployedCommit:
+          description: Commit actually serving the public site, per CI.
+          oneOf:
+            - type: string
+            - type: "null"
+        publicUrl:
+          oneOf:
+            - type: string
+              format: uri
+            - type: "null"
+        deployedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        publisherVersion:
+          oneOf:
+            - type: string
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
+
+    PublicationStatus:
+      type: object
+      description: >
+        Integrated versus deployed (design §17.3): `integratedCommit` is what
+        Authorbot projected, `deployedCommit` is what CI says is live. They are
+        reported separately so the gap is visible rather than assumed.
+      required: [integratedCommit, deployedCommit, buildStatus, inSync]
+      properties:
+        integratedCommit:
+          oneOf:
+            - type: string
+            - type: "null"
+        deployedCommit:
+          oneOf:
+            - type: string
+            - type: "null"
+        buildStatus:
+          description: Build status of the most recent publication CI reported.
+          oneOf:
+            - type: string
+              enum: [queued, building, succeeded, failed]
+            - type: "null"
+        publicUrl:
+          oneOf:
+            - type: string
+              format: uri
+            - type: "null"
+        deployedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        publisherVersion:
+          oneOf:
+            - type: string
+            - type: "null"
+        inSync:
+          type: boolean
+          description: >
+            True only when both commits are known AND equal. An unknown
+            deployment is never reported as up to date.
+        latest:
+          oneOf:
+            - $ref: "#/components/schemas/Publication"
+            - type: "null"
+
     Project:
       type: object
       required: [id, slug, repoProvider, repo, defaultBranch, status, createdAt, updatedAt]
@@ -1815,6 +2172,76 @@ components:
         status:
           type: string
           enum: [active, invalid, diverged, archived]
+        gitIntegration:
+          type: string
+          enum: [configured, unconfigured, incomplete, invalid]
+          description: >
+            Whether this deployment holds a usable GitHub App credential set
+            (Phase 5 §2). `unconfigured` means reads work and mutations are
+            accepted and queued, but nothing is committed to the repository;
+            `incomplete` means some but not all of GITHUB_APP_ID,
+            GITHUB_APP_PRIVATE_KEY and GITHUB_INSTALLATION_ID are set;
+            `invalid` means all three are present but at least one cannot work
+            (a PKCS#1 private key, a non-numeric app or installation id).
+            `incomplete` and `invalid` are both treated exactly like
+            `unconfigured` at runtime. `configured` means all three are present
+            and well-formed. No credential value is ever exposed.
+        projection:
+          type: object
+          description: >
+            State of the database projection relative to the repository
+            (Phase 5 §6, design §20.3).
+          required: [commit, stale]
+          properties:
+            commit:
+              description: >
+                Repository commit the projection was last built from — the
+                *integrated* commit. Null before the first successful refresh.
+              oneOf:
+                - type: string
+                - type: "null"
+            stale:
+              type: boolean
+              description: >
+                A verified push has arrived that the projection has not yet
+                absorbed. Set before the refresh is attempted, so a refresh
+                that never ran is still visible as owed work.
+        divergence:
+          type: object
+          description: >
+            Design §14.5 divergence state. While `diverged`, prose writes are
+            refused with the `project-diverged` problem and reads continue.
+          required: [state]
+          properties:
+            state:
+              type: string
+              enum: [ok, diverged]
+            divergedAt:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            kinds:
+              type: array
+              items:
+                type: string
+                enum: [revision-regressed, anchor-blocks-vanished]
+            chapters:
+              type: array
+              items:
+                type: object
+                properties:
+                  chapterId:
+                    $ref: "#/components/schemas/Uuid"
+                  path:
+                    type: string
+                  kind:
+                    type: string
+                  projectedRevision:
+                    type: integer
+                  snapshotRevision:
+                    type: integer
+        publication:
+          $ref: "#/components/schemas/PublicationStatus"
         createdAt:
           $ref: "#/components/schemas/Timestamp"
         updatedAt:

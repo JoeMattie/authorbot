@@ -10,6 +10,7 @@ import type { ApiScope } from "./api-scopes.js";
 import type { IdentityProvider } from "./identity/provider.js";
 import type { IdempotencyClaim } from "./idempotency.js";
 import type { BookRepoReader } from "./projection/reader.js";
+import type { ProjectionRefresher } from "./reconcile.js";
 
 export interface Clock {
   now(): Date;
@@ -17,8 +18,16 @@ export interface Clock {
 
 export type AuthMode = "dev" | "github";
 
-/** Mirror processing mode (contract §5): inline in dev/tests, queue-only otherwise. */
-export type MirrorMode = "inline" | "queue";
+/**
+ * Mirror processing mode (Phase 2 contract §5, Phase 5 contract §5):
+ *
+ * - `inline` — drain in-process right after the command's batch (dev/tests).
+ * - `queue` — record outbox rows and drain later, out of band. The deployed
+ *   Worker runs this today.
+ * - `durable` — hand the drain to the project's `ProjectCoordinator` Durable
+ *   Object after the batch commits (production, Phase 5).
+ */
+export type MirrorMode = "inline" | "queue" | "durable";
 
 export interface GitHubOAuthConfig {
   clientId: string;
@@ -68,6 +77,14 @@ export interface AppConfig {
    * absent selects the design §25 defaults (PT30M/PT30M/PT4H/PT5M).
    */
   leaseConfig?: LeaseConfig;
+  /**
+   * GitHub App credential status (Phase 5 contract §2), surfaced by
+   * `GET /v1/projects/{id}` as `gitIntegration`. Absent means the same as
+   * `"unconfigured"`: no repository access, reads keep working, outbox rows
+   * accumulate for a later drain. Only the *status* ever leaves this process
+   * — no credential value is stored here.
+   */
+  gitIntegration?: "configured" | "unconfigured" | "incomplete" | "invalid";
   /** SSE new-row poll interval (ms). Default 1000; tests shrink it. */
   ssePollMs?: number;
   /** SSE heartbeat-comment interval (ms). Contract §5: default 15000. */
@@ -91,6 +108,16 @@ export interface AppDeps {
    * swallowed (the operation stays observable via GET .../operations/{id}).
    */
   onMutationCommitted?: (projectId: string) => Promise<void>;
+  /**
+   * Phase 5 contract §6: where a verified `push` webhook sends its request for
+   * a projection refresh. The API never imports the `ProjectCoordinator`
+   * Durable Object — it asks through this seam, so the refresh happens
+   * somewhere serialized without the app depending on the coordinator module.
+   *
+   * Absent is a supported deployment: the webhook still marks the projection
+   * stale durably, and the refresh happens on the next drain/alarm/boot.
+   */
+  projectionRefresher?: ProjectionRefresher;
 }
 
 /** Authenticated request context set by the auth middleware. */

@@ -53,6 +53,12 @@ export const PROBLEM_TYPES = {
   "unsafe-content": { status: 422, title: "Body fails markdown safety rules" },
   "unknown-block": { status: 422, title: "Target block does not exist in this chapter revision" },
   "domain-rule-failed": { status: 422, title: "Domain rule failed" },
+  // ---- Phase 5 reconciliation / publication problems (contract §6) ---------
+  "project-diverged": {
+    status: 409,
+    title: "Book repository diverged from the projection",
+  },
+  "signature-invalid": { status: 401, title: "Missing or invalid callback signature" },
   internal: { status: 500, title: "Internal error" },
 } as const;
 

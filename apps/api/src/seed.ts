@@ -51,6 +51,12 @@ export async function seedProject(
       repo: config.projectRepo,
       defaultBranch: config.defaultBranch ?? "main",
       status: "active",
+      // Phase 5 §6 defaults: a fresh project has never been projected, is not
+      // stale, and has not diverged. Matches the migration column defaults.
+      projectionStale: false,
+      projectedCommit: null,
+      divergenceReason: null,
+      divergedAt: null,
       createdAt: now,
       updatedAt: now,
     };

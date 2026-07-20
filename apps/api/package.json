@@ -32,6 +32,7 @@
   "dependencies": {
     "@authorbot/database": "workspace:*",
     "@authorbot/domain": "workspace:*",
+    "@authorbot/git-github": "workspace:*",
     "@authorbot/markdown": "workspace:*",
     "@authorbot/repo-coordinator": "workspace:*",
     "@authorbot/rule-engine": "workspace:*",

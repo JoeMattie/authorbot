@@ -1,8 +1,33 @@
 // Cloudflare Worker configuration for @authorbot/api (Phase 2 contract §6).
+//
+// NOT THE LIVE DEPLOYMENT'S CONFIG. This is the development/reference config
+// for the API on its own: `name` is "authorbot-api", there is no `assets`
+// binding, and AUTH_MODE plus the OAuth vars are deliberately absent (see the
+// SECURITY note below). A real deployment is the COMBINED config described in
+// docs/getting-started.md §3b — the one that owns `assets`, AUTH_MODE=github
+// and the OAuth vars, and whose name is the live Worker (`causal-projector`
+// for this project). Do not `wrangler deploy` this file at a live Worker:
+// wrangler replaces the plain-text `vars` set wholesale, which would wipe the
+// static site binding and the auth configuration. Operator steps live in
+// docs/github-app-setup.md.
 // Secrets are NOT set here: run
 //   wrangler secret put SESSION_SECRET
 //   wrangler secret put WEBHOOK_SECRET
 //   wrangler secret put GITHUB_CLIENT_SECRET   (github mode only)
+//   wrangler secret put GITHUB_APP_PRIVATE_KEY (Phase 5 Git integration only)
+//
+// GIT INTEGRATION (Phase 5 contract §2), all optional and all-or-nothing:
+//   GITHUB_APP_ID           var    — the GitHub App's numeric id
+//   GITHUB_APP_PRIVATE_KEY  SECRET — PKCS#8 PEM ("BEGIN PRIVATE KEY"). GitHub's
+//                                    download button gives PKCS#1 ("BEGIN RSA
+//                                    PRIVATE KEY"); convert with
+//                                    `openssl pkcs8 -topk8 -nocrypt -in key.pem`
+//   GITHUB_INSTALLATION_ID  var    — the installation on the book repository
+// App permissions: contents:write, metadata:read. Webhook events: push.
+// With none of them set the deployment reports gitIntegration "unconfigured":
+// reads work, mutations queue, nothing commits. With some but not all set it
+// reports "incomplete" and still does no Git work — a half-configured app
+// must never half-work. NO CREDENTIAL VALUE IS SET IN THIS FILE.
 // For `wrangler dev`, put dev-only values in .dev.vars (gitignored).
 //
 // SECURITY: AUTH_MODE is deliberately NOT set here. AUTH_MODE=dev mounts the
@@ -29,16 +54,55 @@
     {
       "binding": "DB",
       "database_name": "authorbot",
-      // Placeholder for local dev; replace with the real D1 database id on deploy.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "57987a5d-e6d3-4a73-b7f8-5179cdfddf65",
       "migrations_dir": "../../migrations"
     }
   ],
+  // ProjectCoordinator (Phase 5 contract §5): one Durable Object per project
+  // id, serializing outbox drains, lease sweeps, and projection refreshes.
+  // The class is re-exported from src/worker.ts (the `main` entry), which is
+  // where wrangler resolves `class_name`.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COORDINATOR",
+        "class_name": "ProjectCoordinator"
+      }
+    ]
+  },
+  // Self-starting maintenance loop (contract §5). The coordinator's periodic
+  // alarm is armed by `ensureAlarm()` inside the Durable Object's fetch, and
+  // the only two callers of that fetch are durable-mode mutations and the
+  // GitHub push webhook — neither of which exists on a `queue`-mode
+  // deployment without a GitHub App. Without this trigger no alarm is ever
+  // set and `sweepExpiredLeases` never runs in production, leaving expired
+  // leases stranded and their work items unclaimable.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      // SQLite-backed storage: the current default for new classes. The
+      // coordinator stores only scheduling bookkeeping (the alarm and a
+      // projection-stale flag) — D1 stays the source of operational truth,
+      // so a DO reset loses nothing.
+      "new_sqlite_classes": ["ProjectCoordinator"]
+    }
+  ],
   "vars": {
-    "PROJECT_SLUG": "hollow-creek-anomaly",
+    "PROJECT_SLUG": "causal-projector",
     "PROJECT_REPO": "JoeMattie/causal-projector",
     "INITIAL_MAINTAINER": "github:JoeMattie",
     "DEFAULT_BRANCH": "main",
-    "MIRROR_MODE": "queue"
+    // Deliberately still "queue": the live deployment keeps its current
+    // behaviour until an operator switches it. Set "durable" to route
+    // post-commit drains through the coordinator (requires the COORDINATOR
+    // binding above, and only commits once the GitHub App is configured).
+    "MIRROR_MODE": "queue",
+    // Coordinator alarm cadence in seconds (contract §5 default 60): drains
+    // any outbox backlog, sweeps expired leases (Phase 4 §2), and refreshes
+    // the projection when a webhook marked it stale.
+    "COORDINATOR_ALARM_SECONDS": "60"
   }
 }

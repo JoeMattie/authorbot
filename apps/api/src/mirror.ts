@@ -14,25 +14,24 @@
  *
  * Node-only (the default `LocalGitAdapter` spawns `git`), so this module is
  * exported via `@authorbot/api/local` and never reaches the Worker bundle.
- * The Worker runs `MIRROR_MODE=queue` until Phase 5 wires a Durable Object
- * alarm to a GitHub-App writer.
+ * Constructing `LocalGitAdapter` is the reason: a live reference to it from a
+ * Worker-reachable module would pull `node:child_process` into the bundle.
+ * `MIRROR_MODE=durable` (Phase 5 contract §5) gets the same drain through
+ * coordinator.ts with a `GitHubBookRepoWriter` instead.
  *
- * Drains are serialized per project: the repo-coordinator processor assumes a
- * single drainer per project (rows found `processing` at drain entry are
- * treated as crash leftovers), so overlapping requests must never drain
- * concurrently. The post-drain hook runs inside the same chain.
+ * The drain itself — processor + Phase 4 post-drain hook, serialized per
+ * project — lives in the Worker-safe drain.ts and is shared with the Durable
+ * Object, so inline and durable modes cannot diverge.
  */
 import type { SqlDatabase } from "@authorbot/database";
 import {
-  createProcessor,
   LocalGitAdapter,
   type BookRepoWriter,
   type DrainResult,
   type Processor,
 } from "@authorbot/repo-coordinator";
 import type { Clock } from "./deps.js";
-import { finalizeSubmissionOutcomes } from "./reanchor.js";
-import { createSubmissionApplier } from "./submission-applier.js";
+import { createDrainRunner } from "./drain.js";
 
 export interface InlineMirrorOptions {
   db: SqlDatabase;
@@ -67,45 +66,19 @@ export function createInlineMirror(options: InlineMirrorOptions): InlineMirror {
   if (writer === undefined) {
     throw new Error("createInlineMirror requires either workTreePath or writer");
   }
-  const clock = options.clock ?? { now: (): Date => new Date() };
-  const processor = createProcessor({
+  const runner = createDrainRunner({
     db: options.db,
     writer,
-    clock,
-    submissionApplier: createSubmissionApplier({ db: options.db, writer, clock }),
+    ...(options.clock !== undefined ? { clock: options.clock } : {}),
     ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
   });
 
-  // Per-project drain chain: each new drain waits for the previous one,
-  // whether it succeeded or failed (single-drainer invariant).
-  const chains = new Map<string, Promise<unknown>>();
-  const drain = (projectId: string): Promise<DrainResult> => {
-    const previous = chains.get(projectId) ?? Promise.resolve();
-    const run = async (): Promise<DrainResult> => {
-      const result = await processor.drain(projectId);
-      // Phase 4 post-drain hook (module docs): §10.3 re-anchoring + conflict
-      // problem recording, inside the same serialized chain.
-      await finalizeSubmissionOutcomes(
-        { db: options.db, writer, clock },
-        projectId,
-        result.outcomes,
-      );
-      return result;
-    };
-    const next = previous.then(run, run);
-    chains.set(
-      projectId,
-      next.catch(() => undefined),
-    );
-    return next;
-  };
-
   return {
-    drain,
+    drain: runner.drain,
     onMutationCommitted: async (projectId: string): Promise<void> => {
-      await drain(projectId);
+      await runner.drain(projectId);
     },
     writer,
-    processor,
+    processor: runner.processor,
   };
 }

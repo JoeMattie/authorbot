@@ -120,6 +120,21 @@ describe("openapi.yaml is synced with the router", () => {
     expect(undelivered, "documented as live but no route serves them").toEqual([]);
   });
 
+  /**
+   * The reverse direction, which nothing checked before Phase 5: the two
+   * assertions around this one compare spec → routes, so a route that ships
+   * with no spec entry at all was invisible to them. `GET
+   * /v1/projects/{projectId}/annotations/{annotationId}` had been undocumented
+   * since Phase 3 and no test noticed. Exit criterion 7 asks for a synced
+   * spec, and "synced" has to mean both ways or a generated client silently
+   * omits endpoints the API serves.
+   */
+  it("documents every route the app actually serves", () => {
+    const documented = new Set(specOperations().map((op) => op.key));
+    const undocumented = [...served].filter((key) => !documented.has(key)).sort();
+    expect(undocumented, "served by the router but absent from openapi.yaml").toEqual([]);
+  });
+
   it("marks no implemented route as `planned`", () => {
     const stale = specOperations()
       .filter((op) => op.planned && served.has(op.key))

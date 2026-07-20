@@ -1,15 +1,24 @@
 /**
- * Cloudflare Worker entry (contract §6). Builds `AppDeps` from bindings and
- * serves the app. Projection rebuild is skipped here: the Worker has no book
- * repository access until the Phase 5 GitHub reader (reads still work; the
- * webhook records deliveries and marks them `ignored`).
+ * Cloudflare Worker entry (Phase 2 contract §6, Phase 5 contract §5). Builds
+ * `AppDeps` from bindings and serves the app.
  *
- * Secrets (`SESSION_SECRET`, `WEBHOOK_SECRET`, `GITHUB_CLIENT_SECRET`) come
- * from `wrangler secret put` — never from vars or code.
+ * Projection rebuild is deliberately NOT done here even once the GitHub
+ * reader exists: a rebuild on the request path would make every cold isolate
+ * pay a full repository read before serving anything. All repository access
+ * belongs to the `ProjectCoordinator` Durable Object (contract §5: "All
+ * Git-touching work goes through it"), which refreshes on its alarm when a
+ * webhook marks the projection stale — so `deps.reader` stays undefined in
+ * the Worker and `bootstrap()` behaves exactly as it does today.
+ *
+ * Secrets (`SESSION_SECRET`, `WEBHOOK_SECRET`, `GITHUB_CLIENT_SECRET`,
+ * `GITHUB_APP_PRIVATE_KEY`) come from `wrangler secret put` — never from vars
+ * or code, never logged, never returned in a response.
  */
 import { wrapD1Database, type D1DatabaseLike } from "@authorbot/database";
 import { createApi, type AuthorbotApi } from "./app.js";
-import type { AppConfig, AppDeps } from "./deps.js";
+import { coordinatorAlarmMsFromEnv, gitIntegrationStatus } from "./coordinator.js";
+import { callCoordinator, type DurableObjectNamespaceLike } from "./coordinator-do.js";
+import type { AppConfig, AppDeps, MirrorMode } from "./deps.js";
 import { createDevIdentityProvider, type IdentityProvider } from "./identity/provider.js";
 import { createGitHubIdentityProvider } from "./identity/github.js";
 import { leaseConfigFromEnv } from "./leases.js";
@@ -59,6 +68,27 @@ export interface WorkerBindings {
   LEASE_RENEWAL_DURATION?: string;
   LEASE_MAX_TOTAL_DURATION?: string;
   LEASE_RENEWAL_PROMPT_BEFORE?: string;
+  /**
+   * `ProjectCoordinator` Durable Object namespace (Phase 5 contract §5).
+   * Required by `MIRROR_MODE=durable`; absent otherwise.
+   */
+  COORDINATOR?: DurableObjectNamespaceLike;
+  /**
+   * Coordinator alarm cadence in seconds (default 60). Validated at boot —
+   * a malformed value throws rather than silently disabling the periodic
+   * backlog drain and lease sweep.
+   */
+  COORDINATOR_ALARM_SECONDS?: string;
+  /**
+   * GitHub App credentials (Phase 5 contract §2). All three or none: a
+   * partially configured app reports `gitIntegration: "incomplete"` and does
+   * no Git work, rather than half-working. `GITHUB_APP_PRIVATE_KEY` is a
+   * PKCS#8 PEM set with `wrangler secret put`; its value is never logged,
+   * persisted, or returned in any response.
+   */
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  GITHUB_INSTALLATION_ID?: string;
 }
 
 function required(bindings: WorkerBindings, name: keyof WorkerBindings): string {
@@ -89,7 +119,7 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
     projectSlug: required(bindings, "PROJECT_SLUG"),
     projectRepo: required(bindings, "PROJECT_REPO"),
     initialMaintainer: required(bindings, "INITIAL_MAINTAINER"),
-    mirrorMode: bindings.MIRROR_MODE === "inline" ? "inline" : "queue",
+    mirrorMode: mirrorModeFromBindings(bindings),
     // Boot-time validation (contract 2b §3): an invalid entry throws here,
     // never silently widens CORS at runtime.
     allowedOrigins: parseAllowedOrigins(bindings.ALLOWED_ORIGINS),
@@ -115,7 +145,35 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
       redirectUri: required(bindings, "GITHUB_REDIRECT_URI"),
     };
   }
+  // Boot-time COORDINATOR_ALARM_SECONDS validation (contract §5): throws on
+  // anything that is not a sane positive integer.
+  coordinatorAlarmMsFromEnv(bindings.COORDINATOR_ALARM_SECONDS);
+  // Status only: which of the three credential names are present. Reading the
+  // credentials themselves happens inside the Durable Object.
+  config.gitIntegration = gitIntegrationStatus(bindings);
   return config;
+}
+
+/**
+ * `MIRROR_MODE` (Phase 2 contract §5 + Phase 5 contract §5). Unknown values
+ * fall back to `queue` — the safe mode that records work without attempting
+ * it — but `durable` without a `COORDINATOR` binding is a misconfiguration
+ * that must fail the boot, not silently degrade to a deployment whose outbox
+ * never drains.
+ */
+export function mirrorModeFromBindings(bindings: WorkerBindings): MirrorMode {
+  if (bindings.MIRROR_MODE === "inline") {
+    return "inline";
+  }
+  if (bindings.MIRROR_MODE === "durable") {
+    if (bindings.COORDINATOR === undefined) {
+      throw new Error(
+        "MIRROR_MODE=durable requires the COORDINATOR Durable Object binding (see wrangler.jsonc)",
+      );
+    }
+    return "durable";
+  }
+  return "queue";
 }
 
 /**
@@ -183,7 +241,77 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
     config,
     identityProvider: identityProviderFor(config),
   };
+  const coordinator = bindings.COORDINATOR;
+  if (config.mirrorMode === "durable" && coordinator !== undefined) {
+    // Post-commit drain (contract §5): the command's D1 batch has already
+    // landed, so the coordinator reads a committed outbox row. A failure here
+    // is swallowed by `notifyMutation` — the row stays `pending` and the next
+    // mutation or the 60s alarm drains it, so a coordinator hiccup costs
+    // latency, not work.
+    deps.onMutationCommitted = async (projectId: string): Promise<void> => {
+      await callCoordinator(coordinator, projectId, "drain");
+    };
+  }
+  if (coordinator !== undefined) {
+    // Webhook-driven reconciliation (contract §6) — wired whenever the
+    // binding exists, independently of MIRROR_MODE, because a `push` must be
+    // reconciled even on a deployment that still queues its own writes.
+    // `markStaleAndRequestRefresh` has already committed the stale flag by the
+    // time this runs, so a failure here only delays the refresh to the next
+    // alarm; the webhook still answers 2xx and GitHub does not redeliver.
+    deps.projectionRefresher = {
+      requestProjectionRefresh: async (request): Promise<void> => {
+        await callCoordinator(coordinator, request.projectId, "refresh");
+      },
+    };
+  }
   return createApi(deps);
+}
+
+/**
+ * Cron entry (contract §5). The periodic alarm is armed only by
+ * `ensureAlarm()` inside the Durable Object's `fetch`, and `fetch` is reached
+ * from exactly two places: `onMutationCommitted` (MIRROR_MODE=durable only)
+ * and the GitHub push webhook. A deployment running `queue` without a GitHub
+ * App — which is what the live deployment is — therefore never contacted the
+ * DO at all, so no alarm was ever set and `sweepExpiredLeases` never ran in
+ * production, despite §5 requiring it ("sweeps expired leases (Phase 4 §2
+ * requires this in production)"). The DO cannot self-bootstrap either: an
+ * alarm that fires before any request has recorded a project id returns
+ * without rescheduling.
+ *
+ * A cron poke closes that: it runs the sweep AND, through the same
+ * `fetch` path, calls `ensureAlarm()`, so the maintenance loop is
+ * self-starting independent of MIRROR_MODE and of whether GitHub credentials
+ * exist. Failures are swallowed and logged nowhere sensitive — a cron that
+ * throws is retried on its own schedule, and the alarm remains the primary
+ * loop once armed.
+ */
+export async function runScheduledMaintenance(env: WorkerBindings): Promise<void> {
+  const coordinator = env.COORDINATOR;
+  if (coordinator === undefined) {
+    return;
+  }
+  const slug = env.PROJECT_SLUG;
+  if (slug === undefined || slug.length === 0) {
+    return;
+  }
+  const db = wrapD1Database(env.DB);
+  // The DO is keyed by project id, which only D1 knows; the cron has no
+  // request context to derive it from. Deliberately not via
+  // `configFromBindings`: a cron must not fail on unrelated configuration
+  // (OAuth vars, AUTH_MODE) when all it needs is the project's identity.
+  const row = await db
+    .prepare(`SELECT id FROM projects WHERE slug = ?`)
+    .bind(slug)
+    .first();
+  const projectId = row === null ? null : String(row["id"]);
+  if (projectId === null) {
+    // Not yet seeded: the first request bootstraps the project, and the next
+    // cron tick finds it. Nothing to maintain in the meantime.
+    return;
+  }
+  await callCoordinator(coordinator, projectId, "sweep");
 }
 
 function internalProblem(): Response {
@@ -198,4 +326,24 @@ function internalProblem(): Response {
   );
 }
 
-export default createWorkerRuntime();
+/**
+ * Durable Object class export (contract §5). Wrangler resolves
+ * `durable_objects.bindings[].class_name` against this entry module, so the
+ * class must be re-exported here even though it lives in coordinator-do.ts.
+ */
+export { ProjectCoordinator } from "./coordinator-do.js";
+
+const runtime = createWorkerRuntime();
+
+export default {
+  fetch: (request: Request, env: WorkerBindings): Promise<Response> =>
+    runtime.fetch(request, env),
+  /**
+   * `triggers.crons` entry point (see wrangler.jsonc). This is what arms the
+   * coordinator's periodic alarm on a deployment that receives neither
+   * durable-mode mutations nor GitHub webhooks.
+   */
+  scheduled: async (_event: unknown, env: WorkerBindings): Promise<void> => {
+    await runScheduledMaintenance(env);
+  },
+};

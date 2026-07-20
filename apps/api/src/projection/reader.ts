@@ -55,10 +55,33 @@ export interface BookRepoSnapshot {
   workItems?: RepoWorkItemSnapshot[];
   /** Head commit the snapshot was read at, when known. */
   headCommit?: string;
+  /**
+   * Raw UTF-8 text of every matched path, from the SAME tree as everything
+   * else in this snapshot.
+   *
+   * Reconciliation re-anchors annotations against chapter source. Reading that
+   * source back through `readTextFile` re-resolved the branch head, so a push
+   * landing mid-pass produced a re-anchor computed against one commit's bytes
+   * while the revision and block ids came from another's — a decision recorded
+   * at a revision that never contained that text, and persisted as an
+   * append-only audit row a later converging pass does not undo. Taking the
+   * source from the snapshot keeps the whole pass on one commit, which is the
+   * invariant the Git-backed reader exists to provide.
+   *
+   * Optional: readers that do not retain file text omit it and callers fall
+   * back to `readTextFile`.
+   */
+  files?: ReadonlyMap<string, string>;
 }
 
 export interface BookRepoReader {
   readSnapshot(): Promise<BookRepoSnapshot>;
+  /**
+   * Current head commit of the branch this reader reads, when it can name
+   * one. Used to detect that a snapshot went stale mid-pass before acting on
+   * a conclusion drawn from it.
+   */
+  readHeadCommit?(): Promise<string>;
   /**
    * Raw text of one committed repository file (repo-relative path), or null
    * when it does not exist. Phase 4 uses this for the claim task bundle's

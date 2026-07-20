@@ -51,6 +51,38 @@ export {
   finalizeSubmissionOutcomes,
   type FinalizeSubmissionOptions,
 } from "./reanchor.js";
+export {
+  coordinatorAlarmMsFromEnv,
+  createCoordinatorGit,
+  createProjectCoordinator,
+  gitIntegrationStatus,
+  parseRepoCoordinates,
+  DEFAULT_COORDINATOR_ALARM_SECONDS,
+  MAX_COORDINATOR_ALARM_SECONDS,
+  type AlarmScheduler,
+  type CoordinatorAlarmResult,
+  type CoordinatorBindings,
+  type CoordinatorGit,
+  type CoordinatorStore,
+  type DrainOutboxResult,
+  type GitIntegrationStatus,
+  type ProjectCoordinator,
+  type ProjectCoordinatorOptions,
+  type RefreshProjectionResult,
+} from "./coordinator.js";
+export {
+  callCoordinator,
+  coordinatorStub,
+  ProjectCoordinator as ProjectCoordinatorDurableObject,
+  COORDINATOR_ORIGIN,
+  PROJECT_ID_KEY,
+  type CoordinatorAction,
+  type CoordinatorDoBindings,
+  type DurableObjectNamespaceLike,
+  type DurableObjectStateLike,
+  type DurableObjectStubLike,
+} from "./coordinator-do.js";
+export { createDrainRunner, type DrainRunner, type DrainRunnerOptions } from "./drain.js";
 export { uuidv7 } from "./ids.js";
 export { sha256Hex, hmacSha256Hex, randomBase64Url, timingSafeEqual } from "./crypto.js";
 export {
