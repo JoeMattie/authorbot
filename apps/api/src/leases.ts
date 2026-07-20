@@ -12,6 +12,7 @@ import {
   createRepositories,
   type SqlDatabase,
   type SqlStatement,
+  type SqlValue,
 } from "@authorbot/database";
 import {
   DEFAULT_LEASE_CONFIG,
@@ -96,11 +97,152 @@ export interface SweepResult {
 }
 
 /**
+ * The three statements that end ONE expired lease atomically: the
+ * `lease_expired` event, the lease revocation, and the work item's return to
+ * `ready`. They MUST be executed as a single `db.batch` — splitting them is
+ * what previously let a crash (or a failing second write) strand a work item
+ * as `leased` with no active lease row and no event, permanently unclaimable.
+ *
+ * Single-winner semantics without reading an affected-row count: the event
+ * insert runs FIRST and is guarded by the very predicate the revocation then
+ * consumes (`active AND expires_at <= now`). Because the batch is one
+ * transaction, a rival expiry either committed before us — our guard sees
+ * `revoked_at` set, so no event and a 0-row revocation — or commits after us
+ * and observes our revocation. Exactly one caller emits the event, whatever
+ * the wall clock says (two sweeps sharing a frozen test clock included).
+ *
+ * The work-item reset additionally requires that no OTHER live lease holds
+ * the slot, so a claim that raced in between is never stomped, and it leaves
+ * items that already moved on (e.g. to `applying` via submit) untouched.
+ */
+export function expireLeaseStatements(
+  db: SqlDatabase,
+  input: {
+    projectId: string;
+    leaseId: string;
+    workItemId: string;
+    /** Timestamp used as both the expiry cutoff and the revocation instant. */
+    now: string;
+  },
+): SqlStatement[] {
+  const { projectId, leaseId, workItemId, now } = input;
+  return [
+    leaseExpiredEventStatement(db, {
+      projectId,
+      leaseId,
+      workItemId,
+      now,
+      guardColumn: "id",
+      guardValue: leaseId,
+    }),
+    db
+      .prepare(
+        `UPDATE leases SET revoked_at = ?
+           WHERE id = ?
+             AND released_at IS NULL AND revoked_at IS NULL
+             AND expires_at <= ?`,
+      )
+      .bind(now, leaseId, now),
+    workItemReleaseStatement(db, workItemId, now),
+  ];
+}
+
+/**
+ * The claim command's variant, keyed by work item: the same guarded event
+ * plus the revocation of whatever expired lease occupies the slot. The claim
+ * batch supplies its own work-item compare-and-swap, so no reset is included.
+ */
+export function expireLeaseForWorkItemStatements(
+  db: SqlDatabase,
+  input: { projectId: string; leaseId: string; workItemId: string; now: string },
+): SqlStatement[] {
+  const { projectId, leaseId, workItemId, now } = input;
+  return [
+    leaseExpiredEventStatement(db, {
+      projectId,
+      leaseId,
+      workItemId,
+      now,
+      guardColumn: "work_item_id",
+      guardValue: workItemId,
+    }),
+    db
+      .prepare(
+        `UPDATE leases SET revoked_at = ?
+           WHERE work_item_id = ?
+             AND released_at IS NULL AND revoked_at IS NULL
+             AND expires_at <= ?`,
+      )
+      .bind(now, workItemId, now),
+  ];
+}
+
+/**
+ * `lease_expired` appended only if an expired-but-active lease is still there
+ * to expire. `guardColumn` is a fixed identifier chosen by the two callers
+ * above — never caller data — so no value is ever spliced into SQL.
+ */
+function leaseExpiredEventStatement(
+  db: SqlDatabase,
+  input: {
+    projectId: string;
+    leaseId: string;
+    workItemId: string;
+    now: string;
+    guardColumn: "id" | "work_item_id";
+    guardValue: string;
+  },
+): SqlStatement {
+  const params: SqlValue[] = [
+    input.projectId,
+    "lease_expired",
+    JSON.stringify({ leaseId: input.leaseId, workItemId: input.workItemId }),
+    input.now,
+    input.guardValue,
+    input.now,
+  ];
+  return db
+    .prepare(
+      `INSERT INTO events (project_id, type, payload, created_at)
+       SELECT ?, ?, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM leases
+           WHERE ${input.guardColumn} = ?
+             AND released_at IS NULL AND revoked_at IS NULL
+             AND expires_at <= ?
+        )`,
+    )
+    .bind(...params);
+}
+
+/**
+ * Return a work item to `ready` — but only while it is still `leased` AND no
+ * live lease holds its slot. The second condition is what makes an already
+ * stranded item safe to repair and a racing re-claim safe to leave alone.
+ */
+function workItemReleaseStatement(db: SqlDatabase, workItemId: string, now: string): SqlStatement {
+  return db
+    .prepare(
+      `UPDATE work_items SET status = 'ready', updated_at = ?
+         WHERE id = ? AND status = 'leased'
+           AND NOT EXISTS (
+             SELECT 1 FROM leases
+              WHERE work_item_id = ?
+                AND released_at IS NULL AND revoked_at IS NULL
+                AND expires_at > ?
+           )`,
+    )
+    .bind(now, workItemId, workItemId, now);
+}
+
+/**
  * Eager lease expiration (contract §2): end every active lease whose
  * `expires_at <= now`, return its work item `leased → ready`, and emit
- * `lease_expired`. Race-safe against lazy expiry: `LeasesRepository.expire`
- * is a conditional single-winner UPDATE, so a lease already ended by a
- * concurrent command is skipped without a duplicate event.
+ * `lease_expired`. Race-safe against lazy expiry AND crash-safe: each lease
+ * is ended by ONE atomic {@link expireLeaseStatements} batch, so there is no
+ * window in which the lease is revoked but its work item is still `leased`.
+ * A lease already ended by a concurrent command contributes no event and no
+ * count (its guarded revocation changes 0 rows).
  */
 export async function sweepExpiredLeases(
   db: SqlDatabase,
@@ -112,25 +254,18 @@ export async function sweepExpiredLeases(
   const candidates = await repos.leases.listExpired(now, limit);
   let expired = 0;
   for (const lease of candidates) {
-    const won = await repos.leases.expire(lease.id, now);
-    if (won !== 1) {
-      continue; // a lazy check or rival sweep got there first
-    }
-    const statements: SqlStatement[] = [
-      // Return the item to `ready` only if it is still `leased` (it may have
-      // moved on via submit; the expired lease then just frees its slot).
-      db
-        .prepare(`UPDATE work_items SET status = 'ready', updated_at = ? WHERE id = ? AND status = 'leased'`)
-        .bind(now, lease.workItemId),
-      repos.events.appendStatement({
+    const results = await db.batch(
+      expireLeaseStatements(db, {
         projectId: lease.projectId,
-        type: "lease_expired",
-        payload: { leaseId: lease.id, workItemId: lease.workItemId },
-        createdAt: now,
+        leaseId: lease.id,
+        workItemId: lease.workItemId,
+        now,
       }),
-    ];
-    await db.batch(statements);
-    expired += 1;
+    );
+    // Index 1 is the guarded revocation: 1 row ⇔ this sweep ended the lease.
+    if ((results[1]?.changes ?? 0) === 1) {
+      expired += 1;
+    }
   }
   return { expired };
 }

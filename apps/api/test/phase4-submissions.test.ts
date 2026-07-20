@@ -538,3 +538,194 @@ describe("re-anchoring (contract §5, §8 exit criterion 6)", () => {
     }
   });
 });
+
+/**
+ * Contract §5 requires "unique match AND no overlap with the changed regions"
+ * before a moved base may rebase. Unique resolution alone is not the second
+ * conjunct: when the concurrent edit deletes the target block, §10.2 step 4
+ * legitimately searches chapter-wide and can resurrect the quote in prose the
+ * submitter never saw — a clobber reported as a clean rebase.
+ */
+describe("moved-base rebase safety (contract §5, §8 exit criterion 4)", () => {
+  const V4_BLOCK_DELETED = `---
+schema: authorbot.chapter/v1
+id: ${CHAPTER_ID}
+slug: baseline
+title: Baseline
+order: 10
+status: published
+revision: 4
+authors:
+  - actor: github:avery-cole
+summary: The anomaly is first sighted.
+---
+
+<!-- authorbot:block id="${BLOCK_ID_2}" -->
+Elsewhere, the drift appeared on a different page entirely.
+`;
+
+  it("a cross-block relocation against a moved base conflicts instead of clobbering", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const ctx = await claimed(harness);
+      // The target block is deleted; the quote survives exactly once, in an
+      // unrelated paragraph the submitter never saw.
+      await externalEdit(harness, V4_BLOCK_DELETED, 4);
+
+      const accepted = await submit(ctx); // base 3, current 4
+      expect(accepted.status).toBe(202);
+
+      // The hammer assertion: the newer chapter is byte-intact.
+      expect(harness.repoFiles.get(CHAPTER_PATH)).toBe(V4_BLOCK_DELETED);
+      const submissionId = accepted.body["submissionId"] as string;
+      expect((await harness.repos.submissions.getById(submissionId))?.state).toBe("conflicted");
+      expect((await harness.repos.workItems.getById(ctx.workItemId))?.status).toBe("conflict");
+      // A human gets the merge, with both texts.
+      const siblings = await harness.repos.workItems.listBySourceAnnotation(ctx.annotationId);
+      expect(siblings.find((w) => w.type === "resolve_conflict")?.status).toBe("ready");
+    } finally {
+      harness.close();
+    }
+  });
+});
+
+describe("re-anchor completeness and convergence (contract §5, §8.6)", () => {
+  /** Insert `count` annotations on the fixture chapter with the given status. */
+  async function seedAnnotations(
+    harness: Phase4Harness,
+    count: number,
+    status: "open" | "resolved",
+    blockId: string,
+    exact: string,
+  ): Promise<string[]> {
+    const author = (await harness.repos.actors.getByExternalIdentity("github:fixture-author"))!;
+    const ids: string[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const id = uuidv7();
+      ids.push(id);
+      await harness.repos.annotations.insert({
+        id,
+        projectId: harness.projectId,
+        chapterId: CHAPTER_ID,
+        kind: "comment",
+        scope: "range",
+        chapterRevision: 3,
+        target: { blockId, textQuote: { exact } },
+        authorActorId: author.id,
+        body: `annotation ${i}`,
+        status,
+        gitOperationId: null,
+        supersededBy: null,
+        createdAt: "2026-07-19T18:01:00Z",
+        updatedAt: "2026-07-19T18:01:00Z",
+      });
+    }
+    return ids;
+  }
+
+  it("re-anchors annotations beyond the first page instead of silently skipping them", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const ctx = await claimed(harness);
+      // Terminal rows are created FIRST, so with a single capped read they
+      // fill the window and hide every live annotation behind them. UUIDv7
+      // ids are creation-ordered, so this is the ordinary shape of a
+      // long-lived chapter — 200 LIFETIME annotations, not 200 open ones.
+      await seedAnnotations(harness, 205, "resolved", BLOCK_ID_2, "Hollow Creek");
+      const live = await seedAnnotations(harness, 4, "open", BLOCK_ID_2, "Hollow Creek");
+
+      expect((await submit(ctx)).status).toBe(202);
+
+      for (const id of live) {
+        const annotation = await harness.repos.annotations.getById(id);
+        // Unaffected by the edit → kept, with its anchor moved to the new
+        // revision. Being skipped would leave a stale anchor that still looks
+        // authoritative (design §10.2 step 6).
+        expect(annotation?.status).toBe("open");
+        expect(annotation?.chapterRevision).toBe(4);
+      }
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("a drain that crashed before the post-drain hook is repaired by the next drain", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const ctx = await claimed(harness);
+      const [lagging] = await seedAnnotations(harness, 1, "open", BLOCK_ID_2, "Hollow Creek");
+
+      expect((await submit(ctx)).status).toBe(202);
+      expect((await harness.repos.annotations.getById(lagging!))?.chapterRevision).toBe(4);
+
+      // Rewind ONLY the annotation, as a crash between the processor's atomic
+      // finalize batch and the post-drain hook would leave it. The outbox row
+      // is `done`, so no future drain can re-emit that outcome — the repair
+      // must come from durable state.
+      await harness.db
+        .prepare(`UPDATE annotations SET chapter_revision = 3 WHERE id = ?`)
+        .bind(lagging!)
+        .run();
+
+      await harness.mirror.drain(harness.projectId);
+
+      expect((await harness.repos.annotations.getById(lagging!))?.chapterRevision).toBe(4);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("a conflict problem lost to a crash is re-recorded on the operation", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const ctx = await claimed(harness);
+      // An overlapping edit: the target span is rewritten, so the submission
+      // conflicts and the operation must carry the §5 409-style problem.
+      await externalEdit(
+        harness,
+        `---
+schema: authorbot.chapter/v1
+id: ${CHAPTER_ID}
+slug: baseline
+title: Baseline
+order: 10
+status: published
+revision: 4
+authors:
+  - actor: github:avery-cole
+summary: The anomaly is first sighted.
+---
+
+<!-- authorbot:block id="${BLOCK_ID_1}" -->
+The anomaly hovered over the ridge at dawn.
+
+<!-- authorbot:block id="${BLOCK_ID_2}" -->
+Nobody in Hollow Creek spoke of it.
+`,
+        4,
+      );
+      const accepted = await submit(ctx);
+      expect(accepted.status).toBe(202);
+      const operationId = accepted.body["operationId"] as string;
+      expect((await harness.repos.gitOperations.getById(operationId))?.error).not.toBeNull();
+
+      // As a crash before the hook would leave it: committed, but with no
+      // problem recorded — a polling agent would read `committed` and
+      // conclude its edit landed.
+      await harness.db
+        .prepare(`UPDATE git_operations SET error = NULL WHERE id = ?`)
+        .bind(operationId)
+        .run();
+
+      await harness.mirror.drain(harness.projectId);
+
+      const problem = JSON.parse(
+        (await harness.repos.gitOperations.getById(operationId))?.error ?? "{}",
+      ) as Record<string, unknown>;
+      expect(problem["code"]).toBe("submission-conflict");
+      expect(problem["status"]).toBe(409);
+    } finally {
+      harness.close();
+    }
+  });
+});

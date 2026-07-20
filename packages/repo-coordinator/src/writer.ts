@@ -52,6 +52,14 @@ export interface BookRepoWriter {
    * instead of clobbering (the GitHub adapter gains it in Phase 5).
    */
   readFile?(branch: string, filePath: string): Promise<string | null>;
+  /**
+   * Current head SHA of the branch, or `null` when the branch has no commits
+   * yet. Callers that compute content from a read of the branch use it to pin
+   * `expectedHeadOverride` on the resulting commit, so a plan built from one
+   * head can never land on a different one (design §14.2). Optional: adapters
+   * that cannot report a head omit it and their commits go unpinned.
+   */
+  resolveHead?(branch: string): Promise<string | null>;
 }
 
 /** Trailer key that makes commits idempotent per Git operation. */

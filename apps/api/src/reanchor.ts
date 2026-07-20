@@ -39,9 +39,27 @@ export interface FinalizeSubmissionOptions {
   clock: Clock;
 }
 
-/** Run the post-drain hook for one drain's outcomes. */
+/**
+ * Run the post-drain hook for one drain's outcomes, then reconcile anything
+ * an earlier drain owed.
+ *
+ * `projectId` drives the reconciliation pass, which is what makes this hook
+ * crash-safe. The processor's finalize batch atomically marks the operation
+ * `committed`, syncs the record, and marks the outbox row `done`; after that
+ * the row is neither processing nor pending, so no future drain can re-emit
+ * its outcome. A crash in the window between that batch and this hook used to
+ * skip the §10.3 pass and the §5 conflict problem PERMANENTLY.
+ *
+ * Rather than add a marker that could itself be lost, the reconciliation
+ * reads the owed work straight out of durable state: annotations whose
+ * `chapter_revision` lags their chapter, and conflicted submissions whose
+ * operation carries no recorded problem. Both are exactly the conditions this
+ * hook exists to clear, so re-running converges and a fresh drain repairs
+ * whatever the previous one dropped.
+ */
 export async function finalizeSubmissionOutcomes(
   options: FinalizeSubmissionOptions,
+  projectId: string,
   outcomes: readonly DrainRowOutcome[],
 ): Promise<void> {
   const { db, writer, clock } = options;
@@ -73,10 +91,100 @@ export async function finalizeSubmissionOutcomes(
       continue;
     }
     if (submission.state === "conflicted" && row.gitOperationId !== null) {
-      await recordConflictProblem(db, repos, row.gitOperationId, submission, workItem, ts);
+      await recordConflictProblem(
+        db,
+        repos,
+        row.gitOperationId,
+        submission,
+        workItem,
+        ts,
+        resolvedConflictReason(row.payload),
+      );
     }
   }
+
+  await reconcileOwedFinalization({ db, writer, clock }, projectId);
 }
+
+/**
+ * Repair finalization work a previous drain committed but never completed
+ * (see {@link finalizeSubmissionOutcomes}). Driven entirely by durable state,
+ * so it is correct no matter where the earlier process died.
+ */
+async function reconcileOwedFinalization(
+  options: FinalizeSubmissionOptions,
+  projectId: string,
+): Promise<void> {
+  const { db, clock } = options;
+  const repos = createRepositories(db);
+  const ts = toTimestamp(clock.now());
+
+  // 1. Chapters carrying annotations still anchored to an older revision.
+  const stale = await db
+    .prepare(
+      `SELECT DISTINCT a.chapter_id AS chapter_id
+         FROM annotations a
+         JOIN chapters c ON c.id = a.chapter_id
+        WHERE c.project_id = ?
+          AND a.status IN ('open', 'work_item_created')
+          AND a.chapter_revision < c.revision
+        ORDER BY a.chapter_id
+        LIMIT ?`,
+    )
+    .bind(projectId, RECONCILE_CHAPTER_LIMIT)
+    .all();
+  for (const chapterRow of stale) {
+    const chapterId = String(chapterRow["chapter_id"]);
+    await reanchorChapterAnnotations(
+      options,
+      // No originating work item: every lagging annotation is in scope, and
+      // the completed item's own source annotation is already `accepted`, so
+      // the status filter excludes it. The sentinel id matches nothing.
+      { id: `reconcile:${chapterId}`, projectId, chapterId, sourceAnnotationId: "" },
+      ts,
+    );
+  }
+
+  // 2. Conflicted submissions whose operation never got its §5 problem.
+  const conflicted = await repos.submissions.listByProjectState(projectId, "conflicted", {
+    limit: RECONCILE_SUBMISSION_LIMIT,
+  });
+  for (const submission of conflicted) {
+    if (submission.gitOperationId === null) continue;
+    const operation = await repos.gitOperations.getById(submission.gitOperationId);
+    if (operation === null || operation.error !== null) continue;
+    const workItem = await repos.workItems.getById(submission.workItemId);
+    if (workItem === null) continue;
+    const outboxRow = await db
+      .prepare(`SELECT payload FROM outbox WHERE git_operation_id = ? LIMIT 1`)
+      .bind(submission.gitOperationId)
+      .first();
+    const payload =
+      typeof outboxRow?.["payload"] === "string"
+        ? (JSON.parse(outboxRow["payload"]) as unknown)
+        : null;
+    await recordConflictProblem(
+      db,
+      repos,
+      submission.gitOperationId,
+      submission,
+      workItem,
+      ts,
+      resolvedConflictReason(payload),
+    );
+  }
+}
+
+/** The applier's conflict reason as persisted on a `submission.apply` payload. */
+function resolvedConflictReason(payload: unknown): string | null {
+  const resolved = (payload as { resolved?: { outcome?: { reason?: unknown } } } | null)?.resolved;
+  const reason = resolved?.outcome?.reason;
+  return typeof reason === "string" && reason !== "" ? reason : null;
+}
+
+/** Per-drain reconciliation budgets (the next drain continues the tail). */
+const RECONCILE_CHAPTER_LIMIT = 50;
+const RECONCILE_SUBMISSION_LIMIT = 100;
 
 /**
  * §10.3 re-anchor for one applied work item's chapter. Reads the committed
@@ -106,9 +214,14 @@ async function reanchorChapterAnnotations(
   const blockSet = new Set(chapter.blockIds);
   let blocks: ReturnType<typeof listMarkedBlocks> | null = null;
 
-  const annotations = await repos.annotations.listByChapter(workItem.chapterId, { limit: 200 });
+  // Page through EVERY annotation on the chapter. A single capped read left
+  // the tail permanently un-re-anchored and un-flagged: the cap applies
+  // before the status filter and ids are creation-ordered, so on a long-lived
+  // chapter the window fills with terminal rows and silently hides live ones.
+  // A stale anchor that still looks authoritative is exactly the §10.2 step 6
+  // hazard, so the pass must be exhaustive rather than bounded.
   const statements: SqlStatement[] = [];
-  for (const a of annotations) {
+  for await (const a of eachAnnotation(repos, workItem.chapterId)) {
     if (a.id === workItem.sourceAnnotationId) continue;
     if (a.status !== "open" && a.status !== "work_item_created") continue;
     if (a.chapterRevision >= newRevision) continue; // already re-anchored
@@ -161,9 +274,46 @@ async function reanchorChapterAnnotations(
         }),
       );
     }
+    // Bound the transaction size rather than the work: each flush is
+    // self-consistent (every annotation's decision, audit row, and event go
+    // in together), and re-running converges because decided annotations are
+    // skipped by the guards above.
+    if (statements.length >= REANCHOR_BATCH_STATEMENTS) {
+      await db.batch(statements.splice(0));
+    }
   }
   if (statements.length > 0) {
     await db.batch(statements);
+  }
+}
+
+/** Statement budget per re-anchor transaction. */
+const REANCHOR_BATCH_STATEMENTS = 300;
+
+/** Annotation page size for the exhaustive chapter scan. */
+const REANCHOR_PAGE_SIZE = 200;
+
+/** Every annotation on a chapter, oldest id first, paged to exhaustion. */
+async function* eachAnnotation(
+  repos: ReturnType<typeof createRepositories>,
+  chapterId: string,
+): AsyncGenerator<AnnotationRecord> {
+  let afterId = "";
+  for (;;) {
+    const page = await repos.annotations.listByChapter(chapterId, {
+      limit: REANCHOR_PAGE_SIZE,
+      afterId,
+    });
+    if (page.length === 0) {
+      return;
+    }
+    for (const annotation of page) {
+      yield annotation;
+    }
+    afterId = page[page.length - 1]?.id ?? "";
+    if (page.length < REANCHOR_PAGE_SIZE) {
+      return;
+    }
   }
 }
 
@@ -211,6 +361,7 @@ async function recordConflictProblem(
   submission: { id: string; workItemId: string },
   workItem: { id: string; projectId: string; chapterId: string; sourceAnnotationId: string },
   ts: string,
+  reason: string | null,
 ): Promise<void> {
   const operation = await repos.gitOperations.getById(gitOperationId);
   if (operation === null || operation.error !== null) {
@@ -224,6 +375,10 @@ async function recordConflictProblem(
     submissionId: submission.id,
     workItemId: workItem.id,
     conflictWorkItemId: conflictItem?.id ?? null,
+    // The applier's deterministic reason, so clients can distinguish a moved
+    // base from a payload the patch engine refused instead of asserting a
+    // cause they cannot know.
+    reason,
   };
   const statements: SqlStatement[] = [
     db

@@ -108,6 +108,20 @@ export class LocalGitAdapter implements BookRepoWriter {
     return result.code === 0 ? result.stdout : null;
   }
 
+  /**
+   * Head SHA of `branch`, or `null` when the branch does not exist yet or
+   * carries no commits. Used to pin `expectedHeadOverride` on commits whose
+   * content was computed from a read of that head.
+   */
+  async resolveHead(branch: string): Promise<string | null> {
+    const result = await this.git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+    if (result.code !== 0) {
+      return null;
+    }
+    const sha = result.stdout.trim();
+    return sha === "" ? null : sha;
+  }
+
   /** First commit on HEAD's history carrying `Authorbot-Operation: <id>`. */
   private async findOperationCommit(operationId: string): Promise<string | null> {
     const result = await this.mustGit([

@@ -250,3 +250,45 @@ describe("LocalFsBookRepoReader over examples/book-repo", () => {
     expect(stripFrontmatter("No frontmatter here\n")).toBe("No frontmatter here");
   });
 });
+
+/**
+ * `readTextFile` documents "the resolved path must stay inside the
+ * repository", and Phase 4 is the first phase to route repo-relative reads
+ * through it (claim task bundles, the applier's source/attribution reads).
+ * The Phase 5 GitHub reader is specified to mirror this implementation, so a
+ * guard that does not do what it documents propagates.
+ */
+describe("LocalFsBookRepoReader path containment (BookRepoReader contract)", () => {
+  it("refuses a sibling directory that merely shares the repository's name prefix", async () => {
+    const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const base = await mkdtemp(join(tmpdir(), "authorbot-containment-"));
+    const repo = join(base, "book");
+    const sibling = join(base, "book-secrets");
+    await mkdir(repo, { recursive: true });
+    await mkdir(sibling, { recursive: true });
+    await writeFile(join(repo, "inside.txt"), "inside", "utf8");
+    await writeFile(join(sibling, "creds.env"), "TOKEN=hunter2", "utf8");
+
+    const reader = new LocalFsBookRepoReader(repo);
+    expect(await reader.readTextFile("inside.txt")).toBe("inside");
+    // `join(repo, "../book-secrets/creds.env")` normalizes to the sibling,
+    // which passes a bare `startsWith(repoPath)` test — it must not pass here.
+    expect(await reader.readTextFile("../book-secrets/creds.env")).toBeNull();
+    expect(await reader.readTextFile("../../etc/passwd")).toBeNull();
+    expect(await reader.readTextFile("chapters/../../book-secrets/creds.env")).toBeNull();
+    expect(await reader.readTextFile("/etc/passwd")).toBeNull();
+  });
+
+  it("resolves a non-normalized base rather than comparing against it raw", async () => {
+    const reader = new LocalFsBookRepoReader(`${EXAMPLE_REPO}/./`);
+    // An unresolved base made the prefix test meaningless (and fail closed
+    // for a non-normalized root); reads inside the repo must still work.
+    expect(await reader.readTextFile("chapters/001-baseline.md")).toContain(
+      "schema: authorbot.chapter/v1",
+    );
+    expect(await reader.readTextFile("../etc/passwd")).toBeNull();
+  });
+});

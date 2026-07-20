@@ -171,12 +171,20 @@ export type ClaimCheckResult =
 
 /**
  * Claimability (design section 12.2 step 1, contract section 2): the item is
- * `ready`, or it is `leased` and the recorded active lease is no longer
- * active at `now` (expired/released/revoked — lazy expiry). A `leased` item
- * whose lease is still live denies with `lease-held` (the 409 the losing
- * claimant sees; holder-safe messaging is the API's concern). Scope
- * (`work:claim`) and per-type capability checks are separate
- * (`requireScope`, `requiredSubmissionType`).
+ * `ready`, or it is `leased` and no LIVE lease occupies its slot. Only a
+ * `leased` item whose recorded active lease is still live denies with
+ * `lease-held` (the 409 the losing claimant sees; holder-safe messaging is
+ * the API's concern). Scope (`work:claim`) and per-type capability checks are
+ * separate (`requireScope`, `requiredSubmissionType`).
+ *
+ * A `leased` item with NO active lease row at all is claimable, not held: the
+ * slot is provably free (the unique index admits exactly one active lease, so
+ * "none" is unambiguous). That combination is what an interrupted expiry or a
+ * bare administrative revocation leaves behind, and treating it as
+ * `lease-held` made such items permanently unclaimable, unreleasable, and
+ * unsweepable — recoverable only by direct database surgery. Claiming
+ * self-heals it instead: `priorLeaseExpired` sends the caller down the
+ * expire-then-claim path, whose compare-and-swap starts from `leased`.
  */
 export function checkWorkItemClaimable(
   status: WorkItemStatus,
@@ -192,7 +200,7 @@ export function checkWorkItemClaimable(
       `work item in status "${status}" cannot be claimed`,
     );
   }
-  if (activeLease === null || checkLeaseActive(activeLease, now).allowed) {
+  if (activeLease !== null && checkLeaseActive(activeLease, now).allowed) {
     return denied("lease-held", "work item is already leased");
   }
   return { allowed: true, priorLeaseExpired: true };

@@ -358,10 +358,11 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
             return failOperation(row, op, errorMessage(error));
           }
           let commitSha: string;
+          const expectedHead = plan.expectedHead ?? op.expectedHead ?? undefined;
           try {
             const result = await writer.commitFiles({
               branch: plan.branch,
-              ...(op.expectedHead === null ? {} : { expectedHeadOverride: op.expectedHead }),
+              ...(expectedHead === undefined ? {} : { expectedHeadOverride: expectedHead }),
               files: plan.files,
               message: plan.message,
               trailers: plan.trailers,
@@ -399,22 +400,91 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     return failOperation(row, op, `git operation ${op.id} exceeded ${MAX_STATE_STEPS} state steps`);
   }
 
-  /** Mark the operation `failed` (if a legal transition remains) and the outbox row failed. */
+  /**
+   * Mark the operation `failed` (if a legal transition remains) and the
+   * outbox row failed — releasing whatever the row had left in flight.
+   *
+   * A `submission.apply` row holds a work item hostage: the submit command
+   * moved it to `applying` AND released its lease in one batch, so a
+   * terminal failure here previously left the item unclaimable (not
+   * `ready`), unreleasable (no active lease), un-resubmittable (not
+   * `leased`), and uncancellable (`applying` has no cancel edge) — dead,
+   * with no event telling any client. The failure paths are ordinary
+   * (a writer without `readFile`, an actor with no external identity,
+   * retries exhausted on contention), so the row must hand the item back.
+   *
+   * `applying → conflict` is the §9.5 edge that fits: the edit could not be
+   * applied and a human must repair it. `conflict → ready` keeps the item
+   * recoverable, the submission lands in its terminal `conflicted` state,
+   * and `work_item_conflict` carries the reason to the feed.
+   */
   async function failOperation(
     row: OutboxRecord,
     op: GitOperationRecord,
     error: string,
   ): Promise<DrainRowOutcome> {
+    const ts = now();
     const t = transitionGitOperation(op, "failed", maxAttempts);
+    const statements: SqlStatement[] = [];
     if (t.allowed) {
-      await repos.gitOperations.updateState(op.id, {
-        state: "failed",
-        updatedAt: now(),
-        error,
-      });
+      statements.push(
+        repos.gitOperations.updateStateStatement(op.id, {
+          state: "failed",
+          updatedAt: ts,
+          error,
+        }),
+      );
     }
-    await repos.outbox.markFailed(row.id, now());
+    statements.push(...(await releaseFailedApplyStatements(row, ts, error)));
+    statements.push(repos.outbox.markFailedStatement(row.id, ts));
+    await db.batch(statements);
     return outcome(row, "failed", { error });
+  }
+
+  /**
+   * Statements returning a failed `submission.apply` row's work item and
+   * submission to honest terminal states. Guarded on the exact expected
+   * states so a replay (or a row that never got that far) is a no-op.
+   */
+  async function releaseFailedApplyStatements(
+    row: OutboxRecord,
+    ts: string,
+    error: string,
+  ): Promise<SqlStatement[]> {
+    if (row.kind !== "submission.apply") {
+      return [];
+    }
+    let payload: SubmissionApplyPayload;
+    try {
+      payload = parseSubmissionApplyPayload(row);
+    } catch {
+      return []; // Malformed payload is what failed us; nothing to release.
+    }
+    const workItem = await repos.workItems.getById(payload.workItemId);
+    if (workItem === null || workItem.status !== "applying") {
+      return [];
+    }
+    return [
+      db
+        .prepare(
+          `UPDATE work_items SET status = 'conflict', updated_at = ?
+             WHERE id = ? AND status = 'applying'`,
+        )
+        .bind(ts, workItem.id),
+      repos.submissions.transitionStateStatement(payload.submissionId, "applying", "conflicted", ts),
+      repos.events.appendStatement({
+        projectId: row.projectId,
+        type: "work_item_conflict",
+        payload: {
+          workItemId: workItem.id,
+          submissionId: payload.submissionId,
+          chapterId: workItem.chapterId,
+          conflictWorkItemId: null,
+          reason: `the submission could not be applied: ${error}`,
+        },
+        createdAt: ts,
+      }),
+    ];
   }
 
   async function persistTransition(
@@ -438,6 +508,13 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     files: CommitFile[];
     message: string;
     trailers: Record<string, string>;
+    /**
+     * Head SHA this plan's contents were computed against. When set, the
+     * commit is refused with a retryable `non-fast-forward` if the branch has
+     * moved — the guard that stops a replayed plan from clobbering newer
+     * work. Takes precedence over the operation row's `expected_head`.
+     */
+    expectedHead?: string;
   }
 
   async function buildCommitPlan(row: OutboxRecord, op: GitOperationRecord): Promise<CommitPlan> {
@@ -594,6 +671,10 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           "submission.apply requires a SubmissionApplier (createProcessor({ submissionApplier }))",
         );
       }
+      // Pin the head the applier is about to read. The persisted outcome
+      // carries the FULL patched chapter computed against THIS head, so it is
+      // only ever safe to commit while the branch still sits here.
+      const resolvedHead = (await writer.resolveHead?.(branch)) ?? null;
       const outcome = await applier.apply({
         branch,
         submission,
@@ -603,6 +684,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       });
       resolved = {
         attempt: op.attempts,
+        ...(resolvedHead === null ? {} : { resolvedHead }),
         outcome: await resolveOutcome(outcome, workItem, submitterRef),
       };
       await persistResolved(row, resolved);
@@ -635,6 +717,18 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       });
       return {
         branch,
+        // Commit ONLY at the head this outcome was computed against. Without
+        // the pin, a crash-recovery replay (same attempt, so the outcome is
+        // reused rather than re-resolved) committed a chapter built from a
+        // stale head verbatim over whatever the branch had advanced to —
+        // byte-clobbering a newer revision and stamping a revision number
+        // behind it, which then poisons every later base-hash comparison.
+        // With it, the writer refuses with a retryable `non-fast-forward`,
+        // the operation requeues, and the next attempt re-resolves against
+        // the real head. A commit that already landed is still returned by
+        // the `Authorbot-Operation` trailer dedup, which runs before this
+        // check — so the ordinary crash-after-commit replay still finalizes.
+        ...(resolved.resolvedHead === undefined ? {} : { expectedHead: resolved.resolvedHead }),
         files: [
           { path: outcome.chapterPath, content: outcome.content },
           await renderWorkItemFile(workItem, payload.createdByActorId, {
@@ -652,6 +746,9 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     const outcome = resolved.outcome;
     return {
       branch,
+      // The conflict record never touches the chapter, but it quotes the
+      // current text, so it is pinned the same way.
+      ...(resolved.resolvedHead === undefined ? {} : { expectedHead: resolved.resolvedHead }),
       files: [
         await renderWorkItemFile(workItem, payload.createdByActorId, { status: "conflict" }),
         renderConflictArtifact(workItem, submission, outcome),
@@ -1062,6 +1159,13 @@ function parseDecisionPayload(row: OutboxRecord): DecisionCreatePayload {
  */
 interface ResolvedApply {
   attempt: number;
+  /**
+   * Branch head the applier read when producing this outcome. Replayed as
+   * `expectedHeadOverride` so a reused outcome can only land on the head it
+   * was computed from. Absent when the writer cannot report a head (the
+   * commit then proceeds unpinned, as before).
+   */
+  resolvedHead?: string;
   outcome:
     | {
         result: "applied";

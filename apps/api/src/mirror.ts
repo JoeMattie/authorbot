@@ -85,7 +85,11 @@ export function createInlineMirror(options: InlineMirrorOptions): InlineMirror {
       const result = await processor.drain(projectId);
       // Phase 4 post-drain hook (module docs): §10.3 re-anchoring + conflict
       // problem recording, inside the same serialized chain.
-      await finalizeSubmissionOutcomes({ db: options.db, writer, clock }, result.outcomes);
+      await finalizeSubmissionOutcomes(
+        { db: options.db, writer, clock },
+        projectId,
+        result.outcomes,
+      );
       return result;
     };
     const next = previous.then(run, run);

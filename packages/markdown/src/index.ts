@@ -5,7 +5,7 @@
  * schema validation and error-code mapping happen in the CLI.
  */
 
-export { parseChapterMarkdown, type ParsedChapter } from "./parse.js";
+export { parseChapterMarkdown, parseProseMarkdown, type ParsedChapter } from "./parse.js";
 export {
   extractBlocks,
   type AssociatedBlockType,

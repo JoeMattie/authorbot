@@ -13,7 +13,7 @@
  * invalid instead).
  */
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { parseChapterMarkdown } from "@authorbot/markdown";
 import {
   parseDecisionArtifact,
@@ -56,16 +56,34 @@ async function listDir(path: string): Promise<string[]> {
 }
 
 export class LocalFsBookRepoReader implements BookRepoReader {
-  constructor(private readonly repoPath: string) {}
+  /** Absolute, normalized repository root — the containment base. */
+  private readonly root: string;
+
+  constructor(private readonly repoPath: string) {
+    this.root = resolve(repoPath);
+  }
 
   /**
    * Raw text of one repo-relative file, or null when absent (Phase 4 task
-   * bundles and the submission-apply pipeline; reader.ts doc). Path traversal
-   * is refused: the resolved path must stay inside the repository.
+   * bundles and the submission-apply pipeline; reader.ts doc).
+   *
+   * Path traversal is refused: the resolved path must stay inside the
+   * repository. "Inside" means at the root or beneath a separator — a bare
+   * `startsWith` on the raw base admitted any SIBLING directory sharing the
+   * base's name (`/srv/book` + `../book-secrets/creds.env` normalizes to
+   * `/srv/book-secrets/creds.env`, which passes a prefix test), and comparing
+   * against an unresolved base made the test meaningless for relative or
+   * non-normalized roots. Absolute inputs and `..` segments are rejected
+   * outright rather than normalized away, so the guard does not depend on
+   * caller discipline. This is the containment boundary the `BookRepoReader`
+   * contract documents and the Phase 5 GitHub reader is specified to mirror.
    */
   async readTextFile(path: string): Promise<string | null> {
-    const full = join(this.repoPath, path);
-    if (!full.startsWith(this.repoPath)) {
+    if (isAbsolute(path) || path.split(/[\\/]/).includes("..")) {
+      return null;
+    }
+    const full = resolve(this.root, path);
+    if (full !== this.root && !full.startsWith(this.root + sep)) {
       return null;
     }
     try {

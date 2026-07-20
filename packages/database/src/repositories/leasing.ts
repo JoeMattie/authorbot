@@ -141,6 +141,62 @@ export class LeasesRepository {
   }
 
   /**
+   * Renew as a NULL-ABORT compare-and-swap, for composing into the renew
+   * command's batch. Identical guard to {@link renewStatement}, but instead
+   * of quietly affecting 0 rows when the lease is no longer live it writes
+   * NULL into the NOT NULL `token_hash` column, aborting the WHOLE batch —
+   * the same cross-isolate backstop `work_items` status changes use.
+   *
+   * This is what keeps a renewal honest: without it a lease released,
+   * revoked, or expired by another isolate between the handler's read and its
+   * write would still produce a 200, a bumped `renewal_count` in the
+   * response, an audit row, and a `lease_renewed` event for a renewal that
+   * never happened. Callers catch `isConstraintError` and re-read the lease
+   * to pick the right 409.
+   *
+   * SQLite evaluates every SET expression against the PRE-update row, so all
+   * three branches see the same guard result.
+   */
+  renewCasStatement(id: string, newExpiresAt: string, now: string): SqlStatement {
+    const live = `released_at IS NULL AND revoked_at IS NULL
+                  AND expires_at > ? AND expires_at < max_expires_at`;
+    return this.db
+      .prepare(
+        `UPDATE leases
+            SET expires_at    = CASE WHEN ${live} THEN MIN(?, max_expires_at) ELSE expires_at END,
+                renewal_count = CASE WHEN ${live} THEN renewal_count + 1 ELSE renewal_count END,
+                token_hash    = CASE WHEN ${live} THEN token_hash ELSE NULL END
+          WHERE id = ?`,
+      )
+      .bind(now, newExpiresAt, now, now, id);
+  }
+
+  /**
+   * End the lease because its holder's submission was accepted — as a
+   * NULL-ABORT compare-and-swap requiring the lease to still be LIVE
+   * (`active AND expires_at > now`).
+   *
+   * The submission batch's work-item CAS only proves the item is `leased`; it
+   * cannot tell "still leased by me" from "leased by whoever re-claimed it
+   * after my lease expired". Without this statement an expired lease's edit
+   * could be applied while the fresh holder's lease stayed active forever
+   * against a completed item (contract §8.2: an expired or stale lease cannot
+   * submit). Here the abort is unconditional and atomic: if the lease is not
+   * live at write time, nothing in the batch persists.
+   */
+  consumeForSubmissionStatement(id: string, releasedAt: string, now: string): SqlStatement {
+    const live = `released_at IS NULL AND revoked_at IS NULL AND expires_at > ?`;
+    return this.db
+      .prepare(
+        `UPDATE leases
+            SET released_at = CASE WHEN ${live} THEN ? ELSE released_at END,
+                token_hash  = CASE WHEN ${live} THEN token_hash ELSE NULL END
+          WHERE id = ?`,
+      )
+      .bind(now, releasedAt, now, id);
+  }
+
+  /**
    * Release: conditional UPDATE ending an ACTIVE lease voluntarily (holder
    * or maintainer, `POST .../lease/release`). Liveness is NOT required — a
    * holder may release an already-expired-but-unswept lease; either way the

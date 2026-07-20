@@ -18,9 +18,20 @@ import { parseChapterMarkdown } from "./parse.js";
  * `ambiguous` when more than one candidate survives context filtering;
  * `missing` when none. Documented details:
  *
- * - A single quote occurrence is accepted without context verification
- *   (context is a disambiguator among multiple exact matches, not a fuzzy
- *   score).
+ * - Stored context (prefix/suffix) is VERIFICATION, not merely a
+ *   disambiguator among several exact matches. Whenever a selector carries
+ *   context, every acceptance path checks it — the stored position in step 2
+ *   included, and single candidates included. A lone occurrence whose
+ *   surroundings contradict the stored context is not the declared target; it
+ *   is a different sentence that happens to share a quote, and design §10.2
+ *   is explicit that attaching to a merely similar sentence is worse than a
+ *   visible orphan. Skipping the check let a concurrent edit that shifted
+ *   offsets resolve `exact` onto the WRONG occurrence, and let a deleted
+ *   target block relocate onto unrelated prose, in both cases rewriting text
+ *   outside the declared target while reporting a clean resolution.
+ * - A selector with NO stored context at all falls back to uniqueness alone:
+ *   there is nothing else to check, so one occurrence resolves and several
+ *   are `ambiguous`.
  * - Context matching is exact, but truncated at block edges: a candidate
  *   flush against the block start/end matches when the stored prefix/suffix
  *   ends/starts with the shorter available text.
@@ -162,10 +173,15 @@ function pickCandidate(
   if (candidates.length === 0) {
     return { kind: "zero" };
   }
-  const single = candidates[0];
-  if (candidates.length === 1 && single !== undefined) {
-    return { kind: "one", candidate: single };
+  // No stored context: uniqueness is the only evidence available.
+  if (prefix === "" && suffix === "") {
+    const single = candidates[0];
+    return candidates.length === 1 && single !== undefined
+      ? { kind: "one", candidate: single }
+      : { kind: "ambiguous" };
   }
+  // Context stored: filter FIRST, then count. Accepting a lone candidate
+  // before filtering discarded the very evidence that refutes it.
   const filtered = candidates.filter(
     (c) =>
       prefixMatches(c.text, c.index, prefix) &&
@@ -175,7 +191,10 @@ function pickCandidate(
   if (filtered.length === 1 && only !== undefined) {
     return { kind: "one", candidate: only };
   }
-  return { kind: "ambiguous" };
+  // Nothing matched the stored context: the declared target is not here.
+  // `zero` (not `ambiguous`) lets the caller fall through to the next §10.2
+  // step, and ultimately to `missing`.
+  return filtered.length === 0 ? { kind: "zero" } : { kind: "ambiguous" };
 }
 
 /** Resolve a stored range selector against a chapter source (§10.2 1–4). */
@@ -193,7 +212,12 @@ export function resolveTarget(source: string, target: RangeTarget): ResolveResul
   if (targetBlock !== undefined) {
     const norm = normalizeBlockText(targetBlock.node).text;
 
-    // Step 2: stored position + exact-quote verification.
+    // Step 2: stored position + exact-quote AND stored-context verification.
+    // The quote alone is not enough when it occurs more than once in the
+    // block: a concurrent insertion earlier in the block slides a DIFFERENT
+    // occurrence onto the stored offsets, and the quote check happily passes
+    // on it. Verifying the surroundings distinguishes "the target is still
+    // here" from "some other occurrence drifted into its seat".
     const tp = target.textPosition;
     if (
       tp !== undefined &&
@@ -202,7 +226,9 @@ export function resolveTarget(source: string, target: RangeTarget): ResolveResul
       tp.start >= 0 &&
       tp.start < tp.end &&
       tp.end <= norm.length &&
-      norm.slice(tp.start, tp.end) === exact
+      norm.slice(tp.start, tp.end) === exact &&
+      prefixMatches(norm, tp.start, prefix) &&
+      suffixMatches(norm, tp.end, suffix)
     ) {
       return {
         kind: "exact",

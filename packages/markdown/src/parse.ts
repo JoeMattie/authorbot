@@ -32,6 +32,31 @@ const processor = unified()
   .use(remarkGfm)
   .use(remarkFrontmatter, ["yaml"]);
 
+/**
+ * Same dialect WITHOUT frontmatter support — for text that is a chapter
+ * BODY rather than a chapter file (submission payloads, patch replacements).
+ *
+ * The distinction is a safety boundary, not a nicety. `remark-frontmatter`
+ * swallows everything between a leading `---` fence and its closing `---`
+ * into one opaque `yaml` node, and the safety scan only visits `html`,
+ * `link`, `image`, and `definition` nodes. Scanning body text with the
+ * frontmatter-aware processor therefore let a payload that merely STARTED
+ * with `---` hide raw HTML and forbidden URL schemes from the scan entirely.
+ * Body text has no frontmatter to parse, so nothing is lost by refusing to
+ * look for it.
+ */
+const proseProcessor = unified().use(remarkParse).use(remarkGfm);
+
+/**
+ * Parse chapter BODY text (no frontmatter): mdast tree plus the block-marker
+ * scan. Use this — never {@link parseChapterMarkdown} — whenever the input is
+ * untrusted body content such as a submission's `content`.
+ */
+export function parseProseMarkdown(source: string): Pick<ParsedChapter, "ast" | "blocks"> {
+  const ast = proseProcessor.parse(source);
+  return { ast, blocks: extractBlocks(ast) };
+}
+
 /** Parse a chapter Markdown file: frontmatter, mdast tree, and block markers. */
 export function parseChapterMarkdown(source: string): ParsedChapter {
   const ast = processor.parse(source);

@@ -32,7 +32,6 @@
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import {
   isConstraintError,
-  isUniqueConstraintError,
   type ChapterProjectionRecord,
   type LeaseRecord,
   type ProjectRecord,
@@ -55,14 +54,23 @@ import {
   submitWorkCommandSchema,
   type LeaseConfig,
 } from "@authorbot/domain";
-import { DEFAULT_ACCEPTANCE_CRITERIA } from "@authorbot/repo-coordinator";
-import { parseChapterMarkdown, scanSafety } from "@authorbot/markdown";
+import {
+  DEFAULT_ACCEPTANCE_CRITERIA,
+  DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA,
+} from "@authorbot/repo-coordinator";
+import { parseChapterMarkdown, parseProseMarkdown, scanSafety } from "@authorbot/markdown";
+import type { WorkItemType } from "@authorbot/schemas";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
 import type { AppDeps, AppEnv, Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
-import { mintLeaseToken, verifyLeaseToken } from "./leases.js";
+import {
+  expireLeaseForWorkItemStatements,
+  expireLeaseStatements,
+  mintLeaseToken,
+  verifyLeaseToken,
+} from "./leases.js";
 import { problem } from "./problems.js";
 import { sha256Hex } from "./crypto.js";
 import type { ProjectSerializer } from "./serializer.js";
@@ -178,23 +186,20 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
   /**
    * Lazy expiry of one lease (contract §2 "enforced lazily on every
    * lease-relevant command"): single-winner conditional end, item back to
-   * `ready`, `lease_expired` emitted — only when this call actually won.
+   * `ready`, `lease_expired` emitted — only when this call actually won, and
+   * all three in ONE atomic batch (see `expireLeaseStatements`). Splitting
+   * the revocation from the work-item reset used to leave a crash window in
+   * which the item was stranded `leased` with an empty lease slot forever.
    */
   const lazilyExpire = async (lease: LeaseRecord): Promise<void> => {
-    const ts = now();
-    const won = await repos.leases.expire(lease.id, ts);
-    if (won !== 1) {
-      return;
-    }
-    await deps.db.batch([
-      deps.db
-        .prepare(`UPDATE work_items SET status = 'ready', updated_at = ? WHERE id = ? AND status = 'leased'`)
-        .bind(ts, lease.workItemId),
-      appendEventStatement(lease.projectId, "lease_expired", {
+    await deps.db.batch(
+      expireLeaseStatements(deps.db, {
+        projectId: lease.projectId,
         leaseId: lease.id,
         workItemId: lease.workItemId,
+        now: now(),
       }),
-    ]);
+    );
   };
 
   /** Chapter source via the configured reader (bundle + base verification). */
@@ -214,7 +219,14 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
     }
     const a = authOf(c);
 
-    return serialize(guard.project.id, async () => {
+    /**
+     * Sentinel for "a rival command won a compare-and-swap under us, but the
+     * item is still claimable" — the caller re-runs the whole attempt once
+     * against fresh state (see the claim route's retry below).
+     */
+    const RETRY = Symbol("retry-claim");
+
+    const attemptClaim = async (): Promise<Response | typeof RETRY> => {
       const workItem = await findWorkItem(c, guard.project);
       if (workItem instanceof Response) {
         return workItem;
@@ -275,13 +287,17 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         revokedAt: null,
       };
 
-      const target = bundleTarget(workItem);
       const submissionType = requiredSubmissionType(workItem.type);
+      // Contract §3: `target` is absent for chapter scope. `resolve_conflict`
+      // items inherit the originating range selector on their row, but they
+      // are submitted as a whole chapter — advertising a span would tell the
+      // claimant to edit one sentence of a document they must merge.
+      const target = submissionType === "chapter_replacement" ? null : bundleTarget(workItem);
       const bundle = {
         workItem: {
           id: workItem.id,
           type: workItem.type,
-          acceptanceCriteria: [...DEFAULT_ACCEPTANCE_CRITERIA],
+          acceptanceCriteria: [...acceptanceCriteriaFor(workItem.type)],
           priority: workItem.priority,
         },
         lease: {
@@ -308,17 +324,27 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       const statements: SqlStatement[] = [];
       if (claimable.priorLeaseExpired && activeLease !== null) {
         // Contract §2: expire the stale lease in the same serialized batch.
+        // The `lease_expired` event is GUARDED by the same predicate as the
+        // revocation, so losing that race emits nothing rather than claiming
+        // an expiry that another command actually performed.
         statements.push(
-          repos.leases.expireForWorkItemStatement(workItem.id, timestamp),
-          appendEventStatement(guard.project.id, "lease_expired", {
+          ...expireLeaseForWorkItemStatements(deps.db, {
+            projectId: guard.project.id,
             leaseId: activeLease.id,
             workItemId: workItem.id,
+            now: timestamp,
           }),
         );
       }
       statements.push(
-        workItemCas(workItem.id, claimable.priorLeaseExpired ? "leased" : "ready", "leased", timestamp),
+        // Order matters: the lease INSERT runs BEFORE the work-item CAS so a
+        // cross-isolate claim race aborts on the partial unique index
+        // `idx_leases_active_work_item` — a UNIQUE violation the catch below
+        // maps to the contract's 409 `lease-held`. With the CAS first the
+        // batch aborted on a NOT NULL violation instead, which carries no
+        // information about who won and used to surface as a 500.
         repos.leases.claimStatement(lease),
+        workItemCas(workItem.id, claimable.priorLeaseExpired ? "leased" : "ready", "leased", timestamp),
         // The claim audit event doubles as the durable record of the lease's
         // task-bundle base (module docs) — target_id is the lease id.
         auditStatement({
@@ -345,10 +371,17 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       try {
         await deps.db.batch(statements);
       } catch (error) {
-        if (isUniqueConstraintError(error)) {
-          // Lost the cross-isolate race on idx_leases_active_work_item.
-          const holderLease = await repos.leases.getActiveByWorkItem(workItem.id);
-          if (holderLease !== null && holderLease.id !== lease.id) {
+        if (!isConstraintError(error)) {
+          throw error;
+        }
+        // ANY constraint abort here means a rival command committed between
+        // our read and our write — the unique index on the lease INSERT, or
+        // the NOT NULL abort of the work-item CAS. Both are ordinary
+        // contention, never a 500: contract §2 requires the loser of two
+        // simultaneous claims to see 409 `lease-held`.
+        const holderLease = await repos.leases.getActiveByWorkItem(workItem.id);
+        if (holderLease !== null && holderLease.id !== lease.id) {
+          if (checkLeaseActive(holderLease, clock.now()).allowed) {
             const holder = await repos.actors.getById(holderLease.actorId);
             return problem(c, "lease-held", {
               detail: "work item is already leased",
@@ -356,19 +389,41 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
               expiresAt: holderLease.expiresAt,
             });
           }
+          // The rival's lease is already expired — the item is claimable
+          // again, so re-run rather than reporting a conflict that is not one.
+          return RETRY;
         }
-        if (isConstraintError(error)) {
-          // Work-item status CAS aborted: a rival command moved the item.
-          const fresh = await repos.workItems.getById(workItem.id);
-          if (fresh !== null && fresh.status !== "ready" && fresh.status !== "leased") {
-            return problem(c, "state-conflict", {
-              detail: `work item is no longer claimable (status "${fresh.status}")`,
-            });
-          }
+        const fresh = await repos.workItems.getById(workItem.id);
+        if (fresh === null) {
+          return problem(c, "not-found", { detail: "unknown work item" });
         }
-        throw error;
+        if (fresh.status !== "ready" && fresh.status !== "leased") {
+          return problem(c, "state-conflict", {
+            detail: `work item is no longer claimable (status "${fresh.status}")`,
+          });
+        }
+        // Claimable status with no live lease holding the slot: a sweep or a
+        // rival expiry moved the item under us. Re-read and try again.
+        return RETRY;
       }
       return c.json(bundle, 201);
+    };
+
+    return serialize(guard.project.id, async () => {
+      // One retry only: each attempt either commits, returns a typed problem,
+      // or observes a genuinely still-claimable item. A second RETRY means
+      // sustained contention rather than a transient interleaving.
+      const first = await attemptClaim();
+      if (first !== RETRY) {
+        return first;
+      }
+      const second = await attemptClaim();
+      if (second !== RETRY) {
+        return second;
+      }
+      return problem(c, "state-conflict", {
+        detail: "work item is being claimed concurrently; retry",
+      });
     });
   });
 
@@ -431,24 +486,54 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         renewalPromptAt: renewalPromptAt({ ...lease, expiresAt: renewable.expiresAt }, leaseConfig),
         correlationId: c.get("correlationId"),
       };
-      await deps.db.batch([
-        repos.leases.renewStatement(lease.id, renewable.expiresAt, timestamp),
-        auditStatement({
-          projectId: guard.project.id,
-          actorId: lease.actorId,
-          action: "lease.renew",
-          targetType: "lease",
-          targetId: lease.id,
-          correlationId: c.get("correlationId"),
-          metadata: { workItemId: workItem.id, expiresAt: renewable.expiresAt },
-        }),
-        appendEventStatement(guard.project.id, "lease_renewed", {
-          leaseId: lease.id,
-          workItemId: workItem.id,
-          expiresAt: renewable.expiresAt,
-        }),
-        ...ctx.claimStatements(c, 200, responseBody),
-      ]);
+      try {
+        await deps.db.batch([
+          // NULL-abort CAS, not a bare conditional UPDATE: the checks above
+          // read the lease, and a release/revoke/expiry committed by another
+          // isolate in between would otherwise leave the guarded UPDATE
+          // matching 0 rows while this handler still returned 200 with a new
+          // expiry, bumped `renewalCount`, an audit row, a `lease_renewed`
+          // event, and a stored idempotent replay — a lease the server will
+          // reject, with a countdown telling the holder otherwise. The abort
+          // makes the whole batch atomic with the liveness check.
+          repos.leases.renewCasStatement(lease.id, renewable.expiresAt, timestamp),
+          auditStatement({
+            projectId: guard.project.id,
+            actorId: lease.actorId,
+            action: "lease.renew",
+            targetType: "lease",
+            targetId: lease.id,
+            correlationId: c.get("correlationId"),
+            metadata: { workItemId: workItem.id, expiresAt: renewable.expiresAt },
+          }),
+          appendEventStatement(guard.project.id, "lease_renewed", {
+            leaseId: lease.id,
+            workItemId: workItem.id,
+            expiresAt: renewable.expiresAt,
+          }),
+          ...ctx.claimStatements(c, 200, responseBody),
+        ]);
+      } catch (error) {
+        if (!isConstraintError(error)) {
+          throw error;
+        }
+        // Re-read to name the reason honestly (contract §2/§8.2: expired,
+        // released, revoked, and max-total renewals are all rejected).
+        const fresh = await repos.leases.getById(lease.id);
+        if (fresh === null) {
+          return problem(c, "not-found", { detail: "unknown lease" });
+        }
+        if (isLeaseExpired(fresh, clock.now())) {
+          await lazilyExpire(fresh);
+          return problem(c, "lease-expired", { detail: "lease has expired" });
+        }
+        const freshActive = checkLeaseActive(fresh, clock.now());
+        return problem(c, "lease-inactive", {
+          detail: freshActive.allowed
+            ? "lease could not be renewed; it is no longer renewable"
+            : freshActive.message,
+        });
+      }
       return c.json(responseBody, 200);
     });
   });
@@ -610,7 +695,26 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       if (!baseCheck.allowed) {
         return problem(c, "submission-base-mismatch", { detail: baseCheck.message });
       }
-      // 9. Phase 0 prose safety on `content` (schema/size already enforced).
+      // 9. Payload shape + Phase 0 prose safety on `content` (size/emptiness
+      // already enforced by the schema).
+      //
+      // Shape first: a range replacement must be single-line inline text. The
+      // patch engine refuses newlines outright, and without this check a
+      // multi-line payload (a human pressing Enter in the /work/ textarea, or
+      // any API client) was accepted with 202 and only refused at apply time
+      // — where the refusal was laundered into a "the chapter changed
+      // underneath it" conflict, burning the work item and committing a
+      // spurious resolve_conflict artifact to Git on an UNMOVED base.
+      if (command.type === "range_replacement" && /[\r\n]/.test(command.content)) {
+        return problem(c, "validation-failed", {
+          issues: [
+            {
+              path: "content",
+              message: "a range replacement must be single-line inline text (no line breaks)",
+            },
+          ],
+        });
+      }
       const findings = contentSafetyFindings(command.content);
       if (findings.length > 0) {
         return problem(c, "unsafe-content", { findings });
@@ -668,8 +772,16 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         // leased → submitted → applying in the command (contract §4); the two
         // §9.5 edges collapse to one stored status inside this atomic batch.
         workItemCas(workItem.id, "leased", "applying", timestamp),
-        // The accepted submission consumes the lease (module docs).
-        repos.leases.releaseStatement(lease.id, timestamp),
+        // The accepted submission consumes the lease (module docs) — as a
+        // NULL-abort CAS requiring the lease to still be LIVE at write time.
+        // The work-item CAS alone is not enough: it proves only that the item
+        // is `leased`, not that THIS lease holds it. Between the liveness
+        // check above and this batch another isolate can expire this lease
+        // and hand the item to a new claimant, leaving the item `leased`
+        // again — the CAS would pass, this release would silently change 0
+        // rows, and an expired lease's edit would be applied while the fresh
+        // holder's lease stayed active against a completed item.
+        repos.leases.consumeForSubmissionStatement(lease.id, timestamp, timestamp),
         ...command202.statements.slice(1),
         appendEventStatement(guard.project.id, "submission_received", {
           submissionId,
@@ -684,12 +796,23 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         // The work-item CAS aborted: a rival command (cancel/expiry sweep in
         // another isolate) moved the item off `leased` after our read.
         if (isConstraintError(error)) {
-          const fresh = await repos.workItems.getById(workItem.id);
-          if (fresh !== null && fresh.status !== "leased") {
-            return problem(c, "state-conflict", {
-              detail: `work item in status "${fresh.status}" cannot accept a submission`,
-            });
+          // Either CAS may have aborted. Report whichever precondition
+          // actually broke, and never surface contention as a 500.
+          const freshLease = await repos.leases.getById(lease.id);
+          if (freshLease !== null && isLeaseExpired(freshLease, clock.now())) {
+            await lazilyExpire(freshLease);
+            return problem(c, "lease-expired", { detail: "lease has expired" });
           }
+          if (freshLease !== null) {
+            const freshActive = checkLeaseActive(freshLease, clock.now());
+            if (!freshActive.allowed) {
+              return problem(c, "lease-inactive", { detail: freshActive.message });
+            }
+          }
+          const fresh = await repos.workItems.getById(workItem.id);
+          return problem(c, "state-conflict", {
+            detail: `work item in status "${fresh?.status ?? "unknown"}" cannot accept a submission`,
+          });
         }
         throw error;
       }
@@ -741,7 +864,13 @@ export function contentSafetyFindings(content: string): string[] {
   if (content.includes("<!--") && /authorbot:/i.test(content)) {
     findings.push("authorbot comments are not allowed in submission content");
   }
-  const scan = scanSafety(parseChapterMarkdown(content).ast);
+  // `parseProseMarkdown`, NOT `parseChapterMarkdown`: submission content is
+  // chapter BODY text. A frontmatter-aware parse hid every payload that began
+  // with a `---` fence — raw `<script>` and `javascript:` URLs alike — inside
+  // an unvisited `yaml` node, so the request was accepted with 202 instead of
+  // the contract-mandated 422 and the payload was persisted verbatim and
+  // committed into `.authorbot/work-items/<id>.md` unescaped.
+  const scan = scanSafety(parseProseMarkdown(content).ast);
   if (scan.rawHtml.length > 0) {
     findings.push("raw HTML is forbidden in submission content");
   }
@@ -749,6 +878,23 @@ export function contentSafetyFindings(content: string): string[] {
     findings.push(`URL scheme "${url.scheme}" is forbidden`);
   }
   return findings;
+}
+
+/**
+ * The §15.3 bundle's acceptance criteria for a work-item type — the SAME
+ * criteria the Git artifact for that type carries.
+ *
+ * `resolve_conflict` items are rendered with the merge criteria ("never
+ * discard either silently"); handing their claimant the range-editing
+ * defaults instead told them to "change only the selected span" while the
+ * bundle simultaneously demanded a whole-chapter merge submission. That is
+ * the one work type whose failure mode is silent loss of one side of a
+ * conflict, so artifact and bundle must not disagree.
+ */
+function acceptanceCriteriaFor(type: WorkItemType): readonly string[] {
+  return type === "resolve_conflict"
+    ? DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA
+    : DEFAULT_ACCEPTANCE_CRITERIA;
 }
 
 /** §15.3 `target` (absent for chapter scope / target-less items). */

@@ -188,10 +188,15 @@ describe("checkWorkItemClaimable (design section 12.2 step 1)", () => {
     ).toEqual({ allowed: true, priorLeaseExpired: true });
   });
 
-  it("a leased item with no lease row on record denies lease-held (defensive)", () => {
-    expect(checkWorkItemClaimable("leased", null, at(0))).toMatchObject({
-      allowed: false,
-      reason: "lease-held",
+  it("a leased item with no lease row on record is claimable (self-heals a stranded slot)", () => {
+    // The partial unique index admits exactly one active lease, so "no active
+    // lease" is unambiguous: the slot is free. An interrupted expiry or a bare
+    // administrative revocation leaves exactly this state, and denying it as
+    // `lease-held` made the item permanently unclaimable, unreleasable, and
+    // unsweepable — repairable only by direct database surgery.
+    expect(checkWorkItemClaimable("leased", null, at(0))).toEqual({
+      allowed: true,
+      priorLeaseExpired: true,
     });
   });
 
@@ -203,7 +208,9 @@ describe("checkWorkItemClaimable (design section 12.2 step 1)", () => {
       if (status === "ready") {
         expect(result.allowed).toBe(true);
       } else if (status === "leased") {
-        expect(result).toMatchObject({ allowed: false, reason: "lease-held" });
+        // With no active lease the slot is free; `lease-held` is reserved for
+        // a `leased` item whose lease is genuinely still live (covered above).
+        expect(result).toEqual({ allowed: true, priorLeaseExpired: true });
       } else {
         expect(result).toMatchObject({ allowed: false, reason: "not-claimable" });
         if (!result.allowed) {

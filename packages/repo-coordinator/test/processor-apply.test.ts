@@ -379,3 +379,140 @@ describe("submission.apply — conflict path", () => {
     expect((await seed.repos.outbox.getById(outboxId))?.status).toBe("done");
   });
 });
+
+/**
+ * Crash and terminal-failure regressions: a replayed apply must never commit
+ * bytes computed from a head the branch has since left, and a `submission.apply`
+ * row that dies must hand its work item back instead of holding it forever.
+ */
+describe("submission.apply — crash and failure recovery", () => {
+  /** Put the row/operation back in the pre-commit `committing` window. */
+  async function rewindToCommitting(outboxId: string, operationId: string): Promise<void> {
+    await seed.db
+      .prepare(`UPDATE outbox SET status = 'processing', processed_at = NULL WHERE id = ?`)
+      .bind(outboxId)
+      .run();
+    await seed.db
+      .prepare(
+        `UPDATE git_operations SET state = 'committing', commit_sha = NULL, error = NULL WHERE id = ?`,
+      )
+      .bind(operationId)
+      .run();
+  }
+
+  /**
+   * A realistic applier: like the production one it reads the CURRENT branch
+   * head and derives its result from it, so re-resolution genuinely sees a
+   * moved chapter (a stub that ignores the head would clobber either way and
+   * prove nothing).
+   */
+  function makeHeadAwareApplier(): { applier: SubmissionApplier; calls: () => number } {
+    let calls = 0;
+    const applier: SubmissionApplier = {
+      apply: async ({ branch }) => {
+        calls += 1;
+        const current = await writer.readFile(branch, CHAPTER_PATH);
+        if (current === null) throw new Error("chapter missing at head");
+        const revision = Number(/^revision: (\d+)$/m.exec(current)?.[1] ?? 0);
+        return {
+          result: "applied" as const,
+          chapterPath: CHAPTER_PATH,
+          // Body preserved verbatim: whatever is at the head stays there.
+          patchedSource: current,
+          newRevision: revision + 1,
+          blockIds: [...current.matchAll(/id="([^"]+)"/g)].map((m) => m[1] as string),
+        };
+      },
+    };
+    return { applier, calls: () => calls };
+  }
+
+  it("a replay whose branch head moved does NOT clobber the newer chapter", async () => {
+    await commitChapterFixture(2);
+    const { applier, calls } = makeHeadAwareApplier();
+    const { outboxId, operationId } = await enqueueSubmissionApply(seed);
+
+    // Attempt 1 resolves against head H1 and persists the full patched
+    // chapter, then the process dies before the commit lands.
+    const crashing: BookRepoWriter = {
+      commitFiles: () => Promise.reject(new Error("simulated crash before commit")),
+      readFile: (branch, filePath) => writer.readFile(branch, filePath),
+      resolveHead: (branch) => writer.resolveHead(branch),
+    };
+    await processor(applier, crashing).drain(seed.projectId);
+    expect(calls()).toBe(1);
+
+    // Meanwhile a human commits revision 4 straight into the checkout.
+    const humanSource = chapterSourceFixture(seed.chapterId, 4, {
+      body: `<!-- authorbot:block id="${uuidv7()}" -->\nHUMAN REVISION FOUR MARKER.\n`,
+    });
+    await writeFile(join(repo.dir, CHAPTER_PATH), humanSource, "utf8");
+    await git(repo.dir, "add", CHAPTER_PATH);
+    await git(
+      repo.dir,
+      "-c",
+      "user.name=Human",
+      "-c",
+      "user.email=human@example.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "human edit",
+    );
+
+    // Crash recovery: the SAME attempt replays, so the persisted outcome is
+    // reused. It was computed against H1 and must not land on H2.
+    await rewindToCommitting(outboxId, operationId);
+    await processor(applier, writer).drain(seed.projectId);
+
+    const head = await writer.readFile("main", CHAPTER_PATH);
+    // The newer revision is byte-intact (contract §8.4, design §12.6 rule 5).
+    expect(head).toContain("HUMAN REVISION FOUR MARKER.");
+    // And the revision never went backwards.
+    expect(head).not.toMatch(/^revision: 3$/m);
+    // The stale plan was refused, so the applier re-resolved on a new attempt.
+    expect(calls()).toBeGreaterThan(1);
+  });
+
+  it("a still-current head replays the persisted outcome without re-resolving", async () => {
+    await commitChapterFixture(2);
+    const { applier, calls } = makeAppliedApplier();
+    const { outboxId, operationId } = await enqueueSubmissionApply(seed);
+    await processor(applier).drain(seed.projectId);
+    expect(calls()).toBe(1);
+
+    // Crash between the commit and the finalize batch, head unchanged: the
+    // operation-trailer dedup returns the landed commit and nothing re-runs.
+    const commits = await git(repo.dir, "rev-list", "--count", "HEAD");
+    await rewindToCommitting(outboxId, operationId);
+    const { outcomes } = await processor(applier).drain(seed.projectId);
+    expect(outcomes[0]?.result).toBe("committed");
+    expect(calls()).toBe(1);
+    expect(await git(repo.dir, "rev-list", "--count", "HEAD")).toBe(commits);
+  });
+
+  it("a terminally failed apply hands the work item back instead of stranding it", async () => {
+    await commitChapterFixture();
+    const { workItemId, submissionId } = await enqueueSubmissionApply(seed);
+    // A writer without `readFile` fails every apply row (the GitHub adapter
+    // gains it only in Phase 5) — an ordinary, non-exotic failure.
+    const writeOnly: BookRepoWriter = { commitFiles: (input) => writer.commitFiles(input) };
+
+    const { outcomes } = await processor(makeAppliedApplier().applier, writeOnly).drain(
+      seed.projectId,
+    );
+    expect(outcomes[0]?.result).toBe("failed");
+
+    // The submit command already released the lease and moved the item to
+    // `applying`. Leaving it there made it unclaimable, unreleasable,
+    // un-resubmittable and uncancellable — dead, and silently so.
+    const workItem = await seed.repos.workItems.getById(workItemId);
+    expect(workItem?.status).toBe("conflict");
+    expect(workItem?.status).not.toBe("applying");
+    // `conflict → ready` keeps it recoverable (design §9.5).
+    expect((await seed.repos.submissions.getById(submissionId))?.state).toBe("conflicted");
+    // And a client watching the feed is told.
+    const events = await eventTypes();
+    expect(events).toContain("work_item_conflict");
+  });
+});
