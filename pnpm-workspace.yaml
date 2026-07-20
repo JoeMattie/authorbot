@@ -4,3 +4,5 @@ packages:
 allowBuilds:
   esbuild: false
   sharp: false
+  better-sqlite3: true
+  workerd: true
