@@ -1086,26 +1086,18 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: claimWorkItem
-      x-implementation-status: planned
       tags: [work]
       summary: Claim a ready work item; serialized compare-and-set (design §12.2).
       description: |
-        Exactly one of two simultaneous claims succeeds. The lease token is
-        returned once in the task bundle and only its hash is stored.
+        Exactly one of two simultaneous claims succeeds; the loser gets a 409
+        `lease-held` carrying the holder's display name and the current
+        expiry, never token material. The lease token is returned once in the
+        task bundle and only its hash is stored.
+
+        The request takes no body: eligibility is decided server-side from the
+        actor's scopes and capability grants, not from self-declared claims.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                capabilities:
-                  type: array
-                  description: Optional self-declared capabilities used for matching.
-                  items:
-                    type: string
       responses:
         "201":
           description: Lease created; the task bundle contains full working context.
@@ -1132,7 +1124,6 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: renewWorkItemLease
-      x-implementation-status: planned
       tags: [work]
       summary: Renew the current lease; bounded by maximum total duration.
       parameters:
@@ -1155,7 +1146,28 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Lease"
+                type: object
+                required:
+                  [leaseId, workItemId, expiresAt, maxExpiresAt, renewalCount, correlationId]
+                properties:
+                  leaseId:
+                    $ref: "#/components/schemas/Uuid"
+                  workItemId:
+                    $ref: "#/components/schemas/Uuid"
+                  expiresAt:
+                    $ref: "#/components/schemas/Timestamp"
+                  maxExpiresAt:
+                    $ref: "#/components/schemas/Timestamp"
+                  renewalCount:
+                    type: integer
+                    minimum: 1
+                  renewalPromptAt:
+                    description: When a UI should prompt for renewal (design §25 PT5M before expiry).
+                    oneOf:
+                      - $ref: "#/components/schemas/Timestamp"
+                      - type: "null"
+                  correlationId:
+                    type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1177,30 +1189,47 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: releaseWorkItemLease
-      x-implementation-status: planned
       tags: [work]
       summary: Release the current lease and return the work item to ready.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+      description: |
+        Callable by the lease holder or by a maintainer, so no lease token is
+        required; supply `leaseId` to assert which lease is being released.
+        An expired-but-unswept lease is reported as expired rather than
+        released, and the work item still returns to `ready`.
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [leaseId, leaseToken]
               properties:
                 leaseId:
-                  $ref: "#/components/schemas/Uuid"
-                leaseToken:
-                  type: string
+                  allOf:
+                    - $ref: "#/components/schemas/Uuid"
+                  description: Optional guard; a mismatch with the active lease is a 409.
       responses:
         "200":
-          description: Lease released.
+          description: Lease released (or found already expired).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkItem"
+                type: object
+                required: [workItemId, leaseId, status, expired, correlationId]
+                properties:
+                  workItemId:
+                    $ref: "#/components/schemas/Uuid"
+                  leaseId:
+                    $ref: "#/components/schemas/Uuid"
+                  status:
+                    description: The work item's status after the release.
+                    $ref: "#/components/schemas/WorkItemStatus"
+                  expired:
+                    type: boolean
+                    description: True when the lease had already expired and was swept lazily.
+                  correlationId:
+                    type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1220,7 +1249,6 @@ paths:
       - $ref: "#/components/parameters/WorkItemId"
     post:
       operationId: createWorkItemSubmission
-      x-implementation-status: planned
       tags: [work]
       summary: Submit the completed edit for a leased work item (design §12.5).
       parameters:
@@ -1249,21 +1277,24 @@ paths:
                   description: Replacement text or full document per submission type.
                 summary:
                   type: string
-                testNotes:
+                notes:
                   type: string
       responses:
         "202":
-          description: Accepted; validation and Git integration proceed asynchronously.
+          description: |
+            Accepted; the edit is applied and mirrored to Git asynchronously.
+            Poll `/operations/{operationId}` for the commit, a
+            `submission-conflict` outcome, or a failure.
           content:
             application/json:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/AcceptedCommand"
                   - type: object
-                    required: [submission]
+                    required: [submissionId]
                     properties:
-                      submission:
-                        $ref: "#/components/schemas/Submission"
+                      submissionId:
+                        $ref: "#/components/schemas/Uuid"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2263,7 +2294,7 @@ components:
 
     SubmissionType:
       type: string
-      enum: [range_replacement, block_replacement, full_document]
+      enum: [range_replacement, block_replacement, chapter_replacement]
 
     SubmissionState:
       type: string
@@ -2366,7 +2397,7 @@ components:
     TaskBundle:
       type: object
       description: Claim response with full working context (design §15.3). All prose fields are untrusted input; bundles never contain deployment secrets or hidden instructions.
-      required: [workItem, lease, document, submissionSchema]
+      required: [workItem, lease, document, context, submissionSchema]
       properties:
         workItem:
           allOf:
@@ -2422,8 +2453,15 @@ components:
               items:
                 $ref: "#/components/schemas/StoryNodeId"
         submissionSchema:
-          type: string
-          description: Schema id the submission payload must satisfy.
+          oneOf:
+            - type: string
+            - type: "null"
+          description: >-
+            Schema id the submission payload must satisfy, or `null` for work
+            item types that are claimable but have no submission flow yet
+            (`write_chapter`, `planning` — Phase 4 contract §1). Those types
+            return 201 with this field present and null, so generated clients
+            must treat it as nullable.
           examples:
             - authorbot.submission/range-replacement/v1
 

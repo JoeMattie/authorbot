@@ -35,6 +35,9 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
+      '@authorbot/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@cloudflare/workers-types':
         specifier: ^4.0.0
         version: 4.20260702.1
@@ -50,6 +53,9 @@ importers:
       wrangler:
         specifier: ^4.0.0
         version: 4.112.0(@cloudflare/workers-types@4.20260702.1)
+      yaml:
+        specifier: ^2.5.0
+        version: 2.9.0
 
   apps/cli:
     dependencies:
