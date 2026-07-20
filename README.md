@@ -107,6 +107,7 @@ option — never emitted otherwise).
 | 6 | onboarding wizard, "New chapter" authoring, browser settings | contracted |
 | 7 | hardening: rate limits, restore drill, reviews, load testing | contracted |
 | 8 | installable collaborator skill for agent fleets | contracted |
+| 9 | author-facing docs and authorbot.joemattie.com | contracted |
 
 ## Status
 
