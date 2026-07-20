@@ -14,6 +14,21 @@ fills). Regenerate rasters rather than editing them by hand.
 | `icon-32.png`, `icon-16.png` | browser favicons |
 | `favicon.ico` | multi-resolution 16/32/48 |
 
+## Palette
+
+| Colour | Use | Contrast (white / dark) |
+|---|---|---|
+| `#EA580C` | "Author" wordmark | 3.56 / 5.32 |
+| `#0B90AE` | "bot" wordmark | 3.95 / 4.79 |
+| `#102A40` | book cover, robot body | 14.71 / 1.29 |
+| `#E2B655` | sparkle accent | 1.90 / 9.96 |
+
+The wordmark was navy until it proved invisible on dark backgrounds (1.29:1 —
+the book cover colour is fine as a shape but fails as text). `#EA580C` clears
+the 3:1 large-text threshold against both white and GitHub's dark background.
+Keep that constraint if the palette changes: the logo appears on light READMEs,
+dark READMEs, and npm.
+
 All rasters have real alpha. The wordmark is illegible below ~100px, which is
 why favicons use the mark alone.
 
