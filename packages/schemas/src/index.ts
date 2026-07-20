@@ -103,6 +103,9 @@ export type { Attribution, AttributionEntry } from "./attribution.js";
 export { releaseSchema } from "./release.js";
 export type { Release } from "./release.js";
 
+export { buildManifestChapterSchema, buildManifestSchema } from "./build.js";
+export type { BuildManifest, BuildManifestChapter } from "./build.js";
+
 export {
   declarativeRuleSchema,
   instanceConfigSchema,

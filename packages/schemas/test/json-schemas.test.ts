@@ -9,7 +9,7 @@ describe("buildJsonSchemas", () => {
     expect(Object.keys(documents).sort()).toEqual(
       Object.keys(artifactSchemas).sort(),
     );
-    expect(Object.keys(documents)).toHaveLength(12);
+    expect(Object.keys(documents)).toHaveLength(13);
   });
 
   it("stamps each document with its schema discriminator as $id", () => {

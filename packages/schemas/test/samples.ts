@@ -250,3 +250,20 @@ export const validInstance = {
   },
   publishing: { collaboration_data: "dynamic", static_snapshot_on_release: true },
 };
+
+export const validBuildManifest = {
+  schema: "authorbot.build/v1",
+  commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+  built_at: "2026-07-19T20:00:00Z",
+  publisher_version: "0.1.0",
+  base_url: "https://example.org/books/example-serial/",
+  chapters: [
+    {
+      id: UUIDS.chapter,
+      slug: "the-window",
+      revision: 4,
+      title: "The Window",
+      status: "published",
+    },
+  ],
+};

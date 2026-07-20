@@ -2,6 +2,7 @@ import { z } from "zod";
 import { annotationSchema, replySchema } from "./annotation.js";
 import { attributionSchema } from "./attribution.js";
 import { bookConfigSchema } from "./book.js";
+import { buildManifestSchema } from "./build.js";
 import { chapterFrontmatterSchema } from "./chapter.js";
 import { characterSchema } from "./character.js";
 import { decisionSchema } from "./decision.js";
@@ -25,6 +26,7 @@ export const artifactSchemas = {
   attribution: attributionSchema,
   release: releaseSchema,
   instance: instanceConfigSchema,
+  build: buildManifestSchema,
 } as const;
 export type ArtifactName = keyof typeof artifactSchemas;
 
@@ -42,6 +44,7 @@ export const SCHEMA_IDS: Record<ArtifactName, string> = {
   attribution: "authorbot.attribution/v1",
   release: "authorbot.release/v1",
   instance: "authorbot.instance/v1",
+  build: "authorbot.build/v1",
 };
 
 /**
