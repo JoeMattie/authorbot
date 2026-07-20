@@ -33,6 +33,24 @@ export {
 export { rebuildProjection, type RebuildResult } from "./projection/rebuild.js";
 export { seedProject } from "./seed.js";
 export { PROBLEM_TYPES, type ProblemSlug } from "./problems.js";
+export {
+  LEASE_ENV_NAMES,
+  leaseConfigFromEnv,
+  mintLeaseToken,
+  sweepExpiredLeases,
+  verifyLeaseToken,
+  type MintedLeaseToken,
+  type SweepResult,
+} from "./leases.js";
+export {
+  createSubmissionApplier,
+  type CreateSubmissionApplierOptions,
+} from "./submission-applier.js";
+export {
+  REANCHOR_ALGORITHM_VERSION,
+  finalizeSubmissionOutcomes,
+  type FinalizeSubmissionOptions,
+} from "./reanchor.js";
 export { uuidv7 } from "./ids.js";
 export { sha256Hex, hmacSha256Hex, randomBase64Url, timingSafeEqual } from "./crypto.js";
 export {

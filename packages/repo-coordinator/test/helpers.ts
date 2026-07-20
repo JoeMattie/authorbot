@@ -21,6 +21,7 @@ import {
   type Repositories,
   type ReplyRecord,
   type SqliteAdapter,
+  type SubmissionRecord,
   type WorkItemRecord,
 } from "@authorbot/database";
 import { toTimestamp } from "@authorbot/domain";
@@ -429,6 +430,140 @@ export async function enqueueWorkItemUpdate(
     repos.outbox.insertStatement(outbox),
   ]);
   return { operationId, outboxId };
+}
+
+export interface EnqueuedApply {
+  annotationId: string;
+  workItemId: string;
+  submissionId: string;
+  operationId: string;
+  outboxId: string;
+}
+
+/**
+ * Phase 4 contract §4 submit-command batch (the parts the processor
+ * consumes): annotation + work item (`applying`) + submission (`applying`)
+ * rows and one `submission.apply` outbox row. The annotation row is inserted
+ * directly (already mirrored) so the drain only sees the apply row.
+ */
+export async function enqueueSubmissionApply(
+  seed: SeededDatabase,
+  options: {
+    content?: string;
+    workItemType?: WorkItemRecord["type"];
+    submissionType?: SubmissionRecord["type"];
+    baseRevision?: number;
+    payloadExtra?: Record<string, unknown>;
+  } = {},
+): Promise<EnqueuedApply> {
+  const { db, repos, projectId, actorId, chapterId } = seed;
+  const ts = nowIso();
+  const annotationId = uuidv7();
+  const workItemId = uuidv7();
+  const submissionId = uuidv7();
+  const operationId = uuidv7();
+  const outboxId = uuidv7();
+  const baseRevision = options.baseRevision ?? 2;
+  const target = defaultRangeTarget();
+
+  const annotation: AnnotationRecord = {
+    id: annotationId,
+    projectId,
+    chapterId,
+    kind: "suggestion",
+    scope: "range",
+    chapterRevision: baseRevision,
+    target,
+    authorActorId: actorId,
+    body: 'Suggest replacing with "honest from the first pass".',
+    status: "work_item_created",
+    gitOperationId: null,
+    supersededBy: null,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  const workItem: WorkItemRecord = {
+    id: workItemId,
+    projectId,
+    type: options.workItemType ?? "revise_range",
+    status: "applying",
+    sourceAnnotationId: annotationId,
+    chapterId,
+    baseRevision,
+    target,
+    priority: "normal",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  const submission: SubmissionRecord = {
+    id: submissionId,
+    projectId,
+    workItemId,
+    leaseId: uuidv7(),
+    actorId,
+    type: options.submissionType ?? "range_replacement",
+    baseRevision,
+    baseContentHash:
+      "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    content: options.content ?? "honest from the first pass",
+    summary: null,
+    notes: null,
+    state: "applying",
+    gitOperationId: operationId,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  const outbox: OutboxRecord = {
+    id: outboxId,
+    projectId,
+    gitOperationId: operationId,
+    kind: "submission.apply",
+    payload: { submissionId, workItemId, ...options.payloadExtra },
+    status: "pending",
+    attempts: 0,
+    createdAt: ts,
+    processedAt: null,
+  };
+  await db.batch([
+    repos.gitOperations.insertStatement(newOperation(seed, operationId, ts)),
+    repos.annotations.insertStatement(annotation),
+    repos.workItems.insertStatement(workItem),
+    repos.submissions.insertStatement(submission),
+    repos.outbox.insertStatement(outbox),
+  ]);
+  return { annotationId, workItemId, submissionId, operationId, outboxId };
+}
+
+/** A schema-valid marked-up chapter source at the given revision. */
+export function chapterSourceFixture(
+  chapterId: string,
+  revision: number,
+  options: { body?: string; authors?: readonly string[] } = {},
+): string {
+  const authors = options.authors ?? ["github:original-author"];
+  const body =
+    options.body ??
+    [
+      `<!-- authorbot:block id="${uuidv7()}" -->`,
+      "The interferometer was telling the truth.",
+      "",
+    ].join("\n");
+  return [
+    "---",
+    "schema: authorbot.chapter/v1",
+    `id: ${chapterId}`,
+    "slug: signal",
+    "title: Signal",
+    "order: 1",
+    "status: draft",
+    `revision: ${revision}`,
+    "authors:",
+    ...authors.map((actor) => `  - actor: ${actor}`),
+    "summary: A chapter about honest instruments.",
+    "---",
+    "",
+    body,
+  ].join("\n");
 }
 
 /** API-shaped withdraw command batch (new operation + outbox row). */

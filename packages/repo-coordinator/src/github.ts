@@ -28,4 +28,13 @@ export class GitHubAdapter implements BookRepoWriter {
       ),
     );
   }
+
+  readFile(_branch: string, _filePath: string): Promise<string | null> {
+    return Promise.reject(
+      new GitWriteError(
+        "not-implemented",
+        `GitHubAdapter.readFile for ${this.options.repo} is a Phase 5 deliverable; use LocalGitAdapter until then`,
+      ),
+    );
+  }
 }

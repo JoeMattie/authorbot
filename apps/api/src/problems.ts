@@ -29,6 +29,27 @@ export const PROBLEM_TYPES = {
     title: "A request with this idempotency key is still in flight",
   },
   "state-conflict": { status: 409, title: "Resource state forbids this operation" },
+  // ---- Phase 4 lease/submission problems (contract §2, §4) ------------------
+  "lease-held": { status: 409, title: "Work item is already leased" },
+  "lease-expired": { status: 409, title: "Lease has expired" },
+  "lease-inactive": { status: 409, title: "Lease has been released or revoked" },
+  "lease-max-total-exceeded": {
+    status: 409,
+    title: "Lease has reached its maximum total duration",
+  },
+  "lease-token-invalid": { status: 403, title: "Lease token does not match" },
+  "submission-base-mismatch": {
+    status: 409,
+    title: "Submission base does not match the lease's task bundle",
+  },
+  "submission-type-mismatch": {
+    status: 422,
+    title: "Submission type does not match the work item type",
+  },
+  "submission-not-supported": {
+    status: 422,
+    title: "Work item type has no submission flow in this phase",
+  },
   "unsafe-content": { status: 422, title: "Body fails markdown safety rules" },
   "unknown-block": { status: 422, title: "Target block does not exist in this chapter revision" },
   "domain-rule-failed": { status: 422, title: "Domain rule failed" },

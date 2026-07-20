@@ -26,6 +26,8 @@ import {
 import { apiRoleScopes, mintAgentTokenApiCommandSchema } from "./api-scopes.js";
 import { parseRuleEntries } from "./rules.js";
 import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
+import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
+import { createProjectSerializer } from "./serializer.js";
 import { parseChapterMarkdown, scanSafety } from "@authorbot/markdown";
 import { z } from "zod";
 import {
@@ -165,6 +167,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
   const auth = requireAuth(services);
   const idem = idempotency(services);
+
+  // One per-project serial command queue shared by the Phase 3 and Phase 4
+  // command handlers (mutually serialized; see serializer.ts).
+  const serialize = createProjectSerializer();
 
   /**
    * Anonymous read support (Phase 2b contract §2.1: "Public visibility
@@ -1225,11 +1231,33 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     auth,
     maybeAuth,
     idem,
+    serialize,
     requireReadOrPublic,
     claimStatements,
     commandStatements,
     readJson,
     parseLimit,
+    notifyMutation,
+    now,
+  });
+
+  // ---- Phase 4 routes (leases, task bundles, submissions) ------------------
+  registerPhase4Routes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    // Claim bundles carry the return-once lease token: replays store a
+    // redacted body (contract §2 "returned exactly once").
+    claimIdem: idempotency(services, { redactStored: redactClaimBundle }),
+    serialize,
+    leaseConfig: deps.config.leaseConfig,
+    claimStatements,
+    commandStatements,
+    readJson,
     notifyMutation,
     now,
   });

@@ -17,7 +17,9 @@ export {
   type ParsedDecisionArtifact,
 } from "./decision-artifact.js";
 export {
+  COMPLETION_HEADING,
   DEFAULT_ACCEPTANCE_CRITERIA,
+  DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA,
   escapeWorkItemText,
   ORIGINAL_TEXT_END,
   ORIGINAL_TEXT_ESCAPE,
@@ -25,16 +27,33 @@ export {
   parseWorkItemArtifact,
   renderWorkItemArtifact,
   SUBMISSION_TYPE_BY_WORK_TYPE,
+  SUBMITTED_TEXT_END,
+  SUBMITTED_TEXT_START,
   unescapeWorkItemText,
   WORK_ITEM_SECTION_HEADINGS,
   workItemFilePath,
   type ParsedWorkItemArtifact,
   type WorkItemArtifactInput,
   type WorkItemArtifactSections,
+  type WorkItemCompletion,
 } from "./work-item-artifact.js";
+export {
+  appendAttributionEntry,
+  attributionFilePath,
+  parseAttributionArtifact,
+  renderAttributionArtifact,
+  type AppendAttributionResult,
+  type AttributionEntryInput,
+} from "./attribution-artifact.js";
+export {
+  applyChapterFrontmatterUpdate,
+  type ChapterFrontmatterUpdate,
+  type UpdatedChapterFile,
+} from "./chapter-artifact.js";
 export {
   ACTOR_TRAILER,
   ANNOTATION_TRAILER,
+  BASE_REVISION_TRAILER,
   formatCommitMessage,
   GitWriteError,
   isGitWriteError,
@@ -51,6 +70,7 @@ export { GitHubAdapter, type GitHubAdapterOptions } from "./github.js";
 export {
   createProcessor,
   OUTBOX_KINDS,
+  SYSTEM_APPLY_REF,
   SYSTEM_CLOCK,
   SYSTEM_RULE_ENGINE_REF,
   type AnnotationCreatePayload,
@@ -64,5 +84,9 @@ export {
   type OutboxKind,
   type Processor,
   type ReplyCreatePayload,
+  type SubmissionApplier,
+  type SubmissionApplyContext,
+  type SubmissionApplyOutcome,
+  type SubmissionApplyPayload,
   type WorkItemUpdatePayload,
 } from "./processor.js";

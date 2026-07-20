@@ -48,6 +48,7 @@ import { uuidv7 } from "./ids.js";
 import { annotationJson } from "./json.js";
 import { problem } from "./problems.js";
 import type { RuleEntry } from "./rules.js";
+import type { ProjectSerializer } from "./serializer.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_POLL_MS,
@@ -79,6 +80,8 @@ export interface Phase3Context {
   auth: MiddlewareHandler<AppEnv>;
   maybeAuth: MiddlewareHandler<AppEnv>;
   idem: MiddlewareHandler<AppEnv>;
+  /** Shared per-project serial queue (also serializes Phase 4 commands). */
+  serialize: ProjectSerializer;
   requireReadOrPublic(
     c: Context<AppEnv>,
   ): Promise<{ project: ProjectRecord } | { response: Response }>;
@@ -176,23 +179,7 @@ export async function annotationCollabJson(
 const VOTABLE_STATUSES = new Set(["open", "work_item_created"]);
 
 export function registerPhase3Routes(ctx: Phase3Context): void {
-  const { app, deps, repos, clock, services, auth, maybeAuth, idem, now } = ctx;
-
-  // Per-project serial command queue (contract §3). Single-process guarantee;
-  // the DB unique key backstops anything outside it.
-  const chains = new Map<string, Promise<unknown>>();
-  const serialize = <T>(projectId: string, fn: () => Promise<T>): Promise<T> => {
-    const previous = chains.get(projectId) ?? Promise.resolve();
-    const next = previous.then(fn, fn);
-    chains.set(
-      projectId,
-      next.then(
-        () => undefined,
-        () => undefined,
-      ),
-    );
-    return next;
-  };
+  const { app, deps, repos, clock, services, auth, maybeAuth, idem, serialize, now } = ctx;
 
   const appendEventStatement = (
     projectId: string,

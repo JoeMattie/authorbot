@@ -12,6 +12,7 @@ import { createApi, type AuthorbotApi } from "./app.js";
 import type { AppConfig, AppDeps } from "./deps.js";
 import { createDevIdentityProvider, type IdentityProvider } from "./identity/provider.js";
 import { createGitHubIdentityProvider } from "./identity/github.js";
+import { leaseConfigFromEnv } from "./leases.js";
 import { parseAllowedOrigins } from "./origins.js";
 
 export interface WorkerBindings {
@@ -50,6 +51,14 @@ export interface WorkerBindings {
    * selects the design §25 default rule.
    */
   RULES_JSON?: string;
+  /**
+   * Lease timing overrides (Phase 4 contract §2), ISO-8601 durations, e.g.
+   * `PT30M`. Validated at boot — a malformed value throws, never degrades.
+   */
+  LEASE_DURATION?: string;
+  LEASE_RENEWAL_DURATION?: string;
+  LEASE_MAX_TOTAL_DURATION?: string;
+  LEASE_RENEWAL_PROMPT_BEFORE?: string;
 }
 
 function required(bindings: WorkerBindings, name: keyof WorkerBindings): string {
@@ -89,6 +98,13 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
   if (bindings.RULES_JSON !== undefined && bindings.RULES_JSON.length > 0) {
     config.rulesJson = bindings.RULES_JSON;
   }
+  // Boot-time LEASE_* validation (Phase 4 contract §2): throws on invalid.
+  config.leaseConfig = leaseConfigFromEnv({
+    LEASE_DURATION: bindings.LEASE_DURATION,
+    LEASE_RENEWAL_DURATION: bindings.LEASE_RENEWAL_DURATION,
+    LEASE_MAX_TOTAL_DURATION: bindings.LEASE_MAX_TOTAL_DURATION,
+    LEASE_RENEWAL_PROMPT_BEFORE: bindings.LEASE_RENEWAL_PROMPT_BEFORE,
+  });
   if (bindings.DEFAULT_BRANCH !== undefined && bindings.DEFAULT_BRANCH.length > 0) {
     config.defaultBranch = bindings.DEFAULT_BRANCH;
   }

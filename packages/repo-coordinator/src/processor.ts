@@ -23,6 +23,7 @@ import {
   type Repositories,
   type SqlDatabase,
   type SqlStatement,
+  type SubmissionRecord,
   type WorkItemRecord,
 } from "@authorbot/database";
 import {
@@ -31,12 +32,19 @@ import {
   transitionGitOperation,
   type GitOperationState,
 } from "@authorbot/domain";
+import { appendAttributionEntry, attributionFilePath } from "./attribution-artifact.js";
+import { applyChapterFrontmatterUpdate } from "./chapter-artifact.js";
 import { renderDecisionArtifact } from "./decision-artifact.js";
 import { renderAnnotationArtifact, renderReplyArtifact, type RenderedFile } from "./render.js";
-import { renderWorkItemArtifact } from "./work-item-artifact.js";
+import {
+  DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA,
+  renderWorkItemArtifact,
+  type WorkItemCompletion,
+} from "./work-item-artifact.js";
 import {
   ACTOR_TRAILER,
   ANNOTATION_TRAILER,
+  BASE_REVISION_TRAILER,
   isGitWriteError,
   OPERATION_TRAILER,
   WORK_ITEM_TRAILER,
@@ -52,6 +60,7 @@ export const OUTBOX_KINDS = [
   "decision.create",
   "decision.update",
   "work_item.update",
+  "submission.apply",
 ] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
 
@@ -60,6 +69,12 @@ export type OutboxKind = (typeof OUTBOX_KINDS)[number];
  * crossings are performed by the rule engine itself (design §13).
  */
 export const SYSTEM_RULE_ENGINE_REF = "system:rule-engine";
+
+/**
+ * Artifact actor reference recorded as `created_by` of `resolve_conflict`
+ * work items — the apply pipeline itself creates them (design §12.6).
+ */
+export const SYSTEM_APPLY_REF = "system:authorbot";
 
 /** Payload for `annotation.create` outbox rows. */
 export interface AnnotationCreatePayload {
@@ -130,6 +145,81 @@ export interface WorkItemUpdatePayload {
   createdByActorId?: string;
 }
 
+/**
+ * Payload for `submission.apply` outbox rows (Phase 4 contract §5) —
+ * written by the submit command in the same batch that transitions the
+ * work item `leased → submitted → applying`.
+ *
+ * The actual patching happens at **drain time** via the injected
+ * {@link SubmissionApplier} (the patch engine and current-source access live
+ * in the API layer): the applier re-runs on every commit attempt, so a
+ * non-fast-forward retry re-resolves against the branch head instead of
+ * committing a stale result. The chosen outcome is persisted back onto this
+ * payload (`resolved`) *before* the commit, which makes crash recovery
+ * finalize exactly the outcome that was committed.
+ *
+ * - `createdByActorId`: original creator of the work item for byte-stable
+ *   re-renders (see {@link DecisionCreatePayload}); the *submitting* actor is
+ *   read from the submission row itself.
+ */
+export interface SubmissionApplyPayload {
+  submissionId: string;
+  workItemId: string;
+  createdByActorId?: string;
+}
+
+/** Everything the applier needs to patch or detect a conflict. */
+export interface SubmissionApplyContext {
+  branch: string;
+  submission: SubmissionRecord;
+  workItem: WorkItemRecord;
+  annotation: AnnotationRecord;
+  /** Git-operation attempt this invocation belongs to. */
+  attempt: number;
+}
+
+/**
+ * Result of one apply attempt (design §12.6):
+ *
+ * - `applied` — the submission maps cleanly onto the current chapter (equal
+ *   base revision, or a deterministic §10.2 steps 1–4 rebase with no
+ *   overlap). `patchedSource` is the full chapter file with the new body but
+ *   the frontmatter still at the prior revision; the processor performs the
+ *   revision bump + author credit and stages the atomic multi-file commit.
+ * - `conflict` — ambiguous/overlapping/absent target: the newer chapter is
+ *   NEVER overwritten. The processor renders the both-texts
+ *   `resolve_conflict` artifact, re-renders the original item as `conflict`,
+ *   and inserts the conflict work-item row in the finalize batch.
+ */
+export type SubmissionApplyOutcome =
+  | {
+      result: "applied";
+      /** Repo-relative chapter path, e.g. `chapters/01-signal.md`. */
+      chapterPath: string;
+      /** Full patched chapter source (frontmatter at the prior revision). */
+      patchedSource: string;
+      /** Revision the apply produces (prior revision + 1). */
+      newRevision: number;
+      /** Valid block ids of the patched chapter (projection row update). */
+      blockIds: string[];
+    }
+  | {
+      result: "conflict";
+      /** Deterministic, human-readable reason (artifact + event). */
+      reason: string;
+      /** Current text at the target — the conflict artifact's Original text. */
+      currentText: string;
+      /** Chapter revision the conflict was detected against. */
+      currentRevision: number;
+      /** Fresh UUIDv7 for the new resolve_conflict work item. */
+      conflictWorkItemId: string;
+    };
+
+/** Drain-time patch hook, injected by the API layer (module split, §6.2). */
+export interface SubmissionApplier {
+  apply(context: SubmissionApplyContext): Promise<SubmissionApplyOutcome>;
+}
+
 export interface Clock {
   now(): Date;
 }
@@ -143,6 +233,11 @@ export interface CreateProcessorOptions {
   clock?: Clock;
   /** Maximum commit attempts per operation (default 3, contract §5). */
   maxAttempts?: number;
+  /**
+   * Required to process `submission.apply` rows (Phase 4). Without it such
+   * rows fail with a clear error instead of guessing.
+   */
+  submissionApplier?: SubmissionApplier;
 }
 
 export interface DrainRowOutcome {
@@ -170,6 +265,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   const writer = options.writer;
   const clock = options.clock ?? SYSTEM_CLOCK;
   const maxAttempts = options.maxAttempts ?? MAX_GIT_ATTEMPTS;
+  const applier = options.submissionApplier;
   const repos = createRepositories(db);
   const now = (): string => toTimestamp(clock.now());
 
@@ -220,7 +316,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         case "committed":
         case "verified": {
           // Crash-recovery path: commit exists, record/outbox not yet final.
-          const sync = await buildSyncStatements(row);
+          const sync = await buildSyncStatements(row, op.commitSha);
           await db.batch([
             ...sync,
             completionEventStatement(row, op),
@@ -292,7 +388,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
               // a committed operation must never report a stale failure.
               error: null,
             }),
-            ...(await buildSyncStatements(row)),
+            ...(await buildSyncStatements(row, commitSha)),
             completionEventStatement(row, op),
             repos.outbox.markDoneStatement(row.id, ts),
           ]);
@@ -415,6 +511,10 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       return { branch, files, message, trailers };
     }
 
+    if (kind === "submission.apply") {
+      return buildSubmissionApplyPlan(row, op, branch);
+    }
+
     if (kind === "work_item.update") {
       const payload = parseWorkItemPayload(row);
       const workItem = await mustWorkItem(payload.workItemId);
@@ -459,6 +559,317 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   }
 
   /**
+   * Build the atomic apply/conflict commit for a `submission.apply` row
+   * (Phase 4 contract §5, design §12.6, §14.2). Invokes the applier unless a
+   * persisted outcome for this very attempt exists (crash recovery), persists
+   * the outcome onto the payload BEFORE committing, then stages either:
+   *
+   * - applied: chapter file (revision bumped, author credited), work item
+   *   `completed` + Completion metadata, annotation `accepted`, attribution
+   *   append — ONE commit with the §14.3 trailer set; or
+   * - conflict: original work item re-rendered `conflict` + the both-texts
+   *   `resolve_conflict` artifact — the chapter is never touched.
+   */
+  async function buildSubmissionApplyPlan(
+    row: OutboxRecord,
+    op: GitOperationRecord,
+    branch: string,
+  ): Promise<CommitPlan> {
+    const payload = parseSubmissionApplyPayload(row);
+    const workItem = await mustWorkItem(payload.workItemId);
+    const submission = await mustSubmission(payload.submissionId);
+    if (submission.workItemId !== workItem.id) {
+      throw new Error(`submission ${submission.id} does not belong to work item ${workItem.id}`);
+    }
+    const annotation = await mustAnnotation(workItem.sourceAnnotationId);
+    const submitterRef = await actorRef(submission.actorId);
+
+    let resolved = readResolved(row);
+    if (resolved === null || resolved.attempt !== op.attempts) {
+      // New attempt (or first): resolve against the current head. A reused
+      // outcome (same attempt) means a crash between persist and finalize —
+      // the commit, if it landed, matched exactly this outcome.
+      if (applier === undefined) {
+        throw new Error(
+          "submission.apply requires a SubmissionApplier (createProcessor({ submissionApplier }))",
+        );
+      }
+      const outcome = await applier.apply({
+        branch,
+        submission,
+        workItem,
+        annotation,
+        attempt: op.attempts,
+      });
+      resolved = {
+        attempt: op.attempts,
+        outcome: await resolveOutcome(outcome, workItem, submitterRef),
+      };
+      await persistResolved(row, resolved);
+    }
+
+    const trailers: Record<string, string> = {
+      [ACTOR_TRAILER]: submitterRef,
+      [WORK_ITEM_TRAILER]: workItem.id,
+      [ANNOTATION_TRAILER]: workItem.sourceAnnotationId,
+      [BASE_REVISION_TRAILER]: String(submission.baseRevision),
+      [OPERATION_TRAILER]: op.id,
+    };
+
+    if (resolved.outcome.result === "applied") {
+      const outcome = resolved.outcome;
+      const completion: WorkItemCompletion = {
+        submissionId: submission.id,
+        appliedRevision: outcome.newRevision,
+        completedAt: outcome.completedAt,
+        completedBy: submitterRef,
+      };
+      // The attribution append re-reads the committed file on every attempt;
+      // appendAttributionEntry is idempotent, so a replay over an
+      // already-landed commit converges on identical bytes.
+      const prior = await mustReadFile(branch, attributionFilePath(workItem.chapterId));
+      const attribution = appendAttributionEntry(prior, workItem.chapterId, {
+        revision: outcome.newRevision,
+        actor: submitterRef,
+        workItemId: workItem.id,
+      });
+      return {
+        branch,
+        files: [
+          { path: outcome.chapterPath, content: outcome.content },
+          await renderWorkItemFile(workItem, payload.createdByActorId, {
+            status: "completed",
+            completion,
+          }),
+          await renderAnnotationWithStatus(annotation, "accepted"),
+          attribution.file,
+        ],
+        message: `Apply work item ${workItem.id}`,
+        trailers,
+      };
+    }
+
+    const outcome = resolved.outcome;
+    return {
+      branch,
+      files: [
+        await renderWorkItemFile(workItem, payload.createdByActorId, { status: "conflict" }),
+        renderConflictArtifact(workItem, submission, outcome),
+      ],
+      message: `Record conflict on work item ${workItem.id}`,
+      trailers,
+    };
+  }
+
+  /** Turn an applier outcome into the persisted, commit-ready form. */
+  async function resolveOutcome(
+    outcome: SubmissionApplyOutcome,
+    workItem: WorkItemRecord,
+    submitterRef: string,
+  ): Promise<ResolvedApply["outcome"]> {
+    if (outcome.result === "applied") {
+      const updated = applyChapterFrontmatterUpdate(outcome.patchedSource, {
+        revision: outcome.newRevision,
+        author: submitterRef,
+      });
+      if (updated.frontmatter.id !== workItem.chapterId) {
+        throw new Error(
+          `applier returned chapter ${updated.frontmatter.id}, expected ${workItem.chapterId}`,
+        );
+      }
+      return {
+        result: "applied",
+        chapterPath: outcome.chapterPath,
+        content: updated.content,
+        newRevision: outcome.newRevision,
+        contentHash: await sha256Hash(updated.content),
+        blockIds: outcome.blockIds,
+        completedAt: now(),
+      };
+    }
+    const ts = now();
+    return {
+      result: "conflict",
+      reason: outcome.reason,
+      currentText: outcome.currentText,
+      conflictWorkItem: {
+        id: outcome.conflictWorkItemId,
+        projectId: workItem.projectId,
+        type: "resolve_conflict",
+        status: "ready",
+        sourceAnnotationId: workItem.sourceAnnotationId,
+        chapterId: workItem.chapterId,
+        baseRevision: outcome.currentRevision,
+        target: workItem.target,
+        priority: workItem.priority,
+        createdAt: ts,
+        updatedAt: ts,
+      },
+    };
+  }
+
+  /** The §13 both-texts conflict artifact (module docs in work-item-artifact). */
+  function renderConflictArtifact(
+    workItem: WorkItemRecord,
+    submission: SubmissionRecord,
+    outcome: Extract<ResolvedApply["outcome"], { result: "conflict" }>,
+  ): RenderedFile {
+    const conflict = outcome.conflictWorkItem;
+    return renderWorkItemArtifact({
+      id: conflict.id,
+      type: "resolve_conflict",
+      status: "ready",
+      sourceAnnotationId: conflict.sourceAnnotationId,
+      chapterId: conflict.chapterId,
+      baseRevision: conflict.baseRevision,
+      priority: conflict.priority,
+      createdBy: SYSTEM_APPLY_REF,
+      createdAt: conflict.createdAt,
+      context:
+        `Submission ${submission.id} (\`${submission.type}\`) for work item ` +
+        `${workItem.id} could not be applied: ${outcome.reason}. The chapter moved from ` +
+        `revision ${submission.baseRevision} to revision ${conflict.baseRevision} while the ` +
+        `work was in flight. Merge the submitted change (Requested change) into the current ` +
+        `text (Original text) and submit the merged chapter.`,
+      originalText: outcome.currentText,
+      requestedChange:
+        `The change below was submitted against revision ${submission.baseRevision}. ` +
+        `Merge it with the current text shown in the Original text section.`,
+      submittedText: submission.content,
+      acceptanceCriteria: DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA,
+    });
+  }
+
+  /** Re-render an annotation artifact with an explicit status. */
+  async function renderAnnotationWithStatus(
+    annotation: AnnotationRecord,
+    status: "accepted",
+  ): Promise<RenderedFile> {
+    const authorRef = await actorRef(annotation.authorActorId);
+    return renderAnnotationArtifact({
+      id: annotation.id,
+      kind: annotation.kind,
+      scope: annotation.scope,
+      chapterId: annotation.chapterId,
+      chapterRevision: annotation.chapterRevision,
+      author: authorRef,
+      status,
+      createdAt: annotation.createdAt,
+      ...(annotation.target === null ? {} : { target: annotation.target }),
+      body: annotation.body,
+    });
+  }
+
+  /** Reads via the writer are mandatory for apply rows (writer.ts docs). */
+  async function mustReadFile(branch: string, filePath: string): Promise<string | null> {
+    if (writer.readFile === undefined) {
+      throw new Error(
+        "submission.apply requires a writer with readFile (prior attribution artifact); " +
+          "LocalGitAdapter provides it, the GitHub adapter gains it in Phase 5",
+      );
+    }
+    return writer.readFile(branch, filePath);
+  }
+
+  function readResolved(row: OutboxRecord): ResolvedApply | null {
+    const payload = row.payload as { resolved?: ResolvedApply | null } | null;
+    const resolved = payload?.resolved;
+    if (resolved === undefined || resolved === null) return null;
+    if (typeof resolved.attempt !== "number" || typeof resolved.outcome !== "object") {
+      throw new Error(`outbox row ${row.id}: malformed resolved apply outcome`);
+    }
+    return resolved;
+  }
+
+  /**
+   * Persist the resolved outcome onto the outbox payload before committing,
+   * so crash recovery finalizes exactly what was committed (never re-running
+   * the applier over its own landed commit).
+   */
+  async function persistResolved(row: OutboxRecord, resolved: ResolvedApply): Promise<void> {
+    const payload = { ...(row.payload as Record<string, unknown>), resolved };
+    await db
+      .prepare(`UPDATE outbox SET payload = ? WHERE id = ?`)
+      .bind(JSON.stringify(payload), row.id)
+      .run();
+    row.payload = payload;
+  }
+
+  /** Finalize statements for a committed `submission.apply` row. */
+  async function submissionApplySyncStatements(
+    row: OutboxRecord,
+    commitSha: string | null,
+    ts: string,
+  ): Promise<SqlStatement[]> {
+    const payload = parseSubmissionApplyPayload(row);
+    const resolved = readResolved(row);
+    if (resolved === null) {
+      throw new Error(`outbox row ${row.id}: committed submission.apply has no resolved outcome`);
+    }
+    const workItem = await mustWorkItem(payload.workItemId);
+    if (resolved.outcome.result === "applied") {
+      const outcome = resolved.outcome;
+      const statements: SqlStatement[] = [
+        repos.workItems.updateStatusStatement(workItem.id, "completed", ts),
+        repos.annotations.updateStatusStatement(workItem.sourceAnnotationId, "accepted", ts),
+        repos.submissions.transitionStateStatement(payload.submissionId, "applying", "applied", ts),
+      ];
+      const chapter = await repos.chapters.getById(workItem.chapterId);
+      if (chapter !== null) {
+        statements.push(
+          repos.chapters.upsertStatement({
+            ...chapter,
+            revision: outcome.newRevision,
+            contentHash: outcome.contentHash,
+            blockIds: outcome.blockIds,
+            headCommit: commitSha ?? chapter.headCommit,
+            updatedAt: ts,
+          }),
+        );
+      }
+      statements.push(
+        repos.events.appendStatement({
+          projectId: row.projectId,
+          type: "work_item_completed",
+          payload: {
+            workItemId: workItem.id,
+            submissionId: payload.submissionId,
+            chapterId: workItem.chapterId,
+            revision: outcome.newRevision,
+          },
+          createdAt: ts,
+        }),
+      );
+      return statements;
+    }
+    const outcome = resolved.outcome;
+    const statements: SqlStatement[] = [
+      repos.workItems.updateStatusStatement(workItem.id, "conflict", ts),
+      repos.submissions.transitionStateStatement(payload.submissionId, "applying", "conflicted", ts),
+    ];
+    // Idempotent insert: a crash-recovery replay must not violate the PK.
+    const existing = await repos.workItems.getById(outcome.conflictWorkItem.id);
+    if (existing === null) {
+      statements.push(repos.workItems.insertStatement(outcome.conflictWorkItem));
+    }
+    statements.push(
+      repos.events.appendStatement({
+        projectId: row.projectId,
+        type: "work_item_conflict",
+        payload: {
+          workItemId: workItem.id,
+          submissionId: payload.submissionId,
+          chapterId: workItem.chapterId,
+          conflictWorkItemId: outcome.conflictWorkItem.id,
+          reason: outcome.reason,
+        },
+        createdAt: ts,
+      }),
+    );
+    return statements;
+  }
+
+  /**
    * The `operation_completed` feed event (contract §5): appended in the same
    * finalize batch that marks the operation committed and the outbox row done,
    * so the stream reflects `pending_git → committed` transitions.
@@ -473,9 +884,15 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   }
 
   /** Statements that move the mirrored record out of `pending_git` (idempotent). */
-  async function buildSyncStatements(row: OutboxRecord): Promise<SqlStatement[]> {
+  async function buildSyncStatements(
+    row: OutboxRecord,
+    commitSha: string | null,
+  ): Promise<SqlStatement[]> {
     const kind = parseKind(row);
     const ts = now();
+    if (kind === "submission.apply") {
+      return submissionApplySyncStatements(row, commitSha, ts);
+    }
     if (kind === "annotation.create") {
       const payload = parseAnnotationPayload(row);
       return [repos.annotations.updateStatusStatement(payload.annotationId, "open", ts)];
@@ -519,6 +936,11 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   async function renderWorkItemFile(
     workItem: WorkItemRecord,
     createdByActorId: string | undefined,
+    overrides: {
+      /** Status to render before the row transition lands (apply finalize). */
+      status?: WorkItemRecord["status"];
+      completion?: WorkItemCompletion;
+    } = {},
   ): Promise<RenderedFile> {
     const annotation = await mustAnnotation(workItem.sourceAnnotationId);
     const createdBy =
@@ -526,7 +948,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     return renderWorkItemArtifact({
       id: workItem.id,
       type: workItem.type,
-      status: workItem.status,
+      status: overrides.status ?? workItem.status,
       sourceAnnotationId: workItem.sourceAnnotationId,
       chapterId: workItem.chapterId,
       baseRevision: workItem.baseRevision,
@@ -540,6 +962,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       // duplicating the prose (design §13: "without pretending it is
       // already the final prose").
       requestedChange: `Apply the change proposed in suggestion ${workItem.sourceAnnotationId} (see Context).`,
+      ...(overrides.completion === undefined ? {} : { completion: overrides.completion }),
     });
   }
 
@@ -559,6 +982,12 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     const workItem = await repos.workItems.getById(id);
     if (!workItem) throw new Error(`work item ${id} not found`);
     return workItem;
+  }
+
+  async function mustSubmission(id: string): Promise<SubmissionRecord> {
+    const submission = await repos.submissions.getById(id);
+    if (!submission) throw new Error(`submission ${id} not found`);
+    return submission;
   }
 
   /** Resolve an actor id to its artifact actor reference (`github:octocat`). */
@@ -622,6 +1051,60 @@ function parseDecisionPayload(row: OutboxRecord): DecisionCreatePayload {
     throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
   }
   return payload as DecisionCreatePayload;
+}
+
+/**
+ * The persisted apply outcome (`payload.resolved` of a `submission.apply`
+ * outbox row): everything needed to rebuild the exact commit plan and the
+ * finalize batch without re-invoking the applier. `attempt` binds the
+ * outcome to one git-operation attempt — a retry (new attempt) re-resolves,
+ * a crash-recovery replay (same attempt) reuses.
+ */
+interface ResolvedApply {
+  attempt: number;
+  outcome:
+    | {
+        result: "applied";
+        chapterPath: string;
+        /** Final chapter bytes (revision bumped, author credited). */
+        content: string;
+        newRevision: number;
+        /** `sha256:<hex>` of `content` (chapters projection row). */
+        contentHash: string;
+        blockIds: string[];
+        /** Timestamp rendered into the artifact's Completion section. */
+        completedAt: string;
+      }
+    | {
+        result: "conflict";
+        reason: string;
+        currentText: string;
+        /** The fully-formed resolve_conflict row inserted at finalize. */
+        conflictWorkItem: WorkItemRecord;
+      };
+}
+
+function parseSubmissionApplyPayload(row: OutboxRecord): SubmissionApplyPayload {
+  const payload = row.payload as Partial<SubmissionApplyPayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.submissionId !== "string" ||
+    typeof payload.workItemId !== "string" ||
+    (payload.createdByActorId !== undefined && typeof payload.createdByActorId !== "string")
+  ) {
+    throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
+  }
+  return payload as SubmissionApplyPayload;
+}
+
+/** `sha256:<hex>` of the UTF-8 bytes (WebCrypto: Node and Workers). */
+async function sha256Hash(content: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+  const hex = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `sha256:${hex}`;
 }
 
 function parseWorkItemPayload(row: OutboxRecord): WorkItemUpdatePayload {

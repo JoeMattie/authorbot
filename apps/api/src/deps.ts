@@ -5,7 +5,7 @@
  * better-sqlite3 + fakes).
  */
 import type { SqlDatabase, Repositories, ActorRecord, ProjectMembershipRecord } from "@authorbot/database";
-import type { Role } from "@authorbot/domain";
+import type { LeaseConfig, Role } from "@authorbot/domain";
 import type { ApiScope } from "./api-scopes.js";
 import type { IdentityProvider } from "./identity/provider.js";
 import type { IdempotencyClaim } from "./idempotency.js";
@@ -62,6 +62,12 @@ export interface AppConfig {
    * the design §25 default rule.
    */
   rulesJson?: string;
+  /**
+   * Lease timing configuration (Phase 4 contract §2): parsed/validated at
+   * boot from the `LEASE_*` env (ISO-8601 durations) by `leaseConfigFromEnv`;
+   * absent selects the design §25 defaults (PT30M/PT30M/PT4H/PT5M).
+   */
+  leaseConfig?: LeaseConfig;
   /** SSE new-row poll interval (ms). Default 1000; tests shrink it. */
   ssePollMs?: number;
   /** SSE heartbeat-comment interval (ms). Contract §5: default 15000. */

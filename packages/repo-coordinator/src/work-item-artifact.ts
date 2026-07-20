@@ -10,6 +10,25 @@
  * `authorbot:original` delimiters), Requested change, Acceptance criteria,
  * Submission contract (naming the base revision).
  *
+ * ## Phase 4 additions (contract §5–§6)
+ *
+ * - **Completion metadata**: an applied work item re-renders with frontmatter
+ *   `status: completed` and an appended `## Completion` section (submission
+ *   id, applied revision, completed-at, completed-by). The five §13 sections
+ *   stay byte-intact; the canonical `authorbot.work-item/v1` frontmatter is
+ *   strict, so completion metadata lives in the body, not the frontmatter.
+ * - **Conflict artifacts**: a `resolve_conflict` work item (design §12.6)
+ *   carries BOTH texts between distinct delimiter pairs — the *current*
+ *   chapter text between the standard `authorbot:original` delimiters (it is
+ *   the text the resolver revises; `base_revision` names the current
+ *   revision), and the *submitted* change between
+ *   `authorbot:original:submitted` delimiters inside the Requested change
+ *   section. The submitted delimiters live inside the `authorbot:original:`
+ *   escape namespace, so the existing fence-safe escaping covers lookalikes
+ *   in free text, and the Phase 0 delimiter validator (which matches
+ *   `authorbot:original:(start|end)` exactly) still sees exactly one
+ *   balanced pair.
+ *
  * ## Delimiter/heading escaping (round-trip safety)
  *
  * Free text (Context, Original text, Requested change) may itself contain
@@ -57,6 +76,14 @@ export const ORIGINAL_TEXT_START = "<!-- authorbot:original:start -->";
 export const ORIGINAL_TEXT_END = "<!-- authorbot:original:end -->";
 /** Escape marker prefixed to dangerous free-text lines (module docs). */
 export const ORIGINAL_TEXT_ESCAPE = "<!-- authorbot:original:escape -->";
+/**
+ * Delimiters around the *submitted change* in a `resolve_conflict` artifact
+ * (Phase 4 contract §5). Deliberately inside the `authorbot:original:`
+ * namespace: the fence-safe escaping already covers lookalike free-text
+ * lines, and the Phase 0 delimiter validator ignores them (module docs).
+ */
+export const SUBMITTED_TEXT_START = "<!-- authorbot:original:submitted:start -->";
+export const SUBMITTED_TEXT_END = "<!-- authorbot:original:submitted:end -->";
 /** Any free-text line starting with this must be escaped. */
 const DANGEROUS_PREFIX = "<!-- authorbot:original:";
 /**
@@ -78,6 +105,16 @@ export const WORK_ITEM_SECTION_HEADINGS = [
   "## Submission contract",
 ] as const;
 
+/** Optional trailing section carrying completion metadata (Phase 4 §5). */
+export const COMPLETION_HEADING = "## Completion";
+
+/**
+ * Every heading the renderer anchors on, and therefore escapes in free text.
+ * (Adding `## Completion` in Phase 4 changes rendered bytes only for free
+ * text containing exactly that line — previously never emitted.)
+ */
+const ESCAPED_HEADINGS: readonly string[] = [...WORK_ITEM_SECTION_HEADINGS, COMPLETION_HEADING];
+
 /** Default acceptance-criteria template (Phase 3 contract §4). */
 export const DEFAULT_ACCEPTANCE_CRITERIA: readonly string[] = [
   "Preserve point of view.",
@@ -85,17 +122,26 @@ export const DEFAULT_ACCEPTANCE_CRITERIA: readonly string[] = [
   "Keep continuity facts intact.",
 ];
 
+/** Default acceptance criteria for `resolve_conflict` items (Phase 4 §5). */
+export const DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA: readonly string[] = [
+  "Merge the submitted change with the current text; never discard either silently.",
+  "Preserve the newer revision's changes outside the conflicting span.",
+  "Keep continuity facts intact.",
+];
+
 /**
  * Submission type named by the Submission contract section, per work type
  * (design §13 example, §22.1 "range replacement, block replacement, and
- * whole-chapter submission types"). Phase 3 only ever creates the three
- * `revise_*` types; rendering any other type fails closed until Phase 4
- * defines its submission vocabulary.
+ * whole-chapter submission types"). `resolve_conflict` submits the merged
+ * chapter as a `chapter_replacement` (Phase 4; matches
+ * `@authorbot/domain.requiredSubmissionType`). `write_chapter`/`planning`
+ * submission flows are deferred (Phase 4 contract §1) and fail closed.
  */
 export const SUBMISSION_TYPE_BY_WORK_TYPE: Partial<Record<WorkItemType, string>> = {
   revise_range: "range_replacement",
   revise_block: "block_replacement",
   revise_chapter: "chapter_replacement",
+  resolve_conflict: "chapter_replacement",
 };
 
 /** Escape one free-text block for embedding in the artifact body. */
@@ -106,7 +152,7 @@ export function escapeWorkItemText(text: string): string {
     .map((line) =>
       line.startsWith(DANGEROUS_PREFIX) ||
       CODE_FENCE.test(line) ||
-      (WORK_ITEM_SECTION_HEADINGS as readonly string[]).includes(line)
+      ESCAPED_HEADINGS.includes(line)
         ? `${ORIGINAL_TEXT_ESCAPE}${line}`
         : line,
     )
@@ -148,6 +194,30 @@ export interface WorkItemArtifactInput {
   requestedChange: string;
   /** One line per criterion; defaults to {@link DEFAULT_ACCEPTANCE_CRITERIA}. */
   acceptanceCriteria?: readonly string[];
+  /**
+   * The submitted change of a `resolve_conflict` artifact, preserved
+   * byte-exactly between the `authorbot:original:submitted` delimiters
+   * inside the Requested change section (Phase 4 contract §5).
+   */
+  submittedText?: string;
+  /**
+   * Completion metadata for an applied work item (Phase 4 contract §5):
+   * rendered as a trailing `## Completion` section. The §13 sections are
+   * unaffected. Normally paired with `status: "completed"`.
+   */
+  completion?: WorkItemCompletion;
+}
+
+/** `## Completion` section fields — all single-line values. */
+export interface WorkItemCompletion {
+  /** Submission UUIDv7 that produced the applied edit. */
+  submissionId: string;
+  /** Chapter revision the edit produced. */
+  appliedRevision: number;
+  /** RFC 3339 UTC timestamp of the apply commit's finalization. */
+  completedAt: string;
+  /** Actor reference (`github:octocat`) of the submitter. */
+  completedBy: string;
 }
 
 /** Render `.authorbot/work-items/<id>.md`. Byte-stable. */
@@ -178,6 +248,14 @@ export function renderWorkItemArtifact(input: WorkItemArtifactInput): RenderedFi
   };
   workItemSchema.parse(frontmatter);
 
+  if (input.completion !== undefined) {
+    for (const [field, value] of Object.entries(completionLines(input.completion))) {
+      if (value.includes("\n") || value.includes("\r")) {
+        throw new Error(`work item ${input.id}: completion ${field} must be a single line`);
+      }
+    }
+  }
+
   const context = escapeWorkItemText(normalizeTrim(input.context));
   const requestedChange = escapeWorkItemText(normalizeTrim(input.requestedChange));
   const originalText = escapeWorkItemText(input.originalText);
@@ -196,6 +274,14 @@ export function renderWorkItemArtifact(input: WorkItemArtifactInput): RenderedFi
     "",
     requestedChange,
     "",
+    ...(input.submittedText === undefined
+      ? []
+      : [
+          SUBMITTED_TEXT_START,
+          escapeWorkItemText(input.submittedText),
+          SUBMITTED_TEXT_END,
+          "",
+        ]),
     "## Acceptance criteria",
     "",
     ...criteria.map((criterion) => `- ${criterion}`),
@@ -203,9 +289,27 @@ export function renderWorkItemArtifact(input: WorkItemArtifactInput): RenderedFi
     "## Submission contract",
     "",
     `Submit a \`${submissionType}\` against chapter revision ${input.baseRevision} while holding the current lease.`,
+    ...(input.completion === undefined
+      ? []
+      : [
+          "",
+          COMPLETION_HEADING,
+          "",
+          ...Object.values(completionLines(input.completion)),
+        ]),
   ].join("\n");
 
   return { path: workItemFilePath(input.id), content: renderArtifact(frontmatter, body) };
+}
+
+/** The `## Completion` bullet lines, in fixed order (render and parse). */
+function completionLines(completion: WorkItemCompletion): Record<string, string> {
+  return {
+    submissionId: `- Submission: ${completion.submissionId}`,
+    appliedRevision: `- Applied revision: ${completion.appliedRevision}`,
+    completedAt: `- Completed at: ${completion.completedAt}`,
+    completedBy: `- Completed by: ${completion.completedBy}`,
+  };
 }
 
 export interface WorkItemArtifactSections {
@@ -217,6 +321,14 @@ export interface WorkItemArtifactSections {
   acceptanceCriteria: string[];
   /** Raw Submission contract section text. */
   submissionContract: string;
+  /**
+   * The submitted change of a `resolve_conflict` artifact (between the
+   * `authorbot:original:submitted` delimiters), byte-exact after CRLF→LF
+   * normalization. Absent when the artifact carries none.
+   */
+  submittedText?: string;
+  /** Completion metadata of an applied work item, when present. */
+  completion?: WorkItemCompletion;
 }
 
 export interface ParsedWorkItemArtifact {
@@ -244,9 +356,16 @@ export function parseWorkItemArtifact(content: string): ParsedWorkItemArtifact {
     headingIndex.push(index);
     searchFrom = index + 1;
   }
+  // Optional trailing `## Completion` section (Phase 4): bounds block(4).
+  const completionIndex = lines.indexOf(COMPLETION_HEADING, (headingIndex[4] ?? 0) + 1);
   const block = (section: number): string[] => {
     const start = (headingIndex[section] ?? 0) + 1;
-    const end = section + 1 < headingIndex.length ? headingIndex[section + 1] : lines.length;
+    const end =
+      section + 1 < headingIndex.length
+        ? headingIndex[section + 1]
+        : completionIndex === -1
+          ? lines.length
+          : completionIndex;
     return lines.slice(start, end);
   };
 
@@ -262,6 +381,29 @@ export function parseWorkItemArtifact(content: string): ParsedWorkItemArtifact {
     originalBlock.slice(startIndex + 1, endIndex).join("\n"),
   );
 
+  // Optional submitted-change delimiters inside Requested change (Phase 4
+  // conflict artifacts). Free-text lookalikes are escaped, so an unescaped
+  // delimiter line is unambiguous.
+  const requestedBlock = block(2);
+  const submittedStart = requestedBlock.indexOf(SUBMITTED_TEXT_START);
+  const submittedEnd = requestedBlock.indexOf(SUBMITTED_TEXT_END);
+  let submittedText: string | undefined;
+  let requestedLines = requestedBlock;
+  if (submittedStart !== -1 || submittedEnd !== -1) {
+    if (submittedStart === -1 || submittedEnd === -1 || submittedEnd < submittedStart) {
+      throw new Error(
+        `work item artifact ${record.id}: malformed authorbot:original:submitted delimiters`,
+      );
+    }
+    submittedText = unescapeWorkItemText(
+      requestedBlock.slice(submittedStart + 1, submittedEnd).join("\n"),
+    );
+    requestedLines = [
+      ...requestedBlock.slice(0, submittedStart),
+      ...requestedBlock.slice(submittedEnd + 1),
+    ];
+  }
+
   const acceptanceCriteria = block(3)
     .filter((line) => line.startsWith("- "))
     .map((line) => line.slice(2));
@@ -271,10 +413,36 @@ export function parseWorkItemArtifact(content: string): ParsedWorkItemArtifact {
     sections: {
       context: unescapeWorkItemText(joinTrim(block(0))),
       originalText,
-      requestedChange: unescapeWorkItemText(joinTrim(block(2))),
+      requestedChange: unescapeWorkItemText(joinTrim(requestedLines)),
       acceptanceCriteria,
       submissionContract: joinTrim(block(4)),
+      ...(submittedText === undefined ? {} : { submittedText }),
+      ...(completionIndex === -1
+        ? {}
+        : { completion: parseCompletion(record.id, lines.slice(completionIndex + 1)) }),
     },
+  };
+}
+
+/** Parse the `## Completion` bullet lines (inverse of the renderer). */
+function parseCompletion(workItemId: string, lines: string[]): WorkItemCompletion {
+  const value = (label: string): string => {
+    const prefix = `- ${label}: `;
+    const line = lines.find((candidate) => candidate.startsWith(prefix));
+    if (line === undefined) {
+      throw new Error(`work item artifact ${workItemId}: Completion section missing "${label}"`);
+    }
+    return line.slice(prefix.length);
+  };
+  const appliedRevision = Number(value("Applied revision"));
+  if (!Number.isInteger(appliedRevision) || appliedRevision < 1) {
+    throw new Error(`work item artifact ${workItemId}: invalid Completion applied revision`);
+  }
+  return {
+    submissionId: value("Submission"),
+    appliedRevision,
+    completedAt: value("Completed at"),
+    completedBy: value("Completed by"),
   };
 }
 

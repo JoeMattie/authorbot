@@ -30,6 +30,7 @@ import { createApi, type AuthorbotApi } from "./app.js";
 import type { AppDeps } from "./deps.js";
 import { configFromBindings, identityProviderFor, type WorkerBindings } from "./worker.js";
 import type { IdentityProvider } from "./identity/provider.js";
+import { sweepExpiredLeases } from "./leases.js";
 import { createInlineMirror, type InlineMirror } from "./mirror.js";
 import { LocalFsBookRepoReader } from "./projection/local-fs.js";
 
@@ -43,6 +44,9 @@ export interface NodeDevApi {
   bookRepoPath: string;
   close(): void;
 }
+
+/** Default eager lease-sweep interval (Phase 4 contract §2 dev-server timer). */
+export const DEFAULT_LEASE_SWEEP_MS = 60_000;
 
 /**
  * Build the fully wired Node dev app from environment variables. Exported
@@ -80,7 +84,41 @@ export async function createNodeDevApi(env: NodeJS.ProcessEnv = process.env): Pr
   };
   const api = createApi(deps);
   await api.bootstrap();
-  return { api, db, mirror, bookRepoPath, close: () => db.close() };
+
+  // Eager lease expiration (Phase 4 contract §2): `sweepExpiredLeases` on a
+  // timer — the dev-server stand-in for the Phase 5 Durable Object alarm.
+  // Lazy per-command enforcement runs regardless; the sweep frees leases
+  // nobody touches. LEASE_SWEEP_MS=0 disables (tests drive sweeps directly).
+  const sweepMs = env["LEASE_SWEEP_MS"] === undefined
+    ? DEFAULT_LEASE_SWEEP_MS
+    : Number(env["LEASE_SWEEP_MS"]);
+  if (!Number.isFinite(sweepMs) || sweepMs < 0) {
+    throw new Error("LEASE_SWEEP_MS must be a non-negative integer (milliseconds)");
+  }
+  const clock = { now: (): Date => new Date() };
+  const sweepTimer =
+    sweepMs > 0
+      ? setInterval(() => {
+          sweepExpiredLeases(db, clock).catch(() => {
+            // A transient sweep failure must not kill the server; lazy
+            // expiry still guards every command, and the next tick retries.
+          });
+        }, sweepMs)
+      : null;
+  sweepTimer?.unref?.();
+
+  return {
+    api,
+    db,
+    mirror,
+    bookRepoPath,
+    close: () => {
+      if (sweepTimer !== null) {
+        clearInterval(sweepTimer);
+      }
+      db.close();
+    },
+  };
 }
 
 /** Minimal node:http → fetch bridge (no extra dependency). */

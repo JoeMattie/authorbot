@@ -58,6 +58,26 @@ async function listDir(path: string): Promise<string[]> {
 export class LocalFsBookRepoReader implements BookRepoReader {
   constructor(private readonly repoPath: string) {}
 
+  /**
+   * Raw text of one repo-relative file, or null when absent (Phase 4 task
+   * bundles and the submission-apply pipeline; reader.ts doc). Path traversal
+   * is refused: the resolved path must stay inside the repository.
+   */
+  async readTextFile(path: string): Promise<string | null> {
+    const full = join(this.repoPath, path);
+    if (!full.startsWith(this.repoPath)) {
+      return null;
+    }
+    try {
+      return await readFile(full, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async readSnapshot(): Promise<BookRepoSnapshot> {
     const { annotations, replies } = await this.readAnnotationDirs();
     return {

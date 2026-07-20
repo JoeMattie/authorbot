@@ -43,6 +43,15 @@ export interface BookRepoWriter {
    * again (crash-recovery safety).
    */
   commitFiles(input: CommitFilesInput): Promise<CommitFilesResult>;
+  /**
+   * Read one committed file from the branch head (Phase 4: the attribution
+   * append reads the prior artifact so the whole file can be re-rendered in
+   * the same commit as the edit). Returns `null` when the path does not
+   * exist at the branch head. Optional: adapters without read access omit
+   * it, and the processor fails `submission.apply` rows with a clear error
+   * instead of clobbering (the GitHub adapter gains it in Phase 5).
+   */
+  readFile?(branch: string, filePath: string): Promise<string | null>;
 }
 
 /** Trailer key that makes commits idempotent per Git operation. */
@@ -50,6 +59,8 @@ export const OPERATION_TRAILER = "Authorbot-Operation";
 export const ACTOR_TRAILER = "Authorbot-Actor";
 export const ANNOTATION_TRAILER = "Authorbot-Annotation";
 export const WORK_ITEM_TRAILER = "Authorbot-Work-Item";
+/** Base revision the applied submission targeted (design §14.3, Phase 4). */
+export const BASE_REVISION_TRAILER = "Authorbot-Base-Revision";
 
 export type GitWriteFailure =
   /** Branch head is not where the caller expected (retryable → `conflict`). */

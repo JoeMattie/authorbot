@@ -74,10 +74,17 @@ export function fixtureSnapshot(): BookRepoSnapshot {
 }
 
 export class FakeReader implements BookRepoReader {
+  /** Repo-relative path → file text (Phase 4 chapter-source reads). */
+  files = new Map<string, string>();
+
   constructor(public snapshot: BookRepoSnapshot = fixtureSnapshot()) {}
 
   async readSnapshot(): Promise<BookRepoSnapshot> {
     return this.snapshot;
+  }
+
+  async readTextFile(path: string): Promise<string | null> {
+    return this.files.get(path) ?? null;
   }
 }
 
@@ -89,6 +96,8 @@ export interface TestHarness {
   reader: FakeReader;
   projectId: string;
   mutationsCommitted: string[];
+  /** Late-bind the mutation hook (e.g. to an inline mirror built over `db`). */
+  setMutationHook(hook: (projectId: string) => Promise<void>): void;
   close(): void;
 }
 
@@ -96,6 +105,10 @@ export async function makeHarness(options: {
   config?: Partial<AppConfig>;
   reader?: FakeReader | null;
   githubMode?: boolean;
+  /** Injectable clock (Phase 4 lease-expiry tests). */
+  clock?: { now(): Date };
+  /** Override the default mutation hook (e.g. wire a real inline mirror). */
+  onMutationCommitted?: (projectId: string) => Promise<void>;
 } = {}): Promise<TestHarness> {
   const db = openSqliteDatabase(":memory:");
   await applyMigrations(db, MIGRATIONS_DIR);
@@ -124,10 +137,16 @@ export async function makeHarness(options: {
         ? createGitHubIdentityProvider(config.github)
         : createDevIdentityProvider(),
     ...(reader !== undefined ? { reader } : {}),
+    ...(options.clock !== undefined ? { clock: options.clock } : {}),
     onMutationCommitted: async (projectId) => {
-      mutationsCommitted.push(projectId);
+      await mutationHook(projectId);
     },
   };
+  let mutationHook: (projectId: string) => Promise<void> =
+    options.onMutationCommitted ??
+    (async (projectId) => {
+      mutationsCommitted.push(projectId);
+    });
 
   const api = createApi(deps);
   const { project } = await api.bootstrap();
@@ -140,6 +159,9 @@ export async function makeHarness(options: {
     reader: reader ?? new FakeReader(),
     projectId: project.id,
     mutationsCommitted,
+    setMutationHook: (hook) => {
+      mutationHook = hook;
+    },
     close: () => db.close(),
   };
 }

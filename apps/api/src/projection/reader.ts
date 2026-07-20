@@ -59,6 +59,16 @@ export interface BookRepoSnapshot {
 
 export interface BookRepoReader {
   readSnapshot(): Promise<BookRepoSnapshot>;
+  /**
+   * Raw text of one committed repository file (repo-relative path), or null
+   * when it does not exist. Phase 4 uses this for the claim task bundle's
+   * `document.source` (contract §3: full chapter Markdown) and for the
+   * submission-apply pipeline's current-source + attribution reads — the
+   * chapters projection deliberately stores only hashes/block ids, never
+   * source. Optional so pre-Phase-4 readers/fixtures stay valid; endpoints
+   * that need source respond with a problem when it is absent.
+   */
+  readTextFile?(path: string): Promise<string | null>;
 }
 
 // NOTE: valid block ids are persisted on the `chapters` projection row

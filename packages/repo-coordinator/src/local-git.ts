@@ -91,6 +91,23 @@ export class LocalGitAdapter implements BookRepoWriter {
     return { commitSha: head.stdout.trim() };
   }
 
+  /**
+   * Read one committed file at the branch head (`git show <branch>:<path>`),
+   * or `null` when the path does not exist there. The branch itself must
+   * exist — an unknown branch is a `git-failure`, never a silent `null`
+   * (a null misread would let an attribution append clobber history).
+   */
+  async readFile(branch: string, filePath: string): Promise<string | null> {
+    const relative = safeRelativePath(filePath);
+    const branchExists =
+      (await this.git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
+    if (!branchExists) {
+      throw new GitWriteError("git-failure", `branch ${JSON.stringify(branch)} does not exist`);
+    }
+    const result = await this.git(["show", `${branch}:${relative}`]);
+    return result.code === 0 ? result.stdout : null;
+  }
+
   /** First commit on HEAD's history carrying `Authorbot-Operation: <id>`. */
   private async findOperationCommit(operationId: string): Promise<string | null> {
     const result = await this.mustGit([
