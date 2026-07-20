@@ -15,22 +15,35 @@ The stages are deliberately separable, and each one is useful on its own:
 Stop after stage 2 and you have a perfectly good serial-fiction site. Stages 3
 and 4 add the editorial machinery.
 
-**Prerequisites:** Node 22+, pnpm, a GitHub account. Stage 3 adds a Cloudflare
+**Prerequisites:** Node 22+ and a GitHub account. Stage 2 adds a Cloudflare
 account (free tier is enough).
+
+> **You never clone or compile Authorbot** (ADR-0022). The toolchain is an npm
+> package your book depends on, pinned in your `package.json` and locked by
+> your `package-lock.json`. Your CI runs `npm ci` and then the `authorbot`
+> binary — there is no `AUTHORBOT_REF` repository variable any more, and no
+> TypeScript build in your pipeline.
 
 ---
 
 ## Stage 1 — Create the book repository
 
-The book lives in its own repository, separate from Authorbot itself.
+The book lives in its own repository, separate from Authorbot itself. Copy the
+blank template and install the pinned toolchain:
 
 ```sh
-git clone https://github.com/JoeMattie/authorbot
-cd authorbot && pnpm install && pnpm build && cd ..
-
-cp -r authorbot/templates/book-repo my-book
+cp -r <this repo>/templates/book-repo my-book
 cd my-book && git init -b main
+
+npm install          # installs @authorbot/cli, writes package-lock.json
+git add -A && git commit -m "Start the book"
 ```
+
+Commit `package-lock.json`. It is what pins your toolchain version: visible in
+your history, diffable in a pull request, and revertable with `git revert`
+alongside whatever content it was paired with. CI refuses to run without it.
+
+From here on `npx authorbot` runs the pinned binary from `node_modules`.
 
 Edit `book.yml` — the identity of your book:
 
@@ -66,8 +79,16 @@ graph), `timeline.yml`, `characters/`, `concepts/`, `style-guide.md`. None of
 it is mandatory to publish, but it is what gives collaborators and agents the
 context to write in your world rather than a generic one.
 
-Write a chapter as `chapters/010-opening.md`. Every top-level block needs a
-stable marker — those are the anchors annotations attach to:
+**A book with zero chapters is a first-class state.** It validates, builds, and
+publishes, and the site says "No chapters published yet." rather than rendering
+a broken index. You do not have to write a chapter to finish this stage — and
+once collaboration is on (stage 3), the **New chapter** button in the site
+writes chapters for you, generating the id and every block marker so you never
+type a UUID. Prefer that to hand-writing the format below.
+
+If you do want a chapter on disk now, write `chapters/010-opening.md`. Every
+top-level block needs a stable marker — those are the anchors annotations
+attach to:
 
 ```markdown
 ---
@@ -93,7 +114,7 @@ The second paragraph follows.
 Validate before you commit anything:
 
 ```sh
-node ../authorbot/apps/cli/dist/bin.js validate .
+npx authorbot validate .
 ```
 
 Fix what it reports — it checks schemas, duplicate IDs, unresolved
@@ -111,9 +132,16 @@ promote it to `published`.
 Build locally first:
 
 ```sh
-node ../authorbot/apps/cli/dist/bin.js build . --out _site --include-drafts
+npx authorbot build . --out _site --include-drafts
 # then open _site/index.html
 ```
+
+**Cloudflare is the only supported host** (ADR-0020). There is no host question
+to answer and no GitHub Pages path: a static-only host can serve your prose but
+never the annotations, votes, or work queue, because the collaboration API must
+be served from the same origin as the site (ADR-0019). Shipping both would
+produce two live URLs where one silently lacked every collaboration feature.
+Cloudflare's free tier covers a book of this size.
 
 Push the repository to GitHub, then let CI do it on every change. The template
 ships two workflows:
@@ -121,22 +149,26 @@ ships two workflows:
 - `validate.yml` — validates on every push and pull request
 - `publish.yml` — builds and deploys when public content changes
 
-For **GitHub Pages**: in repository Settings → Pages, set Source to "GitHub
-Actions". Push to `main` and the site deploys.
+The template's `wrangler.jsonc` already has an `assets` block pointing at
+`_site`. To finish stage 2:
 
-For **Cloudflare** (also supports the API later, so prefer it if you plan to go
-past stage 2): add a `wrangler.jsonc` with an `assets` block pointing at
-`_site`, create an API token with Workers Scripts: Edit, and store it as the
-`CLOUDFLARE_API_TOKEN` repository secret.
+1. Edit `wrangler.jsonc` and set `name` to the Worker name you want — it
+   becomes part of your default URL and is the identity CI deploys to.
+   Renaming later creates a *second* Worker rather than moving the first.
+2. Create a Cloudflare API token with the "Edit Cloudflare Workers" template
+   and store it as the `CLOUDFLARE_API_TOKEN` repository secret; store your
+   account id as `CLOUDFLARE_ACCOUNT_ID`.
+3. Only if the book is served under a sub-path of a larger site
+   (`example.com/my-book/`), set the `AUTHORBOT_BASE_URL` repository variable.
+   Leave it unset for a book at the root of its own hostname.
 
 > **Deploy through CI, not from your laptop.** `_site` is build output. A local
 > `wrangler deploy` publishes whatever happens to be in that directory — a
 > stale one will quietly replace your live book with an older version. If you
 > must deploy by hand, delete `_site` and rebuild first.
 
-Pin the toolchain: set an `AUTHORBOT_REF` repository *variable* to a specific
-authorbot commit SHA. Without it your builds track a moving `main`, and a
-toolchain change can alter your published site without you touching it.
+The toolchain is already pinned by `package-lock.json` from stage 1; there is
+nothing else to pin.
 
 **You now have a working serial-fiction site.** Everything below is optional.
 
@@ -149,31 +181,60 @@ Cloudflare Worker, a D1 database, and a GitHub OAuth app.
 
 ### 3a. Database
 
+Install the API package alongside the CLI — it ships the prebuilt Worker *and*
+the migration SQL for that exact version, so your schema and your Worker code
+can never be different releases (ADR-0022):
+
 ```sh
-cd authorbot
-wrangler d1 create authorbot          # note the returned database_id
-wrangler d1 migrations apply authorbot --remote
+npm install @authorbot/api      # commit the updated package-lock.json
+
+npx wrangler d1 create authorbot   # note the returned database_id
 ```
 
-### 3b. Decide same-origin or split
+Set the `AUTHORBOT_D1_DATABASE` repository variable to the same database name.
+That switches on the `wrangler d1 migrations apply` step in `publish.yml`,
+which runs **before** the Worker deploy (ADR-0021 §4) — migrate-then-deploy is
+the only safe ordering, because for the seconds between the two the old Worker
+is still serving against the new schema.
 
-**Same-origin is strongly recommended**: one Worker serves both your static
-site and the API at `/v1/*`. No CORS, simpler cookies, and OAuth redirects work
-without an allow-list. Requests matching a built asset never invoke the Worker,
-so an API fault cannot take your prose offline.
+### 3b. One Worker, one origin
+
+Authorbot is same-origin by design (ADR-0019): **one Worker serves both your
+static site and the API at `/v1/*`**. There is no split option — no CORS, no
+allow-list, one set of cookie rules. Requests matching a built asset never
+invoke the Worker, so an API fault cannot take your prose offline.
+
+A book published under a subpath (`example.com/my-book/`) is supported: set
+the Worker var `API_BASE_PATH: "/my-book"` and `publication.api_url: "/my-book"`,
+and keep the two identical.
 
 The combined Worker config looks like:
+
+Nothing here is compiled from source: `main` names a prebuilt Worker inside
+`node_modules`, and `migrations_dir` names the SQL that shipped with that same
+version. The full block is in the template's `wrangler.jsonc`, commented out
+and ready to merge.
 
 ```jsonc
 {
   "name": "my-serial",
-  "main": "authorbot/apps/api/src/worker.ts",   // from the pinned checkout
+  "main": "node_modules/@authorbot/api/dist/worker.js",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
-  "alias": { "better-sqlite3": "./authorbot/apps/api/src/stubs/better-sqlite3.ts" },
+  // @authorbot/database also re-exports a native SQLite adapter the Worker
+  // never calls; alias it to a stub to keep it out of the bundle.
+  "alias": {
+    "better-sqlite3": "node_modules/@authorbot/api/dist/stubs/better-sqlite3.js"
+  },
   "assets": { "directory": "./_site" },
   "d1_databases": [{ "binding": "DB", "database_name": "authorbot",
-                     "database_id": "<from 3a>" }],
+                     "database_id": "<from 3a>",
+                     "migrations_dir": "node_modules/@authorbot/api/migrations" }],
+  "durable_objects": {
+    "bindings": [{ "name": "COORDINATOR", "class_name": "ProjectCoordinator" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectCoordinator"] }],
+  "triggers": { "crons": ["* * * * *"] },
   "vars": {
     "AUTH_MODE": "github",
     "PROJECT_SLUG": "my-serial",
@@ -239,7 +300,8 @@ Add to `book.yml`:
 
 ```yaml
 publication:
-  api_url: "/"          # same-origin; or the full API origin if split
+  api_url: "/"          # root-relative only: "/" or a base path like "/my-book"
+                        # (an absolute URL fails the build — ADR-0019)
 ```
 
 Rebuild and deploy. Chapter pages now carry the annotation gutter, sign-in
@@ -305,28 +367,48 @@ reference implementation of exactly that loop.
 
 ## Governance you can tune
 
+Rules live in `book.yml` under `governance.rules`, so they are versioned,
+diffable, and reviewable alongside the prose they govern — and editable from
+the Settings view (below). The `RULES_JSON` environment variable remains only
+as a bootstrap default for a book that has not set them.
+
 The default rule for turning a suggestion into work:
 
 ```yaml
-rules:
-  suggestion_to_work_item:
-    version: 1
-    when:
-      all:
-        - { metric: approvals, operator: gte, value: 3 }
-        - { metric: net_score, operator: gte, value: 2 }
-        - { metric: human_approvals, operator: gte, value: 1 }
+governance:
+  rules:
+    suggestion_to_work_item:
+      version: 2
+      when:
+        all:
+          - { metric: approvals, operator: gte, value: 3 }
+          - { metric: net_score, operator: gte, value: 2 }
+          - { metric: human_approvals, operator: gte, value: 1 }
+          - { metric: human_maintainer_approvals, operator: gte, value: 1 }
 ```
 
-That last clause is load-bearing: it prevents a fleet of freshly minted agent
-tokens from manufacturing consensus. Available metrics are `approvals`,
-`rejections`, `abstentions`, `net_score`, `distinct_voters`, `human_approvals`,
-and `agent_approvals`. Rules are declarative data — no code from the book
-repository is ever executed.
+The last two clauses are load-bearing. `human_approvals` prevents a fleet of
+freshly minted agent tokens from manufacturing consensus. **`human_maintainer_approvals`
+is the author's veto**: nothing becomes work on your book without you agreeing
+to it. It counts *human* maintainers specifically, because an author may grant
+the maintainer role to their own agent tokens — a plain `maintainer_approvals`
+clause could then be satisfied by an agent the author owns, reopening the same
+hole. A suggestion that reaches the numeric threshold without a human
+maintainer's approval does not become work.
+
+It is removable: an author running a genuinely collaborative project may not
+want a personal veto on every change, and that is their call.
+
+Available metrics are `approvals`, `rejections`, `abstentions`, `net_score`,
+`distinct_voters`, `human_approvals`, `agent_approvals`, `maintainer_approvals`,
+and `human_maintainer_approvals`. Rules are declarative data — no code from the
+book repository is ever executed.
 
 A solo author can set thresholds to 1 and use the machinery purely for
-tracking. A large project can require more approvals or restrict voting by
-role.
+tracking, or skip voting entirely: **Promote to work** on any open suggestion
+creates a work item regardless of the tally, recording a reason alongside the
+tally you overrode. The inverse — rejecting a suggestion that did cross — works
+the same way. Thresholds only start mattering when other people arrive.
 
 ---
 
@@ -343,13 +425,33 @@ role.
 
 ---
 
-## Current limitation
+## Writing and configuring from the browser
 
-Reading and writing a **remote** GitHub repository from a deployed Worker is
-Phase 5 and in progress. Until it lands, a deployed instance can authenticate
-people and serve reads, but it cannot project your chapters or commit back —
-so stage 3's annotation writes and stage 4's agent loop are not yet usable in
-production. Both work fully against a local repository (tests and local dev).
+Once stage 3 is on, the two things you would otherwise do by editing files are
+in the site itself, signed in with the GitHub account that owns the project.
 
-Stages 1 and 2 — a validated book and a published reading site — are complete
-and in production use today.
+**New chapter.** A button in the collaboration islands, visible only to editors
+and maintainers, opening a plain title-and-prose composer — Markdown, no
+frontmatter, no marker syntax. The server generates the chapter id and every
+block marker, assigns `order` as the last one plus ten, defaults to
+`status: draft`, and validates the result exactly as any other write before
+committing it with attribution. Publishing a draft is a separate, explicit,
+maintainer-only action. Editing an existing chapter uses the same composer, and
+markers are reused for blocks whose text did not change, so annotations stay
+anchored across a revision.
+
+**Settings.** A maintainer-only view editing the same `book.yml` that lives in
+Git, through the same outbox, validation, and attribution path as any other
+write. Settings changes are commits: diffable, revertable, audited. There is no
+second configuration store.
+
+- *Editable:* title, language, license, the display toggles, and the governance
+  thresholds above.
+- *Guarded:* `slug` and `publication.chapter_url` — changing either breaks
+  existing links to published chapters, so both require an explicit
+  confirmation that names what breaks.
+- *Never editable here:* `id`, `repository.default_branch`,
+  `content.chapters_glob`, and `content.raw_html`. The first is permanent
+  identity, the next two are deployment invariants, and enabling raw HTML is a
+  security decision that belongs in a reviewed commit rather than a toggle.
+  These are absent from the interface, not merely disabled.

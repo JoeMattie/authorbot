@@ -8,3 +8,9 @@ _site/
 .dev.vars
 .env
 .DS_Store
+
+# Generated at pack time (scripts/copy-license.mjs, apps/api/scripts/sync-migrations.mjs).
+# The authoritative copies live at ./LICENSE and ./migrations.
+apps/*/LICENSE
+packages/*/LICENSE
+apps/api/migrations/

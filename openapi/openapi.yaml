@@ -378,46 +378,32 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     post:
       operationId: createChapterSubmission
-      x-implementation-status: planned
       tags: [chapters]
-      summary: Submit a full chapter draft or revision outside the work-item flow.
+      summary: Write a chapter directly, or revise one, without a work item.
+      description: >-
+        The direct authoring path (Phase 6 contract 3.5). The author sends a
+        title and Markdown prose; the server generates the chapter id, the
+        block marker for every top-level block, the slug, the order (last
+        existing + 10), `status: draft`, and the revision. Requires the
+        `submissions:write` scope AND the editor or maintainer role. Publishing
+        is a separate action.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [type, content]
-              properties:
-                type:
-                  type: string
-                  enum: [full_document]
-                chapterId:
-                  $ref: "#/components/schemas/Uuid"
-                slug:
-                  $ref: "#/components/schemas/Slug"
-                title:
-                  type: string
-                baseRevision:
-                  type: integer
-                  minimum: 1
-                baseContentHash:
-                  $ref: "#/components/schemas/ContentHash"
-                content:
-                  type: string
-                  description: Full chapter Markdown, including frontmatter and block markers.
-                summary:
-                  type: string
+              oneOf:
+                - $ref: "#/components/schemas/NewChapterSubmission"
+                - $ref: "#/components/schemas/ChapterRevisionSubmission"
       responses:
         "202":
           description: Accepted and queued for Git integration.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AcceptedCommand"
+                $ref: "#/components/schemas/AcceptedChapterWrite"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -428,12 +414,122 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-        "412":
-          $ref: "#/components/responses/PreconditionFailed"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/chapters/{chapterId}/source:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChapterId"
+    get:
+      operationId: getChapterSource
+      tags: [chapters]
+      summary: Return a chapter's prose for the composer.
+      description: >
+        The chapter's Markdown as an author wrote it: frontmatter removed and
+        block markers stripped. Feeds the Phase 6 §3.5 composer, whose revise
+        half requires a complete replacement body plus the current
+        `baseRevision` — send `revision` straight back as that value. Editor or
+        maintainer only, matching the write it feeds.
+      responses:
+        "200":
+          description: The chapter's editable source.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chapterId, title, revision, status, body]
+                properties:
+                  chapterId:
+                    type: string
+                    format: uuid
+                  title:
+                    type: string
+                  summary:
+                    type: string
+                    nullable: true
+                  revision:
+                    type: integer
+                    description: Send back as `baseRevision` when revising.
+                  status:
+                    type: string
+                    enum: [draft, proposed, published]
+                  body:
+                    type: string
+                    description: Markdown with no frontmatter and no block markers.
+                  correlationId:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/chapters/{chapterId}/publish:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChapterId"
+    post:
+      operationId: publishChapter
+      tags: [chapters]
+      summary: Publish a draft chapter (maintainer only).
+      description: >-
+        Deliberately distinct from writing (Phase 6 contract 3.5): saving prose
+        never publishes it. Moves the chapter's frontmatter `status` from
+        `draft` to `published`, stamps `published_at`, and bumps the revision,
+        as one attributed commit.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Accepted and queued for Git integration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedChapterWrite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/chapters/{chapterId}/unpublish:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChapterId"
+    post:
+      operationId: unpublishChapter
+      tags: [chapters]
+      summary: Return a published chapter to draft (maintainer only).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Accepted and queued for Git integration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedChapterWrite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/story/outline:
     parameters:
@@ -1508,6 +1604,247 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 
+  /v1/projects/{projectId}/settings:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getBookSettings
+      tags: [identity]
+      summary: Read the book's editable settings and effective governance rules.
+      description: |
+        Maintainer-only (Phase 6 contract §3.6). Returns the projection of the
+        book's `book.yml`, split into three blocks that mirror the contract's
+        field classes:
+
+        - `settings` — freely editable values. This is what a settings form
+          binds to.
+        - `guarded` — `slug` and `publication.chapter_url`, each shipped with
+          the consequence of changing it, so the UI does not carry its own copy
+          of the warning.
+        - `readOnly` — fields the API will never change, each with the reason.
+          Present so the interface can explain the boundary, never as form
+          fields.
+
+        `governance.source` is `book` once the book declares its own rules in
+        `book.yml`, and `bootstrap` while it is still running the deployment's
+        `RULES_JSON` (or the built-in default). `governance.vocabulary` is the
+        closed set of metrics and operators a rule condition may name.
+
+        `status` is `pending_git` while a previous settings commit is still in
+        flight, so the view can say "saving…" honestly.
+      responses:
+        "200":
+          description: The book's settings.
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/XCorrelationId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settings, guarded, governance, readOnly, status]
+                properties:
+                  settings:
+                    type: object
+                    properties:
+                      title: { type: string }
+                      language: { type: string }
+                      license:
+                        oneOf: [{ type: string }, { type: "null" }]
+                      publication:
+                        type: object
+                        properties:
+                          show_revision:
+                            oneOf: [{ type: boolean }, { type: "null" }]
+                          show_attribution:
+                            oneOf: [{ type: boolean }, { type: "null" }]
+                          show_public_annotations:
+                            oneOf: [{ type: boolean }, { type: "null" }]
+                  guarded:
+                    type: object
+                    description: >
+                      Each entry carries the current `value` and the
+                      `consequence` of changing it.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        value:
+                          oneOf: [{ type: string }, { type: "null" }]
+                        consequence: { type: string }
+                  governance:
+                    type: object
+                    required: [source, rules, vocabulary]
+                    properties:
+                      source:
+                        type: string
+                        enum: [book, bootstrap]
+                      rules:
+                        type: object
+                        additionalProperties:
+                          $ref: "#/components/schemas/GovernanceRule"
+                      vocabulary:
+                        type: object
+                        properties:
+                          metrics:
+                            type: array
+                            items: { type: string }
+                          operators:
+                            type: array
+                            items: { type: string }
+                  readOnly:
+                    type: object
+                    description: >
+                      Never-editable values plus a `reasons` map explaining each.
+                      Not form fields.
+                  status:
+                    type: string
+                    enum: [pending_git, committed]
+                  updatedAt: { type: string, format: date-time }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            The book's `book.yml` has not been projected from its repository
+            yet, so there is nothing to read.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    patch:
+      operationId: updateBookSettings
+      tags: [identity]
+      summary: Change the book's settings; the change lands as a commit to book.yml.
+      description: |
+        Maintainer-only (Phase 6 contract §3.6). This is a read-modify-write of
+        `book.yml` that lands through the same outbox, coordinator, validation,
+        and attribution path as any other write — settings changes are commits:
+        diffable, revertable, audited. There is no second configuration store.
+
+        Only the fields present in the body change. An explicit `null` clears an
+        optional field; omitting it leaves the field alone.
+
+        **`governance.rules` replaces the rule map wholesale** rather than
+        merging it, so a rule can be removed — including the default
+        `human_maintainer_approvals >= 1` clause, which §3.6 makes removable
+        for authors running a genuinely collaborative project.
+
+        **Rule versions are assigned by the server and may not be supplied.**
+        Phase 3 keys decisions on
+        `(source_annotation_id, action_type, rule_version)`, so an edited rule
+        that kept its version would make two materially different rules
+        indistinguishable in the decision record. Each rule whose
+        `when`/`action`/`trigger` differs from the currently effective rule of
+        the same name gets `previous version + 1`; unchanged rules keep theirs.
+
+        Guarded fields (`slug`, `publication.chapter_url`) are refused with
+        `settings-confirmation-required` unless the request names them in
+        `confirm`; the refusal states what breaks. Never-editable fields
+        (`id`, `repository.default_branch`, `content.*`,
+        `publication.api_url`, `schema`) are refused with
+        `settings-field-immutable` and a per-field reason.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title: { type: string, minLength: 1 }
+                language: { type: string }
+                license:
+                  oneOf: [{ type: string, minLength: 1 }, { type: "null" }]
+                slug: { type: string }
+                publication:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    chapter_url:
+                      oneOf: [{ type: string, minLength: 1 }, { type: "null" }]
+                    show_revision:
+                      oneOf: [{ type: boolean }, { type: "null" }]
+                    show_attribution:
+                      oneOf: [{ type: boolean }, { type: "null" }]
+                    show_public_annotations:
+                      oneOf: [{ type: boolean }, { type: "null" }]
+                governance:
+                  type: object
+                  additionalProperties: false
+                  required: [rules]
+                  properties:
+                    rules:
+                      type: object
+                      description: >
+                        Replaces the whole rule map. Rule objects must NOT
+                        carry `version` — the server assigns it.
+                      additionalProperties:
+                        $ref: "#/components/schemas/GovernanceRuleInput"
+                confirm:
+                  type: array
+                  description: Dotted paths of guarded fields the maintainer has confirmed.
+                  items: { type: string }
+      responses:
+        "200":
+          description: >
+            The patch changed nothing, so no commit was queued. `git log` stays
+            free of empty settings commits when a form is re-saved unmodified.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, changed, settings]
+                properties:
+                  status: { type: string, enum: [unchanged] }
+                  changed:
+                    type: array
+                    items: { type: string }
+                  settings: { type: object }
+        "202":
+          description: The change was accepted and a commit to book.yml was queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [operationId, status, changed, settings]
+                properties:
+                  operationId: { type: string, format: uuid }
+                  status: { type: string, enum: [queued] }
+                  changed:
+                    type: array
+                    description: Dotted paths that actually differ.
+                    items: { type: string }
+                  settings: { type: object }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            A guarded change was not confirmed
+            (`settings-confirmation-required`), or a previous settings commit
+            is still in flight.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: >
+            A never-editable field was present (`settings-field-immutable`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
   /v1/projects/{projectId}/publications:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -1904,6 +2241,84 @@ components:
             $ref: "#/components/schemas/Problem"
 
   schemas:
+    # ---- Phase 6 §3.6 governance --------------------------------------------
+    RuleCondition:
+      type: object
+      additionalProperties: false
+      required: [metric, operator, value]
+      properties:
+        metric:
+          type: string
+          description: >
+            Must name a metric in the closed vocabulary returned by
+            `GET .../settings` as `governance.vocabulary.metrics`. A condition
+            naming anything else makes the whole rule unsatisfied (fail closed),
+            so the API refuses it at write time.
+          pattern: "^[a-z][a-z0-9_]*$"
+        operator:
+          type: string
+          enum: [gte, gt, lte, lt, eq]
+        value:
+          type: number
+    RuleWhen:
+      type: object
+      description: A condition group — exactly one of `all` or `any`.
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        all:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RuleCondition" }
+        any:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RuleCondition" }
+    RuleAction:
+      type: object
+      additionalProperties: false
+      required: [type, work_type]
+      properties:
+        type:
+          type: string
+          enum: [create_work_item]
+        work_type:
+          $ref: "#/components/schemas/WorkItemType"
+    GovernanceRule:
+      type: object
+      description: >
+        A declarative governance rule as stored in `book.yml`
+        (`governance.rules`). Rules are data: no expression or code from
+        configuration is ever evaluated.
+      additionalProperties: false
+      required: [version, when, action]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: >
+            Server-assigned. Recorded on every decision the rule produces, and
+            part of the decision uniqueness key, so it must change whenever the
+            rule's meaning does.
+        trigger:
+          type: string
+          enum: [vote_changed]
+        when: { $ref: "#/components/schemas/RuleWhen" }
+        action: { $ref: "#/components/schemas/RuleAction" }
+    GovernanceRuleInput:
+      type: object
+      description: >
+        A rule as supplied to `PATCH .../settings`. Identical to
+        `GovernanceRule` except that `version` is absent: the server assigns it,
+        and a client-supplied version is rejected rather than silently ignored.
+      additionalProperties: false
+      required: [when, action]
+      properties:
+        trigger:
+          type: string
+          enum: [vote_changed]
+        when: { $ref: "#/components/schemas/RuleWhen" }
+        action: { $ref: "#/components/schemas/RuleAction" }
     Uuid:
       type: string
       format: uuid
@@ -1990,6 +2405,63 @@ components:
         correlationId:
           $ref: "#/components/schemas/Uuid"
       additionalProperties: true
+
+    AcceptedChapterWrite:
+      type: object
+      description: >-
+        A queued chapter write. The chapter id is reserved and returned
+        immediately; the slug, order, marker ids and committed bytes are
+        composed against the branch head when the outbox drains.
+      required: [chapterId, operationId, correlationId, status]
+      properties:
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        operationId:
+          $ref: "#/components/schemas/Uuid"
+        correlationId:
+          type: string
+        status:
+          type: string
+          enum: [queued]
+
+    NewChapterSubmission:
+      type: object
+      description: Create a chapter. The server generates everything not listed here.
+      required: [title, body]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          description: >-
+            Chapter prose as plain Markdown: no frontmatter, no block markers.
+            The server inserts a marker for every top-level block.
+        slug:
+          $ref: "#/components/schemas/Slug"
+        summary:
+          type: string
+
+    ChapterRevisionSubmission:
+      type: object
+      description: >-
+        Revise an existing chapter. `baseRevision` must equal the chapter's
+        current revision; a stale one is rejected with 409, and marker ids are
+        preserved for blocks whose text did not change.
+      required: [chapterId, baseRevision]
+      properties:
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        baseRevision:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+        summary:
+          type: string
 
     AcceptedCommand:
       type: object

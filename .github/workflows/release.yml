@@ -1,0 +1,148 @@
+# Release workflow (ADR-0021 §1, ADR-0022).
+#
+# A semver tag is the only trigger. Pushing `v1.5.0` builds the workspace
+# once, runs every test against exactly those build outputs, packs each
+# publishable package, and publishes the tarballs to npm with provenance.
+#
+# WHY ONE JOB. Build, test, and publish share a single checkout and a single
+# `pnpm -r build`, so the artifacts that were tested are byte-for-byte the
+# artifacts that get published. Splitting them across jobs would mean either
+# rebuilding (and publishing something no test ever saw) or shuttling
+# `dist/` through an artifact upload, which is a lot of machinery to
+# reintroduce a guarantee we get for free by not splitting.
+#
+# WHY PACK WITH pnpm AND PUBLISH WITH npm. Internal dependencies are declared
+# `workspace:*`, which is meaningless to a consumer. `pnpm pack` rewrites each
+# one to the exact version being released; `npm publish <tarball>` is what
+# supports npm's OIDC trusted publishing and `--provenance`. Using either tool
+# for both halves loses one of those properties.
+#
+# PROVENANCE. `--provenance` has GitHub mint a signed attestation tying each
+# tarball to this workflow file, this commit, and this repository, published
+# to Sigstore's transparency log. Anyone can then check that the code on npm
+# came from the tag it claims to. That is the whole reason `id-token: write`
+# is here, and it is the only elevated permission this workflow holds.
+#
+# FIRST PUBLISH NEEDS A TOKEN. Trusted publishing (OIDC) is configured
+# per-package on npmjs.com, and a package that does not exist yet cannot have
+# it configured. So the first release of each package must be published from
+# a laptop, or from here using a granular access token in the NPM_TOKEN
+# secret. Once every package exists and has this repository and workflow
+# registered as its trusted publisher, delete NPM_TOKEN — the step below
+# prefers OIDC and only falls back to the token when it is present.
+# docs/npm-release.md walks through it.
+
+name: release
+
+on:
+  push:
+    tags:
+      # Semver tags only. A `v1.5.0-rc.1` prerelease matches too and publishes
+      # under the `next` dist-tag (see the publish step); anything that is not
+      # a version tag never reaches this workflow.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    # A fork that pushes a tag must never be able to publish, even though the
+    # registry credentials would not be available to it — this fails fast and
+    # visibly rather than at the last step with a confusing auth error.
+    if: github.repository == 'JoeMattie/authorbot'
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      # Required for --provenance and for OIDC trusted publishing. Nothing
+      # else in this workflow needs a token.
+      id-token: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # npm's OIDC trusted publishing landed in npm 11.5.1. The Node 22 line
+      # ships an older npm, so upgrade it rather than silently falling back to
+      # token auth.
+      - name: Upgrade npm to a version that supports trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every package's version must equal the tag. A mismatch here means a
+      # tag was pushed without `pnpm -r version`, and publishing anyway would
+      # put a version on the registry that does not exist in git history.
+      - name: Check package versions against the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node scripts/check-release-versions.mjs "$TAG"
+
+      - name: Build
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      # Asserts each tarball contains dist/ and a licence and leaks no tests,
+      # sources, or configs. Runs `npm pack --dry-run`; publishes nothing.
+      - name: Check packaging
+        run: node scripts/check-packaging.mjs
+
+      - name: Pack every publishable package
+        run: node scripts/pack-release.mjs --out "$RUNNER_TEMP/release"
+
+      # Published in dependency order so a consumer installing the moment the
+      # workflow finishes never resolves a package whose dependency is not on
+      # the registry yet.
+      #
+      # NPM_CONFIG_PROVENANCE is set globally instead of passing --provenance
+      # per invocation so it cannot be forgotten on a package added later.
+      - name: Publish to npm
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+          # Empty when trusted publishing is configured for every package;
+          # npm then authenticates over OIDC and ignores this.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # A prerelease tag must not become the default `npm install` target.
+          case "$TAG" in
+            *-*) DIST_TAG=next ;;
+            *)   DIST_TAG=latest ;;
+          esac
+          echo "Publishing with dist-tag: $DIST_TAG"
+          for tarball in $(node scripts/pack-release.mjs --list --out "$RUNNER_TEMP/release"); do
+            echo "==> npm publish $(basename "$tarball")"
+            npm publish "$tarball" --access public --tag "$DIST_TAG"
+          done
+
+      - name: Summarise
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "### Published \`$TAG\`"
+            echo
+            echo "| package | version |"
+            echo "| --- | --- |"
+            node scripts/pack-release.mjs --list --out "$RUNNER_TEMP/release" \
+              | xargs -n1 basename \
+              | sed -E 's/^authorbot-(.*)-([0-9].*)\.tgz$/| @authorbot\/\1 | \2 |/'
+          } >> "$GITHUB_STEP_SUMMARY"

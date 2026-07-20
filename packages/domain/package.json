@@ -2,7 +2,27 @@
   "name": "@authorbot/domain",
   "version": "0.1.0",
   "description": "Pure domain logic for Authorbot: role/scope authorization, annotation and Git-operation state machines, command validators, and token/session value rules (Phase 2 contract section 3)",
+  "keywords": [
+    "authorbot",
+    "domain",
+    "authorization"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "packages/domain"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -13,10 +33,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

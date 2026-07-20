@@ -13,6 +13,8 @@
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @authorbot/api build && pnpm --filter @authorbot/publisher test:e2e",
     "typecheck": "pnpm -r typecheck",
+    "check:packaging": "node scripts/check-packaging.mjs",
+    "check:author-ci": "node scripts/simulate-author-ci.mjs",
     "validate:example": "pnpm --filter @authorbot/cli start validate examples/book-repo",
     "build:example": "pnpm --filter @authorbot/cli start build examples/book-repo --out _site"
   }

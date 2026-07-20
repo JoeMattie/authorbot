@@ -62,8 +62,8 @@ are allowed); `--force` overrides with a prominent warning. Chapters with
 `status: published` are included by default; `--include-drafts` adds
 draft/proposed chapters with a visible draft banner. The template book
 repository ships GitHub Actions workflows that validate on every content
-change and publish `_site/` to GitHub Pages on pushes to `main`
-(see `templates/book-repo/README.md`).
+change and deploy `_site/` to a Cloudflare Worker on pushes to `main`
+(ADR-0020; see `templates/book-repo/README.md`).
 
 ## Site ↔ API pairing (collaboration islands)
 
@@ -74,26 +74,30 @@ Chapter pages can carry inline-annotation islands backed by the Phase 2 API
 script-free build** — zero JavaScript, no collaboration chrome (ADR-0018;
 Phase 2b contract §1).
 
-**Production — same-origin recommended.** Serve the built site and the API
-from one host and use a root-relative API base (e.g. `--api-url /api` when
-the API is reverse-proxied under `/api`; the islands call
-`<base>/v1/...`): no `ALLOWED_ORIGINS` configuration, no CORS surface,
-`SameSite=Lax` session cookies. Cross-origin (e.g. site on GitHub Pages, API on a Worker) is
-supported: build with the absolute API URL and set `ALLOWED_ORIGINS` on the
-API to the site's exact origin — see `apps/api/README.md` for the CORS/CSRF
-details.
+**Same-origin, always (ADR-0019).** The site and the API are served from one
+origin; cross-origin deployment is not supported. `--api-url` therefore takes
+a **root-relative path only** — `/` when the API answers at the origin root,
+or a base path like `/my-book` for a book published under a subpath (the
+islands then call `/my-book/v1/...`, and the Worker runs with a matching
+`API_BASE_PATH`). An absolute URL fails the build. No CORS header is ever
+emitted, session cookies are always `SameSite=Lax`, and the CSRF origin check
+stays — see `apps/api/README.md`.
 
-**Local dev.** Run the Node dev API (see `apps/api/README.md`) with
-`ALLOWED_ORIGINS` set to wherever you serve the site, build with
-`--api-url`, and serve `_site/` statically:
+A static-only host can therefore never serve a site with collaboration
+features — the API has to answer on the same origin as the prose — which is
+why Cloudflare is the single supported host (ADR-0020).
+
+**Local dev.** Run the Node dev API (see `apps/api/README.md`), serve `_site/`
+from the same origin (any reverse proxy that routes `/v1/*` to the API — the
+Playwright e2e in `packages/publisher/test/e2e-ui/helpers.ts` does exactly
+this in ~30 lines of `node:http`), and build with `--api-url /`:
 
 ```sh
 # API (dev auth; point BOOK_REPO_PATH at a throwaway clone)
-ALLOWED_ORIGINS=http://127.0.0.1:4321 ... pnpm --filter @authorbot/api dev:node   # :8788
+... pnpm --filter @authorbot/api dev:node   # :8788
 
-# Site
-authorbot build examples/book-repo --out _site --api-url http://127.0.0.1:8788
-npx serve _site -l 4321
+# Site — served behind a proxy that forwards /v1/* to :8788
+authorbot build examples/book-repo --out _site --api-url /
 ```
 
 Signed-out readers get a "Sign in with GitHub" link (dev builds can surface
