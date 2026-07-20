@@ -66,6 +66,23 @@ to ask a novelist would have been "same-origin or split?", and the honest
 answer is that there was only ever one right choice. Removing the fork removes
 the question.
 
+## 2b. Prerequisite: npm distribution (ADR-0022)
+
+Also before the wizard, because the wizard generates the CI it would otherwise
+have to generate twice:
+
+- Claim the `@authorbot` npm scope and publish `@authorbot/cli`,
+  `@authorbot/api`, and `@authorbot/create` with prebuilt `dist/`.
+- A release workflow: semver tag → build once → publish with `--provenance`
+  → attach self-contained bundles and `SHA256SUMS` to the GitHub release.
+- Generated book repositories get a `package.json` + lockfile pinning
+  `@authorbot/cli`; `AUTHORBOT_REF` is retired. Template CI drops the
+  checkout-and-build steps, and `wrangler.jsonc` points `main` at
+  `node_modules/@authorbot/api/dist/worker.js`.
+- Migrate `causal-projector` off `AUTHORBOT_REF`, removing the repository
+  variable once nothing reads it.
+- Document vendoring the release bundles as a supported, opt-in escape hatch.
+
 ## 3. Stages
 
 Each stage is independently runnable (`create-authorbot <stage>`) and the
@@ -337,4 +354,8 @@ the repository, this replaces the separate OAuth App. Requirements:
 12. `upgrade` moves a book across a release that includes a book-format
     migration, producing a pull request that validates before and after; the
     publish workflow applies pending D1 migrations before deploying.
-13. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+13. A generated book publishes with no clone or compile of this repository:
+    author CI installs pinned npm packages and runs the binary. Releases
+    publish with provenance, and the vendoring escape hatch is documented and
+    tested at least once.
+14. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.

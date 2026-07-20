@@ -32,3 +32,5 @@ later ADRs record per-phase decisions.
 
 New ADRs: next number, same format, add a row here. Superseding an ADR: mark
 the old one `Superseded by ADR NNNN` in its Status line.
+| 0021 | [Versioning and the author upgrade path](./0021-versioning-and-upgrades.md) | Accepted |
+| 0022 | [Distribute prebuilt packages on npm](./0022-npm-distribution.md) | Accepted |
