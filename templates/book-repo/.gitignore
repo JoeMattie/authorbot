@@ -1,0 +1,14 @@
+# Build output: `authorbot build . --out _site` regenerates it from the
+# Markdown and YAML that IS the book. Committing it would mean reviewing a
+# rendered copy of every change alongside the change itself.
+_site/
+
+# Wizard progress journal (Phase 6): resumable setup state, never secrets.
+.authorbot-setup.json
+
+# Local-only wrangler values. Real deployment secrets are set with
+# `wrangler secret put` and never live in the repository.
+.dev.vars
+
+node_modules/
+.DS_Store

@@ -3,7 +3,7 @@ import type { CliIo } from "./cli.js";
 import type { Finding, ValidationReport } from "./validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "./validate/index.js";
 
-export const BUILD_USAGE = `Usage: authorbot build <repo> [--out <dir>] [--base-url <url>] [--api-url <url>] [--include-drafts] [--force]
+export const BUILD_USAGE = `Usage: authorbot build <repo> [--out <dir>] [--base-url <url>] [--api-url <path>] [--include-drafts] [--force]
 
 Build the static reading site for an Authorbot book repository (Phase 1
 contract sections 1-3). Refuses to build when validation reports errors
@@ -13,10 +13,12 @@ Options:
   --out <dir>       output directory (default: _site)
   --base-url <url>  public base URL or base path; prefixes internal links
                     and is recorded in authorbot-build.json
-  --api-url <url>   collaboration API base URL; enables the annotation
-                    islands on chapter pages (Phase 2b). Overrides
-                    publication.api_url in book.yml. Without either, the
-                    build emits zero JavaScript.
+  --api-url <path>  collaboration API base PATH; enables the annotation
+                    islands on chapter pages (Phase 2b). Root-relative only
+                    ("/" or a base path like "/my-book") — the API is
+                    same-origin with the site, so an absolute URL is
+                    rejected (ADR-0019). Overrides publication.api_url in
+                    book.yml. Without either, zero JavaScript is emitted.
   --include-drafts  also publish draft/proposed chapters, with a draft banner
   --force           build despite validation errors (prominent warning)
   -h, --help        show this help

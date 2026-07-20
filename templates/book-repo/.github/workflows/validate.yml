@@ -21,10 +21,19 @@
 # link and accessibility checks over real output run in the Authorbot
 # toolchain's own e2e suite.
 #
-# One-time setup: optionally set the AUTHORBOT_REF repository variable to an
-# exact commit SHA or release tag of JoeMattie/authorbot (shared with
-# publish.yml so validation and publication use the same toolchain);
-# without it, both workflows track that repository's main branch.
+# Nothing is deployed from here under any circumstance. Deployment is
+# publish.yml's job, and its only target is Cloudflare (ADR-0020).
+#
+# NO CLONE, NO COMPILE (ADR-0022). Like publish.yml, this installs the
+# published `@authorbot/cli` package from package-lock.json and runs its
+# binary. Because both workflows install from that same lockfile, the
+# toolchain that validates a pull request is by construction the toolchain
+# that will publish it — they cannot drift, and there is no AUTHORBOT_REF
+# repository variable to keep in sync any more.
+#
+# If the book is served under a base path, the AUTHORBOT_BASE_URL repository
+# variable is read here too, so the smoke build exercises the same prefixing
+# publish.yml will apply (ADR-0019 §6).
 
 name: validate
 
@@ -37,12 +46,16 @@ on:
       - "chapters/**"
       - "story/**"
       - ".authorbot/**"
+      - "package.json"
+      - "package-lock.json"
   pull_request:
     paths:
       - "book.yml"
       - "chapters/**"
       - "story/**"
       - ".authorbot/**"
+      - "package.json"
+      - "package-lock.json"
 
 permissions:
   contents: read
@@ -54,47 +67,33 @@ jobs:
       - name: Check out the book repository
         uses: actions/checkout@v4
 
-      - name: Check out the Authorbot toolchain
-        uses: actions/checkout@v4
-        with:
-          repository: JoeMattie/authorbot
-          # The AUTHORBOT_REF repository variable when set (an exact commit
-          # SHA is preferred; keep it in lockstep with publish.yml), falling
-          # back to main so the template's first push validates cleanly.
-          ref: ${{ vars.AUTHORBOT_REF || 'main' }}
-          path: authorbot
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          package_json_file: authorbot/package.json
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: authorbot/pnpm-lock.yaml
+          cache: npm
 
-      - name: Install and build the Authorbot toolchain
-        working-directory: authorbot
+      - name: Install the pinned Authorbot toolchain
         run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Put the authorbot CLI on PATH
-        run: |
-          install -d "$RUNNER_TEMP/authorbot-bin"
-          printf '#!/usr/bin/env bash\nexec node "%s" "$@"\n' \
-            "$GITHUB_WORKSPACE/authorbot/apps/cli/dist/bin.js" \
-            > "$RUNNER_TEMP/authorbot-bin/authorbot"
-          chmod +x "$RUNNER_TEMP/authorbot-bin/authorbot"
-          echo "$RUNNER_TEMP/authorbot-bin" >> "$GITHUB_PATH"
+          if [ ! -f package-lock.json ]; then
+            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile — it is what pins your toolchain version."
+            exit 1
+          fi
+          npm ci --no-audit --no-fund
 
       - name: Validate the book repository
-        run: authorbot validate .
+        run: npx authorbot validate .
 
       # Build smoke test (design §17.1): catches anything that validates but
-      # cannot publish before it lands on main. Nothing is deployed.
+      # cannot publish before it lands on main. Nothing is deployed. The
+      # --base-url handling mirrors publish.yml exactly so the two builds
+      # cannot disagree.
       - name: Build the site (dry run)
-        run: authorbot build . --out "$RUNNER_TEMP/site"
+        env:
+          BASE_URL: ${{ vars.AUTHORBOT_BASE_URL }}
+        run: |
+          if [ -n "$BASE_URL" ]; then
+            npx authorbot build . --out "$RUNNER_TEMP/site" --base-url "$BASE_URL"
+          else
+            npx authorbot build . --out "$RUNNER_TEMP/site"
+          fi

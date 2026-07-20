@@ -2,7 +2,30 @@
   "name": "@authorbot/cli",
   "version": "0.1.0",
   "description": "Authorbot command-line interface: validate Authorbot book repositories against the Phase 0 contract (section 5)",
+  "keywords": [
+    "authorbot",
+    "cli",
+    "markdown",
+    "book",
+    "validate",
+    "static-site"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "apps/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -16,10 +39,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "start": "cd ../.. && node apps/cli/dist/bin.js"

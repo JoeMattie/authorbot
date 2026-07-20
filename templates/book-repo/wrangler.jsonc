@@ -1,0 +1,75 @@
+// Cloudflare Worker configuration for this book (ADR-0020: GitHub for the
+// repository, Cloudflare for hosting — there is no second supported host).
+//
+// As shipped this is a STATIC SITE ONLY: the Worker serves the files that
+// `authorbot build` writes to _site, and nothing else. That is stage 2 of
+// docs/getting-started.md, and it is a complete, publishable book.
+//
+// EDIT `name` BEFORE YOUR FIRST DEPLOY. It becomes part of your default URL
+// (https://<name>.<your-subdomain>.workers.dev) and it is the identity of the
+// Worker your CI deploys to. Deploying with the placeholder name creates a
+// Worker called "my-book"; renaming later creates a *second* Worker rather
+// than moving the first.
+//
+// NO SECRETS IN THIS FILE. The API token that lets CI deploy lives in GitHub
+// repository secrets (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID); anything
+// the Worker itself needs is set with `wrangler secret put`, which never
+// writes to disk.
+//
+// DEPLOY FROM CI, NOT FROM YOUR LAPTOP. `_site` is build output. A local
+// `wrangler deploy` publishes whatever happens to be in that directory, and a
+// stale one quietly replaces your live book with an older version.
+//
+// TURNING ON COLLABORATION (stage 3 of docs/getting-started.md) upgrades this
+// same Worker in place — same name, same origin, same URL. Same-origin is not
+// a preference but the supported shape (ADR-0019): the API is served from
+// this Worker at /v1/*, so there is no CORS, no cookie relaxation, and no
+// second URL. Requests that match a built asset never invoke the API code, so
+// an API fault cannot take your prose offline.
+//
+// To do that, `npm install @authorbot/api` (which adds it to package.json and
+// the lockfile, pinned exactly like the CLI) and merge the block below into
+// this file. Nothing here is compiled from source: `main` names a prebuilt
+// Worker inside node_modules, and `migrations_dir` names the SQL that shipped
+// with that same version (ADR-0022), so your database schema and your Worker
+// code can never be different releases.
+//
+//   "main": "node_modules/@authorbot/api/dist/worker.js",
+//   "compatibility_flags": ["nodejs_compat"],
+//   // @authorbot/database also re-exports a native SQLite adapter used by
+//   // the toolchain's own tests. The Worker never calls it — it uses the D1
+//   // binding — so it is aliased to a stub that throws, keeping a native
+//   // module out of the bundle.
+//   "alias": {
+//     "better-sqlite3": "node_modules/@authorbot/api/dist/stubs/better-sqlite3.js"
+//   },
+//   "d1_databases": [
+//     {
+//       "binding": "DB",
+//       "database_name": "<your D1 database name>",
+//       "database_id": "<printed by `wrangler d1 create`>",
+//       "migrations_dir": "node_modules/@authorbot/api/migrations"
+//     }
+//   ],
+//   "durable_objects": {
+//     "bindings": [{ "name": "COORDINATOR", "class_name": "ProjectCoordinator" }]
+//   },
+//   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectCoordinator"] }],
+//   "triggers": { "crons": ["* * * * *"] },
+//   "vars": {
+//     "AUTH_MODE": "github",
+//     "PROJECT_SLUG": "<your book slug>",
+//     "PROJECT_REPO": "<owner>/<repo>",
+//     "INITIAL_MAINTAINER": "github:<your GitHub login>",
+//     "DEFAULT_BRANCH": "main"
+//   }
+//
+// Also set the AUTHORBOT_D1_DATABASE repository variable to the same database
+// name, which switches on the migration step in publish.yml (ADR-0021 §4).
+{
+  "name": "my-book",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "./_site"
+  }
+}

@@ -1,17 +1,42 @@
-# Authorbot publication workflow (design §17.2, phase1-contract §5).
+# Authorbot publication workflow (design §17.2, ADR-0020, ADR-0021, ADR-0022).
 #
-# Publishes the book as a static GitHub Pages site whenever public content
-# changes on main. It never runs on raw collaboration traffic (design §7.4):
-# annotations and votes are validated by validate.yml without rebuilding the
-# book.
+# Publishes the book as a static reading site on a Cloudflare Worker whenever
+# public content changes on main. It never runs on raw collaboration traffic
+# (design §7.4): annotations and votes are validated by validate.yml without
+# rebuilding the book.
+#
+# NO CLONE, NO COMPILE (ADR-0022). This workflow installs the published
+# `@authorbot/cli` package and runs its binary. It does not check out the
+# Authorbot repository and does not build TypeScript. The version of the
+# toolchain that runs is the one written in this repository's package.json and
+# locked by package-lock.json — visible in your history, diffable in a pull
+# request, and revertable with `git revert` alongside whatever content it was
+# paired with. There is no AUTHORBOT_REF repository variable any more.
+#
+# ONE HOST, BY DESIGN (ADR-0020). GitHub holds the repository; Cloudflare
+# serves the site — and, later, the collaboration API from that same origin
+# (ADR-0019). There is no GitHub Pages path: a static-only host can serve the
+# prose but never the annotations, votes, or work queue, so shipping both
+# produced two live URLs where one silently lacked every collaboration
+# feature. Cloudflare's free tier covers a book of this size.
 #
 # One-time setup for your repository:
-#   1. In Settings → Pages, set "Source" to "GitHub Actions".
-#   2. (Recommended) In Settings → Secrets and variables → Actions →
-#      Variables, set AUTHORBOT_REF to an exact commit SHA (preferred) or
-#      release tag of JoeMattie/authorbot. Without it the workflow tracks
-#      that repository's main branch, which works out of the box but is not
-#      reproducible; pin it, and bump it deliberately as its own commit.
+#   1. Edit wrangler.jsonc: set `name` to the Worker name you want.
+#   2. Run `npm install` once locally and COMMIT package-lock.json. `npm ci`
+#      below refuses to run without it, and that is deliberate — an install
+#      without a lockfile is an unpinned install.
+#   3. Create a Cloudflare API token with the "Edit Cloudflare Workers"
+#      template and store it as the CLOUDFLARE_API_TOKEN repository *secret*;
+#      store your account id as the CLOUDFLARE_ACCOUNT_ID repository secret.
+#   4. Only if the book is served under a sub-path of a larger site (e.g.
+#      https://example.com/my-book/), set the AUTHORBOT_BASE_URL repository
+#      variable to that path or URL. Leave it unset for a book at the root of
+#      its own hostname, which is the usual case.
+#   5. Only once you have turned on collaboration (stage 3 of
+#      docs/getting-started.md), set the AUTHORBOT_D1_DATABASE repository
+#      variable to your D1 database name. That switches on the migration step
+#      below. Leave it unset for a static-only book — there is no database to
+#      migrate.
 
 name: publish
 
@@ -21,96 +46,116 @@ on:
     # Path filters per design §7.4: chapters, story data, book.yml, and
     # publisher configuration trigger a public rebuild. Releases are included
     # so a manual release commit republishes; other .authorbot/** records do
-    # not trigger publication.
+    # not trigger publication. wrangler.jsonc is included because it decides
+    # what is deployed and where, and package-lock.json because it decides
+    # which toolchain builds it.
     paths:
       - "book.yml"
       - "chapters/**"
       - "story/**"
       - ".authorbot/releases/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/publish.yml"
   # Manual release / redeploy.
   workflow_dispatch: {}
 
-# GitHub Pages deployment via OIDC needs exactly these scopes.
+# Deploying needs nothing beyond reading this repository: the Cloudflare
+# credentials are repository secrets, not GitHub OIDC scopes.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # One deployment at a time; let a queued deploy of a newer commit finish
 # rather than cancelling it mid-flight.
 concurrency:
-  group: pages
+  group: publish
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - name: Check out the book repository
         uses: actions/checkout@v4
-
-      - name: Check out the Authorbot toolchain
-        uses: actions/checkout@v4
-        with:
-          repository: JoeMattie/authorbot
-          # Toolchain ref: the AUTHORBOT_REF repository variable when set
-          # (an exact commit SHA is preferred — pinning makes builds
-          # reproducible and keeps a toolchain change from silently altering
-          # your published site), falling back to main so a repository
-          # created from this template deploys on its very first push.
-          ref: ${{ vars.AUTHORBOT_REF || 'main' }}
-          path: authorbot
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          package_json_file: authorbot/package.json
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: authorbot/pnpm-lock.yaml
+          cache: npm
 
-      - name: Install and build the Authorbot toolchain
-        working-directory: authorbot
+      # `npm ci` installs exactly what package-lock.json records, with
+      # integrity hashes, and fails rather than silently resolving something
+      # newer. The check in front of it turns npm's confusing "can only
+      # install with an existing package-lock.json" error into an instruction.
+      - name: Install the pinned Authorbot toolchain
         run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Put the authorbot CLI on PATH
-        run: |
-          install -d "$RUNNER_TEMP/authorbot-bin"
-          printf '#!/usr/bin/env bash\nexec node "%s" "$@"\n' \
-            "$GITHUB_WORKSPACE/authorbot/apps/cli/dist/bin.js" \
-            > "$RUNNER_TEMP/authorbot-bin/authorbot"
-          chmod +x "$RUNNER_TEMP/authorbot-bin/authorbot"
-          echo "$RUNNER_TEMP/authorbot-bin" >> "$GITHUB_PATH"
+          if [ ! -f package-lock.json ]; then
+            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile — it is what pins your toolchain version."
+            exit 1
+          fi
+          npm ci --no-audit --no-fund
 
       - name: Validate the book repository
-        run: authorbot validate .
+        run: npx authorbot validate .
 
-      # Resolves where Pages will serve this repository. Project sites live
-      # under https://<owner>.github.io/<repo>/, so the build must prefix
-      # every internal link and the stylesheet with the repo path — without
-      # it the deployed site is unstyled and un-navigable.
-      - name: Configure GitHub Pages
-        id: pages
-        uses: actions/configure-pages@v5
-
+      # --base-url survives ADR-0020 for exactly one job: serving the book
+      # under a base path (ADR-0019 §6). A book at the root of its own
+      # hostname needs no prefix, so the flag is passed only when
+      # AUTHORBOT_BASE_URL is set — an empty --base-url is a usage error, and
+      # a wrong one produces a site whose internal links and stylesheet 404.
       - name: Build the static site and build manifest
-        run: authorbot build . --out _site --base-url "${{ steps.pages.outputs.base_url }}"
+        env:
+          BASE_URL: ${{ vars.AUTHORBOT_BASE_URL }}
+        run: |
+          if [ -n "$BASE_URL" ]; then
+            npx authorbot build . --out _site --base-url "$BASE_URL"
+          else
+            npx authorbot build . --out _site
+          fi
 
-      - name: Upload the Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      # ADR-0021 §4 — MIGRATIONS RUN BEFORE THE DEPLOY, NOT AFTER.
+      #
+      # The Worker currently serving your readers keeps serving throughout the
+      # deploy, so for the seconds between these two steps the OLD code is
+      # talking to the NEW schema. Migrating first is the only ordering that
+      # is safe in that window: a migration can be written to be compatible
+      # with the code already running, whereas a Worker cannot be written to
+      # tolerate columns that do not exist yet. Deploy-then-migrate leaves a
+      # live Worker querying a table it has not got.
+      #
+      # That safety is conditional on migrations being EXPAND/CONTRACT: only
+      # additive changes ship in a release that also changes the Worker.
+      # Removing a column or tightening a constraint takes two releases —
+      # expand in one, deploy, contract in the next — so no deployed version
+      # ever meets a schema it was not written for. Authorbot's own migrations
+      # follow this rule; if you write your own, it applies to you too.
+      #
+      # The SQL comes from node_modules/@authorbot/api/migrations, named as
+      # `migrations_dir` in wrangler.jsonc, so the schema and the Worker code
+      # are always the same pinned version. Applying is idempotent: wrangler
+      # records what it has run in a d1_migrations table and skips it next
+      # time. Skipped entirely for a static-only book, which has no database.
+      - name: Apply pending database migrations
+        if: ${{ vars.AUTHORBOT_D1_DATABASE != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Passed as an environment variable rather than interpolated into
+          # the command: an expression is substituted into the shell script
+          # before the shell sees it, so a value containing shell syntax would
+          # execute rather than be an argument.
+          D1_DATABASE: ${{ vars.AUTHORBOT_D1_DATABASE }}
+        run: npx wrangler d1 migrations apply "$D1_DATABASE" --remote
+
+      # Deploys the Worker described by wrangler.jsonc, whose `assets` block
+      # points at the _site directory built above. Stage 3 of
+      # docs/getting-started.md upgrades that same Worker to also serve the
+      # collaboration API from this one origin; this step does not change
+      # when that happens.
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: _site
-
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

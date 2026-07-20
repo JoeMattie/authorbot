@@ -105,14 +105,14 @@ describe("authorbot build (built dist)", () => {
         "--out",
         out,
         "--api-url",
-        "http://127.0.0.1:8787",
+        "/my-book",
       ]);
       expect(result.status, result.stderr).toBe(0);
       const page = await readFile(
         path.join(out, "chapters", "baseline", "index.html"),
         "utf8",
       );
-      expect(page).toContain('data-api-base="http://127.0.0.1:8787"');
+      expect(page).toContain('data-api-base="/my-book"');
       expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
       expect(page).toContain("Content-Security-Policy");
       // The CLI never sets the dev-login flag (programmatic builds only).
