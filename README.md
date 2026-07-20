@@ -1,4 +1,6 @@
-# Authorbot
+<p align="center">
+  <img src="https://raw.githubusercontent.com/JoeMattie/authorbot/main/assets/logo-600.png" alt="Authorbot" width="320">
+</p>
 
 A Git-backed editorial control plane and collaboration protocol for serial books.
 
