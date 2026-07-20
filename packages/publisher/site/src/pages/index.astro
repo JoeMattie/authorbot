@@ -1,0 +1,23 @@
+---
+import Base from "../layouts/Base.astro";
+import { site } from "virtual:authorbot-site";
+---
+
+<Base title={site.book.title}>
+  <h1>{site.book.title}</h1>
+  {
+    site.chapters.length === 0 ? (
+      <p>No chapters published yet.</p>
+    ) : (
+      <ol class="chapter-index">
+        {site.chapters.map((chapter) => (
+          <li>
+            <a href={chapter.href}>{chapter.title}</a>
+            {chapter.isDraft && <span class="badge">{chapter.status}</span>}
+            {chapter.summary && <p class="summary">{chapter.summary}</p>}
+          </li>
+        ))}
+      </ol>
+    )
+  }
+</Base>

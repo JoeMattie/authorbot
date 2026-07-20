@@ -1,0 +1,68 @@
+---
+import Base from "../layouts/Base.astro";
+import { site } from "virtual:authorbot-site";
+
+// One route per included chapter, at the path derived from
+// publication.chapter_url (Phase 1 contract section 2). A rest parameter is
+// used so the configured pattern controls the directory layout; Astro ranks
+// the static index/story routes above this one.
+export function getStaticPaths() {
+  return site.chapters.map((chapter, index) => ({
+    params: { chapterPath: chapter.path },
+    props: { index },
+  }));
+}
+
+const { index } = Astro.props;
+const chapter = site.chapters[index];
+const prev = index > 0 ? site.chapters[index - 1] : undefined;
+const next = index < site.chapters.length - 1 ? site.chapters[index + 1] : undefined;
+const showFooter = site.book.showRevision || site.book.showAttribution;
+---
+
+<Base
+  title={`${chapter.title} · ${site.book.title}`}
+  description={chapter.summary}
+  noindex={chapter.isDraft}
+>
+  <article class="chapter">
+    {
+      chapter.isDraft && (
+        <p class="draft-banner" role="status">
+          <strong>Draft.</strong> This chapter has status “{chapter.status}” and is
+          not part of the published book.
+        </p>
+      )
+    }
+    <header class="chapter-header">
+      <h1>{chapter.title}</h1>
+    </header>
+    <div class="prose" set:html={chapter.html} />
+    {
+      showFooter && (
+        <footer class="chapter-footer">
+          {site.book.showRevision && <span>Revision {chapter.revision}</span>}
+          {site.book.showAttribution && chapter.authors.length > 0 && (
+            <span>By {chapter.authors.join(", ")}</span>
+          )}
+        </footer>
+      )
+    }
+  </article>
+  <nav class="chapter-nav" aria-label="Chapter navigation">
+    <span class="chapter-nav-prev">
+      {prev && (
+        <a rel="prev" href={prev.href}>
+          ← {prev.title}
+        </a>
+      )}
+    </span>
+    <span class="chapter-nav-next">
+      {next && (
+        <a rel="next" href={next.href}>
+          {next.title} →
+        </a>
+      )}
+    </span>
+  </nav>
+</Base>

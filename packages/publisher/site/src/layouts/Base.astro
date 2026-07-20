@@ -1,0 +1,44 @@
+---
+import { site } from "virtual:authorbot-site";
+import "../styles/site.css";
+
+const { title, description, noindex = false } = Astro.props;
+const base = site.basePath;
+// Astro escapes attribute quotes but keeps `<`/`>` inside attribute values;
+// dropping them here guarantees the built output never contains a literal
+// `<script` anywhere, even inside a quoted attribute (contract section 6).
+const safeDescription =
+  typeof description === "string" ? description.replace(/[<>]/g, "") : undefined;
+---
+
+<!doctype html>
+<html lang={site.book.language}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {safeDescription && <meta name="description" content={safeDescription} />}
+    {noindex && <meta name="robots" content="noindex" />}
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav aria-label="Site">
+        <a class="book-link" href={base}>{site.book.title}</a>
+        <ul class="site-nav">
+          <li><a href={`${base}story/`}>Outline</a></li>
+          <li><a href={`${base}story/timeline/`}>Timeline</a></li>
+          <li><a href={`${base}story/characters/`}>Characters</a></li>
+        </ul>
+      </nav>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>
+        {site.book.title}{site.book.license ? ` · ${site.book.license}` : ""}
+      </p>
+    </footer>
+  </body>
+</html>

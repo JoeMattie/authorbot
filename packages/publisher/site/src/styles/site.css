@@ -1,0 +1,337 @@
+/*
+ * The single shared stylesheet for the reading site (design section 16.1:
+ * restraint — the prose is the product). No framework, no JavaScript.
+ */
+
+:root {
+  --bg: #faf9f6;
+  --fg: #24221e;
+  --muted: #6d6960;
+  --link: #17559c;
+  --border: #e3dfd6;
+  --surface: #f1eee7;
+  --draft-bg: #fbf2d8;
+  --draft-border: #d9bb62;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1a18;
+    --fg: #e7e4de;
+    --muted: #a29d93;
+    --link: #8fb8ef;
+    --border: #38352f;
+    --surface: #242220;
+    --draft-bg: #3a3320;
+    --draft-border: #8a7434;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  -webkit-text-size-adjust: 100%;
+}
+
+.site-header,
+.site-footer,
+.site-nav,
+.chapter-nav,
+.badge,
+.node-type,
+.meta {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a {
+  color: var(--link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+/* Skip link (visible on focus). */
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  z-index: 10;
+  padding: 0.5rem 1rem;
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+}
+
+/* Header and footer. */
+.site-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.site-header nav {
+  max-width: 65ch;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.25rem;
+}
+
+.book-link {
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.book-link:hover {
+  text-decoration: underline;
+}
+
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 3rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.site-footer p {
+  max-width: 65ch;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+/* Readable measure. */
+main {
+  max-width: 65ch;
+  margin: 0 auto;
+  padding: 1.75rem 1rem 2rem;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  margin: 1.5em 0 0.5em;
+}
+
+h1:first-child,
+.chapter-header h1 {
+  margin-top: 0.5rem;
+}
+
+/* Index and record lists. */
+.chapter-index,
+.character-index {
+  padding-left: 1.25rem;
+}
+
+.chapter-index li,
+.character-index li {
+  margin: 0.75rem 0;
+}
+
+.summary {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.meta {
+  margin: 0.25rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Draft banner. */
+.draft-banner {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--draft-border);
+  border-radius: 4px;
+  background: var(--draft-bg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.9rem;
+}
+
+/* Prose. */
+.prose p {
+  margin: 0 0 1.1em;
+}
+
+.prose blockquote {
+  margin: 1.25em 0;
+  padding: 0.1rem 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.prose pre {
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+
+.prose code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2rem auto;
+  width: 8rem;
+}
+
+/*
+ * Anchor targets: following a #b-<uuid> link must visibly mark the block,
+ * with a non-color cue (design section 16.6: never rely on color alone —
+ * and the surface tint alone is ~1.1:1 against the page background).
+ * scroll-margin keeps the target clear of the viewport edge.
+ */
+.prose [id^="b-"]:target {
+  background: var(--surface);
+  outline: 2px solid var(--link);
+  outline-offset: 4px;
+  scroll-margin-top: 2rem;
+}
+
+/* Chapter footer and prev/next navigation. */
+.chapter-footer {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.chapter-nav-next {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* Outline tree. */
+.outline {
+  list-style: none;
+  padding-left: 0;
+}
+
+.outline .outline {
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+.outline > li {
+  margin: 0.6rem 0;
+}
+
+.node-type {
+  display: inline-block;
+  min-width: 4.5rem;
+  margin-right: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Timeline table (scrolls inside its own container, never the page). */
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+table.timeline {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+
+table.timeline th,
+table.timeline td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+table.timeline thead th {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+table.timeline tbody th {
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

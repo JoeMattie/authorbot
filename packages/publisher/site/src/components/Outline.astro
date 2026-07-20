@@ -1,0 +1,23 @@
+---
+// Recursive outline tree: nodes nested by parent, ordered (Phase 1 contract
+// section 2). Renders itself for children via Astro.self.
+const { nodes } = Astro.props;
+---
+
+<ul class="outline">
+  {
+    nodes.map((node) => (
+      <li>
+        <span class="node-type">{node.type}</span>
+        {node.chapterHref ? (
+          <a href={node.chapterHref}>{node.title ?? node.id}</a>
+        ) : (
+          <span class="node-title">{node.title ?? node.id}</span>
+        )}
+        {node.status && <span class="badge">{node.status}</span>}
+        {node.summary && <p class="summary">{node.summary}</p>}
+        {node.children.length > 0 && <Astro.self nodes={node.children} />}
+      </li>
+    ))
+  }
+</ul>

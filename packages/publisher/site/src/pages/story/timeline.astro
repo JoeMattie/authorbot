@@ -1,0 +1,65 @@
+---
+import Base from "../../layouts/Base.astro";
+import { site } from "virtual:authorbot-site";
+
+const timeline = site.timeline;
+---
+
+<Base title={`Timeline · ${site.book.title}`}>
+  <h1>Timeline</h1>
+  {
+    timeline === null ? (
+      <p>This book has no timeline.</p>
+    ) : (
+      <>
+        {timeline.calendar && <p class="summary">Calendar: {timeline.calendar}</p>}
+        <div class="table-scroll" role="region" aria-label="Timeline" tabindex="0">
+          <table class="timeline">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Event</th>
+                <th scope="col">Participants</th>
+                <th scope="col">Locations</th>
+                <th scope="col">Chapters</th>
+              </tr>
+            </thead>
+            <tbody>
+              {timeline.events.map((event) => (
+                <tr>
+                  <td>{event.displayTime}</td>
+                  <th scope="row">{event.title}</th>
+                  <td>
+                    {event.participants.map((participant, i) => (
+                      <>
+                        {i > 0 && ", "}
+                        {participant.href ? (
+                          <a href={participant.href}>{participant.name}</a>
+                        ) : (
+                          participant.name
+                        )}
+                      </>
+                    ))}
+                  </td>
+                  <td>{event.locations.join(", ")}</td>
+                  <td>
+                    {event.chapters.map((chapter, i) => (
+                      <>
+                        {i > 0 && ", "}
+                        {chapter.href ? (
+                          <a href={chapter.href}>{chapter.title}</a>
+                        ) : (
+                          chapter.title
+                        )}
+                      </>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+</Base>

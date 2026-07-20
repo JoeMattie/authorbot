@@ -1,0 +1,22 @@
+---
+import Base from "../../../layouts/Base.astro";
+import { site } from "virtual:authorbot-site";
+---
+
+<Base title={`Characters · ${site.book.title}`}>
+  <h1>Characters</h1>
+  {
+    site.characters.length === 0 ? (
+      <p>This book has no character records.</p>
+    ) : (
+      <ul class="character-index">
+        {site.characters.map((character) => (
+          <li>
+            <a href={character.href}>{character.name}</a>
+            {character.summary && <p class="summary">{character.summary}</p>}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</Base>
