@@ -67,7 +67,8 @@ describe("Phase 3 collaboration pipeline (integration)", () => {
 
   it("concurrent qualifying votes yield one decision + one work item, in DB and Git", async () => {
     const c1 = await devLogin(app, "vera", "contributor");
-    const c2 = await devLogin(app, "wade", "contributor");
+    // Phase 6 §3.6: the default rule requires a human maintainer's approval.
+    const c2 = await devLogin(app, "wade", "maintainer");
     const c3 = await devLogin(app, "xena", "contributor");
     const id = await createOpenSuggestion(c1);
 
@@ -118,11 +119,15 @@ describe("Phase 3 collaboration pipeline (integration)", () => {
   // work-item artifact in the Git work tree — counted as both FILES and
   // COMMITS. Repeated across independent suggestions to shake races.
   it("N>=8 distinct concurrent voters + re-evaluations → one decision, one work item (files AND commits), x5", async () => {
-    // 8 distinct human contributors...
+    // 8 distinct human contributors, plus a maintainer added below...
     const humanNames = ["ada", "boris", "cleo", "dev", "esme", "finn", "gita", "hugo"];
     const humanCookies = await Promise.all(
       humanNames.map((name) => devLogin(app, name, "contributor")),
     );
+    // Phase 6 §3.6: one human maintainer among the concurrent voters, without
+    // which the default rule can never be satisfied and the race under test
+    // would have nothing to race for.
+    humanCookies.push(await devLogin(app, "iris", "maintainer"));
     // ...plus one agent token (agent membership is pinned to editor, whose
     // bundle grants votes:write) — the 9th, non-human qualifying voter.
     const maintainer = await devLogin(app, "quill", "maintainer");
@@ -170,12 +175,16 @@ describe("Phase 3 collaboration pipeline (integration)", () => {
       const workItemId = workItems[0]?.id ?? "";
       expect(workItems[0]?.status).toBe("ready");
 
-      // Aggregate snapshot reflects all 9 distinct voters (one is the agent).
+      // Aggregate snapshot reflects all 10 distinct voters: 8 human
+      // contributors, 1 human maintainer, and the agent token.
       const tally = await app.repos.votes.tally(id);
-      expect(tally.approvals).toBe(9);
-      expect(tally.humanApprovals).toBe(8);
+      expect(tally.approvals).toBe(10);
+      expect(tally.humanApprovals).toBe(9);
       expect(tally.agentApprovals).toBe(1);
-      expect(tally.distinctVoters).toBe(9);
+      expect(tally.distinctVoters).toBe(10);
+      // Phase 6 §3.6: exactly one of those approvals is a human maintainer's.
+      expect(tally.maintainerApprovals).toBe(1);
+      expect(tally.humanMaintainerApprovals).toBe(1);
 
       // Git FILES: exactly one NEW decision artifact and one NEW work-item
       // artifact were added by this crossing (net +1 each), and they are the

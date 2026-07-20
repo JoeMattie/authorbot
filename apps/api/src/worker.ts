@@ -22,7 +22,7 @@ import type { AppConfig, AppDeps, MirrorMode } from "./deps.js";
 import { createDevIdentityProvider, type IdentityProvider } from "./identity/provider.js";
 import { createGitHubIdentityProvider } from "./identity/github.js";
 import { leaseConfigFromEnv } from "./leases.js";
-import { parseAllowedOrigins } from "./origins.js";
+import { normalizeBasePath } from "./base-path.js";
 
 export interface WorkerBindings {
   DB: D1DatabaseLike;
@@ -45,10 +45,11 @@ export interface WorkerBindings {
   DEFAULT_BRANCH?: string;
   MIRROR_MODE?: string;
   /**
-   * Comma-separated exact origins allowed for CORS / CSRF / OAuth return_to
-   * (Phase 2b contract §3). Optional: absent means same-origin deployment.
+   * Route prefix the API is served under (ADR-0019 §6), e.g. `/my-book` when
+   * the book lives at `example.com/my-book/`. Optional: absent (or `/`) mounts
+   * the API at the origin root. Must match the site's `publication.api_url`.
    */
-  ALLOWED_ORIGINS?: string;
+  API_BASE_PATH?: string;
   /**
    * "true" to serve annotation/reply reads anonymously (Phase 2b §2.1) — the
    * API-side mirror of the book's `publication.show_public_annotations`.
@@ -120,9 +121,9 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
     projectRepo: required(bindings, "PROJECT_REPO"),
     initialMaintainer: required(bindings, "INITIAL_MAINTAINER"),
     mirrorMode: mirrorModeFromBindings(bindings),
-    // Boot-time validation (contract 2b §3): an invalid entry throws here,
-    // never silently widens CORS at runtime.
-    allowedOrigins: parseAllowedOrigins(bindings.ALLOWED_ORIGINS),
+    // Boot-time validation (ADR-0019 §6): a malformed base path throws here
+    // rather than serving the API somewhere the site never looks.
+    basePath: normalizeBasePath(bindings.API_BASE_PATH),
     publicAnnotations: bindings.PUBLIC_ANNOTATIONS === "true",
   };
   if (bindings.RULES_JSON !== undefined && bindings.RULES_JSON.length > 0) {

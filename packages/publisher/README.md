@@ -20,7 +20,8 @@ const manifest = await buildSite({
   baseUrl: "https://example.org/books/my-book/", // optional
   commit: undefined,        // optional override; default: git detection
   includeDrafts: false,     // optional
-  apiUrl: undefined,        // optional; enables the collaboration islands
+  apiUrl: undefined,        // optional; enables the collaboration islands.
+                            // Root-relative only: "/" or "/my-book"
                             // (overrides publication.api_url in book.yml)
   devLogin: false,          // optional; surface the dev-login form —
                             // programmatic only, never exposed via the CLI
@@ -105,22 +106,30 @@ hashed file), ~65ch measure, `prefers-color-scheme` dark mode, skip link,
 landmarks, `lang` from `book.yml`. No CSS framework, no icons, no client
 bundle.
 
-## Collaboration islands (`api_url`, Phase 2b contract §1–§4)
+## Collaboration islands (`api_url`, Phase 2b contract §1–§4, ADR-0019)
 
-Enabled by an API base — `buildSite({ apiUrl })` / CLI `--api-url <url>`
-overrides the durable `publication.api_url` in `book.yml`. Accepted forms
-(`resolveCollab` in `src/load.ts`): an absolute http(s) URL (its origin goes
-into the CSP `connect-src`) or a root-relative path for same-origin
-deployment (the recommended production setup; covered by `'self'`). Anything
-else fails the build. Without an API base, `SiteModel.collab` is `null` and
-the output stays byte-identical script-free — regression-tested.
+Enabled by an API base — `buildSite({ apiUrl })` / CLI `--api-url <path>`
+overrides the durable `publication.api_url` in `book.yml`.
+
+**Only a root-relative path is accepted** (`resolveCollab` in `src/load.ts`):
+`/` when the API answers at the origin root, or a base path such as
+`/my-book` when the book is served under a subpath — the islands then call
+`/my-book/v1/...` and the Worker must run with a matching
+`API_BASE_PATH=/my-book`. An **absolute http(s) URL fails the build** with an
+error naming ADR-0019: Authorbot serves the API from the same origin as the
+published site, so a cross-origin base describes a deployment that no longer
+exists. Catching it here beats shipping a site whose every collaboration call
+dies as a browser CORS error.
+
+Without an API base, `SiteModel.collab` is `null` and the output stays
+byte-identical script-free — regression-tested.
 
 When enabled, **chapter pages only** gain four insertions (index, story, and
 character pages are untouched):
 
-- a CSP `<meta>` tag: `default-src 'self'; connect-src 'self' <api-origin>;
-  img-src 'self' data:` (contract §3; no `'unsafe-inline'` needed — the
-  islands touch styles via the CSSOM only);
+- a CSP `<meta>` tag: `default-src 'self'; connect-src 'self'; img-src 'self'
+  data:` — same-origin only, so `'self'` covers the API too (ADR-0019 §1); no
+  `'unsafe-inline'` needed, since the islands touch styles via the CSSOM only;
 - a `<link>` to `_astro/authorbot-collab.css`;
 - the mount element (see contract below);
 - a `<script type="module">` for `_astro/authorbot-collab.js`.
@@ -166,7 +175,7 @@ Assets live at `${base}_astro/authorbot-collab.js|.css`. Key selectors:
 
 `data-dev-login` exists for local testing only: it is a programmatic
 `buildSite` option, not a CLI flag, and is never emitted otherwise. API-side
-pairing (`ALLOWED_ORIGINS`, CSRF, `return_to` validation) is documented in
+pairing (`API_BASE_PATH`, CSRF, `return_to` validation) is documented in
 `apps/api/README.md`; the end-to-end local recipe is in the root `README.md`.
 
 ## The `/work/` page (work queue + claim-and-edit)

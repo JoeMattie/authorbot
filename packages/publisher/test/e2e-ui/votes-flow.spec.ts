@@ -55,9 +55,12 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
   await expect(card.locator(".ab-badge")).toHaveCount(0);
 
   // Actors B and C approve via distinct API sessions; C's vote crosses.
+  // C is the book's human maintainer: Phase 6 contract §3.6 adds
+  // `human_maintainer_approvals >= 1` to the default rule, so three
+  // contributors alone meet the numbers and still create no work item.
   const bob = await loginCookie("vote-bob", "contributor");
   await voteViaApi(bob, annotationId, "approve");
-  const carol = await loginCookie("vote-carol", "contributor");
+  const carol = await loginCookie("vote-carol", "maintainer");
   await voteViaApi(carol, annotationId, "approve");
 
   // Alice's still-open page shows the badge with NO reload — delivered by the

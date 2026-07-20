@@ -165,8 +165,10 @@ describe("openapi.yaml is synced with the router", () => {
       .filter((op) => op.planned)
       .map((op) => op.operationId)
       .sort();
+    // `createChapterSubmission` left this list in Phase 6: contract §3.5's
+    // direct authoring path is implemented, along with the separate
+    // publish/unpublish actions.
     expect(planned).toEqual([
-      "createChapterSubmission",
       "getStoryOutline",
       "getStoryTimeline",
       "listStoryCharacters",

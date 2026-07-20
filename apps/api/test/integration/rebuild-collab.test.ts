@@ -63,7 +63,8 @@ describe("Phase 3 rebuild restores decisions and work items (§7.5)", () => {
   it("restores a live-crossing decision + work item into a brand-new database", async () => {
     // Produce a fresh decision + ready work item via a threshold crossing.
     const c1 = await devLogin(app, "nora", "contributor");
-    const c2 = await devLogin(app, "omar", "contributor");
+    // Phase 6 §3.6: the default rule requires a human maintainer's approval.
+    const c2 = await devLogin(app, "omar", "maintainer");
     const c3 = await devLogin(app, "priya", "contributor");
     const created = await app.app.request(
       `/v1/projects/${app.projectId}/chapters/${CHAPTER_1_ID}/annotations`,

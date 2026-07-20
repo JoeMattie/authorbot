@@ -183,8 +183,10 @@ async function openWorkItem(
   const { annotationId } = (await created.json()) as { annotationId: string };
   expect((await app.repos.annotations.getById(annotationId))?.status).toBe("open");
 
-  for (const login of voters) {
-    const voter = await devLogin(app, login, "contributor");
+  // Phase 6 §3.6: the default rule now also requires
+  // `human_maintainer_approvals >= 1`, so one approver is the maintainer.
+  for (const [index, login] of voters.entries()) {
+    const voter = await devLogin(app, login, index === 0 ? "maintainer" : "contributor");
     const voted = await app.app.request(
       `/v1/projects/${app.projectId}/annotations/${annotationId}/vote`,
       jsonRequest("PUT", { value: "approve" }, { Cookie: voter }),

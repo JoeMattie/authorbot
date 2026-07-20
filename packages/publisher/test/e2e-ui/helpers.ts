@@ -4,7 +4,7 @@
  * environment handles that global-setup passes to the test workers.
  */
 import { execFile } from "node:child_process";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import { cp, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -56,15 +56,59 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /**
  * Serve `root` (set lazily via the returned setter, so the server can start —
- * and its origin be known — before the site is built) on an ephemeral port.
+ * and its origin be known — before the site is built) on an ephemeral port,
+ * **and reverse-proxy `/v1/*` to the collaboration API** (set lazily the same
+ * way).
+ *
+ * The proxy is what makes this e2e model the only deployment shape Authorbot
+ * supports (ADR-0019): site and API on ONE origin. Previously the site and the
+ * API were served from two ports and paired with `ALLOWED_ORIGINS` — a
+ * configuration that no longer exists. Cloudflare serves both planes from one
+ * Worker; this node:http proxy is the local stand-in for that.
+ *
+ * Responses are piped rather than buffered, so the `/v1/projects/{p}/events`
+ * SSE stream stays a stream, and the original `Host` header is forwarded so
+ * the API's own origin — the one its CSRF and `return_to` checks compare
+ * against — is the site's origin.
  */
 export async function startStaticServer(): Promise<{
   server: Server;
   origin: string;
   setRoot: (dir: string) => void;
+  setApiTarget: (target: { host: string; port: number }) => void;
 }> {
   let root: string | null = null;
+  let apiTarget: { host: string; port: number } | null = null;
   const server = createServer((req, res) => {
+    const rawUrl = req.url ?? "/";
+    if (rawUrl === "/v1" || rawUrl.startsWith("/v1/") || rawUrl.startsWith("/v1?")) {
+      if (apiTarget === null) {
+        res.statusCode = 503;
+        res.end("api not started yet");
+        return;
+      }
+      const upstream = httpRequest(
+        {
+          host: apiTarget.host,
+          port: apiTarget.port,
+          method: req.method,
+          path: rawUrl,
+          // `req.headers` still carries the browser's Host (this server's
+          // origin); forwarding it verbatim keeps the API same-origin.
+          headers: req.headers,
+        },
+        (upstreamRes) => {
+          res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+          upstreamRes.pipe(res);
+        },
+      );
+      upstream.on("error", () => {
+        res.statusCode = 502;
+        res.end("bad gateway");
+      });
+      req.pipe(upstream);
+      return;
+    }
     void (async () => {
       if (root === null) {
         res.statusCode = 503;
@@ -106,6 +150,9 @@ export async function startStaticServer(): Promise<{
     origin: `http://127.0.0.1:${port}`,
     setRoot: (dir: string) => {
       root = dir;
+    },
+    setApiTarget: (target: { host: string; port: number }) => {
+      apiTarget = target;
     },
   };
 }
@@ -364,12 +411,22 @@ export async function seedRangeSuggestion(options: {
 }
 
 /**
- * Approve a suggestion with three distinct human contributors — exactly the
- * default rule (design §25: approvals ≥ 3, net ≥ 2, human approvals ≥ 1).
+ * Approve a suggestion until it crosses the default rule: design §25
+ * (approvals ≥ 3, net ≥ 2, human_approvals ≥ 1) **plus** the Phase 6 contract
+ * §3.6 amendment `human_maintainer_approvals >= 1`.
+ *
+ * So the third approver is the book's human maintainer. Without them the
+ * numbers are met and nothing becomes work, which is the whole point of the
+ * amendment — an author's book does not acquire work items without the author
+ * agreeing to it.
  */
 export async function voteToThreshold(annotationId: string, prefix: string): Promise<void> {
-  for (const name of ["a", "b", "c"]) {
-    const cookie = await loginCookie(`${prefix}-${name}`, "contributor");
+  for (const [name, role] of [
+    ["a", "contributor"],
+    ["b", "contributor"],
+    ["c", "maintainer"],
+  ] as const) {
+    const cookie = await loginCookie(`${prefix}-${name}`, role);
     await voteViaApi(cookie, annotationId, "approve");
   }
 }
@@ -427,7 +484,9 @@ export async function rebuildSite(): Promise<void> {
         repoDir: repoDir(),
         siteDir: siteDir(),
         plainDir: plainDir(),
-        apiUrl: apiUrl(),
+        // Same-origin only (ADR-0019 §5): the site is served from the origin
+        // that also answers /v1/*, so the API base is simply the root.
+        apiUrl: "/",
       }),
     ],
     { maxBuffer: 16 * 1024 * 1024 },

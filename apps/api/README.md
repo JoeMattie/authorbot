@@ -81,8 +81,8 @@ PROJECT_REPO=JoeMattie/causal-projector INITIAL_MAINTAINER=github:JoeMattie \
 pnpm --filter @authorbot/api dev:node          # http://127.0.0.1:8788
 # optional: SQLITE_PATH=/tmp/authorbot-dev.sqlite (default is in-memory),
 #           MIRROR_MODE=queue, PORT=8788,
-#           ALLOWED_ORIGINS=http://127.0.0.1:4321 (site origin, for pairing
-#           with a published site's collaboration islands — see below)
+#           API_BASE_PATH=/my-book (only when the book is served under a
+#           subpath — see below)
 ```
 
 Note: mutations commit to the work tree at `BOOK_REPO_PATH` — point it at a
@@ -91,47 +91,50 @@ rather than your checkout if you don't want dev commits in it.
 
 Configuration (contract §6): vars in `wrangler.jsonc` (`AUTH_MODE`,
 `PROJECT_SLUG`, `PROJECT_REPO`, `INITIAL_MAINTAINER`, `DEFAULT_BRANCH`,
-`MIRROR_MODE`, `ALLOWED_ORIGINS`); secrets via `wrangler secret put
+`MIRROR_MODE`, `API_BASE_PATH`); secrets via `wrangler secret put
 SESSION_SECRET` / `WEBHOOK_SECRET` / `GITHUB_CLIENT_SECRET` (github mode adds
 `GITHUB_CLIENT_ID`, `GITHUB_REDIRECT_URI`). `.dev.vars` holds throwaway
 dev-only values.
 
-## Site ↔ API pairing: CORS + CSRF (Phase 2b contract §3, ADR-0018)
+## Site ↔ API pairing: same-origin + CSRF (ADR-0019)
 
-A site built with `authorbot build --api-url <this API>` (or
-`publication.api_url` in `book.yml`) mounts annotation islands on chapter
-pages that call this API with `credentials: "include"` — see the root
-`README.md` for the end-to-end local-dev recipe and
-`packages/publisher/README.md` for the build side.
+A site built with `authorbot build --api-url <path>` (or `publication.api_url`
+in `book.yml`) mounts annotation islands on chapter pages that call this API
+with `credentials: "include"` — see the root `README.md` for the end-to-end
+local-dev recipe and `packages/publisher/README.md` for the build side.
 
-The recommended deployment is **same-origin** (published site and API on one
-host, root-relative `api_url`): leave `ALLOWED_ORIGINS` unset — no CORS
-headers are emitted and the session cookie stays `SameSite=Lax`.
+**There is exactly one supported deployment shape: same origin.** The
+published site and this API are served from one host, and `api_url` is a
+root-relative path. Consequently:
 
-For the cross-origin case (e.g. site on GitHub Pages, API elsewhere), set
-`ALLOWED_ORIGINS` to a comma-separated list of **exact origins** (no
-wildcards, no paths — e.g.
-`ALLOWED_ORIGINS=https://joe.github.io,http://localhost:4321`). The value is
-validated at boot; an invalid entry fails startup. When configured:
-
-- **CORS**: preflights and responses for listed origins get
-  `Access-Control-Allow-Origin: <origin>` +
-  `Access-Control-Allow-Credentials: true`; allowed request headers include
-  `Content-Type`, `Authorization`, and `Idempotency-Key`; `X-Correlation-Id`
-  is exposed to the page. Unlisted origins get no CORS headers at all.
-- **Session cookie** becomes `SameSite=None; Secure` (required for
-  cross-origin `fetch` with credentials).
+- **No CORS.** No `Access-Control-*` header is emitted under any
+  configuration, and there is no `ALLOWED_ORIGINS` variable. A cross-origin
+  browser request fails at the browser, which is the correct outcome
+  (ADR-0019 §1).
+- **Session cookie** is always `HttpOnly; Secure; SameSite=Lax` — the
+  `SameSite=None` path is gone, so the weaker posture is unreachable by
+  configuration (§2).
 - **OAuth `return_to`**: `GET /v1/auth/github?return_to=<url>` accepts only
-  URLs inside an allowed origin **or the API's own origin** (exact origin
-  prefix match; `javascript:` and open-redirect shapes are rejected with 400)
-  and redirects there after the callback. The same-origin deployment
-  (`ALLOWED_ORIGINS` unset) therefore works out of the box: the site origin
-  IS the API origin.
+  absolute http(s) URLs within this API's own origin (exact origin prefix
+  match; `javascript:` and open-redirect shapes are rejected with 400) and
+  redirects there after the callback (§4).
 
-**CSRF** (always on, configured or not): cookie-authenticated mutations —
-and `POST /v1/dev/login`, which mints the cookie — must send an `Origin` (or
-`Referer`) header matching `ALLOWED_ORIGINS` or the API's own origin —
-missing or foreign origins get a 403 `csrf-origin-mismatch` problem.
+### Base path (`API_BASE_PATH`)
+
+A book may live under a subpath: `API_BASE_PATH=/my-book` serves every route
+under `/my-book/v1/*`, matching a site published at `example.com/my-book/`
+with `publication.api_url: "/my-book"`. Absent (or `/`) mounts the API at the
+origin root, which is what the live deployment does. The value is normalized
+and validated at boot — an absolute URL, a dot segment, or a stray query
+string throws rather than serving the API where the site will never look
+(ADR-0019 §6).
+
+### CSRF (retained)
+
+Same-origin is not the same as no CSRF risk, so the origin check stays:
+cookie-authenticated mutations — and `POST /v1/dev/login`, which mints the
+cookie — must send an `Origin` (or `Referer`) header matching this API's own
+origin; missing or foreign origins get a 403 `csrf-origin-mismatch` problem.
 Browsers send `Origin` automatically; non-browser cookie clients (curl) must
 add it explicitly. JSON routes additionally require
 `Content-Type: application/json`, so cross-site `text/plain` "simple

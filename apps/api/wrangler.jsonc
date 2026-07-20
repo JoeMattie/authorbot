@@ -95,6 +95,12 @@
     "PROJECT_REPO": "JoeMattie/causal-projector",
     "INITIAL_MAINTAINER": "github:JoeMattie",
     "DEFAULT_BRANCH": "main",
+    // API_BASE_PATH (ADR-0019 §6) is unset: this Worker serves the API at the
+    // origin root (`/v1/*`), same-origin with the published site. Set it to a
+    // prefix (e.g. "/my-book") only when the book is served under a subpath,
+    // and keep it identical to the site's `publication.api_url`. There is no
+    // ALLOWED_ORIGINS var: cross-origin deployment is not supported, and no
+    // CORS header is emitted under any configuration (ADR-0019 §1).
     // Deliberately still "queue": the live deployment keeps its current
     // behaviour until an operator switches it. Set "durable" to route
     // post-commit drains through the coordinator (requires the COORDINATOR

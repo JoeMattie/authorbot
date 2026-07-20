@@ -48,8 +48,10 @@ async function openWorkItem(app: GitHubIntegrationApp): Promise<string> {
   );
   expect(created.status).toBe(202);
   const { annotationId } = (await created.json()) as { annotationId: string };
-  for (const login of ["reg-wade", "reg-nadia", "reg-omar"]) {
-    const voter = await devLogin(app, login, "contributor");
+  // Phase 6 §3.6: the default rule now also requires
+  // `human_maintainer_approvals >= 1`, so one approver is the maintainer.
+  for (const [index, login] of ["reg-wade", "reg-nadia", "reg-omar"].entries()) {
+    const voter = await devLogin(app, login, index === 0 ? "maintainer" : "contributor");
     const voted = await app.app.request(
       `/v1/projects/${app.projectId}/annotations/${annotationId}/vote`,
       jsonRequest("PUT", { value: "approve" }, { Cookie: voter }),

@@ -139,13 +139,25 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   // dir inside the package (resolvable) while staying distinct from the site
   // root's `.astro` metadata dir — a collision there would sweep Astro's
   // content-layer artifacts into the published output.
+  // A base path nests the emitted tree, because `base` only rewrites the URLs
+  // Astro *writes* — it does not move the files those URLs point at. Building
+  // `--base-url /my-book` therefore used to emit `index.html` and `_astro/` at
+  // the root while every link pointed at `/my-book/…`. Cloudflare Workers
+  // static assets resolve a request path directly against the tree
+  // (`"assets": { "directory": "./_site" }`), so `/my-book/` and every asset
+  // under it 404'd and only an unlinked root copy was reachable: the whole
+  // site published broken. Emitting under `_site/my-book/` makes the tree
+  // match the URLs, which is ADR-0019 §6 and exit criterion 9.
+  const siteOutDir =
+    model.basePath === "/" ? outDir : path.join(outDir, ...model.basePath.split("/").filter(Boolean));
+
   const packageRoot = fileURLToPath(new URL("../", import.meta.url));
   const previousCwd = process.cwd();
   process.chdir(packageRoot);
   try {
     await build({
       root: siteRoot,
-      outDir,
+      outDir: siteOutDir,
       output: "static",
       base: model.basePath,
       integrations: [],
@@ -170,7 +182,9 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   }
 
   if (model.collab !== null) {
-    await buildIslands(siteRoot, outDir);
+    // Islands land beside the rest of the site's assets, under the same base
+    // path prefix their `<script src>` tags point at.
+    await buildIslands(siteRoot, siteOutDir);
   }
 
   const commit =

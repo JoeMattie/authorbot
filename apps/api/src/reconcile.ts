@@ -62,6 +62,7 @@ import {
 } from "@authorbot/database";
 import { toTimestamp } from "@authorbot/domain";
 import type { Context } from "hono";
+import { projectBookConfig } from "./book-config.js";
 import type { AppEnv, Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import { problem } from "./problems.js";
@@ -469,6 +470,31 @@ export async function reconcileProjection(
   }
 
   const projectedCommit = snapshot.headCommit ?? null;
+
+  // Phase 6 §3.6: `book.yml` is projected alongside everything else in this
+  // snapshot, from the same tree. A malformed config is recorded and skipped
+  // rather than allowed to abort a pass that has already rebuilt the prose —
+  // a typo in the book's title must not take the book's chapters offline.
+  const bookConfig = await projectBookConfig(ctx, project.id, reader, {
+    sourceCommit: projectedCommit,
+    ...(snapshot.files === undefined ? {} : { files: snapshot.files }),
+  });
+  if (bookConfig.outcome === "invalid") {
+    await ctx.repos.auditEvents
+      .insertStatement({
+        id: uuidv7(ctx.clock.now()),
+        projectId: project.id,
+        actorId: null,
+        action: "projection.book_config_invalid",
+        targetType: "project",
+        targetId: project.id,
+        correlationId: options.correlationId,
+        metadata: { reason: bookConfig.reason, headCommit: projectedCommit },
+        createdAt: at,
+      })
+      .run();
+  }
+
   await ctx.repos.projects
     .completeProjectionRefreshStatement({
       projectId: project.id,

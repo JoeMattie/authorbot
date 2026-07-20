@@ -198,9 +198,15 @@ export interface RefreshProjectionResult {
  * lifecycle record *intent about* prose rather than rewriting it, their
  * intake keeps working while diverged, and halting their mirroring would turn
  * a repository problem into an unbounded backlog for collaborators who cannot
- * fix it. Only `submission.apply` rewrites a chapter.
+ * fix it. Only `submission.apply` and `chapter.write` rewrite a chapter.
+ *
+ * `chapter.write` (Phase 6 §3.5) belongs here for the same reason its request
+ * path is gated: it composes the chapter against the branch head and commits
+ * it, so a row queued moments before a webhook reconciliation found the
+ * repository diverged would otherwise still write prose into a repository
+ * Authorbot knows it mis-models.
  */
-const PROSE_OUTBOX_KINDS: readonly string[] = ["submission.apply"];
+export const PROSE_OUTBOX_KINDS: readonly string[] = ["submission.apply", "chapter.write"];
 
 export interface CoordinatorAlarmResult {
   sweep: SweepResult;

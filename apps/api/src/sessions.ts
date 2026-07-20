@@ -3,7 +3,7 @@
  * `<sessionId>.<signature>` where sessionId is an opaque 256-bit base64url
  * value and signature = HMAC-SHA-256(SESSION_SECRET, sessionId) hex. The
  * server stores only SHA-256(sessionId); the plaintext exists in the cookie
- * alone. HttpOnly, Secure, SameSite=Lax.
+ * alone. Always HttpOnly, Secure, SameSite=Lax (ADR-0019 §2).
  */
 import { isSessionIdFormat, SESSION_TTL_DAYS } from "@authorbot/domain";
 import { hmacSha256Hex, timingSafeEqual } from "./crypto.js";
@@ -42,15 +42,19 @@ export async function verifySessionCookieValue(
 }
 
 /**
- * Session cookie attributes (Phase 2b contract §3): `SameSite=None; Secure`
- * only when a cross-origin site is configured (ALLOWED_ORIGINS non-empty);
- * `SameSite=Lax` otherwise. Always HttpOnly + Secure.
+ * Session cookie attributes (ADR-0019 §2): ALWAYS
+ * `HttpOnly; Secure; SameSite=Lax`. The `SameSite=None` path existed only for
+ * the cross-origin deployment shape, which is no longer supported — the weaker
+ * posture is now unreachable by configuration.
+ *
+ * `Path=/` rather than the base path: a book under `/my-book` still shares its
+ * origin with everything else on the host, so scoping the cookie by path would
+ * buy no isolation while breaking sign-in for anything served above it.
  */
-export function sessionCookieHeader(value: string, options: { crossOrigin: boolean }): string {
-  const sameSite = options.crossOrigin ? "None" : "Lax";
+export function sessionCookieHeader(value: string): string {
   return (
     `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}; ` +
-    `HttpOnly; Secure; SameSite=${sameSite}`
+    `HttpOnly; Secure; SameSite=Lax`
   );
 }
 

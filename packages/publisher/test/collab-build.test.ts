@@ -21,7 +21,12 @@ let outPlain: string;
 let outCollab: string;
 const tempDirs: string[] = [];
 
-const API_URL = "http://127.0.0.1:8787";
+/**
+ * ADR-0019: `api_url` is root-relative only. This build deliberately uses a
+ * BASE PATH rather than "/", so the emitted mount data and every island
+ * request URL are exercised under the `example.com/my-book/` shape.
+ */
+const API_URL = "/my-book";
 
 async function collectFiles(dir: string): Promise<string[]> {
   const files: string[] = [];
@@ -116,11 +121,11 @@ describe("api-url-less build (script-free regression)", () => {
 });
 
 describe("collab-enabled build", () => {
-  it("emits the CSP meta tag on chapter pages (contract §3)", async () => {
+  it("emits a same-origin CSP meta tag on chapter pages (ADR-0019 §1)", async () => {
     const page = await readFile(path.join(outCollab, "chapters/baseline/index.html"), "utf8");
     expect(page).toContain(
       `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
-        `connect-src 'self' ${API_URL}; img-src 'self' data:">`,
+        `connect-src 'self'; img-src 'self' data:">`,
     );
   });
 
@@ -156,7 +161,7 @@ describe("collab-enabled build", () => {
     // CSP + island stylesheet + bundle, like chapter pages.
     expect(page).toContain(
       `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
-        `connect-src 'self' ${API_URL}; img-src 'self' data:">`,
+        `connect-src 'self'; img-src 'self' data:">`,
     );
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
     expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
@@ -207,10 +212,9 @@ describe("resolveCollab", () => {
   });
 
   it("reads publication.api_url as the durable form", () => {
-    const collab = resolveCollab(book({ api_url: "https://api.example.com/" }), {});
+    const collab = resolveCollab(book({ api_url: "/my-book/" }), {});
     expect(collab).toEqual({
-      apiBase: "https://api.example.com",
-      apiOrigin: "https://api.example.com",
+      apiBase: "/my-book",
       projectSlug: "t-slug",
       showPublicAnnotations: false,
       devLogin: false,
@@ -218,42 +222,124 @@ describe("resolveCollab", () => {
   });
 
   it("lets --api-url override book.yml", () => {
-    const collab = resolveCollab(book({ api_url: "https://durable.example.com" }), {
-      apiUrl: "http://127.0.0.1:8787",
-    });
-    expect(collab?.apiBase).toBe("http://127.0.0.1:8787");
-    expect(collab?.apiOrigin).toBe("http://127.0.0.1:8787");
+    const collab = resolveCollab(book({ api_url: "/durable" }), { apiUrl: "/override" });
+    expect(collab?.apiBase).toBe("/override");
   });
 
-  it("treats a root-relative path as same-origin (no extra CSP origin)", () => {
-    const collab = resolveCollab(book(undefined), { apiUrl: "/api/" });
-    expect(collab?.apiBase).toBe("/api");
-    expect(collab?.apiOrigin).toBeNull();
+  it("accepts a multi-segment base path (ADR-0019 §6)", () => {
+    expect(resolveCollab(book(undefined), { apiUrl: "/books/hollow-creek/" })?.apiBase).toBe(
+      "/books/hollow-creek",
+    );
   });
 
-  it('accepts "/" as API-at-origin-root: empty base, no extra CSP origin', () => {
+  it('accepts "/" as API-at-origin-root: empty base', () => {
     for (const apiUrl of ["/", "//"]) {
-      const collab = resolveCollab(book(undefined), { apiUrl });
-      expect(collab?.apiBase).toBe("");
-      expect(collab?.apiOrigin).toBeNull();
+      expect(resolveCollab(book(undefined), { apiUrl })?.apiBase).toBe("");
     }
-    const durable = resolveCollab(book({ api_url: "/" }), {});
-    expect(durable?.apiBase).toBe("");
+    expect(resolveCollab(book({ api_url: "/" }), {})?.apiBase).toBe("");
   });
 
   it("carries show_public_annotations and the dev-login flag", () => {
     const collab = resolveCollab(
-      book({ api_url: "https://api.example.com", show_public_annotations: true }),
+      book({ api_url: "/my-book", show_public_annotations: true }),
       { devLogin: true },
     );
     expect(collab?.showPublicAnnotations).toBe(true);
     expect(collab?.devLogin).toBe(true);
   });
 
-  it("rejects a non-root-relative, non-http value", () => {
-    expect(() => resolveCollab(book(undefined), { apiUrl: "ftp://x" })).toThrow(PublisherError);
-    expect(() => resolveCollab(book(undefined), { apiUrl: "api.example.com" })).toThrow(
-      PublisherError,
+  it("rejects an absolute http(s) URL at build time, naming ADR-0019", () => {
+    for (const apiUrl of [
+      "https://api.example.com",
+      "http://127.0.0.1:8787",
+      "https://api.example.com/my-book",
+    ]) {
+      expect(() => resolveCollab(book(undefined), { apiUrl })).toThrow(PublisherError);
+      expect(() => resolveCollab(book(undefined), { apiUrl })).toThrow(/ADR-0019/);
+    }
+    // The durable form is checked identically — a book.yml that predates
+    // ADR-0019 fails the build rather than publishing a site whose every
+    // collaboration call is blocked by the browser.
+    expect(() => resolveCollab(book({ api_url: "https://api.example.com" }), {})).toThrow(
+      /ADR-0019/,
     );
+  });
+
+  it("rejects other non-root-relative values", () => {
+    for (const apiUrl of [
+      "ftp://x",
+      "api.example.com",
+      "//evil.example",
+      "/my-book?x=1",
+      "/my-book#frag",
+      "/../etc",
+      "/my//book",
+      "/my book",
+    ]) {
+      expect(() => resolveCollab(book(undefined), { apiUrl }), apiUrl).toThrow(PublisherError);
+    }
+  });
+});
+
+/**
+ * Regression (ADR-0019 §6, phase 6 exit criterion 9: "a book deployed under a
+ * base path works end to end").
+ *
+ * Astro's `base` rewrites the URLs it WRITES; it does not move the files those
+ * URLs point at. So a base-path build emitted `index.html` and `_astro/` at the
+ * root of `_site` while every link pointed at `/my-book/…`. Cloudflare Workers
+ * static assets resolve a request path directly against that tree
+ * (`"assets": { "directory": "./_site" }`), so every one of those links 404'd
+ * and only an unlinked root copy was reachable — the site published broken.
+ *
+ * The property that matters is not "the output is nested" but "every emitted
+ * link resolves to a file that exists", so that is what this asserts.
+ */
+describe("base-path builds are deployable (ADR-0019 §6)", () => {
+  let outBase: string;
+
+  beforeAll(async () => {
+    outBase = await mkdtemp(path.join(os.tmpdir(), "authorbot-basepath-"));
+    tempDirs.push(outBase);
+    await buildSite({
+      repoPath: exampleRepo,
+      outDir: outBase,
+      baseUrl: "/my-book",
+      logLevel: "error",
+    });
+  });
+
+  it("emits the site under the base path, where the links point", async () => {
+    await expect(stat(path.join(outBase, "my-book", "index.html"))).resolves.toBeTruthy();
+    await expect(
+      stat(path.join(outBase, "my-book", "chapters", "baseline", "index.html")),
+    ).resolves.toBeTruthy();
+  });
+
+  it("resolves every root-relative link and asset to a file that exists", async () => {
+    const files = new Set(rel(outBase, await collectFiles(outBase)).map((f) => f.split(path.sep).join("/")));
+    const pages = [...files].filter((f) => f.endsWith(".html"));
+    expect(pages.length).toBeGreaterThan(0);
+
+    const missing: string[] = [];
+    for (const page of pages) {
+      const html = await readFile(path.join(outBase, page), "utf8");
+      const refs = [...html.matchAll(/(?:href|src)="(\/[^"#?]*)"/g)].map((m) => m[1] ?? "");
+      for (const ref of refs) {
+        // A directory-format URL (`/my-book/chapters/x/`) is served by its
+        // `index.html`; anything else is a file request.
+        const target = `${ref.replace(/^\//, "")}${ref.endsWith("/") ? "index.html" : ""}`;
+        if (target !== "" && !files.has(target)) missing.push(`${page} -> ${ref}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("leaves the build manifest at the output root for CI to read", async () => {
+    await expect(stat(path.join(outBase, "authorbot-build.json"))).resolves.toBeTruthy();
+  });
+
+  it("still emits at the root when no base path is configured", async () => {
+    await expect(stat(path.join(outPlain, "index.html"))).resolves.toBeTruthy();
   });
 });

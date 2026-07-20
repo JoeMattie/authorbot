@@ -59,6 +59,25 @@ export const PROBLEM_TYPES = {
     title: "Book repository diverged from the projection",
   },
   "signature-invalid": { status: 401, title: "Missing or invalid callback signature" },
+  // ---- Phase 6 settings problems (contract §3.6) ---------------------------
+  /**
+   * A never-editable field appeared in a settings patch. 422 rather than 403:
+   * the actor is permitted to change settings, but this field is not a setting
+   * anyone can change through the API. The response names each field and why.
+   */
+  "settings-field-immutable": {
+    status: 422,
+    title: "Field cannot be changed through the API",
+  },
+  /**
+   * A guarded field (`slug`, `publication.chapter_url`) would change without
+   * the request confirming it. The response states what breaks and echoes the
+   * exact `confirm` value that would let the change proceed.
+   */
+  "settings-confirmation-required": {
+    status: 409,
+    title: "Change requires explicit confirmation",
+  },
   internal: { status: 500, title: "Internal error" },
 } as const;
 

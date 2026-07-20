@@ -93,8 +93,10 @@ describe("Phase 4 exit criterion 3: applied edit leaves a repo the Phase 0 valid
     expect((await app.repos.annotations.getById(annotationId))?.status).toBe("open");
 
     // 2. Vote it past the governance threshold → a ready work item.
-    for (const login of ["exit-wade", "exit-nadia", "exit-omar"]) {
-      const voter = await devLogin(app, login, "contributor");
+    // Phase 6 §3.6: the default rule now also requires
+    // `human_maintainer_approvals >= 1`, so one approver is the maintainer.
+    for (const [index, login] of ["exit-wade", "exit-nadia", "exit-omar"].entries()) {
+      const voter = await devLogin(app, login, index === 0 ? "maintainer" : "contributor");
       const voted = await request(
         `/annotations/${annotationId}/vote`,
         jsonRequest("PUT", { value: "approve" }, { Cookie: voter }),

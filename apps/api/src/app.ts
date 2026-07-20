@@ -24,11 +24,14 @@ import {
   AGENT_TOKEN_PREFIX,
 } from "@authorbot/domain";
 import { apiRoleScopes, mintAgentTokenApiCommandSchema } from "./api-scopes.js";
-import { parseRuleEntries } from "./rules.js";
+import { parseRuleEntries, resolveRuleEntries, type RuleEntry } from "./rules.js";
+import { registerSettingsRoutes } from "./settings.js";
 import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
 import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
+import { registerChapterSubmissionRoutes } from "./chapter-submissions.js";
 import { createProjectSerializer } from "./serializer.js";
-import { parseChapterMarkdown, scanSafety } from "@authorbot/markdown";
+import { parseChapterMarkdown, scanSafety, stripBlockMarkers } from "@authorbot/markdown";
+import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import {
   authOf,
@@ -37,7 +40,7 @@ import {
   requireProjectScope,
   type AuthServices,
 } from "./auth.js";
-import { cors } from "./cors.js";
+import { normalizeBasePath } from "./base-path.js";
 import { csrfOriginAllowed, isValidReturnTo } from "./origins.js";
 import { randomBase64Url, sha256Hex, timingSafeEqual, hmacSha256Hex } from "./crypto.js";
 import { SYSTEM_CLOCK, type AppDeps, type AppEnv, type Clock } from "./deps.js";
@@ -117,8 +120,22 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   const clock: Clock = deps.clock ?? SYSTEM_CLOCK;
 
   // Boot-time rule validation (Phase 3 contract §3): invalid RULES_JSON
-  // throws here — never degrades to the default at runtime.
-  const rules = parseRuleEntries(deps.config.rulesJson);
+  // throws here — never degrades to the default at runtime. Phase 6 §3.6
+  // makes these the BOOTSTRAP layer: a book that declares `governance.rules`
+  // in its own `book.yml` overrides them, resolved per request below.
+  const bootstrapRules = parseRuleEntries(deps.config.rulesJson);
+
+  /**
+   * The rules in force for a project right now (Phase 6 §3.6). Resolved per
+   * request rather than cached at boot, because "a rule edit takes effect on
+   * the next vote" is a requirement — a cache would make it take effect on the
+   * next deploy instead. The read is one indexed primary-key lookup on a table
+   * with one row per project, inside a command that is already writing.
+   */
+  const rulesFor = async (projectId: string): Promise<RuleEntry[]> => {
+    const row = await repos.bookConfigs.get(projectId);
+    return resolveRuleEntries(row?.config ?? null, bootstrapRules);
+  };
 
   let cachedProject: ProjectRecord | null = null;
   const getProject = async (): Promise<ProjectRecord | null> => {
@@ -128,15 +145,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return cachedProject;
   };
 
-  const allowedOrigins = deps.config.allowedOrigins ?? [];
-  /** Cross-origin site configured → SameSite=None session cookie (2b §3). */
-  const cookieOptions = { crossOrigin: allowedOrigins.length > 0 };
+  // Base path (ADR-0019 §6): re-normalized here rather than trusted, so the
+  // Node dev server and tests get the same validation the Worker boot does.
+  const basePath = normalizeBasePath(deps.config.basePath);
 
   const services: AuthServices & { repos: Repositories; clock: Clock } = {
     repos,
     clock,
     sessionSecret: deps.config.sessionSecret,
-    allowedOrigins,
     getProject,
   };
 
@@ -187,7 +203,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return { project, rebuild: result };
   };
 
-  const app = new Hono<AppEnv>();
+  // Every route below is registered relative to the base path (ADR-0019 §6):
+  // with `API_BASE_PATH=/my-book`, `/v1/me` is served at `/my-book/v1/me`.
+  // An empty base path leaves the routing table exactly as it was.
+  const app = basePath === "" ? new Hono<AppEnv>() : new Hono<AppEnv>().basePath(basePath);
 
   // ---- cross-cutting middleware -------------------------------------------
 
@@ -202,9 +221,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     c.res.headers.set("X-Correlation-Id", correlationId);
   });
 
-  // CORS (Phase 2b contract §3): exact-origin allow-list, credentialed,
-  // preflight short-circuit. Pass-through when ALLOWED_ORIGINS is empty.
-  app.use("*", cors(allowedOrigins));
+  // No CORS middleware, by design (ADR-0019 §1): the API is same-origin with
+  // the site it serves, so no `Access-Control-*` header is ever emitted and a
+  // cross-origin browser request fails at the browser — the correct outcome.
 
   app.onError((error, c) => {
     // Never echo internals (they may contain SQL values); the correlation id
@@ -353,10 +372,11 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   };
 
   const readJson = async (c: Context<AppEnv>): Promise<unknown | Response> => {
-    // Require a JSON content type before parsing (Phase 2b §3 defense in
-    // depth): a cross-site `text/plain` "simple request" (no CORS preflight)
-    // must never reach a JSON handler; declaring application/json forces a
-    // preflight that the exact-origin CORS allow-list controls.
+    // Require a JSON content type before parsing (defense in depth): a
+    // cross-site `text/plain` "simple request" is exactly the shape that
+    // crosses origins without a preflight, so a JSON handler must never
+    // accept one. With CORS removed (ADR-0019) the browser blocks the
+    // response regardless; this keeps the request from being processed.
     const contentType = c.req.header("content-type") ?? "";
     if (!/^application\/json\s*(;|$)/i.test(contentType.trim())) {
       return problem(c, "bad-request", {
@@ -684,6 +704,82 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     }
     return c.json(chapterJson(chapter));
   });
+
+  /**
+   * A chapter's prose, marker-free, for the §3.5 composer.
+   *
+   * "Editing an existing chapter uses the same composer" — but the revise half
+   * of `POST /v1/projects/{p}/chapter-submissions` requires a COMPLETE
+   * replacement body plus the current `baseRevision`, and nothing in the API
+   * let an editor read the current prose to populate that form. A revise had to
+   * be written blind or sourced out-of-band from Git, which is the exact
+   * problem Phase 6 exists to remove. The Phase 4 TaskBundle is not a
+   * substitute: it is gated behind claiming a work item with a lease, and it
+   * returns the raw file including block markers.
+   *
+   * Editor/maintainer scoped like the write it feeds, and marker-stripped so
+   * the body a client sends back is the body a human edited — marker reuse for
+   * unchanged blocks is `applyChapterReplacement`'s job at drain time, not the
+   * client's.
+   */
+  app.get("/v1/projects/:projectId/chapters/:chapterId/source", auth, async (c) => {
+    const guard = await requireProjectScope(c, services, "submissions:write");
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const role = authOf(c).role;
+    if (role !== "editor" && role !== "maintainer") {
+      return problem(c, "forbidden", {
+        detail: "only an editor or a maintainer may read chapter source for editing",
+      });
+    }
+    const chapter = await repos.chapters.getById(c.req.param("chapterId"));
+    if (chapter === null || chapter.projectId !== guard.project.id) {
+      return problem(c, "not-found", { detail: "unknown chapter" });
+    }
+    if (deps.reader?.readTextFile === undefined) {
+      return problem(c, "state-conflict", {
+        detail:
+          "this deployment has no repository reader configured, so chapter source cannot be read",
+      });
+    }
+    const source = await deps.reader.readTextFile(chapter.path);
+    if (source === null) {
+      return problem(c, "not-found", { detail: "chapter source not found at the branch head" });
+    }
+    const parsed = parseChapterMarkdown(source);
+    const fm = chapterFrontmatterSchema.safeParse(parsed.frontmatter);
+    if (!fm.success) {
+      return problem(c, "internal", {
+        detail: "the chapter at the branch head does not have valid frontmatter",
+      });
+    }
+    return c.json({
+      chapterId: chapter.id,
+      title: fm.data.title,
+      summary: fm.data.summary ?? null,
+      /** Send this straight back as `baseRevision` on the revise. */
+      revision: fm.data.revision,
+      status: fm.data.status,
+      /**
+       * Markdown as an author wrote it: no frontmatter, no marker syntax.
+       * Trimmed of the blank lines the file format puts around the body, so
+       * what a composer loads is what a composer would have saved — leading
+       * and trailing blank lines carry no meaning in Markdown, and leaving
+       * them in would make an untouched round trip look like an edit.
+       */
+      body: stripBlockMarkers(chapterBodyOf(source)).trim(),
+      correlationId: c.get("correlationId"),
+    });
+  });
+
+  /** A chapter file's prose, with the frontmatter block removed. */
+  function chapterBodyOf(source: string): string {
+    const normalized = source.replace(/\r\n/g, "\n");
+    if (!normalized.startsWith("---\n")) return normalized;
+    const close = normalized.indexOf("\n---\n", 3);
+    return close === -1 ? normalized : normalized.slice(close + 5);
+  }
 
   // ---- annotations -------------------------------------------------------------
 
@@ -1222,21 +1318,20 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     });
 
     app.post("/v1/dev/login", async (c) => {
-      // CSRF (Phase 2b contract §3): this route sits before requireAuth (it
-      // mints the session), so it applies the same Origin/Referer check the
-      // auth middleware applies to cookie-authenticated mutations — otherwise
-      // any web page could drive a login CSRF against a developer's local API
-      // and destructively replace membership rows.
+      // CSRF (ADR-0019 §3): this route sits before requireAuth (it mints the
+      // session), so it applies the same Origin/Referer check the auth
+      // middleware applies to cookie-authenticated mutations — otherwise any
+      // web page could drive a login CSRF against a developer's local API and
+      // destructively replace membership rows.
       const csrfOk = csrfOriginAllowed(
         c.req.header("origin"),
         c.req.header("referer"),
         new URL(c.req.url).origin,
-        allowedOrigins,
       );
       if (!csrfOk) {
         return problem(c, "csrf-origin-mismatch", {
           detail:
-            "dev login requires an Origin or Referer header matching an allowed origin",
+            "dev login requires an Origin or Referer header matching this API's own origin",
         });
       }
       const body = await readJson(c);
@@ -1326,7 +1421,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         "Set-Cookie",
         sessionCookieHeader(
           await signSessionCookieValue(deps.config.sessionSecret, sessionId),
-          cookieOptions,
         ),
       );
       return c.json({
@@ -1339,16 +1433,15 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const provider = deps.identityProvider;
 
     app.get("/v1/auth/github", async (c) => {
-      // return_to (Phase 2b contract §3): only URLs inside ALLOWED_ORIGINS or
-      // the API's own origin (the same-origin deployment; mirrors the CSRF
-      // check) may round-trip through the state cookie — never
-      // javascript:/data: schemes, never a foreign host (open redirect).
+      // return_to (ADR-0019 §4): only URLs within the API's own origin may
+      // round-trip through the state cookie — never javascript:/data:
+      // schemes, never a foreign host (open redirect).
       const returnToRaw = c.req.query("return_to");
       let returnTo: string | null = null;
       if (returnToRaw !== undefined && returnToRaw.length > 0) {
-        if (!isValidReturnTo(returnToRaw, new URL(c.req.url).origin, allowedOrigins)) {
+        if (!isValidReturnTo(returnToRaw, new URL(c.req.url).origin)) {
           return problem(c, "validation-failed", {
-            detail: "return_to must be an absolute http(s) URL within an allowed origin",
+            detail: "return_to must be an absolute http(s) URL within this API's own origin",
           });
         }
         returnTo = returnToRaw;
@@ -1431,7 +1524,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         "Set-Cookie",
         sessionCookieHeader(
           await signSessionCookieValue(deps.config.sessionSecret, sessionId),
-          cookieOptions,
         ),
       );
       c.header("Set-Cookie", clearOauthStateCookieHeader(), { append: true });
@@ -1439,7 +1531,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       // depth against config changes between start and callback.
       const destination =
         statePayload.returnTo !== null &&
-        isValidReturnTo(statePayload.returnTo, new URL(c.req.url).origin, allowedOrigins)
+        isValidReturnTo(statePayload.returnTo, new URL(c.req.url).origin)
           ? statePayload.returnTo
           : "/";
       return c.redirect(destination, 302);
@@ -1453,7 +1545,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     repos,
     clock,
     services,
-    rules,
+    rules: rulesFor,
     auth,
     maybeAuth,
     idem,
@@ -1481,6 +1573,41 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     claimIdem: idempotency(services, { redactStored: redactClaimBundle }),
     serialize,
     leaseConfig: deps.config.leaseConfig,
+    claimStatements,
+    commandStatements,
+    readJson,
+    notifyMutation,
+    now,
+  });
+
+  // ---- Phase 6 routes (direct authoring, contract §3.5) --------------------
+  registerChapterSubmissionRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    claimStatements,
+    commandStatements,
+    readJson,
+    notifyMutation,
+  });
+
+  // ---- Phase 6 routes (book settings + governance, contract §3.6) ---------
+  registerSettingsRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    bootstrapRules,
+    requireProject: (c) => requireProjectScope(c, services, "chapters:read"),
     claimStatements,
     commandStatements,
     readJson,

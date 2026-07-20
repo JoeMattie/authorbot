@@ -55,7 +55,7 @@ import {
   eventJson,
   sseResponse,
 } from "./sse.js";
-import { adjustTally, tallyJson, tallyToMetrics, type VoterActorType } from "./tally.js";
+import { adjustTally, tallyJson, tallyToMetrics, type Voter, type VoterActorType } from "./tally.js";
 
 /**
  * Outbox kinds Phase 3 emits, matching the @authorbot/repo-coordinator
@@ -76,7 +76,12 @@ export interface Phase3Context {
   repos: Repositories;
   clock: Clock;
   services: AuthServices;
-  rules: RuleEntry[];
+  /**
+   * The rules in force for a project, resolved per call (Phase 6 contract
+   * §3.6): a maintainer editing the governance rule in Settings must see it
+   * apply to the next vote, so this is a lookup rather than a boot constant.
+   */
+  rules(projectId: string): Promise<RuleEntry[]>;
   auth: MiddlewareHandler<AppEnv>;
   maybeAuth: MiddlewareHandler<AppEnv>;
   idem: MiddlewareHandler<AppEnv>;
@@ -370,7 +375,11 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
 
     return serialize(guard.project.id, async () => {
       const a = authOf(c);
-      const actorType = a.actor.type as VoterActorType;
+      // Phase 6 §3.6: the maintainer metrics need the voter's ROLE as well as
+      // their actor type. Taken from the auth context — the membership the
+      // request already resolved — so it is the same current, unrevoked role
+      // the SQL tally's join will read on the next request.
+      const voter: Voter = { actorType: a.actor.type as VoterActorType, role: a.role };
 
       /**
        * One full attempt at the command as a single atomic batch. Fresh reads
@@ -441,7 +450,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         const timestamp = now();
         const base = await repos.votes.tally(annotation.id);
         const nextValue = mode === "cast" ? value : null;
-        const tally = adjustTally(base, actorType, previousValue, nextValue);
+        const tally = adjustTally(base, voter, previousValue, nextValue);
         const metrics = tallyToMetrics(tally);
         const correlationId = c.get("correlationId");
 
@@ -492,7 +501,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         let createdWorkItem = false;
         let stickyMirror = false;
 
-        for (const entry of ctx.rules) {
+        for (const entry of await ctx.rules(guard.project.id)) {
           const evaluation = evaluate(entry.rule, metrics);
           if (evaluation.satisfied) {
             ruleSatisfied = true;

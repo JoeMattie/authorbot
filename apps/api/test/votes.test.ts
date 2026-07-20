@@ -102,7 +102,10 @@ describe("vote endpoints and pipeline", () => {
   it("crossing the threshold creates exactly one decision + work item and transitions the annotation", async () => {
     const id = await createOpenSuggestion(h, author);
     const c1 = author;
-    const c2 = await devLogin(h, "bella", "contributor");
+    // Phase 6 §3.6: the default rule now also requires
+    // `human_maintainer_approvals >= 1`, so a crossing needs the book's
+    // (human) maintainer among the approvers.
+    const c2 = await devLogin(h, "bella", "maintainer");
     const c3 = await devLogin(h, "cyril", "contributor");
 
     await castVote(h, c1, id, "approve");
@@ -136,7 +139,10 @@ describe("vote endpoints and pipeline", () => {
   it("further votes never create a second work item and mark support_changed when support drops", async () => {
     const id = await createOpenSuggestion(h, author);
     const c1 = author;
-    const c2 = await devLogin(h, "bella", "contributor");
+    // Phase 6 §3.6: the default rule now also requires
+    // `human_maintainer_approvals >= 1`, so a crossing needs the book's
+    // (human) maintainer among the approvers.
+    const c2 = await devLogin(h, "bella", "maintainer");
     const c3 = await devLogin(h, "cyril", "contributor");
     await castVote(h, c1, id, "approve");
     await castVote(h, c2, id, "approve");
@@ -167,7 +173,10 @@ describe("vote endpoints and pipeline", () => {
   it("concurrent qualifying votes yield exactly one decision and one work item", async () => {
     const id = await createOpenSuggestion(h, author);
     const c1 = author;
-    const c2 = await devLogin(h, "bella", "contributor");
+    // Phase 6 §3.6: the default rule now also requires
+    // `human_maintainer_approvals >= 1`, so a crossing needs the book's
+    // (human) maintainer among the approvers.
+    const c2 = await devLogin(h, "bella", "maintainer");
     const c3 = await devLogin(h, "cyril", "contributor");
     await castVote(h, c1, id, "approve");
     await castVote(h, c2, id, "approve");

@@ -28,8 +28,6 @@ export interface AuthServices {
   repos: Repositories;
   clock: Clock;
   sessionSecret: string;
-  /** Exact origins allowed for CSRF checks (Phase 2b contract §3). */
-  allowedOrigins: string[];
   getProject(): Promise<ProjectRecord | null>;
 }
 
@@ -144,23 +142,22 @@ export function requireAuth(services: AuthServices): MiddlewareHandler<AppEnv> {
       if (auth === null) {
         return problem(c, "unauthorized", { detail: "missing or invalid credential" });
       }
-      // CSRF (Phase 2b contract §3): cookie-authenticated mutations must
-      // present an Origin (or Referer) matching ALLOWED_ORIGINS or the API's
-      // own origin; missing/foreign fails closed. Bearer requests are exempt
-      // (no ambient credential) — they took the branch above.
+      // CSRF (ADR-0019 §3 — retained after CORS removal): cookie-authenticated
+      // mutations must present an Origin (or Referer) matching the API's own
+      // origin; missing/foreign fails closed. Bearer requests are exempt (no
+      // ambient credential) — they took the branch above.
       if (!CSRF_SAFE_METHODS.has(c.req.method)) {
         const apiOrigin = new URL(c.req.url).origin;
         const ok = csrfOriginAllowed(
           c.req.header("origin"),
           c.req.header("referer"),
           apiOrigin,
-          services.allowedOrigins,
         );
         if (!ok) {
           return problem(c, "csrf-origin-mismatch", {
             detail:
               "cookie-authenticated mutations require an Origin or Referer header " +
-              "matching an allowed origin",
+              "matching this API's own origin",
           });
         }
       }

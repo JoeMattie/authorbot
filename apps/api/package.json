@@ -2,8 +2,29 @@
   "name": "@authorbot/api",
   "version": "0.1.0",
   "description": "Authorbot Phase 2 API: Hono 4 app for Cloudflare Workers with runtime-agnostic business wiring (identity, annotations, replies, Git-mirroring command flow, projection rebuild, webhook ingest)",
+  "keywords": [
+    "authorbot",
+    "cloudflare-workers",
+    "hono",
+    "api",
+    "collaboration"
+  ],
+  "license": "MIT",
+  "author": "Joe Mattie",
+  "homepage": "https://github.com/JoeMattie/authorbot#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "apps/api"
+  },
+  "bugs": {
+    "url": "https://github.com/JoeMattie/authorbot/issues"
+  },
   "type": "module",
-  "private": true,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -18,10 +39,14 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "migrations",
+    "LICENSE",
+    "!dist/**/*.map"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "node scripts/sync-migrations.mjs && node ../../scripts/copy-license.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
@@ -38,6 +63,7 @@
     "@authorbot/rule-engine": "workspace:*",
     "@authorbot/schemas": "workspace:*",
     "hono": "^4.6.0",
+    "yaml": "^2.5.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -46,7 +72,6 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0",
-    "wrangler": "^4.0.0",
-    "yaml": "^2.5.0"
+    "wrangler": "^4.0.0"
   }
 }

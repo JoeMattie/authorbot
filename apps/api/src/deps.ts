@@ -52,11 +52,12 @@ export interface AppConfig {
   github?: GitHubOAuthConfig;
   mirrorMode?: MirrorMode;
   /**
-   * Exact origins allowed for CORS, CSRF, and OAuth `return_to` (Phase 2b
-   * contract §3). Parsed/validated at boot from ALLOWED_ORIGINS; empty means
-   * same-origin deployment (no CORS headers, SameSite=Lax session cookie).
+   * Route prefix the API is served under (ADR-0019 §6), e.g. `/my-book` for a
+   * book at `example.com/my-book/` whose API answers at `/my-book/v1/*`.
+   * Normalized/validated at boot from `API_BASE_PATH`; absent or `""` mounts
+   * the API at the origin root. Must match the site's `publication.api_url`.
    */
-  allowedOrigins?: string[];
+  basePath?: string;
   /**
    * Serve annotation/reply reads to credential-less requests (Phase 2b
    * contract §2.1). The API-side mirror of the book's

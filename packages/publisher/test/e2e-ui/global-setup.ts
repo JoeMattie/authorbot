@@ -4,10 +4,11 @@
  *   1. temp book repo — copy examples/book-repo, `git init` + commit, so the
  *      dev API's LocalGitAdapter mirror has a real work tree to commit into;
  *   2. static server first (ephemeral port) — its origin must be known before
- *      the API starts (ALLOWED_ORIGINS) and before the site is built;
+ *      the site is built, and it is the ONE origin everything is served from:
+ *      it reverse-proxies `/v1/*` to the API (ADR-0019, same-origin only);
  *   3. Phase 2 Node dev API (apps/api dist/dev-server.js as a child process):
- *      dev auth, temp SQLite file, inline mirror, ALLOWED_ORIGINS = the
- *      static origin;
+ *      dev auth, temp SQLite file, inline mirror, reachable only through the
+ *      static server's proxy;
  *   4. `buildSite` twice via a child Node process (Playwright's module loader
  *      breaks Astro's second in-process build): collab-enabled (apiUrl +
  *      devLogin) into the served dir, plus an api-url-less build for the
@@ -125,7 +126,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       LEASE_DURATION: "PT5M10S",
       LEASE_RENEWAL_DURATION: "PT30M",
       LEASE_MAX_TOTAL_DURATION: "PT4H",
-      ALLOWED_ORIGINS: site.origin,
       // Mirror of examples/book-repo book.yml `show_public_annotations: true`
       // (contract §2.1): signed-out readers get read-only annotation lists.
       PUBLIC_ANNOTATIONS: "true",
@@ -134,18 +134,24 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     stdio: ["ignore", "inherit", "inherit"],
   });
   await waitForApi(apiOrigin);
+  // The site origin now answers /v1/* too — one origin, as deployed.
+  site.setApiTarget({ host: "127.0.0.1", port: apiPort });
+  await waitForApi(site.origin);
 
-  // 4. build the site: collab-enabled (served) + api-url-less (regression)
+  // 4. build the site: collab-enabled (served) + api-url-less (regression).
+  // `api_url: "/"` is the only accepted shape now (ADR-0019 §5).
   await execFileAsync(
     process.execPath,
-    [buildSitesJs, JSON.stringify({ repoDir, siteDir, plainDir, apiUrl: apiOrigin })],
+    [buildSitesJs, JSON.stringify({ repoDir, siteDir, plainDir, apiUrl: "/" })],
     { maxBuffer: 16 * 1024 * 1024 },
   );
   site.setRoot(siteDir);
 
-  // 5. hand the handles to the workers
+  // 5. hand the handles to the workers. The API url IS the site url: the
+  //    helpers' direct `fetch` calls go through the same origin the browser
+  //    uses, so their Origin headers satisfy the CSRF check for real.
   process.env[ENV.siteUrl] = site.origin;
-  process.env[ENV.apiUrl] = apiOrigin;
+  process.env[ENV.apiUrl] = site.origin;
   process.env[ENV.plainDir] = plainDir;
   process.env[ENV.repoDir] = repoDir;
   process.env[ENV.siteDir] = siteDir;

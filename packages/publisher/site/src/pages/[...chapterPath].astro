@@ -27,7 +27,8 @@ const showFooter = site.book.showRevision || site.book.showAttribution;
 const collab = site.collab;
 const csp = collab
   ? "default-src 'self'; " +
-    `connect-src 'self'${collab.apiOrigin ? ` ${collab.apiOrigin}` : ""}; ` +
+    // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
+    "connect-src 'self'; " +
     "img-src 'self' data:"
   : undefined;
 const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;

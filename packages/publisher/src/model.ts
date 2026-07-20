@@ -97,13 +97,16 @@ export interface SiteCharacter {
  * byte-comparable with a pre-2b build.
  */
 export interface SiteCollab {
-  /** API base URL exactly as configured, without a trailing slash. */
-  apiBase: string;
   /**
-   * Origin for the CSP `connect-src` directive (contract §3), or null when
-   * `apiBase` is a same-origin path (covered by `'self'`).
+   * Root-relative API base path, normalized (ADR-0019 §5): `""` when the API
+   * is at the origin root, otherwise a leading-slash, no-trailing-slash prefix
+   * such as `/my-book`. The islands build every request URL as
+   * `${apiBase}/v1/...`, so this must match the Worker's `API_BASE_PATH`.
+   *
+   * There is no companion origin: the API is always same-origin with the site,
+   * so the CSP `connect-src 'self'` covers it (ADR-0019 §1).
    */
-  apiOrigin: string | null;
+  apiBase: string;
   /** Project path parameter for `/v1/projects/{projectId}` (the book slug). */
   projectSlug: string;
   /** `publication.show_public_annotations` (default false). */

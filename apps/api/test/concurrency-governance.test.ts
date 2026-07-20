@@ -55,15 +55,21 @@ function siblingApp(h: TestHarness): Hono<AppEnv> {
   return createApi(deps).app;
 }
 
-/** Cross the default rule (approvals >= 3, net >= 2, human_approvals >= 1). */
+/**
+ * Two approvals in place, so a third crosses the default rule
+ * (approvals >= 3, net >= 2, human_approvals >= 1, and — Phase 6 contract
+ * §3.6 — human_maintainer_approvals >= 1). The maintainer casts one of the two
+ * seeded approvals so the crossing vote itself can come from any contributor;
+ * these tests are about the concurrency of the crossing, not about who is
+ * allowed to cause it.
+ */
 async function seedTwoApprovals(h: TestHarness): Promise<{ id: string; third: string; maintainer: string }> {
   const author = await devLogin(h, "author", "contributor");
-  const bella = await devLogin(h, "bella", "contributor");
   const third = await devLogin(h, "cyril", "contributor");
   const maintainer = await devLogin(h, "maeve", "maintainer");
   const id = await createOpenSuggestion(h, author);
   await castVote(h, author, id, "approve");
-  await castVote(h, bella, id, "approve");
+  await castVote(h, maintainer, id, "approve");
   return { id, third, maintainer };
 }
 

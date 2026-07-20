@@ -71,12 +71,22 @@ export function basePathOf(baseUrl: string | undefined): string {
   return base;
 }
 
+/** One base-path segment: no slashes, no encoding tricks, no dot-segments. */
+const API_BASE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._~-]*$/;
+
 /**
- * Resolve the collaboration config (Phase 2b contract §1): the `--api-url`
- * flag overrides `publication.api_url`; absent both, collaboration is off and
- * the build stays byte-comparable with a pre-2b site. An absolute URL yields
- * the CSP `connect-src` origin; a root-relative path means same-origin
- * deployment (already covered by `'self'`).
+ * Resolve the collaboration config (Phase 2b contract §1, as amended by
+ * ADR-0019): the `--api-url` flag overrides `publication.api_url`; absent
+ * both, collaboration is off and the build stays byte-comparable with a pre-2b
+ * site.
+ *
+ * **Only a root-relative path is accepted** — `/` for an API at the origin
+ * root, or a base path such as `/my-book` for a book served under a subpath
+ * (ADR-0019 §5-§6). An absolute http(s) URL is rejected at build time: the API
+ * is same-origin with the site by design, so an absolute URL is either
+ * redundant or describes a deployment shape that no longer exists, and
+ * discovering that at build time beats discovering it as a browser CORS error
+ * after publishing.
  */
 export function resolveCollab(
   book: BookConfig,
@@ -86,30 +96,54 @@ export function resolveCollab(
   if (configured === undefined || configured === "") {
     return null;
   }
-  const apiBase = configured.replace(/\/+$/, "");
-  let apiOrigin: string | null = null;
-  if (apiBase === "" && configured.startsWith("/")) {
-    // `--api-url /` (or api_url: "/"): the API is mounted at the site
-    // origin's root. The empty base yields correct relative URLs (`/v1/...`)
-    // and same-origin CSP (`'self'` already covers it).
-  } else if (/^https?:\/\//i.test(apiBase)) {
-    try {
-      apiOrigin = new URL(apiBase).origin;
-    } catch {
-      throw new PublisherError(`api url "${configured}" is not a valid URL`);
-    }
-  } else if (!apiBase.startsWith("/")) {
-    throw new PublisherError(
-      `api url "${configured}" must be an absolute http(s) URL or a root-relative path`,
-    );
-  }
   return {
-    apiBase,
-    apiOrigin,
+    apiBase: normalizeApiBase(configured),
     projectSlug: book.slug,
     showPublicAnnotations: book.publication?.show_public_annotations === true,
     devLogin: options.devLogin === true,
   };
+}
+
+/**
+ * `publication.api_url` → the prefix the islands build every request URL from
+ * (`${apiBase}/v1/...`). `"/"` yields `""`; `"/my-book/"` yields `"/my-book"`.
+ * Must agree with the Worker's `API_BASE_PATH`.
+ */
+export function normalizeApiBase(configured: string): string {
+  const value = configured.trim();
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) {
+    throw new PublisherError(
+      `api url "${configured}" must be a root-relative path such as "/" or "/my-book", ` +
+        `not an absolute URL. Authorbot serves the collaboration API from the same origin ` +
+        `as the published site; cross-origin deployment is not supported (ADR-0019).`,
+    );
+  }
+  if (!value.startsWith("/")) {
+    throw new PublisherError(
+      `api url "${configured}" must be a root-relative path starting with "/" (ADR-0019)`,
+    );
+  }
+  if (value.includes("?") || value.includes("#")) {
+    throw new PublisherError(
+      `api url "${configured}" must not contain a query string or fragment`,
+    );
+  }
+  const trimmed = value.replace(/\/+$/, "");
+  if (trimmed === "") {
+    // `/`: the API is mounted at the site origin's root. The empty base
+    // yields correct root-relative URLs (`/v1/...`).
+    return "";
+  }
+  const segments = trimmed.slice(1).split("/");
+  for (const segment of segments) {
+    if (!API_BASE_SEGMENT.test(segment) || segment === "." || segment === "..") {
+      throw new PublisherError(
+        `api url "${configured}" has an invalid path segment "${segment}" ` +
+          `(expected segments of [A-Za-z0-9._~-], no empty or dot segments)`,
+      );
+    }
+  }
+  return `/${segments.join("/")}`;
 }
 
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;

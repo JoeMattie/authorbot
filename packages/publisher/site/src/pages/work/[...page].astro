@@ -25,7 +25,8 @@ if (collab === null) {
 
 const csp =
   "default-src 'self'; " +
-  `connect-src 'self'${collab.apiOrigin ? ` ${collab.apiOrigin}` : ""}; ` +
+  // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
+  "connect-src 'self'; " +
   "img-src 'self' data:";
 const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
 const src = `${site.basePath}_astro/authorbot-collab.js`;

@@ -27,6 +27,7 @@ import {
   type DrainResult,
   type Processor,
 } from "@authorbot/repo-coordinator";
+import { createChapterComposer } from "./chapter-composer.js";
 import type { Clock } from "./deps.js";
 import { finalizeSubmissionOutcomes } from "./reanchor.js";
 import { createSubmissionApplier } from "./submission-applier.js";
@@ -63,6 +64,7 @@ export function createDrainRunner(options: DrainRunnerOptions): DrainRunner {
     writer: options.writer,
     clock,
     submissionApplier: createSubmissionApplier({ db: options.db, writer: options.writer, clock }),
+    chapterComposer: createChapterComposer({ db: options.db, writer: options.writer, clock }),
     ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
     ...(options.pausedKinds !== undefined ? { pausedKinds: options.pausedKinds } : {}),
   });

@@ -8,12 +8,26 @@
  *
  * Mirrors `@authorbot/rule-engine` metric semantics exactly: `net_score` =
  * approvals − rejections; `system` approvals count toward `approvals` only,
- * never the human/agent split.
+ * never the human/agent split; a maintainer's approval counts toward
+ * `maintainer_approvals`, and toward `human_maintainer_approvals` only when
+ * the maintainer is a human actor (Phase 6 contract §3.6).
  */
 import type { VoteTally } from "@authorbot/database";
 import type { VoteValue } from "@authorbot/domain";
 
 export type VoterActorType = "human" | "agent" | "system";
+
+/**
+ * Who is voting, as far as the metrics care (Phase 6 contract §3.6). `role` is
+ * the voter's *current* project role, read from the request's auth context —
+ * the same source the SQL tally's membership join reads, so the prospective
+ * adjustment and the next SQL tally cannot disagree about who is a maintainer.
+ */
+export interface Voter {
+  readonly actorType: VoterActorType;
+  /** Current project role, or null for a non-member. */
+  readonly role: string | null;
+}
 
 function apply(
   tally: {
@@ -22,16 +36,24 @@ function apply(
     abstentions: number;
     humanApprovals: number;
     agentApprovals: number;
+    maintainerApprovals: number;
+    humanMaintainerApprovals: number;
   },
-  actorType: VoterActorType,
+  voter: Voter,
   value: VoteValue,
   delta: 1 | -1,
 ): void {
+  const { actorType } = voter;
+  const isMaintainer = voter.role === "maintainer";
   switch (value) {
     case "approve":
       tally.approvals += delta;
       if (actorType === "human") tally.humanApprovals += delta;
       if (actorType === "agent") tally.agentApprovals += delta;
+      if (isMaintainer) {
+        tally.maintainerApprovals += delta;
+        if (actorType === "human") tally.humanMaintainerApprovals += delta;
+      }
       break;
     case "reject":
       tally.rejections += delta;
@@ -43,21 +65,21 @@ function apply(
 }
 
 /**
- * The tally after `actorType`'s vote changes from `previous` to `next`
+ * The tally after `voter`'s vote changes from `previous` to `next`
  * (`null` = no vote). Pure; the input tally is not mutated.
  */
 export function adjustTally(
   base: VoteTally,
-  actorType: VoterActorType,
+  voter: Voter,
   previous: VoteValue | null,
   next: VoteValue | null,
 ): VoteTally {
   const tally = { ...base };
   if (previous !== null) {
-    apply(tally, actorType, previous, -1);
+    apply(tally, voter, previous, -1);
   }
   if (next !== null) {
-    apply(tally, actorType, next, 1);
+    apply(tally, voter, next, 1);
   }
   if (previous === null && next !== null) {
     tally.distinctVoters += 1;
@@ -79,6 +101,8 @@ export function tallyToMetrics(tally: VoteTally): Record<string, number> {
     distinct_voters: tally.distinctVoters,
     human_approvals: tally.humanApprovals,
     agent_approvals: tally.agentApprovals,
+    maintainer_approvals: tally.maintainerApprovals,
+    human_maintainer_approvals: tally.humanMaintainerApprovals,
   };
 }
 
@@ -92,5 +116,7 @@ export function tallyJson(tally: VoteTally): Record<string, number> {
     distinctVoters: tally.distinctVoters,
     humanApprovals: tally.humanApprovals,
     agentApprovals: tally.agentApprovals,
+    maintainerApprovals: tally.maintainerApprovals,
+    humanMaintainerApprovals: tally.humanMaintainerApprovals,
   };
 }
