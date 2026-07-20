@@ -250,6 +250,25 @@ describe("buildSite on examples/book-repo", () => {
     expect(character).toContain('href="/chapters/baseline/"');
   });
 
+  it("renders the GFM table and strikethrough on the character page", async () => {
+    const page = await readFile(
+      path.join(outDefault, "story/characters/mara-voss/index.html"),
+      "utf8",
+    );
+    // The drift ledger renders as a real table with a header row.
+    expect(page).toContain('<div class="table-wrap"><table>');
+    expect(page).toContain('<th scope="col"');
+    expect(page).toContain("within tolerance");
+    // Column alignment from the delimiter row survives.
+    expect(page).toContain('style="text-align:right"');
+    // Strikethrough renders as <del>, tildes gone.
+    expect(page).toContain("<del>instrument error</del>");
+    expect(page).not.toContain("~~");
+    // No raw pipe characters leak into the visible prose.
+    const visibleText = page.replace(/<[^>]*>/g, "");
+    expect(visibleText).not.toContain("|");
+  });
+
   it("keeps the draft chapter's title and reveals out of the public story views", async () => {
     // Regression: the outline used to show the draft chapter's node and its
     // scene, and the timeline used to fall back to the excluded chapter's

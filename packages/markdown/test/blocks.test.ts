@@ -189,6 +189,36 @@ describe("extractBlocks", () => {
     expect(blocks.unmarked).toHaveLength(0);
   });
 
+  it("parses an unmarked GFM table as a table block that needs no marker", () => {
+    // Regression: without remark-gfm the pipe rows parsed as paragraphs, so
+    // an unmarked table reported BLOCK_ID_MISSING for its rows.
+    const source = [
+      "| Night | Drift |",
+      "|---|---|",
+      "| 112 | 0.4 |",
+      "",
+    ].join("\n");
+    const { blocks, ast } = parseChapterMarkdown(source);
+    expect(ast.children.map((child) => child.type)).toEqual(["table"]);
+    expect(blocks.unmarked).toHaveLength(0);
+    expect(blocks.malformed).toHaveLength(0);
+  });
+
+  it("associates a marker directly above a table as blockType table", () => {
+    const source = [
+      markerLine(UUID_A),
+      "| a | b |",
+      "|---|---|",
+      "| 1 | 2 |",
+      "",
+    ].join("\n");
+    const { blocks } = parseChapterMarkdown(source);
+    expect(blocks.markers).toHaveLength(1);
+    expect(blocks.markers[0]).toMatchObject({ id: UUID_A, valid: true, blockType: "table" });
+    expect(blocks.unmarked).toHaveLength(0);
+    expect(blocks.malformed).toHaveLength(0);
+  });
+
   it("accepts a marker before a list as an optional association", () => {
     const source = [markerLine(UUID_A), "- item one", "- item two", ""].join("\n");
     const { blocks } = parseChapterMarkdown(source);

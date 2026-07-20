@@ -1,5 +1,6 @@
 import type { Root } from "mdast";
 import remarkFrontmatter from "remark-frontmatter";
+import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { parse as parseYaml } from "yaml";
@@ -20,7 +21,16 @@ export interface ParsedChapter {
   blocks: BlockScanResult;
 }
 
-const processor = unified().use(remarkParse).use(remarkFrontmatter, ["yaml"]);
+/**
+ * GFM (tables, strikethrough, autolink literals, task lists, footnotes) is
+ * part of the dialect: published sites render pipe tables, and the safety
+ * scan sees autolink literals as ordinary `link` nodes so the URL-scheme
+ * check applies to them unchanged.
+ */
+const processor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkFrontmatter, ["yaml"]);
 
 /** Parse a chapter Markdown file: frontmatter, mdast tree, and block markers. */
 export function parseChapterMarkdown(source: string): ParsedChapter {

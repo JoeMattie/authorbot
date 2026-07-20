@@ -222,3 +222,99 @@ describe("renderMarkdownToHtml — structure", () => {
     expect(html).toContain("x");
   });
 });
+
+describe("renderMarkdownToHtml — GFM", () => {
+  const table = [
+    "| Left | Center | Right | Default |",
+    "|:-----|:------:|------:|---------|",
+    "| a | b | c | d |",
+    "",
+  ].join("\n");
+
+  it("renders tables with a header row of <th scope=\"col\"> in a scroll wrapper", () => {
+    const html = renderMarkdownToHtml(table);
+    expect(html).toContain('<div class="table-wrap"><table>');
+    expect(html).toContain("<thead>");
+    expect(html).toContain('<th scope="col" style="text-align:left">Left</th>');
+    expect(html).toContain("<tbody>");
+    expect(html).toContain("</table></div>");
+    // No pipe characters survive into the rendered output.
+    expect(html).not.toContain("|");
+  });
+
+  it("honors the align array per column and omits style for default columns", () => {
+    const html = renderMarkdownToHtml(table);
+    expect(html).toContain('<th scope="col" style="text-align:center">Center</th>');
+    expect(html).toContain('<th scope="col" style="text-align:right">Right</th>');
+    expect(html).toContain('<th scope="col">Default</th>');
+    expect(html).toContain('<td style="text-align:left">a</td>');
+    expect(html).toContain("<td>d</td>");
+  });
+
+  it("escapes text and drops forbidden links inside table cells", () => {
+    const html = renderMarkdownToHtml(
+      [
+        "| Name | Link |",
+        "|---|---|",
+        '| <script>alert(1)</script> | [click](javascript:alert(1)) |',
+        "",
+      ].join("\n"),
+    );
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<a");
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain("<td>click</td>");
+  });
+
+  it("anchors a marked table on the wrapper exactly once", () => {
+    const html = renderMarkdownToHtml(`${marker(B1)}\n${table}`);
+    expect(html).toContain(`<div class="table-wrap" id="b-${B1}"><table>`);
+    expect(html.match(new RegExp(`id="b-${B1}"`, "g"))).toHaveLength(1);
+    expect(html).not.toContain("authorbot");
+  });
+
+  it("renders strikethrough as <del>", () => {
+    const html = renderMarkdownToHtml("Keep ~~drop this~~ the rest.");
+    expect(html).toContain("Keep <del>drop this</del> the rest.");
+  });
+
+  it("renders task-list items as disabled checkboxes without any script", () => {
+    const html = renderMarkdownToHtml("- [x] logged\n- [ ] explained\n");
+    expect(html).toContain('<ul class="task-list">');
+    expect(html).toContain(
+      '<li class="task-item"><input type="checkbox" disabled checked /> logged</li>',
+    );
+    expect(html).toContain(
+      '<li class="task-item"><input type="checkbox" disabled /> explained</li>',
+    );
+    expect(html).not.toContain("<script");
+  });
+
+  it("renders autolink literals as links subject to the scheme allow-list", () => {
+    const html = renderMarkdownToHtml("See www.example.com or joe@example.com.");
+    expect(html).toContain('<a href="http://www.example.com">www.example.com</a>');
+    expect(html).toContain('<a href="mailto:joe@example.com">joe@example.com</a>');
+  });
+
+  it("renders footnotes as sup links plus an endnote list with back links", () => {
+    const html = renderMarkdownToHtml(
+      "A claim[^n] repeated[^n].\n\n[^n]: The <em>note</em>.\n",
+    );
+    expect(html).toContain('<sup class="footnote-ref"><a href="#fn-1" id="fnref-1">1</a></sup>');
+    // The second reference links to the same note without duplicating the id.
+    expect(html.match(/id="fnref-1"/g)).toHaveLength(1);
+    expect(html.match(/href="#fn-1"/g)).toHaveLength(2);
+    expect(html).toContain('<li id="fn-1">');
+    expect(html).toContain('href="#fnref-1"');
+    // Footnote bodies go through the same escaping as everything else.
+    expect(html).toContain("&lt;em&gt;note&lt;/em&gt;");
+  });
+
+  it("strips unreferenced footnote definitions without crashing", () => {
+    const html = renderMarkdownToHtml("Plain prose.\n\n[^ghost]: Never referenced.\n");
+    expect(html).toContain("<p>Plain prose.</p>");
+    expect(html).not.toContain("Never referenced");
+    expect(html).not.toContain("footnotes");
+  });
+});

@@ -15,3 +15,11 @@ which is why the drift folder exists at all.
 
 Voice notes: dry, precise, allergic to adjectives. She names files in
 capital letters and people by their full names until she likes them.
+
+The first page of the drift folder is a ledger she refuses to call a diary:
+
+| Night | Drift (arcsec) | Disposition |
+|------:|:---------------|:------------|
+| 112 | 0.4 | within tolerance |
+| 113 | 1.7 | ~~instrument error~~ confirmed on the second pass |
+| 114 | 1.7 | logged, not explained |

@@ -5,12 +5,16 @@ import {
   parseChapterMarkdown,
 } from "@authorbot/markdown";
 import type {
+  AlignType,
   Definition,
+  FootnoteDefinition,
   Image,
   Link,
   Nodes,
   Root,
   RootContent,
+  Table,
+  TableCell,
 } from "mdast";
 import type { Position } from "unist";
 
@@ -87,6 +91,12 @@ interface RenderState {
    */
   anchors: Map<string, string>;
   definitions: ReadonlyMap<string, Definition>;
+  /** Footnote definitions by lowercased identifier (first definition wins). */
+  footnoteDefinitions: ReadonlyMap<string, FootnoteDefinition>;
+  /** Identifiers in order of first reference; index + 1 is the shown number. */
+  footnoteOrder: readonly string[];
+  /** Identifiers whose first reference already emitted the `fnref` id. */
+  footnoteRefsEmitted: Set<string>;
 }
 
 /** ` id="b-<uuid>"` when the node is an anchored semantic block, else "". */
@@ -131,6 +141,89 @@ function renderImage(node: Image): string {
   return `<img src="${escapeHtml(node.url)}" alt="${escapeHtml(alt)}"${title} />`;
 }
 
+/** `style="text-align:…"` for an aligned column; attribute-free otherwise. */
+function alignAttr(align: AlignType | undefined): string {
+  return align === "left" || align === "center" || align === "right"
+    ? ` style="text-align:${align}"`
+    : "";
+}
+
+function renderTableCell(
+  node: TableCell,
+  align: AlignType | undefined,
+  tag: "th" | "td",
+  state: RenderState,
+): string {
+  const scope = tag === "th" ? ' scope="col"' : "";
+  return `<${tag}${scope}${alignAttr(align)}>${renderChildren(node, state)}</${tag}>`;
+}
+
+/**
+ * GFM table: the first row is the header (`<th scope="col">`), the mdast
+ * `align` array styles each column, and the whole table sits in a
+ * `<div class="table-wrap">` so wide tables scroll inside their own box
+ * instead of breaking the reading measure. A marker directly above the
+ * table anchors the wrapper.
+ */
+function renderTable(node: Table, state: RenderState): string {
+  const anchor = anchorAttr(node, state);
+  const align = node.align ?? [];
+  const [head, ...body] = node.children;
+  const row = (cells: string): string => `<tr>${cells}</tr>\n`;
+  let html = `<div class="table-wrap"${anchor}><table>\n`;
+  if (head !== undefined) {
+    html += `<thead>\n${row(
+      head.children
+        .map((cell, index) => renderTableCell(cell, align[index], "th", state))
+        .join(""),
+    )}</thead>\n`;
+  }
+  if (body.length > 0) {
+    html += `<tbody>\n${body
+      .map((bodyRow) =>
+        row(
+          bodyRow.children
+            .map((cell, index) => renderTableCell(cell, align[index], "td", state))
+            .join(""),
+        ),
+      )
+      .join("")}</tbody>\n`;
+  }
+  return `${html}</table></div>\n`;
+}
+
+/**
+ * Trailing footnote section: an `<ol>` of the definitions that were actually
+ * referenced, in first-reference order, each with a back link to the first
+ * reference. Unreferenced definitions are stripped.
+ */
+function renderFootnoteSection(state: RenderState): string {
+  const items = state.footnoteOrder
+    .map((identifier, index) => {
+      const definition = state.footnoteDefinitions.get(identifier);
+      if (definition === undefined) {
+        return "";
+      }
+      const number = index + 1;
+      const body = definition.children
+        .map((child) => renderNode(child, state))
+        .join("")
+        .trimEnd();
+      const backLink = `<a href="#fnref-${number}" class="footnote-back" aria-label="Back to reference ${number}">↩</a>`;
+      // The back link nests inside a trailing paragraph when one exists so it
+      // sits on the note's last line.
+      const item = body.endsWith("</p>")
+        ? `${body.slice(0, -"</p>".length)} ${backLink}</p>`
+        : `${body} ${backLink}`;
+      return `<li id="fn-${number}">${item}</li>\n`;
+    })
+    .join("");
+  if (items === "") {
+    return "";
+  }
+  return `<section class="footnotes" role="doc-endnotes">\n<ol>\n${items}</ol>\n</section>\n`;
+}
+
 function renderNode(node: Nodes, state: RenderState): string {
   switch (node.type) {
     case "yaml":
@@ -170,7 +263,12 @@ function renderNode(node: Nodes, state: RenderState): string {
             : ` start="${node.start}"`;
         return `<ol${anchor}${start}>\n${inner}</ol>\n`;
       }
-      return `<ul${anchor}>\n${inner}</ul>\n`;
+      // A GFM task list gets a class so the stylesheet can hide the bullets
+      // that would double up with the checkboxes.
+      const taskList = node.children.some(
+        (item) => item.checked === true || item.checked === false,
+      );
+      return `<ul${anchor}${taskList ? ' class="task-list"' : ""}>\n${inner}</ul>\n`;
     }
     case "listItem": {
       // A marker opening a list item associates with the item's first block;
@@ -193,7 +291,15 @@ function renderNode(node: Nodes, state: RenderState): string {
           return renderNode(child, state);
         })
         .join("");
-      return `<li${anchor}>${inner}</li>\n`;
+      // GFM task-list item: a native disabled checkbox needs no client JS
+      // (Phase 1 emits none) and exposes its checked state to assistive
+      // technology on its own, so no extra aria attributes are required.
+      const isTask = node.checked === true || node.checked === false;
+      const checkbox = isTask
+        ? `<input type="checkbox" disabled${node.checked === true ? " checked" : ""} /> `
+        : "";
+      const taskClass = isTask ? ' class="task-item"' : "";
+      return `<li${anchor}${taskClass}>${checkbox}${inner}</li>\n`;
     }
     case "thematicBreak":
       return "<hr />\n";
@@ -240,6 +346,31 @@ function renderNode(node: Nodes, state: RenderState): string {
     }
     case "definition":
       return "";
+    case "table":
+      return renderTable(node, state);
+    case "tableRow":
+      // Orphan row outside a table (defensive; renderTable owns normal rows).
+      return `<tr>${node.children
+        .map((cell) => renderTableCell(cell, undefined, "td", state))
+        .join("")}</tr>\n`;
+    case "tableCell":
+      return renderTableCell(node, undefined, "td", state);
+    case "footnoteReference": {
+      const key = node.identifier.toLowerCase();
+      const index = state.footnoteOrder.indexOf(key);
+      if (index === -1 || !state.footnoteDefinitions.has(key)) {
+        // No definition (defensive): keep the source spelling as plain text.
+        return escapeHtml(`[^${node.label ?? node.identifier}]`);
+      }
+      const number = index + 1;
+      // Only the first reference carries the fnref id (ids must be unique);
+      // later references still link to the same note.
+      const idAttr = state.footnoteRefsEmitted.has(key) ? "" : ` id="fnref-${number}"`;
+      state.footnoteRefsEmitted.add(key);
+      return `<sup class="footnote-ref"><a href="#fn-${number}"${idAttr}>${number}</a></sup>`;
+    }
+    case "footnoteDefinition":
+      return ""; // rendered by renderFootnoteSection at the end of the document
     default: {
       // Unknown containers render their children; unknown leaves render
       // nothing. Nothing unescaped can escape through here.
@@ -252,13 +383,34 @@ function renderNode(node: Nodes, state: RenderState): string {
   }
 }
 
-function collectDefinitions(ast: Root): Map<string, Definition> {
+interface CollectedFootnotes {
+  definitions: Map<string, FootnoteDefinition>;
+  /** Identifiers in order of first reference (defined-and-referenced only). */
+  order: string[];
+}
+
+function collectDefinitions(ast: Root): {
+  definitions: Map<string, Definition>;
+  footnotes: CollectedFootnotes;
+} {
   const definitions = new Map<string, Definition>();
+  const footnoteDefinitions = new Map<string, FootnoteDefinition>();
+  const referenceOrder: string[] = [];
   const walk = (node: Nodes): void => {
     if (node.type === "definition") {
       const key = node.identifier.toLowerCase();
       if (!definitions.has(key)) {
         definitions.set(key, node);
+      }
+    } else if (node.type === "footnoteDefinition") {
+      const key = node.identifier.toLowerCase();
+      if (!footnoteDefinitions.has(key)) {
+        footnoteDefinitions.set(key, node);
+      }
+    } else if (node.type === "footnoteReference") {
+      const key = node.identifier.toLowerCase();
+      if (!referenceOrder.includes(key)) {
+        referenceOrder.push(key);
       }
     }
     const children = (node as { children?: Nodes[] }).children;
@@ -269,19 +421,30 @@ function collectDefinitions(ast: Root): Map<string, Definition> {
     }
   };
   walk(ast);
-  return definitions;
+  return {
+    definitions,
+    footnotes: {
+      definitions: footnoteDefinitions,
+      order: referenceOrder.filter((key) => footnoteDefinitions.has(key)),
+    },
+  };
 }
 
 /** Render a parsed chapter/character mdast tree to sanitized HTML. */
 export function renderAstToHtml(ast: Root, options: RenderOptions = {}): string {
+  const { definitions, footnotes } = collectDefinitions(ast);
   const state: RenderState = {
     rawHtmlAllowed: options.rawHtmlAllowed === true,
     anchors: buildAnchorMap(ast),
-    definitions: collectDefinitions(ast),
+    definitions,
+    footnoteDefinitions: footnotes.definitions,
+    footnoteOrder: footnotes.order,
+    footnoteRefsEmitted: new Set(),
   };
-  return (ast.children as RootContent[])
+  const body = (ast.children as RootContent[])
     .map((child) => renderNode(child, state))
     .join("");
+  return body + renderFootnoteSection(state);
 }
 
 /** Parse Markdown source (frontmatter tolerated) and render it. */

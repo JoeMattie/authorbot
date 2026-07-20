@@ -75,6 +75,31 @@ describe("scanSafety URL schemes", () => {
     expect(scan(source).forbiddenUrls).toHaveLength(0);
   });
 
+  it("catches a javascript: link inside a GFM table cell", () => {
+    const source = [
+      "| Name | Link |",
+      "|---|---|",
+      "| evil | [click](javascript:alert(1)) |",
+      "",
+    ].join("\n");
+    const result = scan(source);
+    expect(result.forbiddenUrls).toHaveLength(1);
+    expect(result.forbiddenUrls[0]).toMatchObject({ scheme: "javascript", nodeType: "link" });
+  });
+
+  it("catches a forbidden link nested inside GFM strikethrough", () => {
+    const result = scan("~~old [ref](vbscript:evil)~~ replaced.\n");
+    expect(result.forbiddenUrls).toHaveLength(1);
+    expect(result.forbiddenUrls[0]).toMatchObject({ scheme: "vbscript", nodeType: "link" });
+  });
+
+  it("passes GFM autolink literals through the URL-scheme check as links", () => {
+    // Autolink literals become ordinary link nodes; www./http(s)/mailto forms
+    // are all inside the allow-list, so they produce no findings.
+    const source = "See www.example.com or https://example.com or joe@example.com.\n";
+    expect(scan(source).forbiddenUrls).toHaveLength(0);
+  });
+
   it("is not fooled by case or embedded control characters", () => {
     expect(forbiddenUrlScheme("JavaScript:alert(1)")).toBe("javascript");
     expect(forbiddenUrlScheme("java\nscript:alert(1)")).toBe("javascript");

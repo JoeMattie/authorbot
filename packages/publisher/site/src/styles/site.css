@@ -232,6 +232,59 @@ h1:first-child,
 }
 
 /*
+ * GFM tables in prose. The wrapper scrolls so a wide table never breaks the
+ * reading measure; colors come from the scheme variables, so light and dark
+ * both hold.
+ */
+.prose .table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 1.25em 0;
+}
+
+.prose .table-wrap table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+
+.prose .table-wrap th,
+.prose .table-wrap td {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose .table-wrap thead th {
+  background: var(--surface);
+  font-weight: 600;
+}
+
+/* GFM task lists: the checkbox replaces the bullet. */
+.prose ul.task-list {
+  list-style: none;
+  padding-left: 0.5rem;
+}
+
+.prose li.task-item input[type="checkbox"] {
+  margin-right: 0.4rem;
+}
+
+/* GFM footnotes. */
+.prose .footnotes {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.prose .footnote-ref a {
+  text-decoration: none;
+}
+
+/*
  * Anchor targets: following a #b-<uuid> link must visibly mark the block,
  * with a non-color cue (design section 16.6: never rely on color alone —
  * and the surface tint alone is ~1.1:1 against the page background).
