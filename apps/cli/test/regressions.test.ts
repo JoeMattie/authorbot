@@ -316,6 +316,41 @@ describe("duplicate record ids across files", () => {
   });
 });
 
+describe("maintainer force-create decision (rule_version 0, contract §4)", () => {
+  it("validates cleanly — `authorbot validate` accepts rule_version 0", async () => {
+    const root = await makeRepo();
+    const annId = "019de29b-0000-7000-8000-000000000001";
+    const wid = "019de29b-0000-7000-8000-000000000002";
+    const decId = "019de29b-0000-7000-8000-000000000003";
+    await writeAnnotation(root, annId, annotationFm(annId, "scope: chapter"));
+    await mkdir(path.join(root, ".authorbot", "work-items"), { recursive: true });
+    await writeFile(path.join(root, ".authorbot", "work-items", `${wid}.md`), workItemFm(wid), "utf8");
+    await mkdir(path.join(root, ".authorbot", "decisions"), { recursive: true });
+    await writeFile(
+      path.join(root, ".authorbot", "decisions", `${decId}.yml`),
+      [
+        "schema: authorbot.decision/v1",
+        `id: ${decId}`,
+        `source_annotation_id: ${annId}`,
+        "rule: maintainer_override",
+        "rule_version: 0",
+        "metrics:",
+        "  approvals: 1",
+        "result: create_work_item",
+        `work_item_id: ${wid}`,
+        "effective_at: 2026-05-03T10:00:00Z",
+        "override_reason: editorial call",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const report = await validateBookRepo(root);
+    expect(errorCodes(report)).not.toContain("DECISION_INVALID");
+    expect(errorCodes(report)).not.toContain("DECISION_REF_UNRESOLVED");
+    expect(report.valid).toBe(true);
+  });
+});
+
 describe("reply thread consistency", () => {
   it("rejects a reply whose annotation_id names a different annotation", async () => {
     const root = await makeRepo();

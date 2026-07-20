@@ -17,8 +17,10 @@ import { stackCards, type StackItem } from "./anchor.js";
 import {
   CollabApi,
   type Annotation,
+  type FeedEvent,
   type Me,
   type Reply,
+  type VoteValue,
 } from "./api.js";
 import {
   CLOSED,
@@ -29,7 +31,9 @@ import {
   type ComposerKind,
   type ComposerState,
 } from "./composer-state.js";
+import { CollabEvents } from "./events.js";
 import { captureRange, type CapturedSelection } from "./selection.js";
+import { VoteControl } from "./vote-control.js";
 
 interface Config {
   apiBase: string;
@@ -38,6 +42,15 @@ interface Config {
   chapterRevision: number;
   devLogin: boolean;
   showPublic: boolean;
+}
+
+/** What had keyboard focus before a full re-render, so it can be restored. */
+interface FocusRestore {
+  cardId: string;
+  index: number;
+  kind: string;
+  /** For `kind === "vote"`: the segment's `data-vote` value. */
+  voteValue?: string;
 }
 
 const DESKTOP_QUERY = "(min-width: 960px)";
@@ -129,6 +142,10 @@ export class AuthorbotCollab extends HTMLElement {
   private liveRegion!: HTMLElement;
   private selTool!: HTMLElement;
   private cardEls = new Map<string, HTMLElement>();
+  private voteControls = new Map<string, VoteControl>();
+  private events: CollabEvents | null = null;
+  private eventsStarted = false;
+  private refetchTimer: number | undefined;
 
   private composer: ComposerState = CLOSED;
   private composerEl: HTMLFormElement | null = null;
@@ -172,6 +189,11 @@ export class AuthorbotCollab extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.events?.stop();
+    this.events = null;
+    if (this.refetchTimer !== undefined) {
+      window.clearTimeout(this.refetchTimer);
+    }
     if (!this.scaffolded) {
       return;
     }
@@ -354,6 +376,12 @@ export class AuthorbotCollab extends HTMLElement {
       await this.loadAnnotations();
     }
     this.renderAll();
+    // Live tallies/decisions (contract §6): start the event feed once, after
+    // the authoritative first load. Anonymous readers of a public book stream
+    // public events too; the feed self-selects SSE with a poll fallback.
+    if (this.me !== null || cfg.showPublic) {
+      await this.startEvents();
+    }
   }
 
   private async loadAnnotations(): Promise<void> {
@@ -407,8 +435,111 @@ export class AuthorbotCollab extends HTMLElement {
     this.renderAll();
   }
 
+  // ---- votes (Phase 3 contract §2/§6) --------------------------------------
+
+  /** Cast (`value`) or clear (`null`) the viewer's vote on a suggestion. */
+  private async castVoteOn(annotationId: string, value: VoteValue | null): Promise<void> {
+    const annotation = this.annotations.find((a) => a.id === annotationId);
+    const control = this.voteControls.get(annotationId);
+    if (annotation === undefined || control === undefined) {
+      return;
+    }
+    control.setBusy(true);
+    const result = value === null
+      ? await this.api.clearVote(annotationId)
+      : await this.api.castVote(annotationId, value);
+    control.setBusy(false);
+    if (!result.ok) {
+      this.announce(this.friendlyWriteError(result.status, result.message));
+      return;
+    }
+    const hadDecision = annotation.decision != null;
+    annotation.votes = result.value.votes;
+    annotation.myVote = result.value.value;
+    annotation.decision = result.value.decision;
+    control.update(annotation);
+    this.announce(control.summary());
+    // A fresh crossing changes the annotation's server-side status; reconcile
+    // authoritative state so the card reflects it even if the feed is down.
+    if (!hadDecision && annotation.decision != null) {
+      this.announce("Threshold reached — queued as a work item.");
+      this.scheduleRefetch();
+    }
+  }
+
+  // ---- live event feed (Phase 3 contract §5) -------------------------------
+
+  private async startEvents(): Promise<void> {
+    if (this.eventsStarted || this.cfg === null) {
+      return;
+    }
+    this.eventsStarted = true;
+    // Prime the fallback cursor at the current head and probe feed support in
+    // one call: an API predating the feed answers non-ok, so no stream/poll
+    // is started and the page simply has no live updates.
+    const primed = await this.api.pollEvents(0);
+    if (!primed.ok) {
+      return;
+    }
+    this.events = new CollabEvents({
+      url: this.api.eventsUrl(),
+      initialCursor: primed.value.latestId,
+      onEvent: (event) => this.onFeedEvent(event),
+      onReconnect: () => this.scheduleRefetch(),
+      poll: async (after) => {
+        const result = await this.api.pollEvents(after);
+        return result.ok
+          ? { ok: true, items: result.value.items, latestId: result.value.latestId }
+          : { ok: false };
+      },
+    });
+    this.events.start();
+  }
+
+  private onFeedEvent(event: FeedEvent): void {
+    const payload = event.payload;
+    const annotationId =
+      typeof payload["annotationId"] === "string" ? payload["annotationId"] : null;
+    switch (event.type) {
+      case "vote_aggregate": {
+        // Live tally update in place — never a re-render, so a voter's keyboard
+        // focus on the segmented control is preserved (contract §6).
+        if (annotationId === null) {
+          break;
+        }
+        const annotation = this.annotations.find((a) => a.id === annotationId);
+        const votes = payload["votes"];
+        if (annotation !== undefined && typeof votes === "object" && votes !== null) {
+          annotation.votes = votes as NonNullable<Annotation["votes"]>;
+          this.voteControls.get(annotationId)?.update(annotation);
+        }
+        break;
+      }
+      case "decision_created":
+      case "decision_support_changed":
+      case "work_item_created":
+      case "annotation_created":
+        // Status/decision/membership of resources changed: refetch the
+        // authoritative annotations (events are notifications, not state).
+        this.scheduleRefetch();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private scheduleRefetch(): void {
+    window.clearTimeout(this.refetchTimer);
+    this.refetchTimer = window.setTimeout(() => void this.refetch(), 400);
+  }
+
   private canWrite(): boolean {
     return this.me !== null && this.me.scopes.includes("annotations:write");
+  }
+
+  /** Phase 3 contract §2/§6: vote controls are enabled only with this scope. */
+  private canVote(): boolean {
+    return this.me !== null && this.me.scopes.includes("votes:write");
   }
 
   /** Human copy for 401/403 write failures instead of raw problem details. */
@@ -469,7 +600,13 @@ export class AuthorbotCollab extends HTMLElement {
     const order = new Map(this.blocks.map((block, index) => [block.id.slice(2), index]));
     return this.annotations
       .filter((annotation) => {
-        if (annotation.status !== "open" && annotation.status !== "pending_git") {
+        // `work_item_created` stays visible so the suggestion keeps its
+        // "Queued as work item" badge and live tally (Phase 3 contract §6).
+        if (
+          annotation.status !== "open" &&
+          annotation.status !== "pending_git" &&
+          annotation.status !== "work_item_created"
+        ) {
           return false;
         }
         // Orphaned targets (block gone from this build) belong to a repair
@@ -814,6 +951,7 @@ export class AuthorbotCollab extends HTMLElement {
     const restore = this.captureFocus();
     this.renderAuthbar();
     this.cardEls.clear();
+    this.voteControls.clear();
     this.cardsHost.textContent = "";
     for (const annotation of this.visibleAnnotations()) {
       const card = this.buildCard(annotation);
@@ -879,29 +1017,36 @@ export class AuthorbotCollab extends HTMLElement {
    * card, which would otherwise drop keyboard/screen-reader focus to <body>
    * whenever an unrelated background sync settles.
    */
-  private captureFocus(): { cardId: string; index: number; kind: string } | null {
+  private captureFocus(): FocusRestore | null {
     const active = document.activeElement as HTMLElement | null;
     if (active === null || !this.cardsHost.contains(active)) {
       return null; // focus is elsewhere (composer, prose, …): leave it alone
     }
     for (const [id, card] of this.cardEls) {
       if (card === active || card.contains(active)) {
+        const voteButton = active.closest<HTMLElement>(".ab-vote-btn");
         const kind =
           active.tagName === "TEXTAREA"
             ? "textarea"
             : active.classList.contains("ab-danger")
               ? "danger"
-              : "card";
+              : voteButton !== null
+                ? "vote"
+                : "card";
         const index = this.visibleAnnotations().findIndex(
           (annotation) => annotation.id === id,
         );
-        return { cardId: id, index, kind };
+        const restore: FocusRestore = { cardId: id, index, kind };
+        if (voteButton !== null && voteButton.dataset.vote !== undefined) {
+          restore.voteValue = voteButton.dataset.vote;
+        }
+        return restore;
       }
     }
     return null;
   }
 
-  private restoreFocus(restore: { cardId: string; index: number; kind: string } | null): void {
+  private restoreFocus(restore: FocusRestore | null): void {
     if (restore === null) {
       return;
     }
@@ -911,6 +1056,17 @@ export class AuthorbotCollab extends HTMLElement {
     }
     const card = this.cardEls.get(restore.cardId);
     if (card !== undefined) {
+      // A focused vote segment must keep focus on the same segment across a
+      // live re-render (contract §6 keyboard-complete voting).
+      if (restore.kind === "vote" && restore.voteValue !== undefined) {
+        const segment = card.querySelector<HTMLButtonElement>(
+          `.ab-vote-btn[data-vote="${restore.voteValue}"]`,
+        );
+        if (segment !== null) {
+          segment.focus();
+          return;
+        }
+      }
       if (restore.kind === "textarea") {
         const textarea = card.querySelector("textarea");
         if (textarea !== null) {
@@ -1008,6 +1164,20 @@ export class AuthorbotCollab extends HTMLElement {
     card.append(el("p", "ab-body", annotation.body));
     if (status.hint !== null) {
       card.append(el("p", "ab-hint", status.hint));
+    }
+
+    // Suggestions carry the vote control + live tally + decision badge
+    // (Phase 3 contract §6). Comments never do.
+    if (annotation.kind === "suggestion") {
+      const control = new VoteControl({
+        canVote: this.canVote(),
+        signedIn: this.me !== null,
+        onVote: (value) => void this.castVoteOn(annotation.id, value),
+        onSignIn: () => this.promptSignIn(),
+      });
+      control.update(annotation);
+      this.voteControls.set(annotation.id, control);
+      card.append(control.root);
     }
 
     const replies = this.repliesByAnnotation.get(annotation.id) ?? [];

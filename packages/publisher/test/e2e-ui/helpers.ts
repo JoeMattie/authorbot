@@ -183,26 +183,36 @@ export async function selectInFirstBlock(page: Page, start: number, end: number)
   );
 }
 
+export const PROJECT = "hollow-creek-anomaly";
+
+/** Dev-login straight against the API; returns the session cookie for reuse. */
+export async function loginCookie(login: string, role = "contributor"): Promise<string> {
+  const loginResponse = await fetch(`${apiUrl()}/v1/dev/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: siteUrl() },
+    body: JSON.stringify({ login, role }),
+  });
+  if (!loginResponse.ok) {
+    throw new Error(`dev login failed: ${loginResponse.status}`);
+  }
+  return (loginResponse.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+}
+
 /**
  * Create an annotation directly against the API (dev login + cookie + CSRF
  * Origin header) — for tests that need existing data without driving the UI.
+ * Returns the created annotation id and the chapter coordinates it used.
  */
 export async function seedAnnotationViaApi(options: {
   login: string;
   body: string;
   chapterSlug?: string;
-}): Promise<void> {
+  kind?: "comment" | "suggestion";
+  role?: string;
+}): Promise<{ annotationId: string; chapterId: string; blockId: string; revision: number }> {
   const api = apiUrl();
   const origin = siteUrl();
-  const loginResponse = await fetch(`${api}/v1/dev/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin },
-    body: JSON.stringify({ login: options.login, role: "contributor" }),
-  });
-  if (!loginResponse.ok) {
-    throw new Error(`dev login failed: ${loginResponse.status}`);
-  }
-  const cookie = (loginResponse.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  const cookie = await loginCookie(options.login, options.role ?? "contributor");
 
   // Read chapter id/revision and a real block id straight from the built page
   // so the seed matches the served site exactly.
@@ -215,26 +225,77 @@ export async function seedAnnotationViaApi(options: {
     throw new Error("could not extract chapter data from the built page");
   }
 
-  const create = await fetch(
-    `${api}/v1/projects/hollow-creek-anomaly/chapters/${chapterId}/annotations`,
+  const create = await fetch(`${api}/v1/projects/${PROJECT}/chapters/${chapterId}/annotations`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin,
+      cookie,
+      "idempotency-key": crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      kind: options.kind ?? "comment",
+      scope: "block",
+      chapterRevision: revision,
+      target: { blockId },
+      body: options.body,
+    }),
+  });
+  if (create.status !== 202) {
+    throw new Error(`seed annotation failed: ${create.status} ${await create.text()}`);
+  }
+  const accepted = (await create.json()) as { annotationId?: string };
+  if (typeof accepted.annotationId !== "string") {
+    throw new Error("seed annotation response had no annotationId");
+  }
+  return { annotationId: accepted.annotationId, chapterId, blockId, revision };
+}
+
+/** Cast a vote on a suggestion via the API using a saved session cookie. */
+export async function voteViaApi(
+  cookie: string,
+  annotationId: string,
+  value: "approve" | "reject" | "abstain",
+): Promise<void> {
+  const response = await fetch(
+    `${apiUrl()}/v1/projects/${PROJECT}/annotations/${annotationId}/vote`,
     {
-      method: "POST",
+      method: "PUT",
       headers: {
         "content-type": "application/json",
-        origin,
+        origin: siteUrl(),
         cookie,
         "idempotency-key": crypto.randomUUID(),
       },
-      body: JSON.stringify({
-        kind: "comment",
-        scope: "block",
-        chapterRevision: revision,
-        target: { blockId },
-        body: options.body,
-      }),
+      body: JSON.stringify({ value }),
     },
   );
-  if (create.status !== 202) {
-    throw new Error(`seed annotation failed: ${create.status} ${await create.text()}`);
+  if (response.status !== 200) {
+    throw new Error(`vote failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+/**
+ * Poll the annotation read until its git operation lands and it becomes
+ * `open` — a freshly seeded annotation is `pending_git` and cannot be voted
+ * on until the inline mirror commits it.
+ */
+export async function waitForAnnotationOpen(annotationId: string, cookie: string): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const response = await fetch(
+      `${apiUrl()}/v1/projects/${PROJECT}/annotations/${annotationId}`,
+      { headers: { cookie } },
+    );
+    if (response.ok) {
+      const body = (await response.json()) as { status?: string };
+      if (body.status === "open") {
+        return;
+      }
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`annotation ${annotationId} did not reach "open" within 15s`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }

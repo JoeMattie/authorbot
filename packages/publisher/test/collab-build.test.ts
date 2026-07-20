@@ -75,10 +75,12 @@ describe("api-url-less build (script-free regression)", () => {
   it("differs from a collab build only by the island additions (byte-comparable)", async () => {
     const plainFiles = rel(outPlain, await collectFiles(outPlain));
     const collabFiles = rel(outCollab, await collectFiles(outCollab));
-    // The collab build adds exactly the two island assets.
+    // The collab build adds exactly the two island assets plus the /work/
+    // page (Phase 3 contract §6: emitted only when an API base is configured).
     expect(collabFiles.filter((file) => !plainFiles.includes(file))).toEqual([
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("work", "index.html"),
     ]);
     expect(plainFiles.filter((file) => !collabFiles.includes(file))).toEqual([]);
 
@@ -147,6 +149,29 @@ describe("collab-enabled build", () => {
       expect(html, relPath).not.toContain("<script");
       expect(html, relPath).not.toContain("authorbot-collab");
     }
+  });
+
+  it("emits the /work/ page with the work-queue island (Phase 3 contract §6)", async () => {
+    const page = await readFile(path.join(outCollab, "work/index.html"), "utf8");
+    // CSP + island stylesheet + bundle, like chapter pages.
+    expect(page).toContain(
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
+        `connect-src 'self' ${API_URL}; img-src 'self' data:">`,
+    );
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
+    expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
+    // The mount carries the API config and a trusted chapter map.
+    const mount = /<authorbot-work-queue[^>]*>/.exec(page)?.[0] ?? "";
+    expect(mount).toContain(`data-api-base="${API_URL}"`);
+    expect(mount).toContain('data-project="hollow-creek-anomaly"');
+    expect(mount).toContain("data-chapters=");
+    expect(mount).toContain("019cadfd-8900-7140-98fb-ceff64cada33"); // a chapter id in the map
+    // Progressive-enhancement fallback text lives inside the mount.
+    expect(page).toContain("The work queue loads here once JavaScript is enabled.");
+  });
+
+  it("plain build emits no /work/ page (script-free regression)", async () => {
+    await expect(stat(path.join(outPlain, "work/index.html"))).rejects.toThrow();
   });
 
   it("ships the bundle within the 35 KB gzipped budget (contract §1)", async () => {

@@ -23,6 +23,36 @@ export interface AnnotationTarget {
   textQuote?: { exact: string; prefix?: string; suffix?: string };
 }
 
+/** Vote value (Phase 3 contract §2). */
+export type VoteValue = "approve" | "reject" | "abstain";
+
+/**
+ * Aggregate vote tally (Phase 3 contract §2/§26.1: counts only — never
+ * per-voter data). Mirrors the API's `tallyJson`.
+ */
+export interface VoteTally {
+  approvals: number;
+  rejections: number;
+  abstentions: number;
+  netScore: number;
+  distinctVoters: number;
+  humanApprovals: number;
+  agentApprovals: number;
+}
+
+/**
+ * The `create_work_item` decision embedded beside a suggestion (Phase 3
+ * contract §6): drives the "Queued as work item" badge and the honest
+ * `supportChanged` state. Mirrors the API's `decisionSummaryJson`.
+ */
+export interface DecisionSummary {
+  id: string;
+  actionType: string;
+  result: string;
+  supportChanged: boolean;
+  workItemId: string | null;
+}
+
 export interface Annotation {
   id: string;
   chapterId: string;
@@ -35,6 +65,36 @@ export interface Annotation {
   status: string;
   gitOperationId: string | null;
   createdAt: string;
+  /** Aggregate vote tally (present on suggestion reads; §2/§6). */
+  votes?: VoteTally;
+  /** The create_work_item decision, or null (§6 badge). */
+  decision?: DecisionSummary | null;
+  /** The viewer's own current vote — member-only (§2). */
+  myVote?: VoteValue | null;
+}
+
+/** A ready work item for the read-only `/work/` queue (Phase 3 contract §6). */
+export interface WorkItem {
+  id: string;
+  projectId: string;
+  type: string;
+  status: string;
+  sourceAnnotationId: string;
+  chapterId: string;
+  baseRevision: number;
+  target: AnnotationTarget | null;
+  priority: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Support summary (aggregate tally) for the source suggestion. */
+  support?: VoteTally;
+}
+
+/** One event-feed row (Phase 3 contract §5). */
+export interface FeedEvent {
+  id: number;
+  type: string;
+  payload: Record<string, unknown>;
 }
 
 export interface Reply {
@@ -57,6 +117,13 @@ export interface Accepted {
   operationId: string;
   annotationId?: string;
   replyId?: string;
+}
+
+/** The 200 body of a vote cast/clear (Phase 3 contract §2). */
+export interface VoteResult {
+  value: VoteValue | null;
+  votes: VoteTally;
+  decision: DecisionSummary | null;
 }
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; status: number; message: string };
@@ -95,15 +162,24 @@ export class CollabApi {
   }
 
   private async post(url: string, body: unknown): Promise<Response> {
+    return this.mutate("POST", url, body);
+  }
+
+  /**
+   * A credentialed idempotent mutation (POST/PUT/DELETE). The `Origin` header
+   * is set by the browser and satisfies the API's CSRF check (contract §3);
+   * the `Idempotency-Key` makes retries safe (contract §2.4).
+   */
+  private async mutate(method: "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response> {
     return fetch(url, {
-      method: "POST",
+      method,
       credentials: "include",
       headers: {
         accept: "application/json",
         "content-type": "application/json",
         "idempotency-key": crypto.randomUUID(),
       },
-      body: JSON.stringify(body),
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   }
 
@@ -241,6 +317,98 @@ export class CollabApi {
     } catch {
       return null;
     }
+  }
+
+  // ---- votes (Phase 3 contract §2) -----------------------------------------
+
+  /**
+   * Cast (or change) the viewer's vote on a suggestion. The 200 response
+   * carries the fresh aggregate tally and the current `create_work_item`
+   * decision (if any), so the caller updates the control in place without a
+   * refetch.
+   */
+  async castVote(annotationId: string, value: VoteValue): Promise<ApiResult<VoteResult>> {
+    return this.voteResult(
+      this.mutate("PUT", this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/vote`), {
+        value,
+      }),
+    );
+  }
+
+  /** Clear the viewer's vote (§2: `DELETE` clears). */
+  async clearVote(annotationId: string): Promise<ApiResult<VoteResult>> {
+    return this.voteResult(
+      this.mutate("DELETE", this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/vote`)),
+    );
+  }
+
+  private async voteResult(pending: Promise<Response>): Promise<ApiResult<VoteResult>> {
+    let response: Response;
+    try {
+      response = await pending;
+    } catch {
+      return { ok: false, status: 0, message: "network error — is the API reachable?" };
+    }
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: await problemMessage(response) };
+    }
+    const body = (await response.json()) as {
+      value: VoteValue | null;
+      votes: VoteTally;
+      decision: DecisionSummary | null;
+    };
+    return {
+      ok: true,
+      value: { value: body.value, votes: body.votes, decision: body.decision ?? null },
+    };
+  }
+
+  // ---- work queue (Phase 3 contract §6) ------------------------------------
+
+  /** A page of ready work items (read-only queue). */
+  async workItems(cursor?: string): Promise<ApiResult<{ items: WorkItem[]; nextCursor: string | null }>> {
+    const query = `?status=ready&limit=50${cursor !== undefined ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    let response: Response;
+    try {
+      response = await this.get(this.projectUrl(`/work-items${query}`));
+    } catch {
+      return { ok: false, status: 0, message: "network error" };
+    }
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: await problemMessage(response) };
+    }
+    const body = (await response.json()) as { items: WorkItem[]; nextCursor: string | null };
+    return { ok: true, value: { items: body.items, nextCursor: body.nextCursor ?? null } };
+  }
+
+  // ---- event feed (Phase 3 contract §5) ------------------------------------
+
+  /** Base URL of the SSE / poll event feed for this project. */
+  eventsUrl(): string {
+    return this.projectUrl("/events");
+  }
+
+  /**
+   * One JSON page of the pollable event feed (`?poll=1`) — the SSE fallback
+   * for environments without a streaming transport (contract §5).
+   */
+  async pollEvents(after: number): Promise<ApiResult<{ items: FeedEvent[]; latestId: number }>> {
+    let response: Response;
+    try {
+      response = await this.get(`${this.eventsUrl()}?poll=1&after=${after}&limit=100`);
+    } catch {
+      return { ok: false, status: 0, message: "network error" };
+    }
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: await problemMessage(response) };
+    }
+    const body = (await response.json()) as { items?: FeedEvent[]; latestId?: number };
+    if (!Array.isArray(body.items) || typeof body.latestId !== "number") {
+      // A response that is not the poll shape (e.g. an API predating the feed):
+      // treat the endpoint as unsupported so the client stops cleanly.
+      return { ok: false, status: 404, message: "event feed unavailable" };
+    }
+    return { ok: true, value: { items: body.items, latestId: body.latestId } };
   }
 
   /** Dev-mode login (only rendered behind the `data-dev-login` build flag). */

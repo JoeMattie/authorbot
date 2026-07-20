@@ -418,6 +418,176 @@ main.ab-enabled {
   }
 }
 
+/* ---- votes (Phase 3 contract §6) ----------------------------------------- */
+
+.ab-votes {
+  margin-top: 0.5rem;
+}
+
+/* Segmented approve/reject/abstain control: three joined buttons. */
+.ab-vote-seg {
+  display: flex;
+  gap: 0;
+}
+
+.ab-vote-btn {
+  font: inherit;
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-left-width: 0;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.ab-vote-btn:first-child {
+  border-left-width: 1px;
+  border-radius: 4px 0 0 4px;
+}
+
+.ab-vote-btn:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.ab-vote-btn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+.ab-vote-btn:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Current vote: outline + background + weight (never color alone, §4). */
+.ab-vote-btn[aria-pressed="true"],
+.ab-vote-btn.ab-vote-current {
+  background: var(--link);
+  border-color: var(--link);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.ab-vote-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ab-vote-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.ab-vote-tally {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ab-vote-hint {
+  margin-top: 0.3rem;
+}
+
+@media (pointer: coarse) {
+  .ab-vote-btn {
+    min-height: 44px;
+  }
+}
+
+/* ---- decision badge ------------------------------------------------------- */
+
+.ab-badge-area {
+  margin-top: 0.4rem;
+}
+
+.ab-badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--link);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--link);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ab-badge-support-changed {
+  border-color: #a06a1f;
+  color: #a06a1f;
+  border-style: dashed;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-badge-support-changed {
+    border-color: #d9a441;
+    color: #d9a441;
+  }
+}
+
+.ab-badge-detail {
+  margin: 0.3rem 0 0;
+}
+
+/* ---- work-queue page (Phase 3 contract §6) -------------------------------- */
+
+.work-page {
+  max-width: 44rem;
+}
+
+.work-intro {
+  color: var(--muted);
+}
+
+.ab-work-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ab-work-item {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.ab-work-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.ab-work-chapter {
+  font-weight: 600;
+}
+
+.ab-work-meta {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ab-work-more {
+  margin-top: 1rem;
+}
+
+.ab-work-status {
+  color: var(--muted);
+}
+
 /* ---- motion --------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: no-preference) {
