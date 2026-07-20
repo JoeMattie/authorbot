@@ -90,6 +90,28 @@ export interface SiteCharacter {
   chapters: { title: string; href: string }[];
 }
 
+/**
+ * Collaboration-islands configuration (Phase 2b contract §1-§2). Present only
+ * when the build was given an API base (`publication.api_url` or `--api-url`);
+ * `null` disables every collaboration artifact, keeping the output
+ * byte-comparable with a pre-2b build.
+ */
+export interface SiteCollab {
+  /** API base URL exactly as configured, without a trailing slash. */
+  apiBase: string;
+  /**
+   * Origin for the CSP `connect-src` directive (contract §3), or null when
+   * `apiBase` is a same-origin path (covered by `'self'`).
+   */
+  apiOrigin: string | null;
+  /** Project path parameter for `/v1/projects/{projectId}` (the book slug). */
+  projectSlug: string;
+  /** `publication.show_public_annotations` (default false). */
+  showPublicAnnotations: boolean;
+  /** Surface the dev-login form (local testing only; never for production). */
+  devLogin: boolean;
+}
+
 export interface SiteBook {
   title: string;
   slug: string;
@@ -115,4 +137,6 @@ export interface SiteModel {
   timeline: { calendar?: string; events: TimelineRow[] } | null;
   /** Characters sorted by name. */
   characters: SiteCharacter[];
+  /** Collaboration-islands config, or null for a script-free build. */
+  collab: SiteCollab | null;
 }

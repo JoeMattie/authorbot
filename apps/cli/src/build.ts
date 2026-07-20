@@ -3,7 +3,7 @@ import type { CliIo } from "./cli.js";
 import type { Finding, ValidationReport } from "./validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "./validate/index.js";
 
-export const BUILD_USAGE = `Usage: authorbot build <repo> [--out <dir>] [--base-url <url>] [--include-drafts] [--force]
+export const BUILD_USAGE = `Usage: authorbot build <repo> [--out <dir>] [--base-url <url>] [--api-url <url>] [--include-drafts] [--force]
 
 Build the static reading site for an Authorbot book repository (Phase 1
 contract sections 1-3). Refuses to build when validation reports errors
@@ -13,6 +13,10 @@ Options:
   --out <dir>       output directory (default: _site)
   --base-url <url>  public base URL or base path; prefixes internal links
                     and is recorded in authorbot-build.json
+  --api-url <url>   collaboration API base URL; enables the annotation
+                    islands on chapter pages (Phase 2b). Overrides
+                    publication.api_url in book.yml. Without either, the
+                    build emits zero JavaScript.
   --include-drafts  also publish draft/proposed chapters, with a draft banner
   --force           build despite validation errors (prominent warning)
   -h, --help        show this help
@@ -36,6 +40,7 @@ function renderFindings(findings: Finding[], io: CliIo): void {
 export async function runBuild(args: string[], io: CliIo): Promise<number> {
   let out = "_site";
   let baseUrl: string | undefined;
+  let apiUrl: string | undefined;
   let includeDrafts = false;
   let force = false;
   const positionals: string[] = [];
@@ -52,7 +57,7 @@ export async function runBuild(args: string[], io: CliIo): Promise<number> {
       includeDrafts = true;
     } else if (arg === "--force") {
       force = true;
-    } else if (arg === "--out" || arg === "--base-url") {
+    } else if (arg === "--out" || arg === "--base-url" || arg === "--api-url") {
       const value = args[i + 1];
       if (value === undefined) {
         io.err(`authorbot: ${arg} requires a value\n\n${BUILD_USAGE}`);
@@ -60,8 +65,10 @@ export async function runBuild(args: string[], io: CliIo): Promise<number> {
       }
       if (arg === "--out") {
         out = value;
-      } else {
+      } else if (arg === "--base-url") {
         baseUrl = value;
+      } else {
+        apiUrl = value;
       }
       i += 1;
     } else if (arg.startsWith("-")) {
@@ -116,6 +123,7 @@ export async function runBuild(args: string[], io: CliIo): Promise<number> {
       repoPath,
       outDir,
       baseUrl,
+      apiUrl,
       includeDrafts,
       onWarning: (message) => {
         io.err(`authorbot: warning: ${message}`);

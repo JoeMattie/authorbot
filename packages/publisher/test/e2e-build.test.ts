@@ -380,7 +380,12 @@ describe("buildSite sanitization (hostile repo)", () => {
     expect(page).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     // The javascript: link is not rendered as a link; its text remains.
     expect(page).toContain("Click x now.");
-    // Inline raw HTML survives only as escaped text.
-    expect(page).toContain("Or img with inline &lt;b onmouseover=alert(2)&gt;markup&lt;/b&gt;.");
+    // Inline raw HTML survives only as escaped text, wrapped as non-atom
+    // text (data-ab-skip) so the islands' normalizer stays in parity with
+    // the mdast stream (Phase 2b §2.2).
+    expect(page).toContain(
+      "with inline <span data-ab-skip>&lt;b onmouseover=alert(2)&gt;</span>" +
+        "markup<span data-ab-skip>&lt;/b&gt;</span>.",
+    );
   });
 });

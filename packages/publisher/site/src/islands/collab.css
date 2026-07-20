@@ -1,0 +1,427 @@
+/*
+ * Collaboration island styles (Phase 2b contract §2, §4). Shipped only when
+ * a build enables the islands, so the reading stylesheet stays byte-identical
+ * for script-free builds. Colors reuse the site's scheme variables, so light
+ * and dark both hold; the reading column's width and typography are untouched
+ * (the gutter lives in the margin, absolutely positioned).
+ */
+
+/* Screen-reader-only text. */
+.ab-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+main.ab-enabled {
+  position: relative;
+}
+
+.ab-prose {
+  position: relative;
+}
+
+/* ---- shared bits --------------------------------------------------------- */
+
+.ab-card-shell,
+.ab-authbar,
+.ab-seltool,
+.ab-drawer-panel {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ab-btn {
+  font: inherit;
+  padding: 0.35rem 0.7rem;
+  min-height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.ab-btn:hover {
+  border-color: var(--muted);
+}
+
+.ab-primary {
+  border-color: var(--link);
+  color: var(--link);
+  font-weight: 600;
+}
+
+.ab-danger {
+  color: #a03434;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-danger {
+    color: #e09a9a;
+  }
+}
+
+.ab-btn-small {
+  padding: 0.1rem 0.45rem;
+  min-height: 0;
+  font-size: 0.75rem;
+}
+
+.ab-chip {
+  display: inline-block;
+  padding: 0.02rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ab-status-syncing {
+  border-style: dashed;
+}
+
+.ab-status-failed {
+  border-color: #a03434;
+  color: #a03434;
+}
+
+.ab-author {
+  font-weight: 600;
+}
+
+.ab-quote {
+  margin: 0.4rem 0;
+  padding: 0.1rem 0.6rem;
+  border-left: 3px solid var(--draft-border);
+  color: var(--muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+/* Untrusted bodies are plain text; preserve the author's newlines. */
+.ab-body {
+  margin: 0.4rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ab-hint,
+.ab-error {
+  margin: 0.35rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.ab-error {
+  color: #a03434;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-error {
+    color: #e09a9a;
+  }
+}
+
+.ab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.ab-field {
+  display: block;
+  margin: 0.4rem 0;
+}
+
+.ab-field-label {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ab-textarea,
+.ab-input {
+  font: inherit;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* ---- anchor-block highlight (outline + background, never color alone) ---- */
+
+.ab-prose .ab-target {
+  background: var(--surface);
+  outline: 2px solid var(--link);
+  outline-offset: 4px;
+}
+
+/* ---- per-block affordances ----------------------------------------------- */
+
+.ab-block-ui {
+  position: absolute;
+  left: -3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 2.75rem;
+  align-items: center;
+}
+
+.ab-annotate,
+.ab-marker {
+  font: inherit;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* Touch targets ≥ 44px (contract §4) — every interactive control, not just
+   the block affordances: card/composer buttons, small reply buttons, form
+   fields, and the kind radio rows. */
+@media (pointer: coarse) {
+  .ab-annotate,
+  .ab-marker {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .ab-btn,
+  .ab-btn-small {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .ab-textarea,
+  .ab-input {
+    min-height: 44px;
+  }
+
+  .ab-kind {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .ab-kind input[type="radio"] {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Touch has no hover: the annotate affordance must rest visible (its
+     resting hover style), or block annotation is undiscoverable on mobile. */
+  .ab-annotate {
+    opacity: 1;
+    border-color: var(--border);
+    background: var(--surface);
+  }
+}
+
+.ab-annotate {
+  opacity: 0;
+}
+
+.ab-annotate:hover,
+.ab-annotate:focus-visible,
+.ab-prose :hover + .ab-block-ui .ab-annotate,
+.ab-block-ui:hover .ab-annotate {
+  opacity: 1;
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.ab-marker {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--link);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+@media (max-width: 959.9px) {
+  .ab-block-ui {
+    left: auto;
+    right: -0.4rem;
+  }
+}
+
+/* ---- selection toolbar ---------------------------------------------------- */
+
+/* `display: flex` would defeat the UA's `[hidden] { display: none }`; the
+   toolbar is shown/hidden via the hidden attribute (found by the e2e suite). */
+.ab-seltool[hidden] {
+  display: none;
+}
+
+.ab-seltool {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* ---- gutter (desktop ≥ 960px) --------------------------------------------- */
+
+.ab-gutter {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 1.5rem);
+  width: calc((100vw - 100%) / 2 - 3rem);
+  min-width: 12rem;
+  max-width: 22rem;
+}
+
+.ab-cards {
+  position: relative;
+}
+
+.ab-gutter .ab-card-shell {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.ab-card-shell {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.ab-card:focus-visible,
+.ab-card.ab-active {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.ab-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.ab-replies {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+}
+
+.ab-replies .ab-replies {
+  margin-top: 0.25rem;
+}
+
+.ab-reply {
+  margin: 0.4rem 0;
+}
+
+.ab-reply-head {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.ab-authbar {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ab-me {
+  margin: 0;
+}
+
+.ab-signin {
+  font-weight: 600;
+}
+
+/* ---- drawer (below 960px) -------------------------------------------------- */
+
+.ab-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.ab-drawer-toggle {
+  font: inherit;
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.6rem 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ab-drawer-panel {
+  max-height: 55vh;
+  overflow-y: auto;
+  padding: 0.5rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.ab-drawer-panel .ab-card-shell {
+  position: static;
+  margin: 0.6rem 0;
+}
+
+@media (min-width: 960px) {
+  .ab-drawer {
+    display: none;
+  }
+}
+
+@media (max-width: 959.9px) {
+  .ab-gutter {
+    display: none;
+  }
+
+  /* Keep the drawer from covering the last lines of prose. */
+  main.ab-enabled {
+    padding-bottom: 5rem;
+  }
+}
+
+/* ---- motion --------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .ab-gutter .ab-card-shell {
+    transition: top 160ms ease-out;
+  }
+}

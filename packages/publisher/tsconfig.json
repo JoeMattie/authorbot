@@ -1,7 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist"
+    "outDir": "dist",
+    // The islands (site/src/islands, reached through the tests) target the
+    // browser; DOM types are additive for the Node-side sources.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "site/src/islands", "playwright.config.ts"]
 }

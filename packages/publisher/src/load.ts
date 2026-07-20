@@ -33,6 +33,10 @@ export interface LoadSiteModelOptions {
   repoPath: string;
   baseUrl?: string | undefined;
   includeDrafts?: boolean | undefined;
+  /** Collaboration API base URL; overrides `publication.api_url` (2b §1). */
+  apiUrl?: string | undefined;
+  /** Surface the dev-login form in the islands (local testing only). */
+  devLogin?: boolean | undefined;
 }
 
 export interface LoadedSite {
@@ -65,6 +69,47 @@ export function basePathOf(baseUrl: string | undefined): string {
     base = `${base}/`;
   }
   return base;
+}
+
+/**
+ * Resolve the collaboration config (Phase 2b contract §1): the `--api-url`
+ * flag overrides `publication.api_url`; absent both, collaboration is off and
+ * the build stays byte-comparable with a pre-2b site. An absolute URL yields
+ * the CSP `connect-src` origin; a root-relative path means same-origin
+ * deployment (already covered by `'self'`).
+ */
+export function resolveCollab(
+  book: BookConfig,
+  options: Pick<LoadSiteModelOptions, "apiUrl" | "devLogin">,
+): SiteModel["collab"] {
+  const configured = options.apiUrl ?? book.publication?.api_url;
+  if (configured === undefined || configured === "") {
+    return null;
+  }
+  const apiBase = configured.replace(/\/+$/, "");
+  let apiOrigin: string | null = null;
+  if (apiBase === "" && configured.startsWith("/")) {
+    // `--api-url /` (or api_url: "/"): the API is mounted at the site
+    // origin's root. The empty base yields correct relative URLs (`/v1/...`)
+    // and same-origin CSP (`'self'` already covers it).
+  } else if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      apiOrigin = new URL(apiBase).origin;
+    } catch {
+      throw new PublisherError(`api url "${configured}" is not a valid URL`);
+    }
+  } else if (!apiBase.startsWith("/")) {
+    throw new PublisherError(
+      `api url "${configured}" must be an absolute http(s) URL or a root-relative path`,
+    );
+  }
+  return {
+    apiBase,
+    apiOrigin,
+    projectSlug: book.slug,
+    showPublicAnnotations: book.publication?.show_public_annotations === true,
+    devLogin: options.devLogin === true,
+  };
 }
 
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -563,6 +608,7 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
     outline,
     timeline,
     characters: characters.map((entry) => entry.character),
+    collab: resolveCollab(book, options),
   };
   if (book.license !== undefined) {
     model.book.license = book.license;

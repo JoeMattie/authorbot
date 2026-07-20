@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BuildManifest } from "@authorbot/schemas";
@@ -27,6 +27,17 @@ export interface BuildSiteOptions {
   commit?: string | null | undefined;
   /** Also publish `draft`/`proposed` chapters with a draft banner. */
   includeDrafts?: boolean | undefined;
+  /**
+   * Collaboration API base URL (Phase 2b contract §1); overrides
+   * `publication.api_url` in book.yml. When neither is set the build emits
+   * zero JavaScript and stays byte-comparable with a pre-2b site.
+   */
+  apiUrl?: string | undefined;
+  /**
+   * Surface the islands' dev-login form (`data-dev-login`) for local testing
+   * against a dev-mode API. Never set for production builds.
+   */
+  devLogin?: boolean | undefined;
   /** Astro log level (default "warn" to keep CLI output terse). */
   logLevel?: "debug" | "info" | "warn" | "error" | "silent" | undefined;
   /** Receives non-fatal loader warnings (skipped records under --force). */
@@ -58,6 +69,48 @@ function siteDataPlugin(model: SiteModel): {
 }
 
 /**
+ * Bundle the collaboration islands (Phase 2b contract §1) into
+ * `_astro/authorbot-collab.js` + `.css` — stable, unhashed names the chapter
+ * template references. This is an explicit Vite step rather than an Astro
+ * `<script>`: Astro emits every discovered script chunk into `_astro/` even
+ * when no page renders it, which would break the contract's byte-comparable
+ * script-free output for api-url-less builds. Running the bundler only when
+ * collab is enabled keeps that invariant trivially true. The stylesheet is a
+ * plain copied asset (never JS-injected), so the contract §3 CSP works
+ * without 'unsafe-inline' styles.
+ */
+async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
+  const assetDir = path.join(outDir, "_astro");
+  await mkdir(assetDir, { recursive: true });
+  const { build: viteBuild } = await import("vite");
+  try {
+    await viteBuild({
+      configFile: false,
+      logLevel: "warn",
+      root: siteRoot,
+      build: {
+        outDir: assetDir,
+        emptyOutDir: false,
+        target: "es2022",
+        minify: "esbuild",
+        rollupOptions: {
+          input: path.join(siteRoot, "src/islands/index.ts"),
+          output: { entryFileNames: "authorbot-collab.js", format: "es" },
+        },
+      },
+    });
+  } catch (error) {
+    throw new PublisherError(
+      `islands bundle failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  await copyFile(
+    path.join(siteRoot, "src/islands/collab.css"),
+    path.join(assetDir, "authorbot-collab.css"),
+  );
+}
+
+/**
  * Build the static reading site for a book repository and write
  * `authorbot-build.json` (`authorbot.build/v1`) into the output directory.
  * Returns the manifest. Throws {@link PublisherError} when the repository
@@ -72,6 +125,8 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
     repoPath,
     baseUrl: options.baseUrl,
     includeDrafts: options.includeDrafts,
+    apiUrl: options.apiUrl,
+    devLogin: options.devLogin,
   });
   for (const warning of warnings) {
     options.onWarning?.(warning);
@@ -112,6 +167,10 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
     );
   } finally {
     process.chdir(previousCwd);
+  }
+
+  if (model.collab !== null) {
+    await buildIslands(siteRoot, outDir);
   }
 
   const commit =

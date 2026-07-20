@@ -177,9 +177,11 @@ describe("renderMarkdownToHtml — URL schemes", () => {
     }
   });
 
-  it("collapses images with disallowed schemes to their alt text", () => {
+  it("collapses images with disallowed schemes to their alt text (marked as non-atom text)", () => {
     const html = renderMarkdownToHtml("![a diagram](javascript:evil())");
-    expect(html).toBe("<p>a diagram</p>\n");
+    // data-ab-skip: the alt text has no atom in the normalized stream, so the
+    // islands' DOM normalizer must exclude it (Phase 2b §2.2 parity).
+    expect(html).toBe("<p><span data-ab-skip>a diagram</span></p>\n");
   });
 
   it("renders images with allowed schemes", () => {
@@ -260,9 +262,11 @@ describe("renderMarkdownToHtml — GFM", () => {
         "",
       ].join("\n"),
     );
-    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    // Escaped raw HTML fragments are wrapped as non-atom text (§2.2 parity).
+    expect(html).toContain("<span data-ab-skip>&lt;script&gt;</span>alert(1)");
+    expect(html).toContain("&lt;/script&gt;");
     expect(html).not.toContain("<script");
-    expect(html).not.toContain("<a");
+    expect(html).not.toContain("<a ");
     expect(html).not.toContain("javascript:");
     expect(html).toContain("<td>click</td>");
   });
@@ -307,8 +311,11 @@ describe("renderMarkdownToHtml — GFM", () => {
     expect(html.match(/href="#fn-1"/g)).toHaveLength(2);
     expect(html).toContain('<li id="fn-1">');
     expect(html).toContain('href="#fnref-1"');
-    // Footnote bodies go through the same escaping as everything else.
-    expect(html).toContain("&lt;em&gt;note&lt;/em&gt;");
+    // Footnote bodies go through the same escaping as everything else (the
+    // escaped fragments are wrapped as non-atom text for §2.2 parity).
+    expect(html).toContain("&lt;em&gt;");
+    expect(html).toContain("&lt;/em&gt;");
+    expect(html).not.toContain("<em>note</em>");
   });
 
   it("strips unreferenced footnote definitions without crashing", () => {

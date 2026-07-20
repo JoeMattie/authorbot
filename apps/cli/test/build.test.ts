@@ -47,6 +47,8 @@ describe("authorbot build (built dist)", () => {
     const help = runBin(["build", "--help"]);
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("--include-drafts");
+    expect(help.stdout).toContain("--api-url");
+    expect(runBin(["build", exampleRepo, "--api-url"]).status).toBe(2);
   });
 
   it("refuses to build an invalid repository unless --force", async () => {
@@ -89,6 +91,37 @@ describe("authorbot build (built dist)", () => {
         "baseline",
         "null-results",
       ]);
+    },
+  );
+
+  it(
+    "passes --api-url through to the publisher (Phase 2b islands)",
+    { timeout: 240_000 },
+    async () => {
+      const out = await makeOutDir();
+      const result = runBin([
+        "build",
+        exampleRepo,
+        "--out",
+        out,
+        "--api-url",
+        "http://127.0.0.1:8787",
+      ]);
+      expect(result.status, result.stderr).toBe(0);
+      const page = await readFile(
+        path.join(out, "chapters", "baseline", "index.html"),
+        "utf8",
+      );
+      expect(page).toContain('data-api-base="http://127.0.0.1:8787"');
+      expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
+      expect(page).toContain("Content-Security-Policy");
+      // The CLI never sets the dev-login flag (programmatic builds only).
+      expect(page).not.toContain("data-dev-login");
+      expect(existsSync(path.join(out, "_astro", "authorbot-collab.js"))).toBe(true);
+      expect(existsSync(path.join(out, "_astro", "authorbot-collab.css"))).toBe(true);
+      // Story pages stay script-free.
+      const story = await readFile(path.join(out, "story", "index.html"), "utf8");
+      expect(story).not.toContain("<script");
     },
   );
 

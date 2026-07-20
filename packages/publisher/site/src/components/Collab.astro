@@ -1,0 +1,28 @@
+---
+/**
+ * Collaboration island mount (Phase 2b contract §1-§2): rendered only on
+ * chapter pages of a build with an API base. The custom element reads its
+ * configuration from the data attributes; the script defines it. Without
+ * JavaScript the element renders nothing and the page stays a plain reading
+ * page (progressive enhancement, §1).
+ *
+ * The script tag is `is:inline` on purpose: the bundle is produced by an
+ * explicit Vite step in buildSite (stable asset name, emitted only for
+ * collab-enabled builds). Routing it through Astro's own script collection
+ * would emit the chunk into `_astro/` even for builds that never render this
+ * component, breaking the contract §1 byte-comparable script-free output.
+ */
+import { site } from "virtual:authorbot-site";
+
+const { collab, chapter } = Astro.props;
+const src = `${site.basePath}_astro/authorbot-collab.js`;
+---
+
+<authorbot-collab
+  data-api-base={collab.apiBase}
+  data-project={collab.projectSlug}
+  data-chapter-id={chapter.id}
+  data-chapter-revision={String(chapter.revision)}
+  data-show-public={collab.showPublicAnnotations ? "true" : "false"}
+  data-dev-login={collab.devLogin ? "true" : undefined}></authorbot-collab>
+<script is:inline type="module" src={src}></script>

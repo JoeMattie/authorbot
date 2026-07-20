@@ -32,6 +32,11 @@ import type { Position } from "unist";
  *   (`http`, `https`, `mailto`, relative) are not rendered as links: the
  *   link text survives as plain text and the image collapses to its alt text.
  * - Semantic blocks identified by a valid marker carry `id="b-<uuid>"`.
+ * - Visible text with no atom in the `@authorbot/markdown` normalized stream
+ *   (escaped raw HTML, collapsed image alt text, orphan footnote labels) is
+ *   wrapped in `<span data-ab-skip>` so the islands' DOM-side normalizer
+ *   (Phase 2b contract §2.2) can exclude it and stay in parity with the
+ *   mdast-side stream that anchors selectors server-side.
  */
 
 export interface RenderOptions {
@@ -50,6 +55,16 @@ const HTML_ESCAPES: Record<string, string> = {
 /** Escape text for use in HTML content or a double-quoted attribute. */
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char] ?? char);
+}
+
+/**
+ * Escaped text that exists in the DOM but has NO atom in the mdast normalized
+ * stream (`normalizeBlockText` skips `html`/`image` nodes): mark it so the
+ * islands' normalizer skips it too, keeping selector offsets identical on
+ * both sides. Empty text renders as nothing.
+ */
+function nonAtomText(value: string): string {
+  return value === "" ? "" : `<span data-ab-skip>${escapeHtml(value)}</span>`;
 }
 
 /** Stable key for a node's source position (anchor lookup). */
@@ -132,7 +147,7 @@ function renderLink(node: Link, state: RenderState): string {
 function renderImage(node: Image): string {
   const alt = node.alt ?? "";
   if (forbiddenUrlScheme(node.url) !== null) {
-    return escapeHtml(alt); // disallowed scheme: collapse to alt text
+    return nonAtomText(alt); // disallowed scheme: collapse to alt text
   }
   const title =
     node.title === null || node.title === undefined
@@ -233,8 +248,9 @@ function renderNode(node: Nodes, state: RenderState): string {
         return ""; // marker comments are stripped (contract section 4)
       }
       // Raw HTML is never emitted when content.raw_html is false: it is
-      // rendered as escaped text instead so nothing hostile survives.
-      return state.rawHtmlAllowed ? node.value : escapeHtml(node.value);
+      // rendered as escaped text instead so nothing hostile survives. The
+      // escaped text has no mdast text atom, hence the data-ab-skip wrapper.
+      return state.rawHtmlAllowed ? node.value : nonAtomText(node.value);
     }
     case "text":
       return escapeHtml(node.value);
@@ -335,7 +351,7 @@ function renderNode(node: Nodes, state: RenderState): string {
     case "imageReference": {
       const definition = state.definitions.get(node.identifier.toLowerCase());
       if (definition === undefined) {
-        return escapeHtml(node.alt ?? "");
+        return nonAtomText(node.alt ?? "");
       }
       return renderImage({
         type: "image",
@@ -359,8 +375,9 @@ function renderNode(node: Nodes, state: RenderState): string {
       const key = node.identifier.toLowerCase();
       const index = state.footnoteOrder.indexOf(key);
       if (index === -1 || !state.footnoteDefinitions.has(key)) {
-        // No definition (defensive): keep the source spelling as plain text.
-        return escapeHtml(`[^${node.label ?? node.identifier}]`);
+        // No definition (defensive): keep the source spelling as plain text
+        // (no mdast text atom → skipped by the islands' normalizer).
+        return nonAtomText(`[^${node.label ?? node.identifier}]`);
       }
       const number = index + 1;
       // Only the first reference carries the fnref id (ids must be unique);
