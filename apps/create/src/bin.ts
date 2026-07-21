@@ -22,6 +22,7 @@ import {
   SystemClock,
 } from "./runtime/node-ports.js";
 import type { OutputPort } from "./ports.js";
+import { invocationCommand } from "./invocation.js";
 
 const out: OutputPort = {
   write: (line) => {
@@ -72,6 +73,7 @@ try {
       columns: process.stdout.columns ?? 80,
       isTty: process.stdout.isTTY === true,
       nodeVersion: process.version,
+      invocation: invocationCommand(process.argv[1]),
     },
     out,
   });

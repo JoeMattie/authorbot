@@ -14,9 +14,12 @@
  */
 import type { Environment, OutputPort } from "../ports.js";
 import type { SecretVault } from "../secrets.js";
+import { BINARY_NAME } from "../invocation.js";
 
 const MAX_WIDTH = 80;
 const MIN_WIDTH = 40;
+
+
 
 export interface Theme {
   readonly colour: boolean;
@@ -80,10 +83,34 @@ export class Reporter {
   /** Values already handed to `revealOnce`, so "once" is enforced not promised. */
   readonly #revealed = new Set<string>();
 
-  constructor(out: OutputPort, vault: SecretVault, theme: Theme) {
+  readonly #invocation: string;
+
+  constructor(out: OutputPort, vault: SecretVault, theme: Theme, invocation = BINARY_NAME) {
     this.#out = out;
     this.#vault = vault;
     this.#theme = theme;
+    this.#invocation = invocation;
+  }
+
+  /**
+   * Says the wizard's name the way the author can actually type it.
+   *
+   * Roughly twenty messages tell someone to run `create-authorbot <stage>` —
+   * every resume hint and most error remedies. That binary exists only for a
+   * global install; `npx @authorbot/create`, the documented way in, leaves
+   * nothing on PATH. So the advice offered at the moment something had already
+   * failed was itself a command not found.
+   *
+   * Rewriting here rather than at each call site is deliberate: this is the
+   * single point every line passes through on its way to the terminal, and the
+   * alternative was threading the invocation into five files and trusting the
+   * twenty-first message to remember. It runs after redaction and before
+   * wrapping, so the substituted (longer) text is what gets measured.
+   */
+  #named(text: string): string {
+    return this.#invocation === BINARY_NAME
+      ? text
+      : text.replaceAll(BINARY_NAME, this.#invocation);
   }
 
   get theme(): Theme {
@@ -109,7 +136,7 @@ export class Reporter {
    * rather than wrapping first.
    */
   #lines(text: string, indent = ""): string[] {
-    return wrap(this.#vault.redact(text), this.#theme.width, indent);
+    return wrap(this.#named(this.#vault.redact(text)), this.#theme.width, indent);
   }
 
   // Redaction is applied again at the sink: cheap, and it means a future
@@ -178,7 +205,7 @@ export class Reporter {
 
   /** Verbatim block (a command, a URL, a file path) — never wrapped. */
   literal(text: string): void {
-    for (const line of this.#vault.redact(text).split("\n")) {
+    for (const line of this.#named(this.#vault.redact(text)).split("\n")) {
       this.#emit(`    ${this.#style(line, "cyan")}`);
     }
   }

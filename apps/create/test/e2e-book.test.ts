@@ -94,6 +94,7 @@ describe.skipIf(!toolchainBuilt)("a real book on a real disk", () => {
         columns: 80,
         isTty: false,
         nodeVersion: process.version,
+        invocation: "create-authorbot",
       },
       out,
     });
@@ -195,6 +196,7 @@ describe.skipIf(!toolchainBuilt)("a real book on a real disk", () => {
         columns: 80,
         isTty: false,
         nodeVersion: process.version,
+        invocation: "create-authorbot",
       },
       out,
     });

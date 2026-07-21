@@ -399,6 +399,7 @@ export function fakeEnvironment(overrides: Partial<Environment> = {}): Environme
     columns: 80,
     isTty: false,
     nodeVersion: "v22.11.0",
+    invocation: "create-authorbot",
     ...overrides,
   };
 }

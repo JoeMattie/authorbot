@@ -168,4 +168,13 @@ export interface Environment {
   /** Terminal width, clamped by the reporter to at most 80 (contract §2.8). */
   readonly columns: number;
   readonly isTty: boolean;
+  /**
+   * How to invoke this wizard again, as the author would have to type it.
+   *
+   * `npx @authorbot/create` leaves nothing on PATH, so every "run this to
+   * carry on" line that said `create-authorbot` was a command not found for
+   * anyone who started the documented way — offered at exactly the moment
+   * something had already gone wrong.
+   */
+  readonly invocation: string;
 }

@@ -227,7 +227,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
   // subprocess as one the wizard minted itself, and the vault only protects
   // what it has been told about.
   registerEnvironmentCredentials(vault, deps.env.env);
-  const reporter = new Reporter(deps.out, vault, themeFor(deps.env));
+  const reporter = new Reporter(deps.out, vault, themeFor(deps.env), deps.env.invocation);
 
   let parsed: ParsedArgs;
   try {
