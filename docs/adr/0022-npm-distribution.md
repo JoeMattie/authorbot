@@ -79,6 +79,19 @@ any tooling.
 The "check out and build the Authorbot toolchain" steps are deleted.
 `wrangler.jsonc` points `main` at `node_modules/@authorbot/api/dist/worker.js`.
 
+### Status: trusted publishing is live (2026-07-21)
+
+All eleven packages are configured with GitHub Actions as their trusted
+publisher, and `v0.1.2` was published over OIDC — npm records the publisher as
+`GitHub Actions <npm-oidc-no-reply@github.com>` rather than a user account,
+which is the evidence rather than an assumption. The bootstrap token has been
+deleted from the repository's secrets and revoked at npm, so there is no
+standing publish credential anywhere.
+
+The `NODE_AUTH_TOKEN` line stays in the workflow: it is empty and unread while
+trusted publishing is configured, and it leaves a deliberate fallback for a
+fork or a future maintainer who has not set it up.
+
 ### Release process
 
 A semver tag triggers a workflow that builds once and publishes to npm with
