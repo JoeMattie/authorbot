@@ -60,14 +60,24 @@ jobs:
       # else in this workflow needs a token.
       id-token: write
     steps:
+      # ACTIONS ARE PINNED TO COMMIT SHAs, not tags: a tag can be moved to
+      # point at different code, and these three run with access to the job
+      # that publishes. The trailing comment is the human-readable version the
+      # SHA corresponded to when it was pinned; it is a label, not the pin.
+      #
+      # They were bumped off the v4 line together because the runner had begun
+      # forcing their Node 20 entrypoints onto Node 24 — a deprecation that
+      # ends in a hard failure — and because setup-node wrote `always-auth`
+      # into .npmrc, which the npm upgraded below no longer recognises and
+      # warned about on every release. The current line stopped emitting it.
       - name: Check out the tagged commit
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
