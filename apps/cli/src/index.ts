@@ -9,6 +9,33 @@
 export { runCli, type CliIo } from "./cli.js";
 export { runBuild, BUILD_USAGE } from "./build.js";
 export {
+  BOOK_REPO_MIGRATIONS,
+  CHECK_EXIT_AVAILABLE,
+  CHECK_EXIT_MIGRATION,
+  CHECK_EXIT_NONE,
+  MigrationApplyError,
+  MigrationRegistryError,
+  UPGRADE_USAGE,
+  UpgradeRepoError,
+  applyMigrations,
+  compareVersions,
+  parsePin,
+  parseVersion,
+  renderPin,
+  resolvePlan,
+  runUpgrade,
+  selectMigrations,
+  type AppliedMigration,
+  type BookRepoMigration,
+  type MigrationRepo,
+  type MigrationRunResult,
+  type Pin,
+  type SelectedMigration,
+  type SemVer,
+  type UpgradeDeps,
+  type UpgradePlan,
+} from "./upgrade/index.js";
+export {
   DEFAULT_BOOK_SETTINGS,
   FindingCollector,
   RepoAccessError,

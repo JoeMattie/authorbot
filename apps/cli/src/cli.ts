@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BUILD_USAGE, runBuild } from "./build.js";
+import { UPGRADE_USAGE, runUpgrade } from "./upgrade/upgrade.js";
 import type { Finding, ValidationReport } from "./validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "./validate/index.js";
 
@@ -22,6 +23,8 @@ const TOP_USAGE = `Usage: authorbot <command> [options]
 Commands:
   validate <path>   validate a book repository (Phase 0 contract)
   build <repo>      build the static reading site (Phase 1 contract)
+  upgrade [path]    move to a newer Authorbot release, as a pull request
+                    (ADR-0021)
 
 Run "authorbot <command> --help" for command options.`;
 
@@ -78,11 +81,14 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
     return 2;
   }
   if (command === "-h" || command === "--help" || command === "help") {
-    io.out(`${TOP_USAGE}\n\n${USAGE}\n\n${BUILD_USAGE}`);
+    io.out(`${TOP_USAGE}\n\n${USAGE}\n\n${BUILD_USAGE}\n\n${UPGRADE_USAGE}`);
     return 0;
   }
   if (command === "build") {
     return runBuild(rest, io);
+  }
+  if (command === "upgrade") {
+    return runUpgrade(rest, io);
   }
   if (command !== "validate") {
     io.err(`authorbot: unknown command "${command}"\n\n${TOP_USAGE}`);

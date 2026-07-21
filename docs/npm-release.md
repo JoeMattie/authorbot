@@ -53,7 +53,10 @@ These are ADR-0021 §2, restated as what a reader of the number can rely on.
 - **Every format change ships with an automated migration.** If we cannot
   write the migration, we do not make the change. This constrains us on
   purpose: it is what makes `authorbot upgrade` able to promise a pull request
-  rather than a manual rewrite.
+  rather than a manual rewrite. Migrations are declared in
+  `apps/cli/src/upgrade/migrations.ts`, which documents what one must do: be
+  idempotent, leave a repository that validates, and report every path it
+  touched. `authorbot upgrade` checks the first two rather than trusting them.
 - **`@authorbot/cli` and `@authorbot/api` keep their CLI flags, exports, and
   HTTP surface.** Additions are minor; removals wait for a major.
 
@@ -255,11 +258,15 @@ Rolling back the *toolchain* and rolling back a *format migration* are
 different operations, and confusing them is how an author ends up with an old
 toolchain reading files a newer one rewrote (ADR-0021 §5).
 
-- **Toolchain:** set the version in the book's `package.json` back, run `npm
-  install`, commit the lockfile, push. CI redeploys on the older release.
+- **Toolchain:** `authorbot upgrade --rollback <version>` moves the pin back
+  and opens a pull request for it, exactly as an upgrade does. (By hand: set
+  the version in the book's `package.json` back, run `npm install`, commit the
+  lockfile, push.) CI redeploys on the older release.
 - **Format migration:** `git revert` the migration commit. Book-repo migrations
   are committed separately from content precisely so this is possible without
-  touching prose.
+  touching prose. `--rollback` does **not** do this for you — it names the
+  migrations that ran between the two versions and leaves the revert to you,
+  because reverting prose is a decision, not a side effect of a pin change.
 - **Database:** there is no automatic down-migration. Expand/contract is what
   makes this survivable — the previous Worker can run against the expanded
   schema, so rolling the Worker back is enough and the extra column is

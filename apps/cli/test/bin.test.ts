@@ -71,4 +71,27 @@ describe("authorbot bin (built dist)", () => {
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
   });
+
+  it("exposes `upgrade` as a real command", () => {
+    // templates/book-repo/package.json ships `"upgrade": "authorbot upgrade"`,
+    // so this being wired up is the difference between a script that works
+    // and one that errors in an author's terminal.
+    const top = runBin(["--help"]);
+    expect(top.status).toBe(0);
+    expect(top.stdout).toContain("upgrade [path]");
+
+    const help = runBin(["upgrade", "--help"]);
+    expect(help.status).toBe(0);
+    expect(help.stdout).toContain("--dry-run");
+    expect(help.stdout).toContain("Exit codes (--check)");
+
+    expect(runBin(["upgrade", "--nope"]).status).toBe(2);
+    expect(runBin(["upgrade", "a", "b"]).status).toBe(2);
+
+    // A directory with no package.json is rejected before anything reaches
+    // the network, so this stays offline.
+    const notABook = runBin(["upgrade", workspaceRoot, "--check"]);
+    expect(notABook.status).toBe(2);
+    expect(notABook.stderr).toContain("does not depend on @authorbot/cli");
+  });
 });
