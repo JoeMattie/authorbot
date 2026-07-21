@@ -28,6 +28,17 @@ export interface CollaborationSettings {
   readonly installationId: string;
   /** Base path when the book is served under a subpath, e.g. `/my-book`. */
   readonly basePath?: string;
+  /**
+   * The API-side half of the book's `publication.show_public_annotations`.
+   *
+   * These two settings are one decision expressed in two places, and nothing
+   * keeps them together but this field. With the book saying annotations are
+   * public and the Worker never told, the site rendered the annotation UI
+   * while the API refused every credential-less read with a 401 — so a
+   * visitor got a page whose collaboration chrome could not load, including
+   * the sign-in link that would have fixed it.
+   */
+  readonly publicAnnotations: boolean;
 }
 
 export interface WranglerSettings {
@@ -126,6 +137,10 @@ export function renderWrangler(settings: WranglerSettings): string {
       `  "vars": {`,
       `    "AUTH_MODE": "github",`,
       `    "MIRROR_MODE": "durable",`,
+      "    // Mirrors publication.show_public_annotations in book.yml. Without",
+      "    // it the API refuses anonymous reads and the site's collaboration",
+      "    // chrome never loads, sign-in included.",
+      `    "PUBLIC_ANNOTATIONS": ${json(String(c.publicAnnotations))},`,
       `    "PROJECT_SLUG": ${json(c.projectSlug)},`,
       `    "PROJECT_REPO": ${json(c.projectRepo)},`,
       `    "INITIAL_MAINTAINER": ${json(`github:${c.maintainerLogin}`)},`,

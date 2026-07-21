@@ -200,6 +200,7 @@ describe("wrangler.jsonc", () => {
         githubClientId: "Iv1.public_client_id",
         redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
         installationId: "777777",
+      publicAnnotations: true,
       },
     });
     for (const secretName of [
@@ -224,6 +225,7 @@ describe("wrangler.jsonc", () => {
       githubClientId: "Iv1.x",
       redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
       installationId: "777777",
+      publicAnnotations: true,
     };
     const text = renderWrangler({ workerName: "my-book", collaboration });
     expect(text).toContain('"name": "my-book"');
@@ -235,6 +237,37 @@ describe("wrangler.jsonc", () => {
     expect(text).toContain("ProjectCoordinator");
     // The callback must be on the site's own origin (ADR-0019).
     expect(text).toContain('"GITHUB_REDIRECT_URI": "https://my-book.workers.dev/v1/auth/github/callback"');
+  });
+
+  it("mirrors show_public_annotations into the Worker's PUBLIC_ANNOTATIONS", () => {
+    // One decision, two places. The book saying annotations are public while
+    // the Worker was never told produced a site that rendered the whole
+    // collaboration UI over an API that refused every anonymous read with a
+    // 401 — so a visitor saw no annotations and no sign-in link either,
+    // because the island gives up when its first read fails.
+    const base = {
+      d1Name: "db",
+      d1Id: "11111111-2222-4333-8444-555555555555",
+      projectSlug: "my-book",
+      projectRepo: "novelist/my-book",
+      maintainerLogin: "novelist",
+      defaultBranch: "main",
+      githubClientId: "Iv1.x",
+      redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
+      installationId: "777777",
+    };
+
+    const open = renderWrangler({
+      workerName: "my-book",
+      collaboration: { ...base, publicAnnotations: true },
+    });
+    expect(open).toContain('"PUBLIC_ANNOTATIONS": "true"');
+
+    const closed = renderWrangler({
+      workerName: "my-book",
+      collaboration: { ...base, publicAnnotations: false },
+    });
+    expect(closed).toContain('"PUBLIC_ANNOTATIONS": "false"');
   });
 
   it("emits valid JSONC: strips to parseable JSON", () => {
@@ -251,6 +284,7 @@ describe("wrangler.jsonc", () => {
         githubClientId: "Iv1.x",
         redirectUri: "https://book.example.com/v1/auth/github/callback",
         installationId: "777777",
+      publicAnnotations: true,
         basePath: "/my-book",
       },
     });

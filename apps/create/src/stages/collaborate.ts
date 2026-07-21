@@ -215,6 +215,7 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
     githubClientId: credentials.clientId,
     redirectUri: `${siteUrl.replace(/\/$/, "")}/v1/auth/github/callback`,
     installationId: credentials.installationId,
+    publicAnnotations: book.showPublicAnnotations,
   };
 
   ctx.reporter.step("Updating your Worker configuration");

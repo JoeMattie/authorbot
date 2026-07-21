@@ -21,6 +21,12 @@ export interface BookFacts {
   readonly repo: string | null;
   /** Current `publication.api_url`, if set. */
   readonly apiUrl: string | null;
+  /**
+   * `publication.show_public_annotations`, which the Worker needs mirrored as
+   * PUBLIC_ANNOTATIONS or it refuses every anonymous read. Defaults to the
+   * scaffold's own default (true) when the key is absent.
+   */
+  readonly showPublicAnnotations: boolean;
 }
 
 export async function requireBookDirectory(ctx: WizardContext): Promise<void> {
@@ -53,6 +59,7 @@ export async function readBookIdentity(ctx: WizardContext): Promise<BookFacts> {
       defaultBranch: planned?.defaultBranch ?? "main",
       repo: planned?.repo ?? null,
       apiUrl: null,
+      showPublicAnnotations: true,
     };
   }
   const text = await ctx.fs.readFile(bookYml);
@@ -74,10 +81,12 @@ export async function readBookIdentity(ctx: WizardContext): Promise<BookFacts> {
   const record = parsed as Record<string, unknown>;
   const repository = record["repository"];
   const publication = record["publication"];
-  const apiUrl =
+  const publicationRecord =
     typeof publication === "object" && publication !== null
-      ? (publication as Record<string, unknown>)["api_url"]
+      ? (publication as Record<string, unknown>)
       : undefined;
+  const apiUrl = publicationRecord?.["api_url"];
+  const showPublic = publicationRecord?.["show_public_annotations"];
 
   const facts: BookFacts = {
     title: typeof record["title"] === "string" ? record["title"] : "Untitled",
@@ -91,6 +100,7 @@ export async function readBookIdentity(ctx: WizardContext): Promise<BookFacts> {
         : "main",
     repo: await resolveRepo(ctx),
     apiUrl: typeof apiUrl === "string" ? apiUrl : null,
+    showPublicAnnotations: typeof showPublic === "boolean" ? showPublic : true,
   };
   return facts;
 }
