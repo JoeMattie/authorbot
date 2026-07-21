@@ -12,9 +12,46 @@ export interface MeActor {
   externalIdentity: string | null;
 }
 
+/**
+ * One project membership as `/v1/me` returns it. Only `role` is load-bearing
+ * for the islands: Phase 6 gates the authoring and settings surfaces on the
+ * editor/maintainer roles, and the API checks the same role again on every
+ * write — this is which affordances to *offer*, never the authorization.
+ */
+export interface MeMembership {
+  role: string;
+}
+
 export interface Me {
   actor: MeActor;
   scopes: string[];
+  /** Present since Phase 3; absent for an actor with no membership. */
+  memberships?: MeMembership[];
+}
+
+/** Roles that may author chapters (contract §3.5) and read settings (§3.6). */
+export type Role = "reader" | "contributor" | "editor" | "maintainer";
+
+/**
+ * The viewer's role on this project, or null when signed out / not a member.
+ * `/v1/me` returns at most one membership (the authenticated project's).
+ */
+export function roleOf(me: Me | null): Role | null {
+  const role = me?.memberships?.[0]?.role;
+  return role === "reader" || role === "contributor" || role === "editor" || role === "maintainer"
+    ? role
+    : null;
+}
+
+/** Contract §3.5: authoring is editor-or-maintainer, never scope alone. */
+export function canAuthorChapters(me: Me | null): boolean {
+  const role = roleOf(me);
+  return (role === "editor" || role === "maintainer") && me !== null && me.scopes.includes("submissions:write");
+}
+
+/** Contract §3.6: settings and the overrides are maintainer-only. */
+export function isMaintainer(me: Me | null): boolean {
+  return roleOf(me) === "maintainer";
 }
 
 export interface AnnotationTarget {
@@ -38,6 +75,13 @@ export interface VoteTally {
   distinctVoters: number;
   humanApprovals: number;
   agentApprovals: number;
+  /**
+   * Role-aware approval counts (Phase 6 contract §3.6). Optional because a
+   * deployment predating the amendment omits them; the override panel shows
+   * "—" rather than a confident zero when they are absent.
+   */
+  maintainerApprovals?: number;
+  humanMaintainerApprovals?: number;
 }
 
 /**
@@ -240,6 +284,118 @@ export interface SubmissionConflict {
   reason: string | null;
 }
 
+// ---- Phase 6 §3.5: chapter authoring ---------------------------------------
+
+/**
+ * `GET .../chapters/{id}/source` — a chapter's prose as an author wrote it.
+ *
+ * `body` is marker-free and frontmatter-free by construction (the API strips
+ * block markers before returning it), which is what lets the composer be a
+ * plain title-and-prose box. `revision` goes straight back as `baseRevision`
+ * on the revise, so an edit that raced another edit fails cleanly.
+ */
+export interface ChapterSource {
+  chapterId: string;
+  title: string;
+  summary: string | null;
+  revision: number;
+  status: string;
+  body: string;
+}
+
+/** 202 body of a chapter create/revise/publish/unpublish (contract §3.5). */
+export interface ChapterAccepted {
+  chapterId: string;
+  operationId: string;
+  correlationId: string;
+  status: string;
+}
+
+// ---- Phase 6 §3.6: settings ------------------------------------------------
+
+/** One governance rule as the settings document carries it (no `version`). */
+export interface SettingsRule {
+  trigger?: string;
+  when: unknown;
+  action: unknown;
+}
+
+/** A guarded field: its value plus what changing it breaks (server-supplied). */
+export interface GuardedField {
+  value: string | null;
+  consequence: string;
+}
+
+/** `GET .../settings` — mirrors the API's field taxonomy exactly. */
+export interface SettingsDocument {
+  settings: {
+    title: string;
+    language: string;
+    license: string | null;
+    publication: {
+      show_revision: boolean | null;
+      show_attribution: boolean | null;
+      show_public_annotations: boolean | null;
+    };
+  };
+  guarded: Record<string, GuardedField>;
+  governance: {
+    /** `book` once the book declares its own rules, else `bootstrap`. */
+    source: "book" | "bootstrap";
+    rules: Record<string, SettingsRule>;
+    vocabulary: { metrics: string[]; operators: string[] };
+  };
+  /**
+   * Values the API will never change, each with the reason. Present so the
+   * boundary can be EXPLAINED — never bound to a form control (contract §3.6:
+   * never-editable fields are absent from the interface, not disabled).
+   */
+  readOnly: Record<string, string | boolean | null | Record<string, string>>;
+  /** `pending_git` while a previous settings commit is still in flight. */
+  status: string;
+  updatedAt: string;
+}
+
+/** PATCH body. `null` clears an optional field; absent leaves it alone. */
+export interface SettingsPatch {
+  title?: string;
+  language?: string;
+  license?: string | null;
+  slug?: string;
+  publication?: {
+    chapter_url?: string | null;
+    show_revision?: boolean | null;
+    show_attribution?: boolean | null;
+    show_public_annotations?: boolean | null;
+  };
+  /** REPLACES the rule map wholesale, so a rule can be deleted. */
+  governance?: { rules: Record<string, SettingsRule> };
+  /** Dotted paths of guarded fields the maintainer has explicitly confirmed. */
+  confirm?: string[];
+}
+
+export interface SettingsSaved {
+  operationId?: string;
+  changed?: string[];
+  status?: string;
+  correlationId?: string;
+}
+
+// ---- Phase 3 maintainer overrides ------------------------------------------
+
+/**
+ * The 200/201 body of a suggestion override. `workItemId` is present only for
+ * force-create; reject answers with the transitioned status alone.
+ */
+export interface OverrideResult {
+  annotationId: string;
+  status: string;
+  decisionId: string;
+  workItemId?: string;
+  operationIds: string[];
+  correlationId: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; value: T }
   /**
@@ -291,7 +447,11 @@ export class CollabApi {
    * is set by the browser and satisfies the API's CSRF check (contract §3);
    * the `Idempotency-Key` makes retries safe (contract §2.4).
    */
-  private async mutate(method: "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<Response> {
+  private async mutate(
+    method: "POST" | "PUT" | "PATCH" | "DELETE",
+    url: string,
+    body?: unknown,
+  ): Promise<Response> {
     return fetch(url, {
       method,
       credentials: "include",
@@ -616,6 +776,129 @@ export class CollabApi {
       return { ok: false, status: 404, message: "event feed unavailable" };
     }
     return { ok: true, value: { items: body.items, latestId: body.latestId } };
+  }
+
+  // ---- Phase 6 §3.5: authoring chapters ------------------------------------
+
+  /**
+   * The prose behind an existing chapter, for the edit half of the composer.
+   *
+   * `state-conflict` here means the deployment has no repository reader
+   * configured, so the current text cannot be read. The composer reports that
+   * verbatim and refuses to open rather than presenting an empty box that
+   * would silently REPLACE the chapter with whatever is typed into it — a
+   * revise sends a complete replacement body.
+   */
+  async chapterSource(chapterId: string): Promise<ApiResult<ChapterSource>> {
+    return this.jsonResult<ChapterSource>(
+      (async () => this.get(this.projectUrl(`/chapters/${encodeURIComponent(chapterId)}/source`)))(),
+      [200],
+    );
+  }
+
+  /**
+   * Create a chapter from a title and Markdown prose (contract §3.5). The
+   * server generates the id, the slug, the order and every block marker, so
+   * nothing here carries a UUID the author had to know.
+   */
+  async createChapter(command: {
+    title: string;
+    body: string;
+    summary?: string;
+  }): Promise<ApiResult<ChapterAccepted>> {
+    return this.jsonResult<ChapterAccepted>(
+      this.post(this.projectUrl("/chapter-submissions"), command),
+      [202],
+    );
+  }
+
+  /**
+   * Revise an existing chapter. `baseRevision` is the `revision` that came
+   * back from `chapterSource`, so a chapter edited elsewhere in the meantime
+   * fails with a clean 409 instead of silently clobbering the other edit.
+   */
+  async reviseChapter(command: {
+    chapterId: string;
+    baseRevision: number;
+    title?: string;
+    body?: string;
+    summary?: string;
+  }): Promise<ApiResult<ChapterAccepted>> {
+    return this.jsonResult<ChapterAccepted>(
+      this.post(this.projectUrl("/chapter-submissions"), command),
+      [202],
+    );
+  }
+
+  /** Publish a draft chapter — a separate explicit action (§3.5). */
+  async publishChapter(chapterId: string): Promise<ApiResult<ChapterAccepted>> {
+    return this.chapterStatus(chapterId, "publish");
+  }
+
+  /** Return a published chapter to draft. */
+  async unpublishChapter(chapterId: string): Promise<ApiResult<ChapterAccepted>> {
+    return this.chapterStatus(chapterId, "unpublish");
+  }
+
+  private async chapterStatus(
+    chapterId: string,
+    action: "publish" | "unpublish",
+  ): Promise<ApiResult<ChapterAccepted>> {
+    return this.jsonResult<ChapterAccepted>(
+      this.post(this.projectUrl(`/chapters/${encodeURIComponent(chapterId)}/${action}`), {}),
+      [202],
+    );
+  }
+
+  // ---- Phase 6 §3.6: book settings -----------------------------------------
+
+  /** The maintainer-only settings document (editable + guarded + governance). */
+  async settings(): Promise<ApiResult<SettingsDocument>> {
+    return this.jsonResult<SettingsDocument>(
+      (async () => this.get(this.projectUrl("/settings")))(),
+      [200],
+    );
+  }
+
+  /**
+   * Save a settings change. A guarded field (slug, chapter_url) comes back as
+   * a `settings-confirmation-required` problem the FIRST time, carrying what
+   * each change breaks; the view shows that text and resends with `confirm`.
+   */
+  async patchSettings(patch: SettingsPatch): Promise<ApiResult<SettingsSaved>> {
+    return this.jsonResult<SettingsSaved>(
+      this.mutate("PATCH", this.projectUrl("/settings"), patch),
+      [200, 202],
+    );
+  }
+
+  // ---- Phase 3 maintainer overrides, surfaced by Phase 6 §3.6 --------------
+
+  /**
+   * Force-create a work item from a suggestion regardless of the tally. The
+   * reason is required by the API and is recorded on the decision, which is
+   * what makes an override auditable rather than silent.
+   */
+  async promoteToWork(annotationId: string, reason: string): Promise<ApiResult<OverrideResult>> {
+    return this.jsonResult<OverrideResult>(
+      this.post(
+        this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/force-create-work-item`),
+        { reason },
+      ),
+      // 201: force-create makes a work item, so it answers "created" — unlike
+      // reject, which only transitions the suggestion and answers 200.
+      [201],
+    );
+  }
+
+  /** Reject an open suggestion (the inverse override, same reason discipline). */
+  async rejectSuggestion(annotationId: string, reason: string): Promise<ApiResult<OverrideResult>> {
+    return this.jsonResult<OverrideResult>(
+      this.post(this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/reject`), {
+        reason,
+      }),
+      [200],
+    );
   }
 
   /** Dev-mode login (only rendered behind the `data-dev-login` build flag). */

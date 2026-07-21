@@ -22,7 +22,22 @@ export const ENV = {
   repoDir: "AB_E2E_REPO_DIR",
   /** The served build directory — the Phase 4 flow rebuilds it in place. */
   siteDir: "AB_E2E_SITE_DIR",
+  /**
+   * The second, base-path deployment (ADR-0019 §6): its own origin, its own
+   * API process mounted under `API_BASE_PATH`, its own book repo and database.
+   * Kept entirely separate from the root deployment so neither test can
+   * observe the other's commits.
+   */
+  baseSiteUrl: "AB_E2E_BASE_SITE_URL",
+  baseRepoDir: "AB_E2E_BASE_REPO_DIR",
 } as const;
+
+/**
+ * The base path the second deployment is published under. One segment is
+ * enough to prove the pairing: the site's URLs, the emitted asset tree, and
+ * the API prefix all have to agree, and they either all do or none do.
+ */
+export const BASE_PATH = "/my-book";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -38,6 +53,13 @@ export const plainDir = (): string => requireEnv(ENV.plainDir);
 export const repoDir = (): string => requireEnv(ENV.repoDir);
 
 export const siteDir = (): string => requireEnv(ENV.siteDir);
+
+/** Origin of the base-path deployment; the book itself lives under BASE_PATH. */
+export const baseSiteUrl = (): string => requireEnv(ENV.baseSiteUrl);
+export const baseRepoDir = (): string => requireEnv(ENV.baseRepoDir);
+
+/** The base-path deployment's site root, e.g. `http://127.0.0.1:PORT/my-book`. */
+export const basePathSiteUrl = (): string => `${baseSiteUrl()}${BASE_PATH}`;
 
 export const chapterUrl = (slug = "baseline"): string => `${siteUrl()}/chapters/${slug}/`;
 
@@ -71,17 +93,33 @@ const CONTENT_TYPES: Record<string, string> = {
  * the API's own origin — the one its CSRF and `return_to` checks compare
  * against — is the site's origin.
  */
-export async function startStaticServer(): Promise<{
+export async function startStaticServer(
+  options: {
+    /**
+     * The path prefix proxied to the API. `/v1` is the origin-root deployment;
+     * a base-path deployment (ADR-0019 §6) serves the same API under its own
+     * prefix, e.g. `/my-book/v1`, which is exactly what the base-path e2e
+     * exercises. The Worker's `API_BASE_PATH` and the site's
+     * `publication.api_url` are the two halves of this pairing.
+     */
+    apiPrefix?: string;
+  } = {},
+): Promise<{
   server: Server;
   origin: string;
   setRoot: (dir: string) => void;
   setApiTarget: (target: { host: string; port: number }) => void;
 }> {
+  const apiPrefix = options.apiPrefix ?? "/v1";
   let root: string | null = null;
   let apiTarget: { host: string; port: number } | null = null;
   const server = createServer((req, res) => {
     const rawUrl = req.url ?? "/";
-    if (rawUrl === "/v1" || rawUrl.startsWith("/v1/") || rawUrl.startsWith("/v1?")) {
+    if (
+      rawUrl === apiPrefix ||
+      rawUrl.startsWith(`${apiPrefix}/`) ||
+      rawUrl.startsWith(`${apiPrefix}?`)
+    ) {
       if (apiTarget === null) {
         res.statusCode = 503;
         res.end("api not started yet");

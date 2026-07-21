@@ -1,16 +1,27 @@
 /**
- * Islands entry (Phase 2b contract §1, Phase 3 contract §6): defines the
- * collaboration custom elements. One bundle serves every island; chapter
- * pages mount `<authorbot-collab>` and the `/work/` page mounts
- * `<authorbot-work-queue>`. Emitted only for builds given an API base.
+ * Islands entry (Phase 2b contract §1, Phase 3 contract §6, Phase 6 contract
+ * §3.5-§3.6): defines the collaboration custom elements. One bundle serves
+ * every island; chapter pages mount `<authorbot-collab>`, the `/work/` page
+ * mounts `<authorbot-work-queue>`, `/write/` and chapter pages mount the
+ * chapter composer, and `/settings/` mounts the maintainer settings view.
+ * Emitted only for builds given an API base.
  */
+import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
+import { AuthorbotNewChapter } from "./new-chapter-button.js";
+import { AuthorbotSettings } from "./settings-view.js";
 import { AuthorbotWorkQueue } from "./work-queue.js";
 
-if (customElements.get("authorbot-collab") === undefined) {
-  customElements.define("authorbot-collab", AuthorbotCollab);
-}
+const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
+  ["authorbot-collab", AuthorbotCollab],
+  ["authorbot-work-queue", AuthorbotWorkQueue],
+  ["authorbot-chapter-composer", AuthorbotChapterComposer],
+  ["authorbot-new-chapter", AuthorbotNewChapter],
+  ["authorbot-settings", AuthorbotSettings],
+];
 
-if (customElements.get("authorbot-work-queue") === undefined) {
-  customElements.define("authorbot-work-queue", AuthorbotWorkQueue);
+for (const [tag, constructor] of ELEMENTS) {
+  if (customElements.get(tag) === undefined) {
+    customElements.define(tag, constructor);
+  }
 }

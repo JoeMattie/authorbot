@@ -1,0 +1,61 @@
+---
+/**
+ * The chapter-authoring page (Phase 6 contract §3.5). Emitted ONLY when the
+ * build has an API base: `getStaticPaths` returns the single `/write/` route
+ * for a collab build and nothing at all otherwise, so an api-url-less build
+ * stays byte-comparable (no page, no script — the script-free regression).
+ *
+ * Like the work page, the bundle is referenced with an `is:inline` script (the
+ * same stable `authorbot-collab.js` asset that buildSite emits for collab
+ * builds). The mount carries only the API config: the composer creates a
+ * chapter from nothing, so there is no chapter id in this page at all.
+ */
+import Base from "../../layouts/Base.astro";
+import { site } from "virtual:authorbot-site";
+
+export function getStaticPaths() {
+  return site.collab ? [{ params: { page: undefined } }] : [];
+}
+
+const collab = site.collab;
+if (collab === null) {
+  // Unreachable: getStaticPaths emits no route without collab. Guards the type.
+  throw new Error("write page rendered without collaboration config");
+}
+
+const csp =
+  "default-src 'self'; " +
+  // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
+  "connect-src 'self'; " +
+  "img-src 'self' data:";
+const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
+const src = `${site.basePath}_astro/authorbot-collab.js`;
+---
+
+<Base
+  title={`New chapter · ${site.book.title}`}
+  description="Write a new chapter for this book."
+  noindex={true}
+  csp={csp}
+  collabStylesHref={collabStylesHref}
+>
+  <section class="write-page">
+    <h1>New chapter</h1>
+    <p class="write-intro">
+      Write a title and the chapter's prose. Saving creates a draft; publishing is a
+      separate step.
+    </p>
+    <authorbot-chapter-composer
+      data-api-base={collab.apiBase}
+      data-project={collab.projectSlug}
+      data-dev-login={collab.devLogin ? "true" : undefined}
+      data-standalone="true"
+    >
+      <p class="write-fallback">
+        The chapter composer loads here once JavaScript is enabled. Writing a chapter
+        needs the editor or maintainer role.
+      </p>
+    </authorbot-chapter-composer>
+  </section>
+  <script is:inline type="module" src={src}></script>
+</Base>

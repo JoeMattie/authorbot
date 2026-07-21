@@ -1,0 +1,59 @@
+---
+/**
+ * The maintainer-only book settings page (Phase 6 contract §3.6). Emitted ONLY
+ * when the build has an API base: `getStaticPaths` returns the single
+ * `/settings/` route for a collab build and nothing at all otherwise, so an
+ * api-url-less build emits no page and stays byte-identically script-free.
+ *
+ * The page itself is public HTML with nothing sensitive in it — the settings
+ * document is fetched at runtime by the island, and the API refuses it to
+ * anyone who is not a maintainer. `noindex` because a settings screen has no
+ * business in search results.
+ */
+import Base from "../../layouts/Base.astro";
+import { site } from "virtual:authorbot-site";
+
+export function getStaticPaths() {
+  return site.collab ? [{ params: { page: undefined } }] : [];
+}
+
+const collab = site.collab;
+if (collab === null) {
+  // Unreachable: getStaticPaths emits no route without collab. Guards the type.
+  throw new Error("settings page rendered without collaboration config");
+}
+
+const csp =
+  "default-src 'self'; " +
+  // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
+  "connect-src 'self'; " +
+  "img-src 'self' data:";
+const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
+const src = `${site.basePath}_astro/authorbot-collab.js`;
+---
+
+<Base
+  title={`Book settings · ${site.book.title}`}
+  description="Maintainer-only book settings, committed to book.yml like any other change."
+  noindex={true}
+  csp={csp}
+  collabStylesHref={collabStylesHref}
+>
+  <section class="settings-page">
+    <h1>Book settings</h1>
+    <p class="settings-intro">
+      These settings live in this book's <code>book.yml</code>. Saving a change commits it to the
+      repository, so every change is diffable, revertable, and attributed like any other edit.
+    </p>
+    <authorbot-settings
+      data-api-base={collab.apiBase}
+      data-project={collab.projectSlug}
+      data-dev-login={collab.devLogin ? "true" : undefined}
+    >
+      <p class="settings-fallback">
+        Book settings load here once JavaScript is enabled. Sign in as a maintainer to edit them.
+      </p>
+    </authorbot-settings>
+  </section>
+  <script is:inline type="module" src={src}></script>
+</Base>

@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { createTempBookRepo, ENV, freePort, startStaticServer } from "./helpers.js";
+import { BASE_PATH, createTempBookRepo, ENV, freePort, startStaticServer } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,27 +64,70 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const repoDir = path.join(tmp, "book-repo");
   const siteDir = path.join(tmp, "site");
   const plainDir = path.join(tmp, "site-plain");
-  let site: Awaited<ReturnType<typeof startStaticServer>> | null = null;
-  let apiProcess: ChildProcess | null = null;
+  // The base-path deployment (ADR-0019 §6) gets its own repo, database and
+  // output tree so the two deployments cannot observe each other's commits.
+  const baseRepoDir = path.join(tmp, "base-book-repo");
+  const baseSiteDir = path.join(tmp, "base-site");
+  const servers: Awaited<ReturnType<typeof startStaticServer>>[] = [];
+  const apiProcesses: ChildProcess[] = [];
+
+  /** Spawn the Node dev API against `repo`, optionally under a base path. */
+  const startApi = async (options: {
+    repo: string;
+    sqlite: string;
+    port: number;
+    basePath?: string;
+  }): Promise<ChildProcess> => {
+    const child = spawn(process.execPath, [devServerJs], {
+      env: {
+        ...process.env,
+        BOOK_REPO_PATH: options.repo,
+        AUTH_MODE: "dev",
+        DEV_LOGIN_ENABLED: "true",
+        SESSION_SECRET: "e2e-session-secret",
+        WEBHOOK_SECRET: "e2e-webhook-secret",
+        PROJECT_SLUG: "hollow-creek-anomaly",
+        PROJECT_REPO: "JoeMattie/causal-projector",
+        INITIAL_MAINTAINER: "github:JoeMattie",
+        SQLITE_PATH: options.sqlite,
+        MIRROR_MODE: "inline",
+        // Phase 4 short-lease test config (contract §7): a 5m10s lease sits
+        // just above the PT5M renewal-prompt threshold, so the prompt appears
+        // ~10 seconds after a claim and the e2e can watch it happen for real
+        // instead of mocking the clock.
+        LEASE_DURATION: "PT5M10S",
+        LEASE_RENEWAL_DURATION: "PT30M",
+        LEASE_MAX_TOTAL_DURATION: "PT4H",
+        // Mirror of examples/book-repo book.yml `show_public_annotations: true`
+        // (contract §2.1): signed-out readers get read-only annotation lists.
+        PUBLIC_ANNOTATIONS: "true",
+        PORT: String(options.port),
+        ...(options.basePath === undefined ? {} : { API_BASE_PATH: options.basePath }),
+      },
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    apiProcesses.push(child);
+    return child;
+  };
 
   const teardown = async (): Promise<void> => {
-    if (site !== null) {
-      const { server } = site;
+    for (const { server } of servers) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    await new Promise<void>((resolve) => {
-      if (apiProcess === null || apiProcess.exitCode !== null) {
-        resolve();
-        return;
-      }
-      apiProcess.once("exit", () => resolve());
-      apiProcess.kill("SIGTERM");
-      const child = apiProcess;
-      setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve();
-      }, 3_000).unref();
-    });
+    for (const apiProcess of apiProcesses) {
+      await new Promise<void>((resolve) => {
+        if (apiProcess.exitCode !== null) {
+          resolve();
+          return;
+        }
+        apiProcess.once("exit", () => resolve());
+        apiProcess.kill("SIGTERM");
+        setTimeout(() => {
+          apiProcess.kill("SIGKILL");
+          resolve();
+        }, 3_000).unref();
+      });
+    }
     await rm(tmp, { recursive: true, force: true });
   };
 
@@ -97,55 +140,64 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   }
 
   async function setUp(): Promise<() => Promise<void>> {
-  // 1. temp git book repo
+  // 1. temp git book repos (one per deployment)
   await createTempBookRepo(exampleRepo, repoDir);
+  await createTempBookRepo(exampleRepo, baseRepoDir);
 
-  // 2. static origin first (root is attached after the build)
-  site = await startStaticServer();
+  // 2. static origins first (roots are attached after the builds)
+  const site = await startStaticServer();
+  servers.push(site);
+  const baseSite = await startStaticServer({ apiPrefix: `${BASE_PATH}/v1` });
+  servers.push(baseSite);
 
-  // 3. Phase 2 Node dev API as a child process
+  // 3. Phase 2 Node dev API per deployment, as child processes
   const apiPort = await freePort();
-  const apiOrigin = `http://127.0.0.1:${apiPort}`;
-  apiProcess = spawn(process.execPath, [devServerJs], {
-    env: {
-      ...process.env,
-      BOOK_REPO_PATH: repoDir,
-      AUTH_MODE: "dev",
-      DEV_LOGIN_ENABLED: "true",
-      SESSION_SECRET: "e2e-session-secret",
-      WEBHOOK_SECRET: "e2e-webhook-secret",
-      PROJECT_SLUG: "hollow-creek-anomaly",
-      PROJECT_REPO: "JoeMattie/causal-projector",
-      INITIAL_MAINTAINER: "github:JoeMattie",
-      SQLITE_PATH: path.join(tmp, "e2e.sqlite"),
-      MIRROR_MODE: "inline",
-      // Phase 4 short-lease test config (contract §7): a 5m10s lease sits
-      // just above the PT5M renewal-prompt threshold, so the prompt appears
-      // ~10 seconds after a claim and the e2e can watch it happen for real
-      // instead of mocking the clock.
-      LEASE_DURATION: "PT5M10S",
-      LEASE_RENEWAL_DURATION: "PT30M",
-      LEASE_MAX_TOTAL_DURATION: "PT4H",
-      // Mirror of examples/book-repo book.yml `show_public_annotations: true`
-      // (contract §2.1): signed-out readers get read-only annotation lists.
-      PUBLIC_ANNOTATIONS: "true",
-      PORT: String(apiPort),
-    },
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  await waitForApi(apiOrigin);
+  await startApi({ repo: repoDir, sqlite: path.join(tmp, "e2e.sqlite"), port: apiPort });
+  await waitForApi(`http://127.0.0.1:${apiPort}`);
   // The site origin now answers /v1/* too — one origin, as deployed.
   site.setApiTarget({ host: "127.0.0.1", port: apiPort });
   await waitForApi(site.origin);
 
-  // 4. build the site: collab-enabled (served) + api-url-less (regression).
-  // `api_url: "/"` is the only accepted shape now (ADR-0019 §5).
+  // The base-path API mounts every route under API_BASE_PATH, the mirror
+  // image of the site's `publication.api_url` (ADR-0019 §6).
+  const baseApiPort = await freePort();
+  await startApi({
+    repo: baseRepoDir,
+    sqlite: path.join(tmp, "e2e-base.sqlite"),
+    port: baseApiPort,
+    basePath: BASE_PATH,
+  });
+  await waitForApi(`http://127.0.0.1:${baseApiPort}${BASE_PATH}`);
+  baseSite.setApiTarget({ host: "127.0.0.1", port: baseApiPort });
+  await waitForApi(`${baseSite.origin}${BASE_PATH}`);
+
+  // 4. build the sites: collab-enabled (served) + api-url-less (regression),
+  // then the base-path deployment. `api_url: "/"` is the only accepted shape
+  // at the origin root; a base path uses its own prefix (ADR-0019 §5-§6).
   await execFileAsync(
     process.execPath,
     [buildSitesJs, JSON.stringify({ repoDir, siteDir, plainDir, apiUrl: "/" })],
     { maxBuffer: 16 * 1024 * 1024 },
   );
   site.setRoot(siteDir);
+
+  await execFileAsync(
+    process.execPath,
+    [
+      buildSitesJs,
+      JSON.stringify({
+        repoDir: baseRepoDir,
+        siteDir: baseSiteDir,
+        apiUrl: BASE_PATH,
+        baseUrl: `${baseSite.origin}${BASE_PATH}`,
+      }),
+    ],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
+  // buildSite nests a base-path tree under the prefix (so files match the
+  // URLs they are linked by), which is exactly what the served root expects:
+  // point the server at the un-nested outDir and `/my-book/` resolves.
+  baseSite.setRoot(baseSiteDir);
 
   // 5. hand the handles to the workers. The API url IS the site url: the
   //    helpers' direct `fetch` calls go through the same origin the browser
@@ -155,6 +207,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env[ENV.plainDir] = plainDir;
   process.env[ENV.repoDir] = repoDir;
   process.env[ENV.siteDir] = siteDir;
+  process.env[ENV.baseSiteUrl] = baseSite.origin;
+  process.env[ENV.baseRepoDir] = baseRepoDir;
 
   return teardown;
   }

@@ -774,3 +774,456 @@ main.ab-enabled {
     transition: top 160ms ease-out;
   }
 }
+
+/* ==== Phase 6 §3.5 — chapter composer ====================================== */
+/* The composer is a full-width authoring surface, not gutter chrome: it sits
+   under the reading column and never changes that column's measure. */
+.ab-chapter-composer {
+  display: block;
+  margin: 2rem 0 0;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.ab-chapter-heading {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+}
+
+.ab-chapter-authbar {
+  margin-bottom: 0.6rem;
+}
+
+.ab-chapter-help {
+  margin: 0 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ab-chapter-form {
+  display: block;
+}
+
+/* Prose deserves room: a chapter is not a comment box. */
+.ab-chapter-text {
+  min-height: 22rem;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.ab-chapter-actions,
+.ab-chapter-publish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+/* Publishing is a separate, secondary action — never the primary button, so
+   it cannot be hit by reflex while saving. */
+.ab-chapter-publish-actions {
+  padding-top: 0.7rem;
+  border-top: 1px dashed var(--border);
+}
+
+.ab-chapter-status {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.ab-chapter-denied {
+  margin: 0;
+}
+
+/* The "New chapter" entry point, rendered only for actors who may use it. */
+.ab-new-chapter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  margin: 1rem 0;
+  padding: 0.4rem 0.9rem;
+  border-radius: 4px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.ab-new-chapter:hover {
+  text-decoration: underline;
+}
+
+/* Focus must be visible on every control here (contract §4). */
+.ab-chapter-composer .ab-input:focus-visible,
+.ab-chapter-composer .ab-btn:focus-visible,
+.ab-new-chapter:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .ab-new-chapter {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* ==== Phase 6 §3.6 — book settings ======================================== */
+.ab-settings-body {
+  display: block;
+}
+
+.ab-settings-authbar {
+  margin-bottom: 1rem;
+}
+
+.ab-settings-denied {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-width: 60ch;
+}
+
+.ab-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 46rem;
+}
+
+.ab-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.ab-settings-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.ab-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ab-field-hint {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.ab-settings-publication {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ab-settings-legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+.ab-license-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  max-width: 60ch;
+}
+
+/* ---- governance ---------------------------------------------------------- */
+
+.ab-governance-intro,
+.ab-governance-source,
+.ab-governance-empty {
+  margin: 0;
+  max-width: 62ch;
+}
+
+.ab-governance-source {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.ab-governance-bootstrap {
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  opacity: 1;
+}
+
+.ab-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ab-rule-name {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.ab-rule-lead,
+.ab-rule-outcome {
+  margin: 0;
+  max-width: 62ch;
+}
+
+.ab-rule-clauses {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ab-rule-clause {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border);
+}
+
+.ab-clause-text {
+  font-weight: 600;
+}
+
+.ab-clause-explain {
+  margin: 0;
+  font-size: 0.85rem;
+  max-width: 60ch;
+  opacity: 0.85;
+}
+
+.ab-clause-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: 12rem;
+}
+
+.ab-field-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ab-human-maintainer-note {
+  margin: 0;
+  font-size: 0.85rem;
+  max-width: 60ch;
+  opacity: 0.85;
+}
+
+/* ---- guarded ------------------------------------------------------------- */
+
+.ab-guarded-consequence {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #a03434;
+  border-radius: 4px;
+  color: #a03434;
+  font-size: 0.9rem;
+  max-width: 62ch;
+}
+
+.ab-settings-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem 0.95rem;
+  border: 2px solid #a03434;
+  border-radius: 6px;
+}
+
+.ab-confirm-heading {
+  margin: 0;
+  font-size: 1rem;
+  color: #a03434;
+}
+
+.ab-confirm-breaks {
+  margin: 0;
+  max-width: 62ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-guarded-consequence {
+    border-color: #e09a9a;
+    color: #e09a9a;
+  }
+
+  .ab-settings-confirm {
+    border-color: #e09a9a;
+  }
+
+  .ab-confirm-heading {
+    color: #e09a9a;
+  }
+}
+
+/* ---- status, errors, boundary -------------------------------------------- */
+
+.ab-settings-status:empty {
+  display: none;
+}
+
+.ab-settings-status {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+}
+
+.ab-settings-error {
+  margin: 0.75rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #a03434;
+  border-radius: 4px;
+  color: #a03434;
+  max-width: 62ch;
+}
+
+.ab-settings-issues {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.ab-settings-pending {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  max-width: 62ch;
+}
+
+.ab-settings-readonly {
+  margin-top: 1.5rem;
+  max-width: 46rem;
+}
+
+.ab-readonly-summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ab-readonly-intro {
+  margin: 0.5rem 0;
+  max-width: 62ch;
+}
+
+.ab-readonly-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  max-width: 62ch;
+}
+
+.ab-settings-form :focus-visible,
+.ab-settings-readonly :focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .ab-settings-form .ab-input,
+  .ab-settings-form .ab-btn,
+  .ab-settings-confirm .ab-btn {
+    min-height: 44px;
+  }
+
+  .ab-field-check input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+  }
+
+  .ab-field-check {
+    min-height: 44px;
+  }
+}
+
+/* ==== Phase 6 §3.6 — maintainer overrides (promote / reject) ============== */
+/* The override panel is deliberately set apart from the vote control above it:
+   this is the surface that bypasses the project's rule, not another way to
+   participate in it. */
+.ab-override {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.ab-override-tally {
+  margin: 0 0 0.3rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ab-override-roles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.ab-override-role {
+  font-variant-numeric: tabular-nums;
+}
+
+.ab-override-actions {
+  margin-top: 0.4rem;
+}
+
+.ab-override-btn:focus-visible,
+.ab-override-confirm:focus-visible,
+.ab-override-cancel:focus-visible,
+.ab-override-reason:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+/* `display: block` on the form would defeat `[hidden] { display: none }`. */
+.ab-override-form[hidden] {
+  display: none;
+}
+
+.ab-override-form {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+@media (pointer: coarse) {
+  .ab-override-btn,
+  .ab-override-confirm,
+  .ab-override-cancel {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .ab-override-reason {
+    min-height: 44px;
+  }
+}

@@ -80,12 +80,17 @@ describe("api-url-less build (script-free regression)", () => {
   it("differs from a collab build only by the island additions (byte-comparable)", async () => {
     const plainFiles = rel(outPlain, await collectFiles(outPlain));
     const collabFiles = rel(outCollab, await collectFiles(outCollab));
-    // The collab build adds exactly the two island assets plus the /work/
-    // page (Phase 3 contract §6: emitted only when an API base is configured).
+    // The collab build adds exactly the two island assets plus the pages that
+    // exist only when an API base is configured: /work/ (Phase 3 contract §6)
+    // and, from Phase 6, /settings/ (§3.6) and /write/ (§3.5). Each is gated
+    // by `getStaticPaths` returning nothing without collab, which is what
+    // keeps the api-url-less build byte-identical rather than merely similar.
     expect(collabFiles.filter((file) => !plainFiles.includes(file))).toEqual([
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("settings", "index.html"),
       path.join("work", "index.html"),
+      path.join("write", "index.html"),
     ]);
     expect(plainFiles.filter((file) => !collabFiles.includes(file))).toEqual([]);
 
@@ -102,15 +107,25 @@ describe("api-url-less build (script-free regression)", () => {
         expect(strip(collab)).toEqual(strip(plain));
         continue;
       }
-      if (file.endsWith(".html") && file.startsWith("chapters" + path.sep)) {
-        // Strip the four island insertions; the remainder must be identical
+      if (file.endsWith(".html")) {
+        // Strip every island insertion; the remainder must be identical
         // (inter-tag whitespace normalized on both sides, since removing the
         // conditional template expressions also removes their surrounding
         // template whitespace).
+        //
+        // This now covers the home page as well as chapter pages. Phase 6
+        // §3.5 puts the "New chapter" entry point there deliberately: the case
+        // the section exists for is "an author facing an empty book", and a
+        // book with no chapters has no chapter pages to host the button. The
+        // invariant that still matters — and that the sibling test asserts —
+        // is that the api-url-less build stays byte-identically script-free;
+        // a collab build was always allowed to differ by exactly the islands.
         collab = collab
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
+          .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
+          .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/>\s+</g, "> <");
         plain = plain.replace(/>\s+</g, "> <");
@@ -142,9 +157,10 @@ describe("collab-enabled build", () => {
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
   });
 
-  it("keeps non-chapter pages script-free (islands hydrate chapter pages only)", async () => {
+  it("keeps the story pages script-free (islands hydrate only where they do something)", async () => {
+    // The story views are pure reading surfaces with no collaboration
+    // affordance, so they carry no bundle even in a collab build.
     for (const relPath of [
-      "index.html",
       "story/index.html",
       "story/timeline/index.html",
       "story/characters/index.html",
@@ -153,6 +169,41 @@ describe("collab-enabled build", () => {
       const html = await readFile(path.join(outCollab, relPath), "utf8");
       expect(html, relPath).not.toContain("<script");
       expect(html, relPath).not.toContain("authorbot-collab");
+    }
+  });
+
+  it("hydrates the home page with the New chapter entry point only (Phase 6 §3.5)", async () => {
+    // §3.5 exists for "an author facing an empty book". Such a book has no
+    // chapter pages, so the authoring entry point cannot live only there — the
+    // home page has to carry it or the blank slate is a dead end. What the
+    // home page must NOT gain is the annotation island: there is no prose on
+    // it to annotate.
+    const html = await readFile(path.join(outCollab, "index.html"), "utf8");
+    expect(html).toContain("<authorbot-new-chapter");
+    expect(html).toContain('data-href="/write/"');
+    expect(html).not.toContain("<authorbot-collab");
+    expect(html).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
+
+    // And the api-url-less build's home page stays exactly as it was.
+    const plain = await readFile(path.join(outPlain, "index.html"), "utf8");
+    expect(plain).not.toContain("<script");
+    expect(plain).not.toContain("authorbot-new-chapter");
+  });
+
+  it("emits the /write/ and /settings/ pages only for a collab build", async () => {
+    for (const [relPath, mount] of [
+      ["write/index.html", "<authorbot-chapter-composer"],
+      ["settings/index.html", "<authorbot-settings"],
+    ] as const) {
+      const page = await readFile(path.join(outCollab, relPath), "utf8");
+      expect(page, relPath).toContain(mount);
+      expect(page, relPath).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
+      expect(page, relPath).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
+      expect(page, relPath).toContain(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
+          `connect-src 'self'; img-src 'self' data:">`,
+      );
+      await expect(stat(path.join(outPlain, relPath))).rejects.toThrow();
     }
   });
 

@@ -1,10 +1,34 @@
 ---
 import Base from "../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
+
+// Phase 6 contract §3.5: the "New chapter" button belongs where an author
+// starts — the book's front page — so a book with no chapters at all still
+// has a way in. Like every other island it is emitted ONLY for a build with
+// an API base: without one this page keeps its byte-comparable, script-free
+// output (no CSP meta, no stylesheet link, no script tag).
+const collab = site.collab;
+const csp = collab
+  ? "default-src 'self'; " +
+    // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
+    "connect-src 'self'; " +
+    "img-src 'self' data:"
+  : undefined;
+const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;
+const src = `${site.basePath}_astro/authorbot-collab.js`;
 ---
 
-<Base title={site.book.title}>
+<Base title={site.book.title} csp={csp} collabStylesHref={collabStylesHref}>
   <h1>{site.book.title}</h1>
+  {
+    collab && (
+      <authorbot-new-chapter
+        data-api-base={collab.apiBase}
+        data-project={collab.projectSlug}
+        data-href={`${site.basePath}write/`}
+      />
+    )
+  }
   {
     site.chapters.length === 0 ? (
       <p>No chapters published yet.</p>
@@ -20,4 +44,5 @@ import { site } from "virtual:authorbot-site";
       </ol>
     )
   }
+  {collab && <script is:inline type="module" src={src} />}
 </Base>

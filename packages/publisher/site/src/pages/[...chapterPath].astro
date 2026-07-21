@@ -81,5 +81,30 @@ const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` 
       )}
     </span>
   </nav>
+  {
+    collab && (
+      <>
+        {/* Phase 6 §3.5: the authoring entry point, and the same composer in
+            edit mode. `data-chapter-id` is a build-time attribute, never
+            visible UI — that is how editing an existing chapter avoids ever
+            showing the author a UUID. Both render nothing until the API says
+            the viewer may author, so the reading column is untouched for
+            everyone else. */}
+        <authorbot-new-chapter
+          data-api-base={collab.apiBase}
+          data-project={collab.projectSlug}
+          data-href={`${site.basePath}write/`}
+        />
+        <authorbot-chapter-composer
+          data-api-base={collab.apiBase}
+          data-project={collab.projectSlug}
+          data-dev-login={collab.devLogin ? "true" : undefined}
+          data-chapter-id={chapter.id}
+          data-chapter-title={chapter.title}
+          data-chapter-status={chapter.status}
+        />
+      </>
+    )
+  }
   {collab && <Collab collab={collab} chapter={chapter} />}
 </Base>

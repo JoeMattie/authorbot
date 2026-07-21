@@ -17,6 +17,8 @@ const EMPTY_TALLY: VoteTally = {
   distinctVoters: 0,
   humanApprovals: 0,
   agentApprovals: 0,
+  maintainerApprovals: 0,
+  humanMaintainerApprovals: 0,
 };
 
 /** A tally that may be absent (comment reads, optimistic gaps) → zeros. */

@@ -16,6 +16,7 @@
 import { stackCards, type StackItem } from "./anchor.js";
 import {
   CollabApi,
+  isMaintainer,
   type Annotation,
   type FeedEvent,
   type Me,
@@ -32,6 +33,12 @@ import {
   type ComposerState,
 } from "./composer-state.js";
 import { CollabEvents } from "./events.js";
+import {
+  canOverride,
+  OverrideControl,
+  type OverrideAction,
+  type OverrideDraft,
+} from "./override-control.js";
 import { captureRange, type CapturedSelection } from "./selection.js";
 import { VoteControl } from "./vote-control.js";
 
@@ -51,6 +58,8 @@ interface FocusRestore {
   kind: string;
   /** For `kind === "vote"`: the segment's `data-vote` value. */
   voteValue?: string;
+  /** For `kind === "override-action"`: the button's `data-override` value. */
+  overrideAction?: string;
 }
 
 const DESKTOP_QUERY = "(min-width: 960px)";
@@ -143,6 +152,9 @@ export class AuthorbotCollab extends HTMLElement {
   private selTool!: HTMLElement;
   private cardEls = new Map<string, HTMLElement>();
   private voteControls = new Map<string, VoteControl>();
+  private overrideControls = new Map<string, OverrideControl>();
+  /** Open override form + typed reason per suggestion (survives re-renders). */
+  private overrideDrafts = new Map<string, OverrideDraft>();
   private events: CollabEvents | null = null;
   private eventsStarted = false;
   private refetchTimer: number | undefined;
@@ -458,6 +470,7 @@ export class AuthorbotCollab extends HTMLElement {
     annotation.myVote = result.value.value;
     annotation.decision = result.value.decision;
     control.update(annotation);
+    this.overrideControls.get(annotationId)?.update(annotation);
     this.announce(control.summary());
     // A fresh crossing changes the annotation's server-side status; reconcile
     // authoritative state so the card reflects it even if the feed is down.
@@ -465,6 +478,41 @@ export class AuthorbotCollab extends HTMLElement {
       this.announce("Threshold reached — queued as a work item.");
       this.scheduleRefetch();
     }
+  }
+
+  // ---- maintainer overrides (Phase 6 contract §3.6) ------------------------
+
+  /**
+   * Run a force-promote / reject. Resolves to the message the control should
+   * show in its alert node, or `null` on success. A 403/409 problem detail is
+   * surfaced VERBATIM — "a work item already exists for this suggestion" says
+   * exactly what happened, and inventing copy for it would be a lie.
+   */
+  private async runOverride(
+    annotationId: string,
+    action: OverrideAction,
+    reason: string,
+  ): Promise<string | null> {
+    const control = this.overrideControls.get(annotationId);
+    control?.setBusy(true);
+    const result =
+      action === "promote"
+        ? await this.api.promoteToWork(annotationId, reason)
+        : await this.api.rejectSuggestion(annotationId, reason);
+    control?.setBusy(false);
+    if (!result.ok) {
+      return result.status === 0 || result.status === 401
+        ? this.friendlyWriteError(result.status, result.message)
+        : result.message;
+    }
+    this.overrideDrafts.delete(annotationId);
+    this.announce(
+      action === "promote"
+        ? "Promoted to work — a work item was created."
+        : "Suggestion rejected.",
+    );
+    this.scheduleRefetch();
+    return null;
   }
 
   // ---- live event feed (Phase 3 contract §5) -------------------------------
@@ -512,6 +560,10 @@ export class AuthorbotCollab extends HTMLElement {
         if (annotation !== undefined && typeof votes === "object" && votes !== null) {
           annotation.votes = votes as NonNullable<Annotation["votes"]>;
           this.voteControls.get(annotationId)?.update(annotation);
+          // The override panel shows the tally being overridden, so it tracks
+          // the same in-place update — never a re-render that would steal
+          // focus from a half-typed reason.
+          this.overrideControls.get(annotationId)?.update(annotation);
         }
         break;
       }
@@ -952,6 +1004,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.renderAuthbar();
     this.cardEls.clear();
     this.voteControls.clear();
+    this.overrideControls.clear();
     this.cardsHost.textContent = "";
     for (const annotation of this.visibleAnnotations()) {
       const card = this.buildCard(annotation);
@@ -1025,20 +1078,28 @@ export class AuthorbotCollab extends HTMLElement {
     for (const [id, card] of this.cardEls) {
       if (card === active || card.contains(active)) {
         const voteButton = active.closest<HTMLElement>(".ab-vote-btn");
+        const overrideButton = active.closest<HTMLElement>("[data-override]");
         const kind =
-          active.tagName === "TEXTAREA"
-            ? "textarea"
-            : active.classList.contains("ab-danger")
-              ? "danger"
-              : voteButton !== null
-                ? "vote"
-                : "card";
+          active.classList.contains("ab-override-reason")
+            ? "override-reason"
+            : overrideButton !== null
+              ? "override-action"
+              : active.tagName === "TEXTAREA"
+                ? "textarea"
+                : active.classList.contains("ab-danger")
+                  ? "danger"
+                  : voteButton !== null
+                    ? "vote"
+                    : "card";
         const index = this.visibleAnnotations().findIndex(
           (annotation) => annotation.id === id,
         );
         const restore: FocusRestore = { cardId: id, index, kind };
         if (voteButton !== null && voteButton.dataset.vote !== undefined) {
           restore.voteValue = voteButton.dataset.vote;
+        }
+        if (overrideButton !== null && overrideButton.dataset.override !== undefined) {
+          restore.overrideAction = overrideButton.dataset.override;
         }
         return restore;
       }
@@ -1064,6 +1125,27 @@ export class AuthorbotCollab extends HTMLElement {
         );
         if (segment !== null) {
           segment.focus();
+          return;
+        }
+      }
+      // An override reason is a textarea too, but a distinct one: match it
+      // before the generic textarea branch so focus never lands in the reply
+      // box instead (and the typed reason is restored with it).
+      if (restore.kind === "override-reason") {
+        const reason = card.querySelector<HTMLTextAreaElement>(".ab-override-reason");
+        if (reason !== null) {
+          reason.focus();
+          const end = reason.value.length;
+          reason.setSelectionRange(end, end);
+          return;
+        }
+      }
+      if (restore.kind === "override-action" && restore.overrideAction !== undefined) {
+        const button = card.querySelector<HTMLButtonElement>(
+          `[data-override="${restore.overrideAction}"]`,
+        );
+        if (button !== null) {
+          button.focus();
           return;
         }
       }
@@ -1178,6 +1260,24 @@ export class AuthorbotCollab extends HTMLElement {
       control.update(annotation);
       this.voteControls.set(annotation.id, control);
       card.append(control.root);
+
+      // Phase 6 contract §3.6: the maintainer overrides, offered only to a
+      // maintainer and only while the suggestion is open and not mid-commit.
+      if (
+        isMaintainer(this.me) &&
+        canOverride(annotation) &&
+        !this.annotationSync.has(annotation.id)
+      ) {
+        const draft = this.overrideDrafts.get(annotation.id) ?? { action: null, reason: "" };
+        const override = new OverrideControl({
+          draft,
+          onDraftChange: (next) => this.overrideDrafts.set(annotation.id, next),
+          onSubmit: (action, reason) => this.runOverride(annotation.id, action, reason),
+        });
+        override.update(annotation);
+        this.overrideControls.set(annotation.id, override);
+        card.append(override.root);
+      }
     }
 
     const replies = this.repliesByAnnotation.get(annotation.id) ?? [];
