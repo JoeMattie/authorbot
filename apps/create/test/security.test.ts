@@ -310,6 +310,10 @@ describe("a journal value can never become a command-line flag", () => {
       "--no-install",
       "--check",
       "--version",
+      "--is-inside-work-tree",
+      // The end-of-options separator, which is the opposite of a risk: it is
+      // what stops a following filename from ever being read as a flag.
+      "--",
     ]);
     for (const call of harness.runner.calls) {
       for (const arg of call.args) {

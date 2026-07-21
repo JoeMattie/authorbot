@@ -100,6 +100,8 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
 
   await installBookDependencies(ctx);
 
+  await commitGeneratedConfig(ctx);
+
   // ---- CI credentials -----------------------------------------------------
 
   // `identity.repo` is the verified `origin`, not whatever the journal claims.
@@ -501,6 +503,84 @@ async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<
     throw new WizardError(
       `Stopped before taking over ${domain}.`,
       "Run `create-authorbot publish` again and give a hostname that is not already serving something — a subdomain like book.example.com is the usual choice. Nothing was deployed.",
+    );
+  }
+}
+
+/**
+ * Commits the configuration this stage just wrote.
+ *
+ * `publish` edits tracked files — the custom domain route into wrangler.jsonc,
+ * the API package and toolchain pin into package.json and its lockfile — and
+ * used to leave every one of them uncommitted. Two things followed, both bad
+ * and neither visible at the time.
+ *
+ * CI deploys from the commit, not the working tree, so the workflow was
+ * publishing a Worker config that did not mention the author's custom domain
+ * while the local `wrangler deploy` used the file that did. The two deploys
+ * disagreed about what the site was.
+ *
+ * And `upgrade` refuses to run against a dirty tree — reasonably, since a
+ * pull request should contain the upgrade and nothing else — so the wizard
+ * left the book in a state where its own next stage would not start.
+ *
+ * Restricted to the files this stage is responsible for: an author's own
+ * work-in-progress is theirs, and sweeping it into a commit they did not ask
+ * for is exactly the kind of surprise the wizard promises not to spring.
+ */
+async function commitGeneratedConfig(ctx: WizardContext): Promise<void> {
+  const GENERATED = ["wrangler.jsonc", "package.json", "package-lock.json"];
+
+  if (ctx.actions.dryRun) {
+    ctx.actions.note(
+      `run: git commit ${GENERATED.join(" ")}`,
+      "Commits the configuration this stage wrote, so CI deploys what was just deployed here.",
+    );
+    return;
+  }
+
+  const inside = await ctx.actions.run({
+    purpose: "check this book is a git repository",
+    command: "git",
+    args: ["rev-parse", "--is-inside-work-tree"],
+    cwd: ctx.directory,
+    mutates: false,
+  });
+  if (inside.code !== 0) {
+    return;
+  }
+
+  await ctx.actions.run({
+    purpose: "stage the configuration this stage wrote",
+    command: "git",
+    args: ["add", "--", ...GENERATED],
+    cwd: ctx.directory,
+    mutates: true,
+  });
+
+  const staged = await ctx.actions.run({
+    purpose: "see whether the configuration actually changed",
+    command: "git",
+    args: ["diff", "--cached", "--quiet", "--", ...GENERATED],
+    cwd: ctx.directory,
+    mutates: false,
+  });
+  if (staged.code === 0) {
+    return;
+  }
+
+  const commit = await ctx.actions.run({
+    purpose: "commit the configuration this stage wrote",
+    command: "git",
+    args: ["commit", "-m", "Configure publishing", "--", ...GENERATED],
+    cwd: ctx.directory,
+    mutates: true,
+  });
+  if (commit.code === 0) {
+    ctx.reporter.ok("Committed the publishing configuration, so CI deploys what you just deployed.");
+  } else {
+    ctx.reporter.warn(
+      "Could not commit the publishing configuration. Commit wrangler.jsonc and package.json yourself — CI deploys from the commit, not from your working tree.",
     );
   }
 }
