@@ -11,9 +11,17 @@
  * cannot be used to obtain one. Rather than invent a CLI-only authentication
  * path (a second way into a system whose whole point is one way in), the stage
  * mints when the author supplies a credential they already hold and otherwise
- * prints the exact request to make from the signed-in site. The prompt file is
- * written either way, because that is the part the author cannot easily write
- * themselves.
+ * sends them to the button on their own settings page.
+ *
+ * That button did not exist when this was written, and neither did any other
+ * way to obtain the credential this stage asks for — so "a credential they
+ * already hold" described nobody, and the fallback pointed at a settings page
+ * that could list and revoke tokens but not create one. Both roads ended
+ * nowhere for every author who walked them. The reasoning above was sound; its
+ * premise was never checked.
+ *
+ * The prompt file is written either way, because that is the part the author
+ * cannot easily write themselves.
  */
 import path from "node:path";
 import { WizardError } from "../errors.js";
@@ -90,28 +98,11 @@ export const agentStage: Stage = async (ctx: WizardContext): Promise<StageOutcom
   if (token === null) {
     ctx.reporter.blank();
     ctx.reporter.warn("No token was minted, because minting needs a signed-in maintainer.");
-    // Not "mint one from your book's settings": that page lists and revokes
-    // tokens and cannot create one, so sending an author there is sending them
-    // to look for a button that is not there. Until it exists, the honest
-    // instruction is the one that works — their own session cookie, from their
-    // own site, which is exactly what the API is asking for.
     ctx.reporter.info(
-      `Sign in at ${base}, then run this in your browser's console ON THAT PAGE. Your session cookie authenticates it, and being same-origin satisfies the API's CSRF check:`,
+      `Sign in at ${base}, open your book's settings, and use "Create an agent token" under Agent tokens. The scopes below are pre-selected there; the token is shown once, when you create it.`,
     );
-    ctx.reporter.literal(
-      `await (await fetch("/v1/projects/${book.slug}/agent-tokens", {\n` +
-        `  method: "POST",\n` +
-        `  credentials: "include",\n` +
-        `  headers: { "content-type": "application/json" },\n` +
-        `  body: JSON.stringify({\n` +
-        `    name: ${JSON.stringify(name)},\n` +
-        `    scopes: ${JSON.stringify([...DEFAULT_AGENT_SCOPES])}\n` +
-        `  })\n` +
-        `})).json()`,
-    );
-    ctx.reporter.info(
-      "The token is in the response, and that is the only time it is ever shown.",
-    );
+    ctx.reporter.literal(`${base}/settings/`);
+    ctx.reporter.info(`Scopes for this agent: ${[...DEFAULT_AGENT_SCOPES].join(", ")}`);
   } else {
     ctx.reporter.blank();
     ctx.reporter.warn(
@@ -194,7 +185,7 @@ async function mintToken(
     const supply = await ctx.prompter.confirm({
       id: "agent.mintNow",
       message: "Mint the token now?",
-      hint: "Only if you already have a maintainer bearer token. Most authors do not: signing in gives you a session cookie, not a token, and nothing in Authorbot hands one out. Say no — the usual answer — and you get the exact request to run from your signed-in site, which your cookie authenticates.",
+      hint: "Only if you already hold a maintainer bearer token — most authors do not, because signing in gives a session cookie rather than a token. Say no, which is the usual answer, and you are pointed at the button on your book's settings page that creates one.",
       defaultValue: false,
     });
     if (!supply) {
