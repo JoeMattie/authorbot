@@ -38,6 +38,7 @@
     "dist",
     "json",
     "LICENSE",
+    "CHANGELOG.md",
     "!dist/**/*.map"
   ],
   "scripts": {

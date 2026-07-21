@@ -38,6 +38,7 @@
     "site",
     "!site/node_modules",
     "LICENSE",
+    "CHANGELOG.md",
     "!dist/**/*.map"
   ],
   "scripts": {

@@ -42,6 +42,7 @@
     "dist",
     "migrations",
     "LICENSE",
+    "CHANGELOG.md",
     "!dist/**/*.map"
   ],
   "scripts": {

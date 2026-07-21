@@ -12,7 +12,9 @@ _site/
 # Generated at pack time (scripts/copy-license.mjs, apps/api/scripts/sync-migrations.mjs).
 # The authoritative copies live at ./LICENSE and ./migrations.
 apps/*/LICENSE
+apps/*/CHANGELOG.md
 packages/*/LICENSE
+packages/*/CHANGELOG.md
 apps/api/migrations/
 test-results/
 playwright-report/

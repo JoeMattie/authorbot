@@ -36,6 +36,7 @@
   "files": [
     "dist",
     "LICENSE",
+    "CHANGELOG.md",
     "!dist/**/*.map"
   ],
   "scripts": {
