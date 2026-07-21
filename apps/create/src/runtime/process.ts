@@ -13,6 +13,39 @@ import type { ExecOptions, ExecResult, ProcessRunner } from "../ports.js";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+/**
+ * The environment a child gets, minus the parent npm's own configuration.
+ *
+ * `npx @authorbot/create` is the documented way to run this wizard, and npx
+ * exports its whole config as `npm_config_*` — `npm_config_prefix`,
+ * `npm_config_local_prefix`, `npm_config_globalconfig`, a dozen more. A child
+ * `npm install` inherits them and resolves against npx's cache directory
+ * instead of the book, so the install fails every time.
+ *
+ * It fails ONLY through npx. Run the same binary directly and the environment
+ * is clean and everything works, which is what made this look like the
+ * author's machine rather than the wizard: it could not be reproduced by
+ * anyone testing the built output, only by anyone actually using it.
+ *
+ * Stripped for npm and npx alone. Other tools are not confused by these, and
+ * scrubbing an environment more broadly than the problem is how a tool that
+ * needed one of them breaks later for no visible reason.
+ */
+function childEnvironment(env: NodeJS.ProcessEnv, command: string): NodeJS.ProcessEnv {
+  const base = command.replace(/\.(cmd|exe)$/i, "");
+  if (base !== "npm" && base !== "npx") {
+    return { ...env };
+  }
+  const cleaned: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (/^npm_config_/i.test(key) || /^NPM_CONFIG_/.test(key)) {
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
 export class NodeProcessRunner implements ProcessRunner {
   readonly #env: NodeJS.ProcessEnv;
 
@@ -24,7 +57,7 @@ export class NodeProcessRunner implements ProcessRunner {
     return new Promise<ExecResult>((resolve, reject) => {
       const child = spawn(command, [...args], {
         cwd: options.cwd ?? process.cwd(),
-        env: { ...this.#env, ...options.env },
+        env: { ...childEnvironment(this.#env, command), ...options.env },
         stdio: ["pipe", "pipe", "pipe"],
         shell: false,
       });
