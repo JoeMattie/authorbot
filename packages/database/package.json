@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/database",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "SqlDatabase portability interface (D1 + better-sqlite3 adapters), SQL migrations runner, and typed repositories for Authorbot Phase 2 operational tables (Phase 2 contract section 2)",
   "keywords": [
     "authorbot",

@@ -24,7 +24,7 @@ import { renderWrangler } from "./wrangler.js";
  * asserts it matches this package's own version, because the wizard and the
  * toolchain it pins are released together.
  */
-export const TOOLCHAIN_VERSION = "0.1.4";
+export const TOOLCHAIN_VERSION = "0.1.5";
 
 /** Contract §3.2: "license defaults to CC-BY-NC-4.0 and is changed in settings". */
 export const DEFAULT_LICENSE = "CC-BY-NC-4.0";
