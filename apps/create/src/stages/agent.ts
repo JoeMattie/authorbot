@@ -130,8 +130,13 @@ export const agentStage: Stage = async (ctx: WizardContext): Promise<StageOutcom
   ctx.reporter.blank();
   ctx.reporter.ok(`Wrote a briefing for your agent: ${promptPath}`);
   ctx.reporter.info(
-    "Paste it into your coding agent. A complete, dependency-free reference implementation of the loop is `examples/agent-workflow.mjs` in the Authorbot repository.",
+    "The briefing is book-specific. For the full protocol — the loop, the safety rules, and per-role guidance — install the collaborator skill into your agent tooling:",
   );
+  ctx.reporter.literal("npx skills add JoeMattie/authorbot");
+  ctx.reporter.info(
+    "Point it at this book with two environment variables, so the token never lands in a file or a chat transcript:",
+  );
+  ctx.reporter.literal(`export AUTHORBOT_API=${base}\nexport AUTHORBOT_TOKEN=<the token above>`);
 
   await ctx.journal.update((data) => {
     data.agent = { name, promptPath };
@@ -305,7 +310,13 @@ retrying: it is what stops a network hiccup from creating two of something.
 - If a submission is rejected, read the reason and revise; do not resubmit the
   same thing.
 
-A complete, dependency-free reference implementation of this loop is
+This briefing is the short version, specific to your book. The full protocol —
+every endpoint, the error codes, the safety rules, and per-role guidance — is
+the installable collaborator skill:
+
+    npx skills add JoeMattie/authorbot
+
+A complete, dependency-free reference implementation of the loop is
 \`examples/agent-workflow.mjs\` in the Authorbot repository.
 `;
 }
