@@ -20,6 +20,7 @@
  *   error all run through the same `finally`. A leaked loopback listener is a
  *   leaked callback endpoint.
  */
+import { createPrivateKey } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import { randomToken } from "../ids.js";
 import { TimeoutError, WizardError } from "../errors.js";
@@ -53,7 +54,7 @@ export interface ManifestConversion {
   readonly clientId: string;
   /** Secret. */
   readonly clientSecret: string;
-  /** Secret: PKCS#1 or PKCS#8 PEM. */
+  /** Secret: always PKCS#8 PEM, converted on the way out if GitHub sent PKCS#1. */
   readonly pem: string;
   /** Secret. */
   readonly webhookSecret: string;
@@ -390,7 +391,7 @@ export async function convertManifestCode(
     htmlUrl,
     clientId,
     clientSecret,
-    pem,
+    pem: toPkcs8(pem),
     webhookSecret,
   };
 }
@@ -423,4 +424,30 @@ export async function withDeadline<T>(
   // The timeout resolved without the flag being set, which cannot happen; fall
   // back to awaiting the real promise rather than inventing a failure.
   return await promise;
+}
+
+/**
+ * GitHub's PEM, in the one format the Worker can actually use.
+ *
+ * The manifest conversion returns a PKCS#1 key — `BEGIN RSA PRIVATE KEY` —
+ * and WebCrypto, which is all a Cloudflare Worker has, cannot import one. The
+ * wizard stored it verbatim, so every book it set up reported
+ * `gitIntegration: "invalid"` and did no Git work at all: chapters could not
+ * be saved, the projection never ran, and nothing said why.
+ *
+ * `createPrivateKey` parses either format and re-exports as PKCS#8, so this is
+ * a re-encoding rather than a conversion in any meaningful sense — the key
+ * material is untouched.
+ *
+ * A key that cannot be parsed is passed through unchanged: the Worker's own
+ * credential check will refuse it and name the problem, which is a better
+ * error than one thrown from inside the setup wizard about a format the
+ * author never chose.
+ */
+export function toPkcs8(pem: string): string {
+  try {
+    return createPrivateKey(pem).export({ type: "pkcs8", format: "pem" }).toString();
+  } catch {
+    return pem;
+  }
 }
