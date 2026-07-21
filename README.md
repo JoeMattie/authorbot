@@ -114,6 +114,7 @@ option — never emitted otherwise).
 | 7 | hardening: rate limits, restore drill, reviews, load testing | contracted |
 | 8 | installable collaborator skill for agent fleets | contracted |
 | 9 | author-facing docs and authorbot.joemattie.com | contracted |
+| 10 | reading presentation settings (measure, typeface) | contracted |
 
 ## Status
 
