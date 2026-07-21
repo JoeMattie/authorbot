@@ -89,13 +89,28 @@ export const agentStage: Stage = async (ctx: WizardContext): Promise<StageOutcom
   const token = await mintToken(ctx, base, book.slug, name);
   if (token === null) {
     ctx.reporter.blank();
-    ctx.reporter.warn("No token was minted, because minting needs you to be signed in.");
+    ctx.reporter.warn("No token was minted, because minting needs a signed-in maintainer.");
+    // Not "mint one from your book's settings": that page lists and revokes
+    // tokens and cannot create one, so sending an author there is sending them
+    // to look for a button that is not there. Until it exists, the honest
+    // instruction is the one that works — their own session cookie, from their
+    // own site, which is exactly what the API is asking for.
     ctx.reporter.info(
-      `Sign in at ${base}, then mint one from your book's settings — or make this request as a signed-in maintainer:`,
+      `Sign in at ${base}, then run this in your browser's console ON THAT PAGE. Your session cookie authenticates it, and being same-origin satisfies the API's CSRF check:`,
     );
     ctx.reporter.literal(
-      `POST ${base}/v1/projects/${book.slug}/agent-tokens\n` +
-        `{ "name": ${JSON.stringify(name)}, "scopes": ${JSON.stringify([...DEFAULT_AGENT_SCOPES])} }`,
+      `await (await fetch("/v1/projects/${book.slug}/agent-tokens", {\n` +
+        `  method: "POST",\n` +
+        `  credentials: "include",\n` +
+        `  headers: { "content-type": "application/json" },\n` +
+        `  body: JSON.stringify({\n` +
+        `    name: ${JSON.stringify(name)},\n` +
+        `    scopes: ${JSON.stringify([...DEFAULT_AGENT_SCOPES])}\n` +
+        `  })\n` +
+        `})).json()`,
+    );
+    ctx.reporter.info(
+      "The token is in the response, and that is the only time it is ever shown.",
     );
   } else {
     ctx.reporter.blank();
@@ -178,8 +193,8 @@ async function mintToken(
     }
     const supply = await ctx.prompter.confirm({
       id: "agent.mintNow",
-      message: "Mint the token now? You will need a maintainer token you already hold.",
-      hint: "Say no to get the exact request to make from your signed-in site instead. Nothing is lost either way.",
+      message: "Mint the token now?",
+      hint: "Only if you already have a maintainer bearer token. Most authors do not: signing in gives you a session cookie, not a token, and nothing in Authorbot hands one out. Say no — the usual answer — and you get the exact request to run from your signed-in site, which your cookie authenticates.",
       defaultValue: false,
     });
     if (!supply) {
@@ -187,7 +202,7 @@ async function mintToken(
     }
     credential = await ctx.prompter.secret({
       id: "agent.maintainerToken",
-      message: "Maintainer token (hidden, sent only to your own site):",
+      message: "Maintainer bearer token (hidden, sent only to your own site):",
     });
   }
   if (credential.length === 0) {
