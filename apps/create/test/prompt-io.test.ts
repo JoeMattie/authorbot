@@ -16,7 +16,14 @@ function prompterOn(lines: string[]): { prompter: TtyPrompter; written: string[]
   const written: string[] = [];
   const prompter = new TtyPrompter({
     input: input as unknown as NodeJS.ReadStream,
-    output: { write: (l: string) => written.push(l) },
+    output: {
+      write: (l: string) => {
+        written.push(l);
+      },
+      error: (l: string) => {
+        written.push(l);
+      },
+    },
   });
   // Feed answers after the interface is listening.
   setTimeout(() => {
@@ -54,7 +61,7 @@ describe("TtyPrompter reads what the user actually typed", () => {
     const input = new PassThrough();
     const prompter = new TtyPrompter({
       input: input as unknown as NodeJS.ReadStream,
-      output: { write: () => {} },
+      output: { write: () => {}, error: () => {} },
     });
     setTimeout(() => input.end(), 5);
     await expect(prompter.text({ id: "y", message: "anything?" })).resolves.toBe("");
