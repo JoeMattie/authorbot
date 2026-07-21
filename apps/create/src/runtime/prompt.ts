@@ -72,12 +72,32 @@ export class TtyPrompter implements Prompter {
     return value as T;
   }
 
+  /**
+   * A prompt's message with its hint under it.
+   *
+   * `TextPrompt` and `ConfirmPrompt` carry a `hint`, and clack has nowhere to
+   * put one: `text` has a placeholder, which vanishes the moment anyone types,
+   * and `confirm` has nothing at all. Moving to clack therefore silently
+   * dropped every explanatory line the wizard had — including the one telling
+   * an author that a maintainer bearer token is something they almost
+   * certainly do not have and that "no" is the expected answer. The question
+   * survived; the part that made it answerable did not.
+   *
+   * So the hint goes into the message, where clack will render and wrap it.
+   */
+  #withHint(message: string, hint: string | undefined): string {
+    const head = this.#redact(message);
+    if (hint === undefined || hint.trim() === "") {
+      return head;
+    }
+    return `${head}\n${this.#redact(hint)}`;
+  }
+
   async text(prompt: TextPrompt): Promise<string> {
     const answer = await text({
-      message: this.#redact(prompt.message),
+      message: this.#withHint(prompt.message, prompt.hint),
       input: this.#input,
       output: this.#output,
-      ...(prompt.hint === undefined ? {} : { placeholder: this.#redact(prompt.hint) }),
       ...(prompt.defaultValue === undefined
         ? {}
         : { initialValue: prompt.defaultValue, defaultValue: prompt.defaultValue }),
@@ -95,7 +115,7 @@ export class TtyPrompter implements Prompter {
 
   async confirm(prompt: ConfirmPrompt): Promise<boolean> {
     const answer = await confirm({
-      message: this.#redact(prompt.message),
+      message: this.#withHint(prompt.message, prompt.hint),
       input: this.#input,
       output: this.#output,
       initialValue: prompt.defaultValue ?? false,

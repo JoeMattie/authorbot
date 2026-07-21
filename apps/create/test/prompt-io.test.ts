@@ -84,6 +84,52 @@ describe("TtyPrompter", () => {
     expect(target.text()).not.toContain("super-secret-token-value");
   });
 
+  it("shows a confirm's hint, which carries the reason for the answer", async () => {
+    // Moving to clack silently dropped this: `confirm` has no hint slot, so
+    // every explanatory line went with it — including the one telling an
+    // author that a maintainer bearer token is something they do not have and
+    // that "no" is the expected answer. The question survived; the part that
+    // made it answerable did not.
+    const input = ttyInput();
+    const target = collector();
+    const prompter = new TtyPrompter({
+      input: input as unknown as NodeJS.ReadStream,
+      output: { write: () => {}, error: () => {} },
+      target,
+    });
+
+    const answer = prompter.confirm({
+      id: "x",
+      message: "Mint the token now?",
+      hint: "Most authors do not hold one.",
+      defaultValue: false,
+    });
+    setTimeout(() => input.write(ENTER), 20);
+    await answer;
+
+    expect(target.text()).toContain("Most authors do not hold one.");
+  });
+
+  it("shows a text prompt's hint", async () => {
+    const input = ttyInput();
+    const target = collector();
+    const prompter = new TtyPrompter({
+      input: input as unknown as NodeJS.ReadStream,
+      output: { write: () => {}, error: () => {} },
+      target,
+    });
+
+    const answer = prompter.text({
+      id: "x",
+      message: "Name?",
+      hint: "Lowercase letters and hyphens.",
+    });
+    setTimeout(() => input.write(`book${ENTER}`), 20);
+    await answer;
+
+    expect(target.text()).toContain("Lowercase letters and hyphens.");
+  });
+
   it("turns Ctrl-C into an AbortedError rather than killing the process", async () => {
     // The wizard's early-stop path prints what it created and how to remove
     // it. Exiting from inside a prompt would skip exactly that, for the person
