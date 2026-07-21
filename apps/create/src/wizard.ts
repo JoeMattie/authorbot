@@ -65,13 +65,23 @@ export async function runStages(
       const wanted = await ctx.prompter.confirm({
         id: `flow.continue.${name}`,
         message: `Next: ${STAGE_SUMMARIES[name]} Do that now?`,
-        hint: `You can stop here and run \`create-authorbot ${name}\` whenever you like — nothing you have done will be repeated.`,
+        hint:
+          name === "upgrade"
+            ? "Optional, and not needed now: a book created a minute ago is already on the current version. It exists for moving an older book forward."
+            : `Optional. You can stop here and run \`create-authorbot ${name}\` whenever you like — nothing you have done will be repeated.`,
         defaultValue: name !== "upgrade" && name !== "agent",
       });
       if (!wanted) {
         ctx.reporter.blank();
-        ctx.reporter.ok(
-          `Stopped here, with everything so far in place. Run \`create-authorbot ${name}\` when you want to continue.`,
+        // Naming the declined stage as the way to "continue" made every
+        // optional step look like an unfinished one — most sharply for
+        // `upgrade`, which a book created ten seconds ago can never need, and
+        // which the author was nonetheless told to run to carry on.
+        ctx.reporter.ok("Stopped here. Everything done so far is in place.");
+        ctx.reporter.info(
+          name === "upgrade"
+            ? "Your book is set up. `create-authorbot upgrade` exists for moving an existing book to a newer Authorbot later — there is nothing to upgrade on a book this new."
+            : `This step is optional. Run \`create-authorbot ${name}\` whenever you want it, and nothing already done will be repeated.`,
         );
         break;
       }
