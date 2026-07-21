@@ -37,7 +37,6 @@ const OPTIONS: ManifestFlowOptions = {
   siteUrl: "https://my-book.workers.dev",
   callbackUrl: "https://my-book.workers.dev/v1/auth/github/callback",
   webhookUrl: "https://my-book.workers.dev/v1/webhooks/github",
-  webhookSecret: "proposed-webhook-secret-value",
   timeoutMs: 60_000,
 };
 
@@ -412,5 +411,47 @@ describe("waitForInstallation", () => {
         installUrl: "https://github.test/x",
       }),
     ).rejects.toThrow(/owner\/repository/);
+  });
+});
+
+describe("the manifest GitHub will actually accept", () => {
+  // GitHub validates the manifest against a closed set of keys and rejects the
+  // whole thing for an unknown one, before the app exists:
+  //
+  //   Invalid GitHub App configuration
+  //   Error "secret" is not a permitted key.
+  //
+  // That is a wall the author hits in the browser, with nothing in the
+  // wizard's output suggesting why, so the shape of this object is worth
+  // pinning rather than trusting to review.
+  const PERMITTED = new Set([
+    "name",
+    "url",
+    "hook_attributes",
+    "redirect_url",
+    "callback_urls",
+    "setup_url",
+    "description",
+    "public",
+    "default_events",
+    "default_permissions",
+    "request_oauth_on_install",
+    "setup_on_update",
+  ]);
+
+  it("uses only keys GitHub permits", () => {
+    const manifest = buildManifest(OPTIONS, "http://127.0.0.1:1234/callback");
+    for (const key of Object.keys(manifest)) {
+      expect(PERMITTED, `manifest key ${key}`).toContain(key);
+    }
+  });
+
+  it("never proposes a webhook secret", () => {
+    const manifest = buildManifest(OPTIONS, "http://127.0.0.1:1234/callback");
+    const hook = manifest["hook_attributes"] as Record<string, unknown>;
+
+    // GitHub generates this and returns it from the conversion; sending one is
+    // rejected outright.
+    expect(Object.keys(hook).sort()).toEqual(["active", "url"]);
   });
 });

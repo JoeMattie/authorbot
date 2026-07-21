@@ -40,8 +40,6 @@ export interface ManifestFlowOptions {
   readonly callbackUrl: string;
   /** Webhook receiver, on the site's own origin. */
   readonly webhookUrl: string;
-  /** Generated locally by the caller with a CSPRNG. */
-  readonly webhookSecret: string;
   /** How long the author has to finish in the browser. */
   readonly timeoutMs: number;
   /** Called once the browser URL is known, so the caller can print it. */
@@ -114,10 +112,12 @@ export function buildManifest(
     hook_attributes: {
       url: options.webhookUrl,
       active: true,
-      // Proposed, not assumed. GitHub generates a webhook secret regardless
-      // and returns it from the conversion; the caller always uses the
-      // *returned* value, so this is a preference rather than a dependency.
-      secret: options.webhookSecret,
+      // NO `secret` HERE. It is not a permitted manifest key, and GitHub
+      // rejects the entire manifest for its presence — "Error \"secret\" is
+      // not a permitted key" — before the app is ever created. GitHub
+      // generates the webhook secret itself and hands it back from the
+      // conversion, which is the value the caller uses, so proposing one was
+      // never anything but a way to fail.
     },
     // `redirect_url` is where GitHub sends the *one-time creation code*, so it
     // is the loopback server — not the site. `callback_urls` is a different

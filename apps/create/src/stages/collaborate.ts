@@ -490,7 +490,6 @@ async function ensureGitHubApp(
   }
 
   const base = options.siteUrl.replace(/\/$/, "");
-  const webhookSecret = ctx.vault.register("WEBHOOK_SECRET", randomToken(ctx.random, 32));
 
   ctx.reporter.blank();
   ctx.reporter.step("Creating a GitHub App for your book");
@@ -535,7 +534,6 @@ async function ensureGitHubApp(
       siteUrl: base,
       callbackUrl: `${base}/v1/auth/github/callback`,
       webhookUrl: `${base}/v1/webhooks/github`,
-      webhookSecret,
       timeoutMs: BROWSER_STEP_TIMEOUT_MS,
       onBrowserStep: (url) => {
         ctx.reporter.info("If your browser did not open, go to:");
