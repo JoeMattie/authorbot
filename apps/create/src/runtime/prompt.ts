@@ -56,13 +56,33 @@ export class TtyPrompter implements Prompter {
   #ask(question: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const rl = createInterface({ input: this.#input, output: process.stdout, terminal: true });
+      // `rl.close()` emits `close` synchronously, so the Ctrl-D handler below
+      // used to win the race and resolve with "" before the real answer —
+      // every typed answer was discarded and every prompt re-asked forever.
+      // One settle guard, and the answer resolves before the close fires.
+      let settled = false;
+      const settle = (value: string): void => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
       rl.question(question, (answer) => {
+        settle(answer);
         rl.close();
-        resolve(answer);
       });
       rl.on("close", () => {
         // Ctrl-D at a prompt: no answer is coming, and looping would spin.
-        resolve("");
+        settle("");
+      });
+      // Ctrl-C must always get you out. readline swallows SIGINT when it owns
+      // the TTY, so without this an unanswerable prompt — a validator that
+      // never passes, say — traps the terminal with no way back short of
+      // killing the process from elsewhere.
+      rl.on("SIGINT", () => {
+        rl.close();
+        this.#write("");
+        this.#write("Cancelled. Nothing was changed; run the same command to pick up where you left off.");
+        process.exit(130);
       });
       rl.on("error", reject);
     });
