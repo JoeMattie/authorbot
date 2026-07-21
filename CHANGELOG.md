@@ -9,6 +9,20 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.24
+
+- **`collaborate` commits and pushes what it writes.** It used to ask you to do
+  it "when you are ready" — and until that push lands, the API cannot project
+  your book, so the settings page reports that it cannot read its own
+  configuration, with nothing connecting the two.
+- **The agent stage stopped asking for a maintainer bearer token.** No author
+  has one; the question could only ever be answered by an operator supplying a
+  credential from elsewhere. `AUTHORBOT_API_TOKEN` still works for that case,
+  and everyone else is sent to the button on the settings page.
+- Declining an optional step no longer tells you to run that step "to
+  continue", which made every optional thing look unfinished — `upgrade` most
+  of all, on a book far too new to need it.
+
 ## 0.1.23
 
 - **Every hint under every question came back.** Moving prompts to clack
