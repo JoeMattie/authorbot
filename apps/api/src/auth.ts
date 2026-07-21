@@ -17,8 +17,20 @@ import {
   shouldUpdateLastUsed,
   toTimestamp,
 } from "@authorbot/domain";
+import type { PolicyCapability } from "@authorbot/domain";
+import {
+  SAFE_METHODS,
+  capabilityForScope,
+  checkWriteGate,
+  loadAccessState,
+  policyAdmitsNonMember,
+  writeGateProblem,
+  type AccessState,
+  type WriteSurface,
+} from "./access-control.js";
 import { apiEffectiveScopes, apiRoleScopes, type ApiScope } from "./api-scopes.js";
 import { sha256Hex, timingSafeEqual } from "./crypto.js";
+import { consumeRateLimit, rateLimitClassFor, rateLimitedProblem } from "./rate-limit.js";
 import type { AppEnv, AuthContext, Clock } from "./deps.js";
 import { csrfOriginAllowed } from "./origins.js";
 import { problem } from "./problems.js";
@@ -197,30 +209,139 @@ export function authOf(c: Context<AppEnv>): AuthContext {
 }
 
 /**
+ * Options a route uses to describe the kind of write it is (Phase 7).
+ *
+ * Both default to the conservative answer, so a route that says nothing gets
+ * the strictest treatment: gated by the freeze, and policy-gated according to
+ * whatever its required scope implies.
+ */
+export interface ProjectGuardOptions {
+  /**
+   * `control` marks the maintainer control plane — settings, freeze, pause,
+   * role changes, revocations, moderation rejection — which a freeze must not
+   * refuse, because a freeze that blocked its own reversal would be a one-way
+   * door. Everything else is `collaboration` and is frozen with the book.
+   */
+  surface?: WriteSurface;
+  /**
+   * Override the policy capability that would be derived from `scope`. Used by
+   * the routes whose scope does not describe what they do — moderation
+   * approval requires `annotations:write` on a maintainer but is not a
+   * collaborator annotating, and lease release is holder-or-maintainer with no
+   * scope at all.
+   */
+  capability?: PolicyCapability | null;
+  /**
+   * Require an actual membership even when the policy would admit a signed-in
+   * non-member.
+   *
+   * Used by reply creation. `open` and `approval-gated` widen who may START a
+   * thread on the book — "any signed-in GitHub user may comment/suggest" — and
+   * Phase 7 supplies a moderation queue for exactly one object type, the
+   * annotation. Admitting non-members into reply threads too would create a
+   * second unmoderated write path on a book whose author chose moderation,
+   * which is the one thing `approval-gated` is supposed to prevent.
+   */
+  requireMembership?: boolean;
+  /**
+   * Skip the rate limiter. Never used by a request-driven route; reserved for
+   * internal/system-driven calls that reach the guard without a client behind
+   * them.
+   */
+  skipRateLimit?: boolean;
+}
+
+/**
  * Guard: `{projectId}` must match the configured project (contract §4;
  * the path accepts the project UUID or its slug) — 404 otherwise — and the
  * actor must hold `scope` through an unrevoked membership — 403 otherwise.
+ *
+ * Phase 7 adds four gates to the same choke point, applied to unsafe methods
+ * only (reads pass through untouched, which is what makes "reads and the
+ * published site are provably unaffected" structural rather than audited):
+ *
+ *   1. **Freeze** — refuses collaboration writes from everyone, maintainers
+ *      included.
+ *   2. **Agent pause** — refuses every agent-token write, control plane
+ *      included, while human collaborators keep working.
+ *   3. **Annotation policy** — `locked` admits only maintainers (including an
+ *      author's agent holding a maintainer-role membership); `open` and
+ *      `approval-gated` additionally admit a signed-in non-member to
+ *      annotation writes; `collaborators-only` is the Phase 2 behaviour.
+ *   4. **Rate limits** — per actor and per token, `429` + `Retry-After`.
+ *
+ * The membership requirement is relaxed for exactly one case — a signed-in
+ * human writing an annotation to an `open` or `approval-gated` book — and the
+ * scope check is relaxed with it, because a non-member has no membership and
+ * therefore no scopes to hold.
  */
 export async function requireProjectScope(
   c: Context<AppEnv>,
   services: AuthServices,
   scope: ApiScope | null,
-): Promise<{ project: ProjectRecord } | { response: Response }> {
+  options: ProjectGuardOptions = {},
+): Promise<{ project: ProjectRecord; access?: AccessState } | { response: Response }> {
   const project = await services.getProject();
   const param = c.req.param("projectId");
   if (project === null || (param !== project.id && param !== project.slug)) {
     return { response: problem(c, "not-found", { detail: "unknown project" }) };
   }
   const auth = authOf(c);
-  if (auth.membership === null) {
+  const method = c.req.method;
+  const mutating = !SAFE_METHODS.has(method);
+
+  // The access state is read for mutations (where every gate applies) and for
+  // reads by a NON-member (where a permissive policy may be the only thing
+  // admitting them). A member's GET — the overwhelmingly common case — pays
+  // nothing: it can neither be gated nor widened.
+  const access =
+    mutating || auth.membership === null
+      ? await loadAccessState(services.repos, project.id)
+      : null;
+  const surface: WriteSurface = options.surface ?? "collaboration";
+  const capability =
+    options.capability !== undefined ? options.capability : capabilityForScope(scope);
+
+  const admitsNonMember =
+    options.requireMembership !== true &&
+    access !== null &&
+    policyAdmitsNonMember({ state: access, auth, capability, mutating, scope });
+
+  if (auth.membership === null && !admitsNonMember) {
     return {
       response: problem(c, "forbidden", { detail: "actor is not a member of this project" }),
     };
   }
-  if (scope !== null && !auth.scopes.includes(scope)) {
+  if (scope !== null && !admitsNonMember && !auth.scopes.includes(scope)) {
     return {
       response: problem(c, "forbidden", { detail: `actor lacks required scope "${scope}"` }),
     };
   }
-  return { project };
+
+  if (access !== null && mutating) {
+    const denial = checkWriteGate({
+      state: access,
+      auth,
+      method,
+      surface,
+      capability,
+      role: auth.role,
+    });
+    if (denial !== null) {
+      return { response: writeGateProblem(c, access, denial) };
+    }
+
+    if (options.skipRateLimit !== true) {
+      const outcome = await consumeRateLimit(
+        { repos: services.repos, clock: services.clock },
+        auth,
+        rateLimitClassFor({ capability, surface }),
+      );
+      if (!outcome.allowed) {
+        return { response: rateLimitedProblem(c, outcome) };
+      }
+    }
+  }
+
+  return access === null ? { project } : { project, access };
 }

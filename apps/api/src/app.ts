@@ -29,6 +29,12 @@ import { registerSettingsRoutes } from "./settings.js";
 import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
 import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
 import { registerChapterSubmissionRoutes } from "./chapter-submissions.js";
+import {
+  pendingAnnotationJson,
+  registerPhase7Routes,
+  revocationCascadeStatements,
+} from "./phase7.js";
+import { loadAccessState } from "./access-control.js";
 import { createProjectSerializer } from "./serializer.js";
 import { parseChapterMarkdown, scanSafety, stripBlockMarkers } from "@authorbot/markdown";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
@@ -626,6 +632,22 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         revokedAt: null,
       }),
       repos.agentTokens.insertStatement(tokenRecord),
+      // Phase 7 contract "Seeing": collaborators are listed with "who added
+      // them". Minting is the one place a membership is granted BY someone
+      // rather than self-served, so it is the one place that fact exists to be
+      // recorded — and an agent appearing in the collaborator list with no
+      // visible owner is exactly the thing an author is vetting for.
+      repos.auditEvents.insertStatement({
+        id: uuidv7(clock.now()),
+        projectId: guard.project.id,
+        actorId: a.actor.id,
+        action: "member.add",
+        targetType: "membership",
+        targetId: agentActorId,
+        correlationId: c.get("correlationId"),
+        metadata: { role: "editor", via: "agent_token.mint", tokenId },
+        createdAt: timestamp,
+      }),
       repos.auditEvents.insertStatement({
         id: uuidv7(clock.now()),
         projectId: guard.project.id,
@@ -656,8 +678,28 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return problem(c, "not-found", { detail: "unknown agent token" });
     }
     const timestamp = now();
+    /**
+     * Phase 7 contract "Revoking": revoking a token takes effect on the NEXT
+     * REQUEST and must release the holder's lease, reject their in-flight
+     * submissions, and invalidate their sessions — while leaving everything
+     * they already contributed in place.
+     *
+     * Before this phase the route flipped `revoked_at` and stopped. That did
+     * stop the token authenticating, but it left any work item the agent held
+     * stranded `leased` until its lease timed out — up to four hours, which is
+     * the exact number the contract names as unacceptable.
+     */
+    const cascade = await revocationCascadeStatements({
+      deps,
+      repos,
+      clock,
+      projectId: guard.project.id,
+      actorId: token.actorId,
+      at: timestamp,
+    });
     await deps.db.batch([
       repos.agentTokens.revokeStatement(token.id, timestamp),
+      ...cascade.statements,
       repos.auditEvents.insertStatement({
         id: uuidv7(clock.now()),
         projectId: guard.project.id,
@@ -666,7 +708,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         targetType: "agent_token",
         targetId: token.id,
         correlationId: c.get("correlationId"),
-        metadata: null,
+        metadata: {
+          leasesReleased: cascade.releasedLeases.length,
+          submissionsRejected: cascade.rejectedSubmissions.length,
+        },
         createdAt: timestamp,
       }),
       ...claimStatements(c, 204, null),
@@ -809,8 +854,34 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       annotations.map((a) => annotationCollabJson(repos, a, viewerActorId)),
     );
     const last = annotations[annotations.length - 1];
+
+    /**
+     * Phase 7 contract "Moderating": "A pending annotation is visible to its
+     * author (badged as awaiting review) and to maintainers. It is invisible to
+     * everyone else."
+     *
+     * Queued rows live in their own table and are merged in HERE rather than
+     * being filtered out downstream, which is the safe direction: the default
+     * for a reader who is neither the author nor a maintainer is that the row
+     * was never fetched at all, so no future change to the serializer can leak
+     * one. They are returned in a separate `pending` array rather than mixed
+     * into `items` for the same reason — a client that knows nothing about
+     * moderation cannot accidentally render an unapproved comment as an
+     * approved one, and cursor paging over `items` stays a paging over real
+     * annotations.
+     */
+    const viewerRole = c.get("auth")?.role ?? null;
+    let pending: Record<string, unknown>[] = [];
+    if (viewerActorId !== null) {
+      const queued = await repos.pendingAnnotations.listPendingByChapter(chapter.id);
+      pending = queued
+        .filter((row) => viewerRole === "maintainer" || row.authorActorId === viewerActorId)
+        .map(pendingAnnotationJson);
+    }
+
     return c.json({
       items,
+      pending,
       nextCursor: annotations.length === limit && last !== undefined ? last.id : null,
     });
   });
@@ -885,6 +956,89 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       const annotationId = uuidv7(clock.now());
       const correlationId = c.get("correlationId");
       const timestamp = now();
+
+      /**
+       * Phase 7 contract "Moderating" — the whole point of `approval-gated`.
+       *
+       * "Pending annotations are not mirrored to Git. They live in the
+       * operational database until approved. Committing unreviewed submissions
+       * to the permanent record would put spam in the book's history forever,
+       * where removing it means rewriting history."
+       *
+       * So this branch writes ONE row into `pending_annotations` and nothing
+       * else: no `git_operations` row, no `outbox` row, no `annotations` row,
+       * no `annotation_created` event. Everything that could carry the comment
+       * toward a commit is simply not created, rather than created and
+       * suppressed — the difference matters, because a suppressed outbox row is
+       * one bug away from being drained.
+       *
+       * The three properties exit criterion 10 asks for follow structurally
+       * rather than by enforcement: no votes (the `votes` foreign key points at
+       * `annotations`, which this row is not in), no rule can fire (the engine
+       * evaluates tallies over `annotations`), and no Git trace (there is no
+       * operation to commit).
+       *
+       * Maintainers bypass the queue. "After a maintainer approves" describes
+       * everyone else; asking an author to approve their own margin notes would
+       * make `approval-gated` unusable for the person who chose it.
+       */
+      const access = "access" in guard && guard.access !== undefined
+        ? guard.access
+        : await loadAccessState(repos, guard.project.id);
+      if (access.requiresApproval && a.role !== "maintainer") {
+        const responseBody = {
+          pendingId: annotationId,
+          annotationId: null,
+          status: "pending_review",
+          /** Said plainly so a client can badge it without inferring. */
+          moderation: {
+            state: "pending",
+            message:
+              "this book reviews contributions before they appear. Your comment is visible to you and to the book's maintainers until one of them approves it.",
+          },
+          correlationId,
+        };
+        await deps.db.batch([
+          repos.pendingAnnotations.insertStatement({
+            id: annotationId,
+            projectId: guard.project.id,
+            chapterId: chapter.id,
+            kind: command.kind,
+            scope: command.scope,
+            chapterRevision: command.chapterRevision,
+            target: command.scope === "chapter" ? null : command.target,
+            authorActorId: a.actor.id,
+            body: command.body,
+            status: "pending",
+            reviewedByActorId: null,
+            reviewedAt: null,
+            rejectionReason: null,
+            approvedAnnotationId: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+          // The submission itself is audited even though it is not published:
+          // "a pattern of abuse is visible" needs the attempts recorded, not
+          // only the moderator's verdicts.
+          repos.auditEvents.insertStatement({
+            id: uuidv7(clock.now()),
+            projectId: guard.project.id,
+            actorId: a.actor.id,
+            action: "annotation.queued",
+            targetType: "annotation",
+            targetId: annotationId,
+            correlationId,
+            metadata: { kind: command.kind, scope: command.scope, chapterId: chapter.id },
+            createdAt: timestamp,
+          }),
+          ...claimStatements(c, 202, responseBody),
+        ]);
+        // Deliberately NO notifyMutation: there is no outbox row to drain, and
+        // waking the mirror for a write that must never reach Git would be, at
+        // best, a lie to the operator reading the drain logs.
+        return c.json(responseBody, 202);
+      }
+
       const command202 = commandStatements({
         project: guard.project,
         correlationId,
@@ -974,7 +1128,11 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/replies", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "annotations:write");
+    // `requireMembership` (Phase 7): a permissive annotation policy widens who
+    // may START a thread, not who may join one — see ProjectGuardOptions.
+    const guard = await requireProjectScope(c, services, "annotations:write", {
+      requireMembership: true,
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1611,6 +1769,24 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     claimStatements,
     commandStatements,
     readJson,
+    notifyMutation,
+    now,
+  });
+
+  // ---- Phase 7 routes (author-facing access control) -----------------------
+  registerPhase7Routes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    claimStatements,
+    commandStatements,
+    readJson,
+    parseLimit,
     notifyMutation,
     now,
   });

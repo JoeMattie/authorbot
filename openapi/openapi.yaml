@@ -48,6 +48,10 @@ tags:
     description: Work items, leases, and submissions (design §12).
   - name: operations
     description: Git operations, event stream, and webhooks.
+  - name: access
+    description: >-
+      Author-facing access control (Phase 7): who may write, the emergency
+      stops, the moderation queue, revocation, and the readable audit view.
 
 paths:
   /v1/me:
@@ -235,6 +239,46 @@ paths:
   /v1/projects/{projectId}/agent-tokens:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listAgentTokens
+      tags: [access]
+      summary: Agent token metadata — never the token value.
+      description: >-
+        Name, scopes, owning human, membership role, created / last-used /
+        expiry times. Tokens are never re-displayable: no code path in the
+        system can return a token value after the mint response that created
+        it. The membership `role` is shown alongside the scopes because
+        effective authority is `token.scopes` intersected with the role bundle,
+        so scopes alone would overstate what a token can do.
+      parameters:
+        - name: includeRevoked
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Token metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/AgentToken"
+                        - type: object
+                          properties:
+                            owner: { $ref: "#/components/schemas/Actor" }
+                            role: { $ref: "#/components/schemas/Role" }
+                            expired: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       operationId: createAgentToken
       tags: [identity]
@@ -1464,6 +1508,57 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/projects/{projectId}/operations/{operationId}/retry:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: operationId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Uuid"
+    post:
+      operationId: retryOperation
+      tags: [operations]
+      summary: Requeue a Git operation that ran out of retries.
+      description: >-
+        Maintainer only. Moves a `failed` operation back to `queued` and its
+        outbox row back to `pending`, so the coordinator attempts it again.
+        Availability failures (GitHub 5xx, rate limits) no longer consume the
+        retry budget — they are deferred to a later drain automatically — so
+        reaching `failed` means a bounded number of genuine attempts were made.
+        This re-runs the existing plan rather than rewriting it: an operation
+        that failed because its content is invalid will fail again.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Requeued; poll the operation for the outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [operationId, state, correlationId]
+                properties:
+                  operationId:
+                    $ref: "#/components/schemas/Uuid"
+                  state:
+                    type: string
+                    enum: [queued]
+                  correlationId:
+                    $ref: "#/components/schemas/Uuid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The operation is not in a state that can be requeued.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
   /v1/projects/{projectId}/events:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -2079,6 +2174,644 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 
+  # =========================================================================
+  # Phase 7 — author-facing access control
+  #
+  # Every operation below is maintainer-only except `getRateLimits` and
+  # `getAccessState`, which any member may read: a collaborator who receives a
+  # 423 needs to be able to see that the book is locked rather than concluding
+  # the API is broken.
+  # =========================================================================
+
+  /v1/projects/{projectId}/access:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getAccessState
+      tags: [access]
+      summary: The book's annotation policy, freeze state, and agent-pause state.
+      description: >-
+        Readable by any member. `annotationPolicy` is projected from
+        `book.yml`; the freeze and agent pause are operational state that takes
+        effect on the next request rather than on the next commit.
+      responses:
+        "200":
+          description: Current access state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/access/freeze:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: freezeBook
+      tags: [access]
+      summary: Freeze the book — no writes from anyone, including maintainers.
+      description: >-
+        The emergency stop. Refuses every collaboration write (annotations,
+        replies, votes, claims, submissions, moderation approvals) with `423`
+        while leaving all reads and the published site unaffected. A reason is
+        required: it is shown to everyone the freeze blocks. Re-freezing an
+        already frozen book is a no-op that preserves the original reason.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Freeze applied (or already in effect).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/access/unfreeze:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: unfreezeBook
+      tags: [access]
+      summary: Lift a freeze.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Freeze lifted (or was never in effect).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/access/pause-agents:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: pauseAgents
+      tags: [access]
+      summary: Suspend every agent token at once; human collaborators keep working.
+      description: >-
+        Reversible: no token is revoked, and resuming restores every token's
+        identity, scopes, expiry, and history. While paused, any request
+        authenticated by an agent token that would write is refused with `403`
+        — including the control plane, so a paused agent cannot unpause itself.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Agents paused (or already paused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/access/resume-agents:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: resumeAgents
+      tags: [access]
+      summary: Resume paused agent tokens.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Agents resumed (or were never paused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/rate-limits:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getRateLimits
+      tags: [access]
+      summary: The documented mutation ceilings.
+      description: >-
+        Served so an agent author can read the ceilings they are writing
+        against rather than discovering them through 429s. Limits apply to
+        mutations only; reads are never counted and never refused by a limit.
+      responses:
+        "200":
+          description: Ceiling table, per limit class.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  classes:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        perActor: { type: integer }
+                        perToken: { type: integer }
+                        windowSeconds: { type: integer }
+                        description: { type: string }
+                  notes:
+                    type: array
+                    items: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/collaborators:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listCollaborators
+      tags: [access]
+      summary: Who has access, their role, when they joined, who added them, and when they last acted.
+      parameters:
+        - name: includeRemoved
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Collaborators, with plain-language role consequences.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Collaborator"
+                  roleConsequences:
+                    type: object
+                    description: What each role means, in plain language rather than scope names.
+                    additionalProperties: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/collaborators/{actorId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: actorId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Uuid"
+    patch:
+      operationId: changeCollaboratorRole
+      tags: [access]
+      summary: Change a collaborator's role.
+      description: >-
+        The book's last maintainer cannot be demoted — a book with no
+        maintainer has no one who can mint a token, change a setting, or lift a
+        freeze. This is also the route that grants an author's agent the
+        `maintainer` role so it keeps working under a `locked` policy: a
+        deliberate grant, never an inheritance from the agent's owner.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role]
+              properties:
+                role:
+                  $ref: "#/components/schemas/Role"
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Role changed (or already held).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actorId: { $ref: "#/components/schemas/Uuid" }
+                  role: { $ref: "#/components/schemas/Role" }
+                  previousRole: { $ref: "#/components/schemas/Role" }
+                  roleMeans: { type: string }
+                  changed: { type: boolean }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      operationId: removeCollaborator
+      tags: [access]
+      summary: Remove a collaborator, effective on their next request.
+      description: >-
+        Revokes the membership, invalidates every session the actor holds,
+        releases any lease they hold (returning the work item to `ready`),
+        rejects their in-flight submissions, and revokes the agent tokens they
+        own. Their prior contributions — annotations, replies, votes, commit
+        attribution — are left entirely intact. Nothing here deletes content.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Collaborator removed; the cascade is reported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevocationOutcome"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/agent-tokens/revoke-all:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: revokeAllAgentTokens
+      tags: [access]
+      summary: Revoke every agent token in one action, for a suspected leak.
+      description: >-
+        One statement revokes them all, so there is no window in which the
+        leaked token is the one not yet reached. Each token's holder gets the
+        full revocation cascade: leases released, in-flight submissions
+        rejected, queued applies failed.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: All tokens revoked; the cascade is reported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevocationOutcome"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/audit:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: readAuditLog
+      tags: [access]
+      summary: The readable activity view, newest first, filterable by actor.
+      parameters:
+        - name: actor
+          in: query
+          required: false
+          description: Actor id or external identity (`github:avery`).
+          schema: { type: string }
+        - name: action
+          in: query
+          required: false
+          schema: { type: string }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Audit events, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEntry"
+                  nextCursor:
+                    type: [string, "null"]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/moderation/queue:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listModerationQueue
+      tags: [access]
+      summary: Annotations awaiting review under an `approval-gated` policy.
+      description: >-
+        Queued annotations live only in the operational database — never in
+        Git — until approved. Each entry carries the comment, its target
+        passage, and the author's history with this book.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected, all]
+            default: pending
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: The queue.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PendingAnnotation"
+                  nextCursor:
+                    type: [string, "null"]
+                  pendingCount: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/moderation/{pendingId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: pendingId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Uuid"
+    post:
+      operationId: approvePendingAnnotation
+      tags: [access]
+      summary: Approve a queued annotation, mirroring it to Git as a normal annotation.
+      description: >-
+        Approval is what makes a comment durable. The queued row is inserted
+        into `annotations` carrying its own id forward and an ordinary
+        `annotation.create` commit is enqueued, credited to the SUBMITTER
+        rather than the approving maintainer. Refused with `423` while the book
+        is frozen, because approval commits new content.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Approved; the commit is queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingId: { $ref: "#/components/schemas/Uuid" }
+                  annotationId: { $ref: "#/components/schemas/Uuid" }
+                  operationId: { $ref: "#/components/schemas/Uuid" }
+                  status: { type: string, enum: [queued] }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/moderation/{pendingId}/reject:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: pendingId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Uuid"
+    post:
+      operationId: rejectPendingAnnotation
+      tags: [access]
+      summary: Reject a queued annotation; the record is retained, never committed.
+      description: >-
+        Takes an optional reason, notifies nobody, and keeps the row in the
+        database so a mistake is recoverable and a pattern of abuse is visible.
+        Because the annotation never entered `annotations`, there is nothing in
+        the repository for a rejection to leave a trace in.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Rejected and retained.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingId: { $ref: "#/components/schemas/Uuid" }
+                  status: { type: string, enum: [rejected] }
+                  retained: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/moderation/bulk:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      operationId: bulkModerate
+      tags: [access]
+      summary: Bulk approve or bulk reject queued annotations.
+      description: >-
+        Per-item outcomes rather than all-or-nothing: in a queue of two
+        hundred, one row already reviewed by a co-maintainer must not fail the
+        other hundred and ninety-nine.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, ids]
+              properties:
+                action: { type: string, enum: [approve, reject] }
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { $ref: "#/components/schemas/Uuid" }
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Per-item outcomes plus a summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  action: { type: string, enum: [approve, reject] }
+                  approved: { type: integer }
+                  rejected: { type: integer }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pendingId: { $ref: "#/components/schemas/Uuid" }
+                        outcome: { type: string }
+                        annotationId: { $ref: "#/components/schemas/Uuid" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+
 components:
   securitySchemes:
     githubSession:
@@ -2498,6 +3231,191 @@ components:
           enum: [active, suspended, revoked]
         createdAt:
           $ref: "#/components/schemas/Timestamp"
+
+    Role:
+      type: string
+      description: A membership role. Bundles are cumulative.
+      enum: [reader, contributor, editor, maintainer]
+
+    AnnotationPolicy:
+      type: string
+      description: >-
+        Who may comment and suggest, and whether it appears immediately.
+        `open` — any signed-in user, immediately. `approval-gated` — any
+        signed-in user, after a maintainer approves. `collaborators-only` —
+        members only, immediately (the default). `locked` — maintainers only,
+        immediately. Anonymous writing is unavailable in every mode, `open`
+        included.
+      enum: [open, approval-gated, collaborators-only, locked]
+
+    AccessState:
+      type: object
+      required: [annotationPolicy, requiresApproval, freeze, agents]
+      properties:
+        annotationPolicy:
+          $ref: "#/components/schemas/AnnotationPolicy"
+        requiresApproval:
+          type: boolean
+        freeze:
+          type: object
+          properties:
+            state: { type: string, enum: [open, frozen] }
+            since:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            reason: { type: [string, "null"] }
+        agents:
+          type: object
+          properties:
+            state: { type: string, enum: [active, paused] }
+            since:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            reason: { type: [string, "null"] }
+        pendingModerationCount:
+          type: integer
+        changed:
+          type: boolean
+          description: Present on writes; false when the control was already in the requested state.
+
+    Collaborator:
+      type: object
+      required: [membershipId, actorId, role, joinedAt]
+      properties:
+        membershipId: { $ref: "#/components/schemas/Uuid" }
+        actorId: { $ref: "#/components/schemas/Uuid" }
+        actor: { $ref: "#/components/schemas/Actor" }
+        role: { $ref: "#/components/schemas/Role" }
+        roleMeans:
+          type: string
+          description: The role's consequences in plain language, not scope names.
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        joinedAt: { $ref: "#/components/schemas/Timestamp" }
+        removedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        addedByActorId:
+          description: >-
+            From the audit log. `null` for a membership created before Phase 7
+            recorded member events — the honest answer rather than a guess.
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        lastActedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        isAgent: { type: boolean }
+        ownerActorId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+
+    RevocationOutcome:
+      type: object
+      description: >-
+        What a revocation actually did. `contributionsRetained` is always true
+        and is stated explicitly: removing someone is not erasing them, and the
+        interface must not imply otherwise.
+      properties:
+        actorId: { $ref: "#/components/schemas/Uuid" }
+        removed: { type: boolean }
+        sessionsInvalidated: { type: boolean }
+        leasesReleased:
+          type: array
+          items:
+            type: object
+            properties:
+              leaseId: { $ref: "#/components/schemas/Uuid" }
+              workItemId: { $ref: "#/components/schemas/Uuid" }
+        submissionsRejected:
+          type: array
+          items: { $ref: "#/components/schemas/Uuid" }
+        agentTokensRevoked:
+          type: array
+          items: { $ref: "#/components/schemas/Uuid" }
+        revoked:
+          type: array
+          description: "Present on revoke-all: the tokens that were revoked."
+          items:
+            type: object
+            properties:
+              id: { $ref: "#/components/schemas/Uuid" }
+              name: { type: string }
+        contributionsRetained: { type: boolean, enum: [true] }
+
+    AuditEntry:
+      type: object
+      required: [id, at, action, targetType]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        at: { $ref: "#/components/schemas/Timestamp" }
+        action: { type: string }
+        actorId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        actorName: { type: [string, "null"] }
+        actorIdentity: { type: [string, "null"] }
+        actorType: { type: [string, "null"] }
+        targetType: { type: string }
+        targetId: { type: [string, "null"] }
+        correlationId: { type: string }
+        metadata:
+          description: Safe structured metadata only; never credential material.
+
+    PendingAnnotation:
+      type: object
+      description: >-
+        An annotation awaiting review. Shaped like `Annotation` where the
+        fields coincide, with `moderation` naming the difference — this is the
+        "badged as awaiting review" of the contract. It has no
+        `gitOperationId` because it has never been, and while pending will
+        never be, mirrored to Git.
+      required: [id, projectId, chapterId, kind, scope, body, moderation]
+      properties:
+        id: { $ref: "#/components/schemas/Uuid" }
+        projectId: { $ref: "#/components/schemas/Uuid" }
+        chapterId: { $ref: "#/components/schemas/Uuid" }
+        kind: { $ref: "#/components/schemas/AnnotationKind" }
+        scope: { $ref: "#/components/schemas/AnnotationScope" }
+        chapterRevision: { type: integer }
+        target:
+          oneOf:
+            - $ref: "#/components/schemas/AnnotationTarget"
+            - type: "null"
+        authorActorId: { $ref: "#/components/schemas/Uuid" }
+        body: { type: string }
+        moderation:
+          type: object
+          properties:
+            state: { type: string, enum: [pending, approved, rejected] }
+            reviewedByActorId:
+              oneOf:
+                - $ref: "#/components/schemas/Uuid"
+                - type: "null"
+            reviewedAt:
+              oneOf:
+                - $ref: "#/components/schemas/Timestamp"
+                - type: "null"
+            rejectionReason: { type: [string, "null"] }
+        gitOperationId:
+          type: "null"
+        author: { $ref: "#/components/schemas/Actor" }
+        authorHistory:
+          type: object
+          description: The author's history with this book, so a tenth spam comment reads as the tenth.
+          properties:
+            pending: { type: integer }
+            approved: { type: integer }
+            rejected: { type: integer }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
 
     Membership:
       type: object

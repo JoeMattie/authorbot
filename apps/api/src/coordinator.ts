@@ -161,6 +161,8 @@ export interface ProjectCoordinatorOptions {
   alarmIntervalMs?: number;
   /** Maximum commit attempts per git operation (default 3). */
   maxAttempts?: number;
+  /** Ceiling on availability deferral before an operation is failed. */
+  maxDeferralMs?: number;
   /** Leases examined per sweep (default 100). */
   leaseSweepLimit?: number;
 }
@@ -304,6 +306,9 @@ export function createProjectCoordinator(
           clock,
           pausedKinds,
           ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
+          ...(options.maxDeferralMs !== undefined
+            ? { maxDeferralMs: options.maxDeferralMs }
+            : {}),
         });
 
   const markProjectionStale = async (): Promise<void> => {

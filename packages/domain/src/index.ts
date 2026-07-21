@@ -1,4 +1,18 @@
 export { ALLOWED, denied } from "./decision.js";
+
+export {
+  ANNOTATION_POLICIES,
+  DEFAULT_ANNOTATION_POLICY,
+  checkAnnotationPolicy,
+  isAnnotationPolicy,
+  policyRequiresApproval,
+} from "./annotation-policy.js";
+export type {
+  AnnotationPolicy,
+  AnnotationPolicyDenialReason,
+  AnnotationPolicyRequest,
+  PolicyCapability,
+} from "./annotation-policy.js";
 export type { Allowed, Decision, Denied } from "./decision.js";
 
 export {

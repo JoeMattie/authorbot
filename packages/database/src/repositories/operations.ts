@@ -241,6 +241,32 @@ export class OutboxRepository {
   }
 
   /** Return a processing row to pending (bounded-retry loop, design §20.2). */
+  /** The outbox row driving a given git operation, if it still exists. */
+  async getByGitOperationId(gitOperationId: string): Promise<OutboxRecord | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM outbox WHERE git_operation_id = ? LIMIT 1`)
+      .bind(gitOperationId)
+      .first();
+    return row ? mapOutbox(row) : null;
+  }
+
+  /**
+   * Statement form of {@link markPending}, so an operator requeue can land in
+   * the same batch as the git-operation reset and its audit row.
+   *
+   * Unlike `markPending`, this accepts a `failed` row: requeueing a failed
+   * operation is precisely what it is for. `done` is excluded — a landed
+   * commit must never be replayed.
+   */
+  markPendingStatement(id: string): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE outbox SET status = 'pending', processed_at = NULL
+          WHERE id = ? AND status IN ('failed', 'processing')`,
+      )
+      .bind(id);
+  }
+
   async markPending(id: string): Promise<void> {
     await this.db
       .prepare(`UPDATE outbox SET status = 'pending' WHERE id = ? AND status = 'processing'`)
@@ -428,6 +454,72 @@ export class AuditEventsRepository {
       .bind(projectId, page?.afterId ?? "", page?.limit ?? 100)
       .all();
     return rows.map(mapAuditEvent);
+  }
+
+  /**
+   * The readable activity view (Phase 7 contract "Seeing": "a readable view of
+   * the audit log filtered by actor, so 'who changed this and when' is
+   * answerable without a runbook").
+   *
+   * NEWEST FIRST, unlike `listByProject`. The two orders are not
+   * interchangeable and the difference is the whole point: `listByProject`
+   * feeds machinery that replays history forward, while a person opening this
+   * view wants the most recent thing that happened, not the first thing that
+   * ever did. Cursor paging follows the same direction (`id < cursor`).
+   *
+   * `actorId` and `action` are optional filters, applied with the
+   * `? IS NULL OR column = ?` idiom so one prepared statement serves every
+   * combination — the alternative, concatenating a WHERE clause, is how string
+   * interpolation gets into SQL.
+   */
+  async listRecent(
+    projectId: string,
+    options: {
+      actorId?: string | null;
+      action?: string | null;
+      limit?: number;
+      beforeId?: string | null;
+    } = {},
+  ): Promise<AuditEventRecord[]> {
+    const actorId = options.actorId ?? null;
+    const action = options.action ?? null;
+    // A UUIDv7 sorts below every real id, so the empty cursor must be a value
+    // that sorts ABOVE them all when paging downward.
+    const beforeId = options.beforeId ?? "\uffff";
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM audit_events
+          WHERE project_id = ?
+            AND (? IS NULL OR actor_id = ?)
+            AND (? IS NULL OR action = ?)
+            AND id < ?
+          ORDER BY id DESC
+          LIMIT ?`,
+      )
+      .bind(projectId, actorId, actorId, action, action, beforeId, options.limit ?? 50)
+      .all();
+    return rows.map(mapAuditEvent);
+  }
+
+  /**
+   * When an actor last did anything in this project (contract "Seeing":
+   * collaborators are listed with "when they last acted").
+   *
+   * Read from `audit_events` rather than from a `last_acted_at` column on the
+   * membership, because the audit log already records every mutation by
+   * construction and a denormalized column would be a second source of truth
+   * that every new write path would have to remember to update.
+   */
+  async lastActedAt(projectId: string, actorId: string): Promise<string | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT MAX(created_at) AS last FROM audit_events
+          WHERE project_id = ? AND actor_id = ?`,
+      )
+      .bind(projectId, actorId)
+      .first();
+    const value = row?.["last"];
+    return value === null || value === undefined ? null : String(value);
   }
 }
 

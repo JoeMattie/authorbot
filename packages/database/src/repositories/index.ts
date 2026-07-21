@@ -27,6 +27,11 @@ import {
   PublicationsRepository,
 } from "./publications.js";
 import { BookConfigsRepository } from "./settings.js";
+import {
+  PendingAnnotationsRepository,
+  ProjectAccessControlsRepository,
+  RateLimitCountersRepository,
+} from "./access-control.js";
 
 export * from "./identity.js";
 export * from "./content.js";
@@ -35,6 +40,7 @@ export * from "./collaboration.js";
 export * from "./leasing.js";
 export * from "./publications.js";
 export * from "./settings.js";
+export * from "./access-control.js";
 
 /**
  * One repository per table (Phase 2 contract §2 plus the Phase 3 contract
@@ -67,6 +73,12 @@ export interface Repositories {
   publicationDeliveries: PublicationDeliveriesRepository;
   /** Phase 6 §3.6: projected `book.yml` (settings + in-book governance). */
   bookConfigs: BookConfigsRepository;
+  /** Phase 7: freeze and pause-agents, the author's emergency stops. */
+  projectAccessControls: ProjectAccessControlsRepository;
+  /** Phase 7: the moderation queue for `approval-gated` books. */
+  pendingAnnotations: PendingAnnotationsRepository;
+  /** Phase 7: fixed-window mutation counters behind the 429s. */
+  rateLimitCounters: RateLimitCountersRepository;
 }
 
 export function createRepositories(db: SqlDatabase): Repositories {
@@ -94,5 +106,8 @@ export function createRepositories(db: SqlDatabase): Repositories {
     publications: new PublicationsRepository(db),
     publicationDeliveries: new PublicationDeliveriesRepository(db),
     bookConfigs: new BookConfigsRepository(db),
+    projectAccessControls: new ProjectAccessControlsRepository(db),
+    pendingAnnotations: new PendingAnnotationsRepository(db),
+    rateLimitCounters: new RateLimitCountersRepository(db),
   };
 }

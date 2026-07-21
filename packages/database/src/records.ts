@@ -482,3 +482,65 @@ export interface BookConfigRecord {
 
 /** `pending_git` until the outbox commits `book.yml`; then `committed`. */
 export type BookConfigStatus = "pending_git" | "committed";
+
+// ---------------------------------------------------------------------------
+// Phase 7: author-facing access control (migration 0007)
+// ---------------------------------------------------------------------------
+
+/**
+ * The emergency stops for one project (Phase 7 contract "Restricting").
+ *
+ * Both controls are represented as a nullable timestamp rather than a boolean:
+ * "frozen since 14:02, by Avery, because the fleet went haywire" is what an
+ * author needs to read an hour later, and a boolean would have thrown all of it
+ * away. A NULL `*_at` means the control is not in effect, and the actor/reason
+ * columns beside it are NULL too.
+ */
+export interface ProjectAccessControlRecord {
+  projectId: string;
+  frozenAt: string | null;
+  frozenByActorId: string | null;
+  freezeReason: string | null;
+  agentsPausedAt: string | null;
+  agentsPausedByActorId: string | null;
+  agentsPauseReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PendingAnnotationStatus = "pending" | "approved" | "rejected";
+
+/**
+ * A queued annotation awaiting a maintainer's approval (Phase 7 contract
+ * "Moderating"). Structurally NOT an `AnnotationRecord`: it lives in its own
+ * table precisely so that it cannot be voted on, cannot be evaluated by the
+ * rule engine, and has no git operation to be committed by.
+ */
+export interface PendingAnnotationRecord {
+  id: string;
+  projectId: string;
+  chapterId: string;
+  kind: "comment" | "suggestion";
+  scope: "range" | "block" | "chapter";
+  chapterRevision: number;
+  target: unknown;
+  authorActorId: string;
+  body: string;
+  status: PendingAnnotationStatus;
+  reviewedByActorId: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  /** The `annotations.id` an approval created (equal to `id`). */
+  approvedAnnotationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One fixed rate-limit window for one subject and class (migration 0007). */
+export interface RateLimitCounterRecord {
+  subject: string;
+  class: string;
+  windowStart: string;
+  count: number;
+  expiresAt: string;
+}

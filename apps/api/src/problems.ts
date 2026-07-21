@@ -78,6 +78,43 @@ export const PROBLEM_TYPES = {
     status: 409,
     title: "Change requires explicit confirmation",
   },
+  // ---- Phase 7 access control (contract "Author-facing access control") ----
+  /**
+   * The book is frozen: no writes from anyone, maintainers included. 423
+   * rather than 409 or 403 — `Locked` is the one status whose meaning is "the
+   * resource itself is unavailable for writing", which is exactly true and is
+   * true regardless of who asked. A 403 would tell a maintainer they lack
+   * permission, which is the wrong diagnosis and would send them to check
+   * their role instead of to the freeze switch they themselves flipped.
+   */
+  "book-frozen": { status: 423, title: "Book is frozen; no writes are accepted" },
+  /**
+   * The annotation policy is `locked`: maintainers only. Same status and the
+   * same reasoning as `book-frozen` — the refusal is a property of the book's
+   * current mode, not of the actor's standing, and existing collaborators keep
+   * their membership throughout.
+   */
+  "book-locked": { status: 423, title: "Book is locked to maintainers" },
+  /**
+   * Every agent token is suspended. 403, not 423: unlike a freeze this IS about
+   * the caller — the same request from a human collaborator succeeds — so the
+   * status that says "your credential, not this resource" is the honest one.
+   */
+  "agents-paused": { status: 403, title: "Agent tokens are paused for this book" },
+  /**
+   * A documented ceiling was exceeded (contract Scope, exit criterion 1). The
+   * response always carries `Retry-After`.
+   */
+  "rate-limited": { status: 429, title: "Rate limit exceeded" },
+  /**
+   * A queued annotation was approved or rejected by someone else first. 409:
+   * the request was well formed and permitted, and the row simply is no longer
+   * `pending`. Bulk moderation makes this ordinary rather than exceptional.
+   */
+  "moderation-already-reviewed": {
+    status: 409,
+    title: "Queued annotation has already been reviewed",
+  },
   internal: { status: 500, title: "Internal error" },
 } as const;
 

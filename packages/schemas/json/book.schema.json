@@ -95,6 +95,21 @@
       },
       "additionalProperties": false
     },
+    "collaboration": {
+      "type": "object",
+      "properties": {
+        "annotation_policy": {
+          "type": "string",
+          "enum": [
+            "open",
+            "approval-gated",
+            "collaborators-only",
+            "locked"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "governance": {
       "type": "object",
       "properties": {

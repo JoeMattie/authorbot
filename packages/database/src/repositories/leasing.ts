@@ -100,6 +100,27 @@ export class LeasesRepository {
    * expired-but-unswept — callers deciding liveness must also compare
    * `expiresAt` against their clock.
    */
+  /**
+   * Work items in this project that currently hold a live lease.
+   *
+   * Used by the projection rebuild, which restores work-item status from Git
+   * artifacts — and those artifacts never mention leases, because leases are
+   * operational-only (Phase 4 contract §6). Without this, every rebuild resets
+   * a leased item to `ready` while its lease row survives.
+   */
+  async listActiveWorkItemIds(projectId: string, now: string): Promise<string[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT work_item_id FROM leases
+          WHERE project_id = ?
+            AND released_at IS NULL AND revoked_at IS NULL
+            AND expires_at > ?`,
+      )
+      .bind(projectId, now)
+      .all<{ work_item_id: string }>();
+    return (rows ?? []).map((row) => row.work_item_id);
+  }
+
   async getActiveByWorkItem(workItemId: string): Promise<LeaseRecord | null> {
     const row = await this.db
       .prepare(
@@ -272,6 +293,29 @@ export class LeasesRepository {
    * `lease_expired` / returns the work item to `ready` for each 1-row
    * result.
    */
+  /**
+   * Every live lease an actor holds (Phase 7 contract "Revoking": revocation
+   * must "release any lease they hold, returning the work item to `ready` so
+   * their departure does not strand work for up to four hours").
+   *
+   * "Live" here means neither released nor revoked — deliberately NOT filtered
+   * on expiry. An expired-but-unswept lease still occupies the partial unique
+   * index that gates re-claiming, so leaving it behind would strand the work
+   * item exactly as the contract says it must not.
+   */
+  async listActiveByActor(projectId: string, actorId: string): Promise<LeaseRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM leases
+          WHERE project_id = ? AND actor_id = ?
+            AND released_at IS NULL AND revoked_at IS NULL
+          ORDER BY id`,
+      )
+      .bind(projectId, actorId)
+      .all();
+    return rows.map(mapLease);
+  }
+
   async listExpired(now: string, limit = 100): Promise<LeaseRecord[]> {
     const rows = await this.db
       .prepare(
@@ -346,6 +390,28 @@ export class SubmissionsRepository {
     const rows = await this.db
       .prepare(`SELECT * FROM submissions WHERE work_item_id = ? AND id > ? ORDER BY id LIMIT ?`)
       .bind(workItemId, page?.afterId ?? "", page?.limit ?? 100)
+      .all();
+    return rows.map(mapSubmission);
+  }
+
+  /**
+   * An actor's submissions that have not finished (Phase 7 contract
+   * "Revoking": revocation must "reject in-flight submissions from the revoked
+   * actor").
+   *
+   * `received` and `applying` are the in-flight states. `applied`,
+   * `conflicted`, and `rejected` are terminal and are left untouched — an
+   * applied submission is already part of the book's history, and the contract
+   * is explicit that revocation must "leave their prior contributions intact".
+   */
+  async listInFlightByActor(projectId: string, actorId: string): Promise<SubmissionRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM submissions
+          WHERE project_id = ? AND actor_id = ? AND state IN ('received', 'applying')
+          ORDER BY id`,
+      )
+      .bind(projectId, actorId)
       .all();
     return rows.map(mapSubmission);
   }

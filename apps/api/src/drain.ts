@@ -38,6 +38,8 @@ export interface DrainRunnerOptions {
   clock?: Clock;
   /** Maximum commit attempts per operation (default 3, Phase 2 contract §5). */
   maxAttempts?: number;
+  /** Ceiling on availability deferral before an operation is failed. */
+  maxDeferralMs?: number;
   /**
    * Outbox kinds to leave `pending` on this drain (processor option of the
    * same name). The coordinator uses it to stop prose commits while the
@@ -66,6 +68,7 @@ export function createDrainRunner(options: DrainRunnerOptions): DrainRunner {
     submissionApplier: createSubmissionApplier({ db: options.db, writer: options.writer, clock }),
     chapterComposer: createChapterComposer({ db: options.db, writer: options.writer, clock }),
     ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
+    ...(options.maxDeferralMs !== undefined ? { maxDeferralMs: options.maxDeferralMs } : {}),
     ...(options.pausedKinds !== undefined ? { pausedKinds: options.pausedKinds } : {}),
   });
 

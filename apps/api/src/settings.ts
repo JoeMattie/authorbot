@@ -51,9 +51,10 @@
  */
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { ProjectRecord, Repositories, SqlStatement } from "@authorbot/database";
-import { toTimestamp } from "@authorbot/domain";
+import { DEFAULT_ANNOTATION_POLICY, toTimestamp } from "@authorbot/domain";
 import { METRIC_NAMES, RULE_OPERATORS } from "@authorbot/rule-engine";
 import {
+  annotationPolicySchema,
   bookConfigSchema,
   ruleActionSchema,
   ruleNameSchema,
@@ -71,6 +72,22 @@ import type { RuleEntry } from "./rules.js";
 import { resolveRuleEntries } from "./rules.js";
 import type { ProjectSerializer } from "./serializer.js";
 
+/**
+ * What each annotation policy mode means, in plain language (Phase 7 contract
+ * "Restricting"). Served with the settings GET so the mode picker explains
+ * itself; `locked` gets the longest entry because it is the one an author is
+ * most likely to misread as "turn collaboration off".
+ */
+export const ANNOTATION_POLICY_MEANS: Readonly<Record<string, string>> = Object.freeze({
+  open: "Any signed-in GitHub user may comment and suggest, and what they write appears immediately. They still cannot vote, claim work, or submit prose — those stay with your collaborators.",
+  "approval-gated":
+    "Any signed-in GitHub user may comment and suggest, but nothing appears — or reaches your repository — until you approve it. Queued comments are visible to their author and to you, and nothing else.",
+  "collaborators-only":
+    "Only people you have added to the book may comment and suggest. This is the default.",
+  locked:
+    "Only maintainers may write. The book stays fully yours to work in: you can annotate your own drafts and run your own agents against them, and an agent works here by holding a maintainer-role membership you granted it. Your existing collaborators keep their membership and everything they have already contributed — they simply cannot write until you reopen the policy.",
+});
+
 /** Outbox kind this module emits (the repo-coordinator processor renders it). */
 export const SETTINGS_OUTBOX_KIND = "book_config.update";
 
@@ -86,6 +103,15 @@ export const EDITABLE_FIELDS = [
   "publication.show_revision",
   "publication.show_attribution",
   "publication.show_public_annotations",
+  /**
+   * Phase 7 contract "Restricting". An ordinary editable field, not a guarded
+   * one: moving up and down the progression is something "an author may do
+   * freely", and unlike `slug` it breaks no link anyone has shared. The one
+   * consequence worth stating — that `locked` does not lock the author out —
+   * is carried by `ANNOTATION_POLICY_MEANS` in the GET response rather than by
+   * a confirmation prompt.
+   */
+  "collaboration.annotation_policy",
   "governance.rules",
 ] as const;
 
@@ -139,6 +165,15 @@ const ruleInputSchema = z.strictObject({
  * than the field simply being absent from the body.
  */
 const settingsPatchSchema = z.strictObject({
+  /**
+   * `null` clears the section, returning the book to the default
+   * `collaborators-only` rather than leaving it in no mode at all.
+   */
+  collaboration: z
+    .strictObject({
+      annotation_policy: annotationPolicySchema.nullable().optional(),
+    })
+    .optional(),
   title: z.string().min(1).optional(),
   language: z
     .string()
@@ -291,6 +326,20 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
           show_revision: config.publication?.show_revision ?? null,
           show_attribution: config.publication?.show_attribution ?? null,
           show_public_annotations: config.publication?.show_public_annotations ?? null,
+        },
+        collaboration: {
+          annotation_policy:
+            config.collaboration?.annotation_policy ?? DEFAULT_ANNOTATION_POLICY,
+          /**
+           * Whether the book is currently running the DEFAULT because it has
+           * declared nothing, or a policy it chose. The Settings view says so
+           * plainly for the same reason it does for governance rules: an author
+           * editing a mode they have not yet adopted is about to *adopt* it.
+           */
+          source:
+            config.collaboration?.annotation_policy === undefined ? "default" : "book",
+          /** Each mode's consequence, in plain language, for the mode picker. */
+          options: ANNOTATION_POLICY_MEANS,
         },
       },
       /**
@@ -552,6 +601,9 @@ export function settingsView(config: BookConfig): Record<string, unknown> {
       show_attribution: config.publication?.show_attribution ?? null,
       show_public_annotations: config.publication?.show_public_annotations ?? null,
     },
+    collaboration: {
+      annotation_policy: config.collaboration?.annotation_policy ?? DEFAULT_ANNOTATION_POLICY,
+    },
     governance: config.governance ?? null,
   };
 }
@@ -672,6 +724,19 @@ export function applyPatch(
     // the diff a maintainer reviews should not contain an empty mapping.
     if (Object.keys(publication).length === 0) delete next.publication;
     else next.publication = publication as BookConfig["publication"];
+  }
+
+  if (patch.collaboration !== undefined) {
+    const policy = patch.collaboration.annotation_policy;
+    if (policy === null) {
+      // Explicitly cleared: the book falls back to `collaborators-only`, and
+      // the empty section is removed rather than committed as
+      // `collaboration: {}` — the diff a maintainer reviews should not contain
+      // an empty mapping.
+      delete (next as Record<string, unknown>)["collaboration"];
+    } else if (policy !== undefined) {
+      next.collaboration = { annotation_policy: policy };
+    }
   }
 
   const ruleVersions: Record<string, { from: number | null; to: number }> = {};

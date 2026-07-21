@@ -325,6 +325,9 @@ export interface Clock {
 
 export const SYSTEM_CLOCK: Clock = { now: () => new Date() };
 
+/** Default ceiling on availability deferral before an operation is failed. */
+const DEFAULT_MAX_DEFERRAL_MS = 60 * 60 * 1000;
+
 export interface CreateProcessorOptions {
   db: SqlDatabase;
   writer: BookRepoWriter;
@@ -332,6 +335,17 @@ export interface CreateProcessorOptions {
   clock?: Clock;
   /** Maximum commit attempts per operation (default 3, contract §5). */
   maxAttempts?: number;
+  /**
+   * How long an operation may keep being deferred for GitHub availability
+   * before it is failed instead (default 1 hour).
+   *
+   * Deferral exists so a transient outage does not burn the commit budget,
+   * but it must still END. An operation that defers forever is invisible: it
+   * is neither committed nor failed, so nothing surfaces it and nobody is
+   * told the write never landed. Past this deadline it fails with an error
+   * naming the cause, and an operator can requeue it once GitHub is back.
+   */
+  maxDeferralMs?: number;
   /**
    * Required to process `submission.apply` rows (Phase 4). Without it such
    * rows fail with a clear error instead of guessing.
@@ -359,7 +373,7 @@ export interface CreateProcessorOptions {
 export interface DrainRowOutcome {
   outboxId: string;
   gitOperationId: string | null;
-  result: "committed" | "failed";
+  result: "committed" | "failed" | "deferred";
   commitSha?: string;
   error?: string;
 }
@@ -381,6 +395,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   const writer = options.writer;
   const clock = options.clock ?? SYSTEM_CLOCK;
   const maxAttempts = options.maxAttempts ?? MAX_GIT_ATTEMPTS;
+  const maxDeferralMs = options.maxDeferralMs ?? DEFAULT_MAX_DEFERRAL_MS;
   const applier = options.submissionApplier;
   const chapterComposer = options.chapterComposer;
   const repos = createRepositories(db);
@@ -427,7 +442,22 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         skipped.add(row.id);
         continue;
       }
-      outcomes.push(await processRow({ ...row, status: "processing", attempts: row.attempts + 1 }));
+      const rowOutcome = await processRow({
+        ...row,
+        status: "processing",
+        attempts: row.attempts + 1,
+      });
+      outcomes.push(rowOutcome);
+      if (rowOutcome.result === "deferred") {
+        // A deferral hands the row back to a LATER drain, so this one must
+        // stop considering it. `deferOperation` returns it to `pending`, and
+        // without this the very next `nextPending` call hands back the same
+        // row — an unbounded spin at 100% CPU, because deferral deliberately
+        // does not spend the attempt budget that bounds every other retry.
+        // In production that would peg the coordinator's Durable Object
+        // against a GitHub outage instead of yielding until its next alarm.
+        skipped.add(row.id);
+      }
     }
 
     return { outcomes };
@@ -516,10 +546,32 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
             commitSha = result.commitSha;
           } catch (error) {
             if (isGitWriteError(error) && error.retryable) {
-              const t = transitionGitOperation(op, "conflict", maxAttempts);
-              if (!t.allowed) return failOperation(row, op, t.message);
-              op = await persistTransition(op, "conflict", t.next.attempts, error.message);
-              continue; // the `conflict` case decides retry vs exhaustion
+              // CONTENTION vs AVAILABILITY. `non-fast-forward` means the branch
+              // moved under us: the right response is to re-resolve against the
+              // new head immediately, and the bounded attempt budget exists for
+              // exactly that.
+              if (error.kind === "non-fast-forward") {
+                const t = transitionGitOperation(op, "conflict", maxAttempts);
+                if (!t.allowed) return failOperation(row, op, t.message);
+                op = await persistTransition(op, "conflict", t.next.attempts, error.message);
+                continue; // the `conflict` case decides retry vs exhaustion
+              }
+              // Anything else retryable is GitHub being unavailable — a 5xx or
+              // a rate limit. Retrying inside this drain spends all three
+              // attempts within milliseconds against a service that is simply
+              // down, so an outage lasting longer than one drain pass used to
+              // fail the operation PERMANENTLY, with the content stranded in
+              // `pending_git` and nothing to retry it. That defeats the point
+              // of the outbox.
+              //
+              // So an availability failure defers instead: the operation goes
+              // back to `queued` WITHOUT consuming the commit budget and the
+              // outbox row returns to `pending`, leaving the next drain (the
+              // coordinator alarm) to try again. Deferral is deliberately
+              // unbounded — the write is durable and should land when GitHub
+              // comes back, and a persistent backlog is visible through queue
+              // depth and the operation's recorded error.
+              return deferOperation(row, op, error.message);
             }
             return failOperation(row, op, errorMessage(error));
           }
@@ -564,6 +616,41 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
    * recoverable, the submission lands in its terminal `conflicted` state,
    * and `work_item_conflict` carries the reason to the feed.
    */
+  /**
+   * Hand an operation back to a later drain without spending its retry budget.
+   * Used when the failure is GitHub's availability rather than anything about
+   * this mutation: the attempt count is what bounds *contention* retries, and
+   * spending it on an outage is what used to strand writes permanently.
+   */
+  async function deferOperation(
+    row: OutboxRecord,
+    op: GitOperationRecord,
+    error: string,
+  ): Promise<DrainRowOutcome> {
+    // Deferral is generous but not infinite. Past the deadline the outage has
+    // stopped being transient, and a write parked in `queued` forever tells
+    // nobody anything — failing it makes the loss visible and leaves the
+    // operator a requeue once GitHub is healthy again.
+    const age = Date.parse(now()) - Date.parse(op.createdAt);
+    // `>=`, not `>`: with a frozen clock (tests) or a zero deadline, an
+    // operation must still be able to reach the deadline it was given.
+    if (Number.isFinite(age) && age >= maxDeferralMs) {
+      return failOperation(
+        row,
+        op,
+        `${error} (giving up after ${Math.round(age / 60000)} minutes of retrying; ` +
+          `requeue the operation once GitHub is reachable)`,
+      );
+    }
+    await repos.gitOperations.updateState(op.id, {
+      state: "queued",
+      updatedAt: now(),
+      error,
+    });
+    await repos.outbox.markPending(row.id);
+    return outcome(row, "deferred", { error });
+  }
+
   async function failOperation(
     row: OutboxRecord,
     op: GitOperationRecord,

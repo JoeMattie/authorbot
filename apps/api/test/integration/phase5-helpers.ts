@@ -129,6 +129,12 @@ export interface MakeGitHubAppOptions {
   /** Commit attempts per outbox row (drain-level). Default 3. */
   maxAttempts?: number;
   /**
+   * Ceiling on availability deferral before an operation is failed. Tests that
+   * assert a SUSTAINED outage terminates set this small; the production
+   * default is an hour, which no test should wait for.
+   */
+  maxDeferralMs?: number;
+  /**
    * Wrap the writer before the coordinator gets it — used by the
    * serialization test to observe overlapping commits.
    */
@@ -270,6 +276,7 @@ export async function makeGitHubIntegrationApp(
     db,
     git,
     ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
+    ...(options.maxDeferralMs !== undefined ? { maxDeferralMs: options.maxDeferralMs } : {}),
   });
 
   return {

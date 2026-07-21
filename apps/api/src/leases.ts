@@ -269,3 +269,67 @@ export async function sweepExpiredLeases(
   }
   return { expired };
 }
+
+/**
+ * End a lease because its HOLDER lost access (Phase 7 contract "Revoking":
+ * revocation must "release any lease they hold, returning the work item to
+ * `ready` so their departure does not strand work for up to four hours").
+ *
+ * Deliberately NOT {@link expireLeaseStatements}. Both of those revoke on the
+ * condition `expires_at <= now`, because both describe a lease that ran out of
+ * time. A revoked collaborator's lease has not run out of time — that is the
+ * whole problem, and it is why the contract calls out "for up to four hours" —
+ * so applying the expiry predicate here would change zero rows and strand the
+ * item exactly as before.
+ *
+ * The emitted event is `lease_revoked` rather than `lease_expired` for the same
+ * reason the release route distinguishes the two: a feed that says a lease
+ * expired when an administrator ended it is lying to everyone reading it.
+ *
+ * The work-item reset carries the same two guards the expiry path uses — still
+ * `leased`, and no OTHER live lease in the slot — so a claim that raced in
+ * between is never stomped.
+ */
+export function revokeLeaseForActorStatements(
+  db: SqlDatabase,
+  input: { projectId: string; leaseId: string; workItemId: string; now: string },
+): SqlStatement[] {
+  const { projectId, leaseId, workItemId, now } = input;
+  return [
+    db
+      .prepare(
+        `INSERT INTO events (project_id, type, payload, created_at)
+         SELECT ?, ?, ?, ?
+          WHERE EXISTS (
+            SELECT 1 FROM leases
+             WHERE id = ? AND released_at IS NULL AND revoked_at IS NULL
+          )`,
+      )
+      .bind(
+        projectId,
+        "lease_revoked",
+        JSON.stringify({ leaseId, workItemId, reason: "actor-access-revoked" }),
+        now,
+        leaseId,
+      ),
+    db
+      .prepare(
+        `UPDATE leases SET revoked_at = ?
+           WHERE id = ? AND released_at IS NULL AND revoked_at IS NULL`,
+      )
+      .bind(now, leaseId),
+    db
+      .prepare(
+        `UPDATE work_items SET status = 'ready', updated_at = ?
+           WHERE id = ? AND status = 'leased'
+             AND NOT EXISTS (
+               SELECT 1 FROM leases
+                WHERE work_item_id = ?
+                  AND id <> ?
+                  AND released_at IS NULL AND revoked_at IS NULL
+                  AND expires_at > ?
+             )`,
+      )
+      .bind(now, workItemId, workItemId, leaseId, now),
+  ];
+}

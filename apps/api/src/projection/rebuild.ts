@@ -363,6 +363,23 @@ export async function rebuildProjection(
   // sticky rows restore unconditionally from their artifacts. Upsert-by-id:
   // decisions/work items are append-only in the repo (a status change is a
   // re-render of the SAME file), so no stale-delete pass is needed.
+  // A work-item artifact ALWAYS says `ready`: leases are operational-only and
+  // deliberately never written to Git (Phase 4 contract §6). So restoring
+  // `status` verbatim silently resets every currently-leased item to `ready`
+  // — on any rebuild, including the push webhook fired by Authorbot's own
+  // commits. The lease row survives, leaving the item advertised as available
+  // and yet unclaimable (the partial unique index refuses the second lease),
+  // which reads as a queue that lies rather than as a bug.
+  //
+  // The lease is not released here. A chapter moving under a claim does not
+  // void the work: Phase 4 §5 rebases a submission whose target still resolves
+  // uniquely, and only an ambiguous or overlapping change becomes a conflict.
+  // Ending someone's lease because the projection was rebuilt would discard
+  // work that was still going to apply cleanly. So the operational status wins
+  // over the artifact's ignorance of it.
+  const leasedWorkItems = new Set<string>(
+    (await repos.leases.listActiveWorkItemIds(project.id, now)) ?? [],
+  );
   const snapshotWorkItems = snapshot.workItems ?? [];
   const snapshotDecisions = snapshot.decisions ?? [];
 
@@ -395,7 +412,7 @@ export async function rebuildProjection(
       id: wi.id,
       projectId: project.id,
       type: wi.type,
-      status: wi.status,
+      status: leasedWorkItems.has(wi.id) && wi.status === "ready" ? "leased" : wi.status,
       sourceAnnotationId: wi.source_annotation_id,
       chapterId: wi.chapter_id,
       baseRevision: wi.base_revision,

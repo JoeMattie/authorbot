@@ -26,8 +26,12 @@ export type {
   UuidV7,
 } from "./primitives.js";
 
-export { bookConfigSchema } from "./book.js";
-export type { BookConfig } from "./book.js";
+export {
+  ANNOTATION_POLICY_MODES,
+  annotationPolicySchema,
+  bookConfigSchema,
+} from "./book.js";
+export type { AnnotationPolicyMode, BookConfig } from "./book.js";
 
 export { CHAPTER_STATUSES, chapterFrontmatterSchema, chapterStatusSchema } from "./chapter.js";
 export type { ChapterFrontmatter, ChapterStatus } from "./chapter.js";

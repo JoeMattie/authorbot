@@ -350,6 +350,31 @@ export class HumanSessionsRepository {
     return result.changes > 0;
   }
 
+  /**
+   * Revoke EVERY live session an actor holds (Phase 7 contract "Revoking":
+   * revocation must "invalidate that actor's sessions, not merely their
+   * membership", and take effect "on the next request — not on session
+   * expiry").
+   *
+   * Exposed as a statement as well as an awaited helper because a revocation
+   * lands the membership change, the session kill, the released lease, the
+   * rejected submissions, and the audit event in one batch: a partial
+   * revocation is worse than none, since it would report success while leaving
+   * the removed collaborator holding a working cookie.
+   */
+  revokeAllForActorStatement(actorId: string, revokedAt: string): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE human_sessions SET revoked_at = ? WHERE actor_id = ? AND revoked_at IS NULL`,
+      )
+      .bind(revokedAt, actorId);
+  }
+
+  async revokeAllForActor(actorId: string, revokedAt: string): Promise<number> {
+    const result = await this.revokeAllForActorStatement(actorId, revokedAt).run();
+    return result.changes;
+  }
+
   /** Delete sessions whose expiry is at or before `now`. Returns count. */
   async deleteExpired(now: string): Promise<number> {
     const result = await this.db
@@ -422,10 +447,36 @@ export class AgentTokensRepository {
     return rows.map(mapToken);
   }
 
+  /** Live (unrevoked) tokens for a project, whether or not they have expired. */
+  async listActiveByProject(projectId: string): Promise<AgentTokenRecord[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT * FROM agent_tokens WHERE project_id = ? AND revoked_at IS NULL ORDER BY id`,
+      )
+      .bind(projectId)
+      .all();
+    return rows.map(mapToken);
+  }
+
   revokeStatement(id: string, revokedAt: string): SqlStatement {
     return this.db
       .prepare(`UPDATE agent_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`)
       .bind(revokedAt, id);
+  }
+
+  /**
+   * Revoke every live token for a project in one statement (Phase 7 contract
+   * "Revoking": "Revoke all agent tokens in one action, for a suspected
+   * leak"). One statement rather than a loop because a leak response that
+   * revokes tokens one at a time leaves a window in which the attacker's token
+   * is the one not yet reached.
+   */
+  revokeAllForProjectStatement(projectId: string, revokedAt: string): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE agent_tokens SET revoked_at = ? WHERE project_id = ? AND revoked_at IS NULL`,
+      )
+      .bind(revokedAt, projectId);
   }
 
   /** Returns true when the token existed and was not already revoked. */

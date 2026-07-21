@@ -3,6 +3,22 @@ import { rulesMapSchema } from "./instance.js";
 import { slugSchema, uuidv7Schema } from "./primitives.js";
 
 /**
+ * The four annotation policy modes (Phase 7 contract "Restricting"). Declared
+ * here rather than imported from `@authorbot/domain` because `@authorbot/schemas`
+ * is the leaf package every other one depends on and must not gain a dependency
+ * on the domain rules; `annotation-policy.test.ts` in the domain suite pins the
+ * two lists equal.
+ */
+export const ANNOTATION_POLICY_MODES = [
+  "open",
+  "approval-gated",
+  "collaborators-only",
+  "locked",
+] as const;
+export const annotationPolicySchema = z.enum(ANNOTATION_POLICY_MODES);
+export type AnnotationPolicyMode = (typeof ANNOTATION_POLICY_MODES)[number];
+
+/**
  * Book config `book.yml` — `authorbot.book/v1` (design section 8.2).
  * Optional sections default at load time; the schema does not inject defaults.
  */
@@ -48,6 +64,25 @@ export const bookConfigSchema = z.strictObject({
       show_revision: z.boolean().optional(),
       show_attribution: z.boolean().optional(),
       show_public_annotations: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * Collaboration access (Phase 7 contract "Restricting").
+   *
+   * `annotation_policy` is who may comment and suggest, and whether what they
+   * write appears immediately: `open`, `approval-gated`, `collaborators-only`
+   * (the default when the section is absent), or `locked`. It lives in
+   * `book.yml` — versioned, diffable, reviewable — because it is an editorial
+   * decision about the book, made deliberately and changed rarely.
+   *
+   * The emergency controls deliberately do NOT live here. Freeze and
+   * pause-agents are operational state in the database (migration 0007
+   * explains why at length): they must take effect on the next request rather
+   * than the next commit, and they must work when the repository does not.
+   */
+  collaboration: z
+    .strictObject({
+      annotation_policy: annotationPolicySchema.optional(),
     })
     .optional(),
   /**
