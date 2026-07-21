@@ -51,11 +51,12 @@ function packFiles(dir) {
     stdio: ["ignore", "pipe", "ignore"],
     maxBuffer: 32 * 1024 * 1024,
   });
-  // `prepack` output (licence copy, migration staging) lands on the same
-  // stream, so take the JSON document rather than the whole stream.
-  const start = raw.indexOf("[");
-  if (start < 0) throw new Error(`npm pack produced no JSON for ${dir}:\n${raw}`);
-  return JSON.parse(raw.slice(start))[0];
+  // `prepack` output (licence copy, migration staging) shares this stream, and
+  // npm's own notices can trail the payload — slicing from the first `[` to the
+  // end of the stream therefore breaks whenever anything is printed AFTER the
+  // JSON, which is exactly what a newer npm did in CI while this machine's npm
+  // did not. Extract the first balanced array instead of assuming it is last.
+  return JSON.parse(firstJsonArray(raw, dir))[0];
 }
 
 const failures = [];
@@ -149,3 +150,34 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(`\n${report.length} package(s) ready to publish. Nothing was published.`);
+
+/**
+ * The first balanced `[...]` in a stream that may carry other output before or
+ * after it. String-aware, so a bracket inside a filename cannot unbalance it.
+ */
+function firstJsonArray(raw, dir) {
+  const start = raw.indexOf("[");
+  if (start < 0) throw new Error(`npm pack produced no JSON for ${dir}:\n${raw}`);
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "[") depth += 1;
+    else if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  throw new Error(`npm pack produced no complete JSON array for ${dir}:\n${raw}`);
+}
