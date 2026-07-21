@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/cli",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Authorbot command-line interface: validate Authorbot book repositories against the Phase 0 contract (section 5)",
   "keywords": [
     "authorbot",

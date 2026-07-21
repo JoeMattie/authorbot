@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/domain",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Pure domain logic for Authorbot: role/scope authorization, annotation and Git-operation state machines, command validators, and token/session value rules (Phase 2 contract section 3)",
   "keywords": [
     "authorbot",

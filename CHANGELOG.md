@@ -9,6 +9,16 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.22
+
+- **You can create an agent token from your book's settings.** Until now
+  nothing in Authorbot could make one: the API needs a maintainer session,
+  which only a browser holds, and the settings page could list and revoke
+  tokens but not create them — while the setup wizard asked for a bearer token
+  no author has ever been issued. The control sits under Agent tokens, shows
+  the value once, and defaults to the narrowest scopes an agent needs to read
+  chapters, claim work, and submit a draft.
+
 ## 0.1.21
 
 - **Installing the GitHub App no longer lands you on a 404.** GitHub was asked
