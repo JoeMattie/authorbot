@@ -1,0 +1,39 @@
+{
+  "name": "@authorbot/create",
+  "version": "0.1.0",
+  "description": "Guided setup for an Authorbot book project.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "create-authorbot": "dist/bin.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoeMattie/authorbot.git"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "sync-templates": "node scripts/sync-templates.mjs"
+  },
+  "dependencies": {
+    "@authorbot/schemas": "workspace:*",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
