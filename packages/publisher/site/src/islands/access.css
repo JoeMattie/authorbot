@@ -514,3 +514,76 @@
     height: 24px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Creating an agent token.
+
+   The one control the product was missing: minting needs a maintainer session,
+   which only a browser holds, so this page is the only place it can happen.
+   --------------------------------------------------------------------------- */
+
+.ab-access-mint-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.ab-access-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+.ab-input-narrow {
+  max-width: 8rem;
+}
+
+.ab-access-scopes {
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ab-access-scope {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 400;
+}
+
+.ab-access-scope-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.ab-access-scope-means {
+  opacity: 0.8;
+}
+
+/* The token, shown once. It has to be readable and selectable at a glance:
+   this is the only moment its value exists outside the agent that will use
+   it, and a value someone squints at is a value they mistype. */
+.ab-access-token-once {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 2px solid currentColor;
+  border-radius: 0.25rem;
+}
+
+.ab-access-token-value {
+  display: block;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95em;
+  word-break: break-all;
+  user-select: all;
+  border: 1px dashed currentColor;
+  border-radius: 0.25rem;
+}

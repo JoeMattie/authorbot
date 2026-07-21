@@ -108,6 +108,25 @@ function parseConfig(host: HTMLElement): Config | null {
   return { apiBase, project };
 }
 
+/**
+ * The scopes a maintainer can put on an agent token, and whether one is on by
+ * default.
+ *
+ * `tokens:manage` and `members:manage` are absent on purpose: an agent's
+ * effective authority is its scopes intersected with its role, agent
+ * memberships are pinned to editor, and neither is in an editor's bundle. An
+ * agent that could mint tokens or change membership would be an agent that
+ * could promote itself.
+ */
+const MINTABLE_SCOPES: ReadonlyArray<readonly [string, string, boolean]> = [
+  ["chapters:read", "Read the book's chapters.", true],
+  ["work:read", "See the work queue.", true],
+  ["work:claim", "Claim an item so two agents do not write the same chapter.", true],
+  ["submissions:write", "Submit a draft for review.", true],
+  ["annotations:read", "Read comments left on the prose.", false],
+  ["annotations:write", "Leave comments of its own.", false],
+];
+
 export class AuthorbotAccess extends HTMLElement {
   private api!: AccessApi;
   private started = false;
@@ -688,8 +707,15 @@ export class AuthorbotAccess extends HTMLElement {
     );
     const active = data.tokens.filter((token) => tokenStatus(token) === "active");
 
+    // Before the empty-list check, deliberately. A book with no tokens is
+    // exactly the book whose maintainer is looking for a way to make one, and
+    // the early return below used to end the section right here — so the one
+    // state that needs this control most was the one state that never showed
+    // it.
+    section.append(this.mintControl());
+
     if (data.tokens.length === 0) {
-      section.append(el("p", "ab-access-empty", "This book has no agent tokens."));
+      section.append(el("p", "ab-access-empty", "This book has no agent tokens yet."));
       return section;
     }
 
@@ -735,6 +761,150 @@ export class AuthorbotAccess extends HTMLElement {
       section.append(bulk);
     }
     return section;
+  }
+
+  /**
+   * Minting an agent token.
+   *
+   * This is the control the product did not have. `POST /agent-tokens` needs
+   * a maintainer *session* — a cookie a browser holds — and the only thing
+   * that ever asked for it was the setup wizard, which wanted a bearer token
+   * no author has ever been issued, then pointed at this page to "mint one
+   * from your book's settings". This page could list tokens and revoke them,
+   * and not make one. Both roads led here, and there was nothing here.
+   *
+   * The default scopes are the narrowest set that lets an agent do the loop
+   * end to end: read chapters, find and claim work, submit a draft. Writing
+   * annotations and voting are offered but off, because an agent that comments
+   * on its own submissions is a decision to make deliberately rather than by
+   * accepting a default.
+   */
+  private mintControl(): HTMLElement {
+    const control = el("div", "ab-access-control ab-access-mint");
+    control.append(el("h4", "ab-access-control-name", "Create an agent token"));
+    control.append(
+      el(
+        "p",
+        "ab-access-control-means",
+        "A credential for a software agent that writes with you. Its value is shown once, here, and never again — Authorbot keeps only a hash.",
+      ),
+    );
+
+    const form = el("form", "ab-access-mint-form") as HTMLFormElement;
+
+    const nameLabel = el("label", "ab-access-field", "Name");
+    const name = el("input", "ab-input") as HTMLInputElement;
+    name.type = "text";
+    name.required = true;
+    name.maxLength = 60;
+    name.placeholder = "drafting-agent";
+    nameLabel.append(name);
+
+    const daysLabel = el("label", "ab-access-field", "Expires in (days)");
+    const days = el("input", "ab-input ab-input-narrow") as HTMLInputElement;
+    days.type = "number";
+    days.min = "1";
+    days.max = "90";
+    days.value = "30";
+    daysLabel.append(days);
+
+    const scopeSet = el("fieldset", "ab-access-scopes");
+    scopeSet.append(el("legend", "ab-access-field", "What it may do"));
+    const boxes: HTMLInputElement[] = [];
+    for (const [scope, description, on] of MINTABLE_SCOPES) {
+      const row = el("label", "ab-access-scope");
+      const box = el("input", "") as HTMLInputElement;
+      box.type = "checkbox";
+      box.value = scope;
+      box.checked = on;
+      boxes.push(box);
+      row.append(box, el("span", "ab-access-scope-name", scope));
+      row.append(el("span", "ab-access-scope-means", description));
+      scopeSet.append(row);
+    }
+
+    const submit = el("button", "ab-btn ab-primary", "Create token") as HTMLButtonElement;
+    submit.type = "submit";
+    const slot = el("div", "ab-access-mint-slot");
+
+    form.append(nameLabel, daysLabel, scopeSet, submit);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const scopes = boxes.filter((box) => box.checked).map((box) => box.value);
+      if (scopes.length === 0) {
+        this.showError("Choose at least one thing the token may do.");
+        return;
+      }
+      submit.disabled = true;
+      void this.applyMint(name.value.trim(), scopes, Number(days.value), slot).finally(() => {
+        submit.disabled = false;
+      });
+    });
+
+    control.append(form, slot);
+    return control;
+  }
+
+  /**
+   * Mints, then shows the value once.
+   *
+   * The token is put on the page rather than into a message line, because it
+   * has to be selectable and copyable and it is the only time it will ever
+   * exist outside the agent that uses it. `load()` refreshes the list around
+   * it, and the panel deliberately survives that refresh: re-rendering the
+   * section out from under a token nobody has copied yet would destroy the one
+   * thing this control exists to produce.
+   */
+  private async applyMint(
+    name: string,
+    scopes: readonly string[],
+    expiresInDays: number,
+    slot: HTMLElement,
+  ): Promise<void> {
+    this.clearMessages();
+    const result = await this.api.mintAgentToken(name, scopes, expiresInDays);
+    if (!result.ok) {
+      this.showError(result.message);
+      return;
+    }
+
+    const minted = result.value;
+    await this.load();
+
+    const panel = el("div", "ab-access-token-once");
+    panel.append(el("h4", "ab-access-control-name", `Token for ${minted.name}`));
+    panel.append(
+      el(
+        "p",
+        "ab-access-control-means",
+        "Copy it now. This is the only time it is ever shown, and nothing in Authorbot can display it again — if it is lost, revoke it and make another.",
+      ),
+    );
+    const value = el("code", "ab-access-token-value", minted.token);
+    value.tabIndex = 0;
+    panel.append(value);
+
+    const copy = el("button", "ab-btn", "Copy") as HTMLButtonElement;
+    copy.type = "button";
+    copy.addEventListener("click", () => {
+      void navigator.clipboard.writeText(minted.token).then(
+        () => {
+          copy.textContent = "Copied";
+        },
+        () => {
+          // Clipboard access can be refused; the value is on the page and
+          // selectable, so this is a downgrade rather than a failure.
+          copy.textContent = "Select it and copy";
+        },
+      );
+    });
+    panel.append(copy);
+
+    // Appended after `load()` re-rendered everything, so it is not swept away
+    // by its own refresh.
+    const target = this.body.querySelector<HTMLElement>(".ab-access-mint-slot") ?? slot;
+    target.replaceChildren(panel);
+    value.focus();
   }
 
   private tokenRow(token: AgentTokenMeta): HTMLElement {

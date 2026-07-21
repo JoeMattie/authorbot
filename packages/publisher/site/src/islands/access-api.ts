@@ -13,9 +13,9 @@
  * `mutate`, `jsonResult`) is inherited rather than reimplemented, so there is
  * one CSRF/idempotency/problem-parsing path in the codebase, not two.
  *
- * Nothing here can return an agent token's value. `agentTokens()` reads
- * metadata, and there is no route in the system that re-displays a token after
- * the mint response that created it.
+ * Nothing here can return an agent token's value after the fact.
+ * `agentTokens()` reads metadata, and no route re-displays a token once minted
+ * — `mintAgentToken()` is the single moment its value exists to be shown.
  */
 import {
   CollabApi,
@@ -231,6 +231,35 @@ export class AccessApi extends CollabApi {
         reason === undefined || reason === "" ? {} : { reason },
       ),
       [200],
+    );
+  }
+
+  /**
+   * Mints an agent token.
+   *
+   * The response is the only time the token's value exists anywhere outside
+   * the agent that will use it: the server keeps a hash, and no route
+   * re-displays it. So the caller must show it immediately, and say that it
+   * cannot be shown again.
+   *
+   * This is the route that had no way to reach it. Minting requires a
+   * maintainer *session*, which is a cookie a browser holds — and the only
+   * thing that ever asked for it was the setup wizard, which wanted a bearer
+   * token no author has ever been issued. Everything needed was here; nothing
+   * called it.
+   */
+  async mintAgentToken(
+    name: string,
+    scopes: readonly string[],
+    expiresInDays: number,
+  ): Promise<ApiResult<AgentTokenMeta & { token: string }>> {
+    return this.jsonResult<AgentTokenMeta & { token: string }>(
+      this.post(this.projectUrl("/agent-tokens"), {
+        name,
+        scopes: [...scopes],
+        expiresInDays,
+      }),
+      [201, 200],
     );
   }
 
