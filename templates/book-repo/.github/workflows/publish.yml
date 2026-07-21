@@ -137,8 +137,28 @@ jobs:
       # are always the same pinned version. Applying is idempotent: wrangler
       # records what it has run in a d1_migrations table and skips it next
       # time. Skipped entirely for a static-only book, which has no database.
+      # A book's very first push happens before `create-authorbot publish` has
+      # had a chance to store the Cloudflare credentials, so this workflow used
+      # to fail on every brand-new book: a red cross and a failure email before
+      # the author had done anything wrong, about a deploy the wizard was in
+      # the middle of doing for them anyway. Validation and the build above are
+      # still worth running on that push, so only the two steps that actually
+      # talk to Cloudflare are skipped — and they say why rather than being
+      # silently absent.
+      - name: Check for Cloudflare credentials
+        id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No CLOUDFLARE_API_TOKEN is set yet, so nothing was deployed. Your site goes up when you run the publish stage of create-authorbot, which sets this secret; every push after that deploys from here."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Apply pending database migrations
-        if: ${{ vars.AUTHORBOT_D1_DATABASE != '' }}
+        if: ${{ steps.creds.outputs.present == 'true' && vars.AUTHORBOT_D1_DATABASE != '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -155,6 +175,7 @@ jobs:
       # collaboration API from this one origin; this step does not change
       # when that happens.
       - name: Deploy to Cloudflare
+        if: ${{ steps.creds.outputs.present == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
