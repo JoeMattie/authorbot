@@ -35,6 +35,7 @@ import {
 import { waitForInstallation } from "../github/installation.js";
 import { looksLikeFlag, validateD1Name, validateWorkerName } from "../slug.js";
 import {
+  commitGenerated,
   readBookIdentity,
   requireBookDirectory,
   resolveSiteUrl,
@@ -341,7 +342,18 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
   ctx.reporter.info(
     `Go to ${siteUrl}, sign in with GitHub, and press New chapter. You get a plain title-and-prose box — Authorbot writes the frontmatter and the ids for you.`,
   );
-  ctx.reporter.info("Commit and push the changed book.yml and wrangler.jsonc when you are ready.");
+  // Not "commit and push these when you are ready". The projection reads
+  // GitHub, so until this lands the deployment cannot see the book it is
+  // serving — and the settings page says exactly that, to an author with no
+  // reason to connect it to a line at the end of a long run.
+  await commitGenerated(ctx, {
+    files: ["book.yml", "wrangler.jsonc", "package.json", "package-lock.json"],
+    message: "Turn on collaboration",
+    push: true,
+    done: "Committed and pushed, so your site can read its own configuration.",
+    failed:
+      "Could not commit the collaboration settings. Commit and push book.yml and wrangler.jsonc yourself — until then your site cannot read them.",
+  });
 
   return { continue: true, note: "collaboration enabled and verified" };
 };

@@ -304,3 +304,112 @@ export async function setApiUrl(ctx: WizardContext, apiUrl: string): Promise<str
 
 /** Re-exported so stages need only one YAML import site. */
 export { stringifyYaml };
+
+/**
+ * Commits the files a stage generated, and optionally pushes them.
+ *
+ * Every stage that writes configuration has to do this, and until now each one
+ * either did it privately or told the author to. `collaborate` did the latter
+ * — "commit and push the changed book.yml and wrangler.jsonc when you are
+ * ready" — which is a footnote at the end of a long run, and the consequence
+ * of missing it is that the API never projects the book and the settings page
+ * reports that it cannot read its own configuration. The author is then
+ * looking at a broken page with no reason to connect it to a line they
+ * scrolled past.
+ *
+ * Pushing matters for exactly that reason: the projection reads GitHub, not
+ * the working tree. A commit that stays local leaves the deployment describing
+ * a book it cannot see.
+ *
+ * Restricted to the named files. An author's work in progress is theirs, and
+ * sweeping it into a commit they did not ask for is the kind of surprise the
+ * wizard promises not to spring.
+ */
+export async function commitGenerated(
+  ctx: WizardContext,
+  options: {
+    readonly files: readonly string[];
+    readonly message: string;
+    readonly push: boolean;
+    /** Said when it worked, in the author's terms. */
+    readonly done: string;
+    /** Said when it did not, naming what they must do themselves. */
+    readonly failed: string;
+  },
+): Promise<void> {
+  const files = [...options.files];
+
+  if (ctx.actions.dryRun) {
+    ctx.actions.note(
+      `run: git commit ${files.join(" ")}${options.push ? " && git push" : ""}`,
+      options.done,
+    );
+    return;
+  }
+
+  const inside = await ctx.actions.run({
+    purpose: "check this book is a git repository",
+    command: "git",
+    args: ["rev-parse", "--is-inside-work-tree"],
+    cwd: ctx.directory,
+    mutates: false,
+  });
+  if (inside.code !== 0) {
+    return;
+  }
+
+  await ctx.actions.run({
+    purpose: "stage the files this stage wrote",
+    command: "git",
+    args: ["add", "--", ...files],
+    cwd: ctx.directory,
+    mutates: true,
+  });
+
+  const staged = await ctx.actions.run({
+    purpose: "see whether anything actually changed",
+    command: "git",
+    args: ["diff", "--cached", "--quiet", "--", ...files],
+    cwd: ctx.directory,
+    mutates: false,
+  });
+  if (staged.code === 0) {
+    return;
+  }
+
+  const commit = await ctx.actions.run({
+    purpose: "commit the files this stage wrote",
+    command: "git",
+    args: ["commit", "-m", options.message, "--", ...files],
+    cwd: ctx.directory,
+    mutates: true,
+  });
+  if (commit.code !== 0) {
+    ctx.reporter.warn(options.failed);
+    return;
+  }
+
+  if (!options.push) {
+    ctx.reporter.ok(options.done);
+    return;
+  }
+
+  const push = await ctx.actions.run({
+    purpose: "push so the deployment can read the book",
+    command: "git",
+    args: ["push"],
+    cwd: ctx.directory,
+    mutates: true,
+    timeoutMs: 120_000,
+  });
+  if (push.code === 0) {
+    ctx.reporter.ok(options.done);
+  } else {
+    // Committed but not pushed is a real state and worth naming precisely: the
+    // work is safe, and the deployment still cannot see it.
+    ctx.reporter.warn(
+      `Committed, but the push failed: ${(push.stderr || push.stdout).trim().split("\n")[0] ?? "unknown error"}`,
+    );
+    ctx.reporter.info("Run `git push` when you can — until then your site cannot read this change.");
+  }
+}
