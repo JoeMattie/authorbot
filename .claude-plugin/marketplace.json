@@ -1,0 +1,16 @@
+{
+  "name": "authorbot",
+  "owner": {
+    "name": "Joe Mattie",
+    "url": "https://github.com/JoeMattie/authorbot"
+  },
+  "plugins": [
+    {
+      "name": "authorbot-collaborator",
+      "source": ".",
+      "description": "Teach an agent to contribute to an Authorbot book: find work, claim it, write or revise prose, and submit it for review through the API. Includes drafter, critic, continuity, and reviewer roles.",
+      "category": "productivity",
+      "license": "MIT"
+    }
+  ]
+}
