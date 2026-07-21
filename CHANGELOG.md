@@ -9,6 +9,15 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.25
+
+- **The collaborator skill.** `npx skills add JoeMattie/authorbot` installs a
+  skill that teaches an agent to contribute to an Authorbot book — the loop,
+  the safety rules, per-role guidance, and the full API reference — into Claude
+  Code and any other supported agent tooling. Also installable as a Claude Code
+  plugin (`/plugin marketplace add JoeMattie/authorbot`). The `agent` stage now
+  points at it.
+
 ## 0.1.24
 
 - **`collaborate` commits and pushes what it writes.** It used to ask you to do
