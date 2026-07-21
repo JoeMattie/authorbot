@@ -26,7 +26,12 @@ Commands:
   upgrade [path]    move to a newer Authorbot release, as a pull request
                     (ADR-0021)
 
-Run "authorbot <command> --help" for command options.`;
+Run "authorbot <command> --help" for command options.
+
+Setting up a new book? This is the toolchain that validates and builds one.
+The guided setup is a different command:
+
+  npx @authorbot/create`;
 
 export interface CliIo {
   out: (line: string) => void;
