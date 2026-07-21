@@ -9,6 +9,20 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.17
+
+- **`npm install` failed for everyone who started the documented way.** npx
+  exports its own configuration as `npm_config_*`, the wizard's `npm install`
+  inherited it, and resolved against npx's cache directory instead of your
+  book — so the install failed and you were left without a
+  `package-lock.json`, which both generated workflows refuse to run without. It
+  worked fine for anyone running the built binary directly, which is why it
+  looked like a problem with the machine.
+- A failed install now shows npm's actual error and offers to try again.
+- Prompts are drawn with `@clack/prompts`: arrow-key selection, a secret field
+  masked with asterisks instead of showing nothing, and Ctrl-C that leaves
+  cleanly with the summary of what was created.
+
 ## 0.1.16
 
 - **`unpublish` and `teardown`.** `npx @authorbot/create unpublish` removes the

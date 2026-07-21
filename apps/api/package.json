@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/api",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Authorbot Phase 2 API: Hono 4 app for Cloudflare Workers with runtime-agnostic business wiring (identity, annotations, replies, Git-mirroring command flow, projection rebuild, webhook ingest)",
   "keywords": [
     "authorbot",
