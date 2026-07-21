@@ -164,6 +164,18 @@ function assertDocValid(source: string, seed: number): void {
 
 const RUNS = 120;
 
+/**
+ * Property tests loop `RUNS` generated documents through parse → patch →
+ * re-parse, so they are legitimately far slower than a unit test. Vitest's 5s
+ * default is sized for the latter, and these were passing locally at ~4.9s
+ * while timing out on a slower CI runner — green on the machine that wrote
+ * them, red on the machine that gates the release.
+ *
+ * The generous ceiling keeps that from recurring without weakening the test:
+ * a genuine infinite loop still fails, just later.
+ */
+const PROPERTY_TIMEOUT_MS = 60_000;
+
 describe("property: char map matches normalizeBlockText", () => {
   it("produces the identical normalized stream for random documents", () => {
     for (let seed = 1; seed <= RUNS; seed += 1) {
@@ -176,7 +188,7 @@ describe("property: char map matches normalizeBlockText", () => {
         expect(map.units.length, `seed ${seed}`).toBe(norm.length);
       }
     }
-  });
+  }, PROPERTY_TIMEOUT_MS);
 });
 
 describe("property: range replacement", () => {
@@ -251,7 +263,7 @@ describe("property: range replacement", () => {
     }
     // The generator must exercise the success path meaningfully.
     expect(successes).toBeGreaterThan(RUNS / 2);
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("keeps selectors in untouched blocks resolvable after an edit elsewhere", () => {
     let checked = 0;
@@ -292,7 +304,7 @@ describe("property: range replacement", () => {
       checked += 1;
     }
     expect(checked).toBeGreaterThan(10);
-  });
+  }, PROPERTY_TIMEOUT_MS);
 });
 
 describe("property: block replacement", () => {
@@ -327,7 +339,7 @@ describe("property: block replacement", () => {
 
       assertDocValid(result.source, seed);
     }
-  });
+  }, PROPERTY_TIMEOUT_MS);
 });
 
 describe("property: chapter replacement", () => {
@@ -416,5 +428,5 @@ describe("property: chapter replacement", () => {
         }
       }
     }
-  });
+  }, PROPERTY_TIMEOUT_MS);
 });
