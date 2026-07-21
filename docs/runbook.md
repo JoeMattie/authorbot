@@ -690,7 +690,9 @@ Three things are easy to confuse with a deployment lag:
   rather than broken. → [§2.5](#25-a-submission-arrives-against-a-stale-projection).
 - **The chapter is `status: "draft"`.** Editorial state, not deployment state.
   A draft chapter is not published to the site no matter how current every
-  commit is. Check `GET /v1/projects/{project}/chapters/{chapterId}`.
+  commit is. A signed-in maintainer sees it in the home page's private Drafts
+  section; API diagnosis can use
+  `GET /v1/projects/{project}/chapters/{chapterId}`.
 
 ### Step 3 — one thing not to trust
 

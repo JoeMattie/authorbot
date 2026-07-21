@@ -170,6 +170,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
+          .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           // The header account strip: sign in, sign out, Settings, Work. An
           // island like any other, on every page that already loads the
           // bundle — which is why the story pages, which do not, are still
@@ -248,7 +249,7 @@ describe("collab-enabled build", () => {
     }
   });
 
-  it("hydrates the home page with the New chapter entry point only (Phase 6 §3.5)", async () => {
+  it("hydrates the home page with private authoring entry points (Phase 6 §3.5)", async () => {
     // §3.5 exists for "an author facing an empty book". Such a book has no
     // chapter pages, so the authoring entry point cannot live only there — the
     // home page has to carry it or the blank slate is a dead end. What the
@@ -256,6 +257,7 @@ describe("collab-enabled build", () => {
     // it to annotate.
     const html = await readFile(path.join(outCollab, "index.html"), "utf8");
     expect(html).toContain("<authorbot-new-chapter");
+    expect(html).toContain("<authorbot-draft-chapters");
     expect(html).toContain('data-href="/write/"');
     expect(html).not.toContain("<authorbot-collab");
     expect(html).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
@@ -264,6 +266,7 @@ describe("collab-enabled build", () => {
     const plain = await readFile(path.join(outPlain, "index.html"), "utf8");
     expect(plain).not.toContain("<script");
     expect(plain).not.toContain("authorbot-new-chapter");
+    expect(plain).not.toContain("authorbot-draft-chapters");
   });
 
   it("emits the /write/ and /settings/ pages only for a collab build", async () => {

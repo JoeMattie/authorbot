@@ -9,6 +9,7 @@
 import { AuthorbotAccount } from "./account.js";
 import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
+import { AuthorbotDraftChapters } from "./draft-chapters.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
 import { AuthorbotSettings } from "./settings-view.js";
 import { AuthorbotWorkQueue } from "./work-queue.js";
@@ -19,6 +20,7 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-account", AuthorbotAccount],
   ["authorbot-work-queue", AuthorbotWorkQueue],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
+  ["authorbot-draft-chapters", AuthorbotDraftChapters],
   ["authorbot-new-chapter", AuthorbotNewChapter],
   ["authorbot-settings", AuthorbotSettings],
 ];

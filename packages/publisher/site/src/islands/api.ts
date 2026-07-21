@@ -303,6 +303,23 @@ export interface ChapterSource {
   body: string;
 }
 
+/**
+ * One chapter projection from `GET .../chapters`.
+ *
+ * This is metadata only: unpublished prose stays behind the separately
+ * authorized `chapterSource` route and is never embedded in the static site.
+ */
+export interface ChapterProjection {
+  id: string;
+  projectId: string;
+  path: string;
+  slug: string;
+  title: string;
+  status: "draft" | "proposed" | "published" | "archived";
+  revision: number;
+  updatedAt: string;
+}
+
 /** 202 body of a chapter create/revise/publish/unpublish (contract §3.5). */
 export interface ChapterAccepted {
   chapterId: string;
@@ -532,8 +549,8 @@ export class CollabApi {
   private async list<T>(firstUrl: string, join: string): Promise<ApiResult<T[]>> {
     const items: T[] = [];
     let url: string | null = firstUrl;
-    // Bounded pagination: 10 pages x 200 is far beyond a chapter's plausible
-    // annotation count and keeps a hostile cursor loop finite.
+    // Bounded pagination: 10 pages x 200 covers any plausible UI collection
+    // and keeps a hostile cursor loop finite.
     for (let pageIndex = 0; url !== null && pageIndex < 10; pageIndex += 1) {
       let response: Response;
       try {
@@ -819,6 +836,11 @@ export class CollabApi {
   }
 
   // ---- Phase 6 §3.5: authoring chapters ------------------------------------
+
+  /** Authenticated chapter metadata, including unpublished drafts. */
+  async chapters(): Promise<ApiResult<ChapterProjection[]>> {
+    return this.list<ChapterProjection>(this.projectUrl("/chapters?limit=200"), "&");
+  }
 
   /**
    * The prose behind an existing chapter, for the edit half of the composer.
