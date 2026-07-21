@@ -138,7 +138,10 @@ already happened.
 1. Documented rate limits enforced and tested.
 2. Restore drill passes as an automated test.
 3. Security and accessibility reviews complete with findings fixed or
-   explicitly accepted in writing.
+   explicitly accepted in writing. (Security: reviewed and fixed. Accessibility:
+   reviewed, findings recorded and ACCEPTED in docs/accessibility-findings.md —
+   deferred until the tool works end-to-end for its first real book, and to be
+   revisited before it is recommended to anyone else.)
 4. Load tests hold under sustained fleet-shaped traffic; failure injection
    degrades reads-still-work, writes-refuse-clearly.
 5. Runbook sufficient for an operator who did not build the system.
