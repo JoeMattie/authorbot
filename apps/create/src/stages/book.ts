@@ -165,34 +165,7 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
   // rather than discarding a scaffold over a network problem.
 
   if (!ctx.actions.dryRun) {
-    ctx.reporter.step("Installing the Authorbot toolchain this book pins");
-    // Said before the wait, not after it: the pinned toolchain pulls wrangler,
-    // which pulls miniflare, workerd and esbuild, and a cold resolve of that
-    // tree runs to several minutes on a first install. With nothing on screen
-    // it reads as a hang — the first author to hit it asked whether to kill it.
-    ctx.reporter.info(
-      "This is the slow step, and only slow once: a first install downloads wrangler and its build tools, which can take a few minutes.",
-    );
-    const install = await ctx.actions.run({
-      purpose: "install the toolchain pinned in the book's package.json",
-      command: "npm",
-      args: ["install", "--no-audit", "--no-fund"],
-      cwd: ctx.directory,
-      mutates: true,
-      // Fifteen minutes, not five. A cold install of this tree took ~4 minutes
-      // on a fast connection, which left almost no margin for a slow one — and
-      // the failure is not harmless: the warning it prints leaves a book with
-      // no package-lock.json, which is the one file both generated workflows
-      // refuse to run without.
-      timeoutMs: 900_000,
-    });
-    if (install.code === 0) {
-      ctx.reporter.ok("Toolchain installed, and package-lock.json now pins it.");
-    } else {
-      ctx.reporter.warn(
-        "Could not install the toolchain (`npm install` failed). Your book is complete and valid; run `npm install` here when you can, and commit package-lock.json — CI needs it.",
-      );
-    }
+    await installToolchain(ctx);
   } else {
     ctx.actions.note(
       "run: npm install",
@@ -423,4 +396,78 @@ async function maybeCreateRemote(
 
   ctx.reporter.ok(`Pushed to https://github.com/${fullName}`);
   return fullName;
+}
+
+/**
+ * `npm install` in the book directory, with the offer to try again.
+ *
+ * This is what produces `package-lock.json`, which both generated workflows
+ * require — `npm ci` refuses to run without it, deliberately, because an
+ * install without a lockfile is an unpinned install.
+ *
+ * It offers a retry because the failures here are overwhelmingly transient: a
+ * dropped connection, a registry blip, a VPN coming up. Carrying on with a
+ * warning leaves the author a book that CI cannot build, over something that
+ * would have worked five seconds later — and the alternative the wizard used
+ * to offer was to notice the warning, read it, and know to run `npm install`
+ * themselves.
+ *
+ * The error is printed rather than summarised. "Could not install" with the
+ * reason swallowed cannot be acted on: a full disk, a proxy, and a typo in
+ * .npmrc all look identical, and the wizard is holding the answer.
+ */
+async function installToolchain(ctx: WizardContext): Promise<void> {
+  const MAX_ATTEMPTS = 3;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    ctx.reporter.step(
+      attempt === 1
+        ? "Installing the Authorbot toolchain this book pins"
+        : `Installing the Authorbot toolchain (attempt ${String(attempt)})`,
+    );
+    if (attempt === 1) {
+      // Said before the wait, not after it: a cold install of wrangler and its
+      // build tools runs to minutes, and silence for that long reads as a hang.
+      ctx.reporter.info(
+        "This is the slow step, and only slow once: a first install downloads wrangler and its build tools, which can take a few minutes.",
+      );
+    }
+
+    const install = await ctx.actions.run({
+      purpose: "install the toolchain pinned in the book's package.json",
+      command: "npm",
+      args: ["install", "--no-audit", "--no-fund"],
+      cwd: ctx.directory,
+      mutates: true,
+      timeoutMs: 900_000,
+    });
+
+    if (install.code === 0) {
+      ctx.reporter.ok("Toolchain installed, and package-lock.json now pins it.");
+      return;
+    }
+
+    const reason = (install.stderr || install.stdout).trim();
+    ctx.reporter.warn("`npm install` failed:");
+    for (const line of reason.split("\n").filter((l) => l.trim() !== "").slice(0, 6)) {
+      ctx.reporter.info(`  ${line}`);
+    }
+
+    if (attempt === MAX_ATTEMPTS) {
+      break;
+    }
+    const again = await ctx.prompter.confirm({
+      id: "book.retryInstall",
+      message: "Try the install again?",
+      hint: "Most failures here are a dropped connection or a registry blip. Answering no leaves your book complete but without package-lock.json, which CI needs.",
+      defaultValue: true,
+    });
+    if (!again) {
+      break;
+    }
+  }
+
+  ctx.reporter.warn(
+    "Carrying on without the toolchain installed. Your book is complete and valid — run `npm install` here when you can, and commit package-lock.json.",
+  );
 }
