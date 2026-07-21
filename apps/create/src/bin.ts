@@ -9,6 +9,8 @@
  * Everything testable lives behind that boundary.
  */
 import { runCli } from "./cli.js";
+import { reportFatal } from "./errors.js";
+import { SecretVault, redactError } from "./secrets.js";
 import { NodeProcessRunner } from "./runtime/process.js";
 import { TtyPrompter } from "./runtime/prompt.js";
 import {
@@ -32,21 +34,48 @@ const out: OutputPort = {
 
 const runner = new NodeProcessRunner();
 
-process.exitCode = await runCli(process.argv.slice(2), {
-  runner,
-  prompter: new TtyPrompter({ input: process.stdin, output: out }),
-  fs: new NodeFileSystem(),
-  http: new FetchHttpClient(),
-  browser: new SystemBrowserOpener(runner),
-  loopback: new NodeLoopbackServerFactory(),
-  clock: new SystemClock(),
-  random: new CryptoRandom(),
-  env: {
-    cwd: process.cwd(),
-    env: process.env,
-    columns: process.stdout.columns ?? 80,
-    isTty: process.stdout.isTTY === true,
-    nodeVersion: process.version,
-  },
-  out,
+// One vault for the whole process, shared by everything that can write: the
+// reporter (inside `runCli`), the prompter, and the handlers below. A second
+// vault would be a second, emptier set of secrets to redact against.
+const vault = new SecretVault();
+
+const fatal = (error: unknown): void => {
+  reportFatal(out, (value) => redactError(vault, value), error);
+};
+
+// Nothing reaches Node's default handler, which prints a raw stack trace
+// (contract §5). These cover what `runCli`'s own try/catch cannot: a throw from
+// outside it, and a rejection nobody is awaiting.
+process.on("uncaughtException", (error) => {
+  fatal(error);
+  process.exit(1);
 });
+process.on("unhandledRejection", (reason) => {
+  fatal(reason);
+  process.exit(1);
+});
+
+try {
+  process.exitCode = await runCli(process.argv.slice(2), {
+    runner,
+    vault,
+    prompter: new TtyPrompter({ input: process.stdin, output: out, vault }),
+    fs: new NodeFileSystem(),
+    http: new FetchHttpClient(),
+    browser: new SystemBrowserOpener(runner),
+    loopback: new NodeLoopbackServerFactory(),
+    clock: new SystemClock(),
+    random: new CryptoRandom(),
+    env: {
+      cwd: process.cwd(),
+      env: process.env,
+      columns: process.stdout.columns ?? 80,
+      isTty: process.stdout.isTTY === true,
+      nodeVersion: process.version,
+    },
+    out,
+  });
+} catch (error) {
+  fatal(error);
+  process.exitCode = 1;
+}

@@ -77,6 +77,8 @@ export class Reporter {
   readonly #out: OutputPort;
   readonly #vault: SecretVault;
   readonly #theme: Theme;
+  /** Values already handed to `revealOnce`, so "once" is enforced not promised. */
+  readonly #revealed = new Set<string>();
 
   constructor(out: OutputPort, vault: SecretVault, theme: Theme) {
     this.#out = out;
@@ -178,6 +180,35 @@ export class Reporter {
   literal(text: string): void {
     for (const line of this.#vault.redact(text).split("\n")) {
       this.#emit(`    ${this.#style(line, "cyan")}`);
+    }
+  }
+
+  /**
+   * The one deliberate exception to redaction, and the only method in this
+   * class that writes to the sink without consulting the vault.
+   *
+   * It exists because one value in the whole wizard is *meant* to be read by
+   * the author: the agent token, which the server keeps only as a hash. Every
+   * other method here redacts — which is correct, and which silently turned
+   * "this is the only time this token will ever be shown" into a banner over
+   * the word `[redacted]`, losing a token that could not be recovered by any
+   * means including minting another one.
+   *
+   * Two properties keep the exception from becoming a hole. It is *named* for
+   * what it does, so a call site that reveals a secret says so in the diff and
+   * cannot be reached by accident. And it is single-use: revealing the same
+   * value twice is a bug (the caller has lost track of a one-time value), so it
+   * throws rather than printing again.
+   */
+  revealOnce(value: string): void {
+    if (this.#revealed.has(value)) {
+      throw new Error(
+        "Reporter.revealOnce: this value has already been shown; a one-time value must not be printed twice.",
+      );
+    }
+    this.#revealed.add(value);
+    for (const line of value.split("\n")) {
+      this.#out.write(`    ${this.#style(line, "cyan")}`);
     }
   }
 

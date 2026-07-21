@@ -102,7 +102,14 @@ export const agentStage: Stage = async (ctx: WizardContext): Promise<StageOutcom
     ctx.reporter.warn(
       "This is the only time this token will ever be shown. Copy it into your agent's configuration now; Authorbot stores only a hash of it and cannot show it again.",
     );
-    ctx.reporter.literal(token);
+    // `revealOnce`, not `literal`: every other reporter method redacts, so
+    // `literal` printed "[redacted]" under that banner and the token — which
+    // the server keeps only as a hash — was gone for good.
+    ctx.reporter.revealOnce(token);
+    // Registered immediately *after* it has been shown, and not before: from
+    // here on it is an ordinary secret, and nothing downstream (a failure
+    // message, the journal, the resource record below) may carry it.
+    ctx.vault.register("AGENT_TOKEN", token);
     ctx.reporter.info(
       `If it leaks, revoke it: DELETE ${base}/v1/projects/${book.slug}/agent-tokens/{id} — the agent stops working immediately and nothing it already did is lost.`,
     );
@@ -225,9 +232,10 @@ async function mintToken(
       "Revoke it from your book's settings and run `create-authorbot agent` again.",
     );
   }
-  // Registered so that if anything downstream throws, the token cannot ride
-  // out in the message. It is printed deliberately, once, by the caller.
-  ctx.vault.register("AGENT_TOKEN", token);
+  // Deliberately NOT registered with the vault here. The caller has to print
+  // this exact value once, and registering it first would mean the vault and
+  // the one method allowed to bypass it were fighting over the same string.
+  // The caller registers it the instant it has been shown.
   return token;
 }
 

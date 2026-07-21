@@ -75,3 +75,49 @@ export function validateWorkerName(name: string): string | null {
   }
   return null;
 }
+
+/**
+ * D1 database names permit underscores, which slugs and Worker names do not.
+ *
+ * This lives beside its siblings rather than inline at the prompt because the
+ * *resume* path has to apply exactly the same rule: a name that came back from
+ * the journal reaches `wrangler d1 migrations apply <name>` as a positional
+ * argument, so it is a name-shaped hole that a flag could otherwise be poured
+ * into. One regex, two call sites, no drift.
+ */
+export const D1_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
+export function validateD1Name(name: string): string | null {
+  if (name.length === 0) {
+    return "A name is required.";
+  }
+  if (!D1_NAME_RE.test(name)) {
+    return "Use lowercase letters, numbers, hyphens, and underscores.";
+  }
+  return null;
+}
+
+/** `owner/repo`, the only shape `gh --repo` should ever be handed. */
+export const REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+export function validateRepo(repo: string): string | null {
+  if (!REPO_RE.test(repo)) {
+    return "A repository is written owner/name, using letters, numbers, dots, hyphens, and underscores.";
+  }
+  return null;
+}
+
+/**
+ * The last line of defence for anything that becomes an argv *value*.
+ *
+ * The subprocess layer is already safe from shells — `spawn` with an argv array
+ * and `shell: false` (see `runtime/process.ts`). This guards the other half of
+ * the problem, which quoting does nothing about: **the tool's own argument
+ * parser**. `wrangler d1 migrations apply --config=/tmp/evil.jsonc` is not a
+ * database called `--config=...`; it is wrangler being told to load an
+ * attacker's configuration and act on the author's live account. A value that
+ * begins with `-` is never a name, so it is refused rather than escaped.
+ */
+export function looksLikeFlag(value: string): boolean {
+  return value.startsWith("-");
+}

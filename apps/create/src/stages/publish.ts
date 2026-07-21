@@ -10,7 +10,7 @@ import path from "node:path";
 import { WizardError } from "../errors.js";
 import type { Stage, StageOutcome, WizardContext } from "../context.js";
 import { nowIso } from "../context.js";
-import { validateWorkerName } from "../slug.js";
+import { looksLikeFlag, validateRepo, validateWorkerName } from "../slug.js";
 import { renderWrangler } from "../scaffold/wrangler.js";
 import { TOOLCHAIN_VERSION } from "../scaffold/render.js";
 import { checkGh, checkWrangler, requireTool } from "../tools.js";
@@ -98,7 +98,8 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
 
   // ---- CI credentials -----------------------------------------------------
 
-  await configureRepositorySecrets(ctx);
+  // `identity.repo` is the verified `origin`, not whatever the journal claims.
+  await configureRepositorySecrets(ctx, identity.repo);
 
   // ---- build and deploy ---------------------------------------------------
 
@@ -232,13 +233,21 @@ async function installBookDependencies(ctx: WizardContext): Promise<void> {
  * never as an argument (argv is visible in the process table) and never
  * written to a file.
  */
-async function configureRepositorySecrets(ctx: WizardContext): Promise<void> {
-  const repo = ctx.journal.data.book?.repo;
-  if (repo === undefined) {
+async function configureRepositorySecrets(ctx: WizardContext, repo: string | null): Promise<void> {
+  if (repo === null) {
     ctx.reporter.info(
       "No GitHub repository yet, so there is nothing to give CI. Publishing from your machine still works; run `create-authorbot book` when you want the repository.",
     );
     return;
+  }
+  // The token about to be collected goes to this repository and nowhere else,
+  // so the destination is checked before it is asked for rather than after.
+  // `--repo -x` would be an option to `gh`, not a repository.
+  if (validateRepo(repo) !== null || looksLikeFlag(repo)) {
+    throw new WizardError(
+      `"${repo}" is not a GitHub repository name, so nothing was sent anywhere.`,
+      "A repository is written owner/name. Check the `origin` remote in your book directory (`git remote -v`), then run `create-authorbot publish` again.",
+    );
   }
   const gh = await checkGh(ctx.actions);
   if (gh.status !== "ok") {
@@ -250,6 +259,21 @@ async function configureRepositorySecrets(ctx: WizardContext): Promise<void> {
 
   if (ctx.journal.hasSecret("CLOUDFLARE_API_TOKEN")) {
     ctx.reporter.info("CI already has its Cloudflare credentials.");
+    return;
+  }
+
+  // §2.4: a dry run changes nothing and asks for nothing. Only the `gh secret
+  // set` below was suppressed, so the run still reached the hidden-input
+  // prompt and asked the author to paste a live Cloudflare API token during an
+  // operation that had just promised to leave their Cloudflare account exactly
+  // as it was. A plan line says the same thing and costs no credential.
+  if (ctx.actions.dryRun) {
+    ctx.actions.note(
+      `ask: a Cloudflare API token and account id, to store as repository secrets on ${repo}`,
+      "In a real run this is a hidden prompt; the token would be piped straight to `gh secret set` and never written down.",
+    );
+    await ctx.actions.secretSet("CLOUDFLARE_API_TOKEN", `the ${repo} repository`);
+    await ctx.actions.secretSet("CLOUDFLARE_ACCOUNT_ID", `the ${repo} repository`);
     return;
   }
 

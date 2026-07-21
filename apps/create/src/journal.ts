@@ -17,6 +17,7 @@
 import path from "node:path";
 import type { FileSystemPort } from "./ports.js";
 import type { SecretVault } from "./secrets.js";
+import { D1_NAME_RE, REPO_RE, SLUG_RE } from "./slug.js";
 import { STAGE_NAMES, type StageName } from "./stages/names.js";
 
 export const JOURNAL_FILENAME = ".authorbot-setup.json";
@@ -115,6 +116,21 @@ export function emptyJournal(now: string): JournalData {
  * journal yields a fresh one rather than an error: refusing to run because a
  * *progress note* is malformed would turn a cosmetic problem into a wall, and
  * the worst case is repeating idempotent work.
+ *
+ * **Tolerating a malformed journal is not the same as trusting its contents.**
+ * `.authorbot-setup.json` is an ordinary file in an ordinary directory: it is
+ * gitignored only by this wizard's own template, so a shared, forked, or
+ * published book can simply carry one, and the author who clones it and runs
+ * `create-authorbot publish` has adopted whatever it says. What it says is not
+ * cosmetic — `book.repo` picks which GitHub repository receives a Cloudflare
+ * API token, `publish.siteUrl` becomes the GitHub App's callback and webhook
+ * host and the base a maintainer token is sent to, and `collaborate.d1Name`
+ * and `publish.workerName` land in argv.
+ *
+ * So every field is validated on the way in, exactly as `resourceArray`
+ * already validates resources, and **a field that fails is dropped rather than
+ * adopted**. Dropping costs a re-prompt for a value the author can retype;
+ * adopting costs the author their credentials.
  */
 export function parseJournal(text: string, now: string): JournalData {
   let raw: unknown;
@@ -166,21 +182,21 @@ export function parseJournal(text: string, now: string): JournalData {
     resources: resourceArray(record["resources"]),
     managedFiles: stringMap(record["managedFiles"]),
   };
-  const book = objectOrUndefined(record["book"]);
+  const book = bookSection(record["book"]);
   if (book !== undefined) {
-    journal.book = book as NonNullable<JournalData["book"]>;
+    journal.book = book;
   }
-  const publish = objectOrUndefined(record["publish"]);
+  const publish = publishSection(record["publish"]);
   if (publish !== undefined) {
-    journal.publish = publish as NonNullable<JournalData["publish"]>;
+    journal.publish = publish;
   }
-  const collaborate = objectOrUndefined(record["collaborate"]);
+  const collaborate = collaborateSection(record["collaborate"]);
   if (collaborate !== undefined) {
-    journal.collaborate = collaborate as NonNullable<JournalData["collaborate"]>;
+    journal.collaborate = collaborate;
   }
-  const agent = objectOrUndefined(record["agent"]);
+  const agent = agentSection(record["agent"]);
   if (agent !== undefined) {
-    journal.agent = agent as NonNullable<JournalData["agent"]>;
+    journal.agent = agent;
   }
   return journal;
 }
@@ -190,6 +206,171 @@ function objectOrUndefined(value: unknown): Record<string, unknown> | undefined 
     return value as Record<string, unknown>;
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Field validation
+//
+// The shapes below are the ones the wizard itself produces. Anything else is
+// either a hand-edit that will be re-derived, or a plant.
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** GitHub App installation ids are decimal integers. */
+const INSTALLATION_ID_RE = /^[0-9]{1,20}$/;
+const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+/** A git branch name, minus the forms git itself refuses. */
+const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+/** GitHub App slugs, as returned by the manifest conversion. */
+const APP_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function matching(value: unknown, pattern: RegExp, maxLength: number): string | undefined {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    pattern.test(value)
+    ? value
+    : undefined;
+}
+
+/**
+ * Free text (a title, a file path) that never reaches argv or a URL. Length is
+ * still bounded, and control characters are refused so a planted value cannot
+ * rewrite the terminal it is printed to.
+ */
+function text(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    return undefined;
+  }
+  // Control characters are refused too, so a planted title cannot rewrite
+  // the terminal it is printed to.
+  return /[\u0000-\u001f\u007f]/.test(value) ? undefined : value;
+}
+
+/**
+ * An absolute `https:` URL and nothing else.
+ *
+ * `http:` is refused as well as the obvious `javascript:` and `file:`: this
+ * value becomes an OAuth callback host and the base a bearer token is sent to,
+ * and neither belongs on a cleartext origin. Credentials, userinfo, and a
+ * missing host are refused for the same reason.
+ */
+function httpsUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048) {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" || url.hostname.length === 0) {
+    return undefined;
+  }
+  if (url.username.length > 0 || url.password.length > 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function bookSection(value: unknown): NonNullable<JournalData["book"]> | undefined {
+  const record = objectOrUndefined(value);
+  if (record === undefined) {
+    return undefined;
+  }
+  const book: NonNullable<JournalData["book"]> = {};
+  const title = text(record["title"], 200);
+  if (title !== undefined) {
+    book.title = title;
+  }
+  const slug = matching(record["slug"], SLUG_RE, 64);
+  if (slug !== undefined) {
+    book.slug = slug;
+  }
+  const id = matching(record["id"], UUID_RE, 36);
+  if (id !== undefined) {
+    book.id = id;
+  }
+  if (record["visibility"] === "public" || record["visibility"] === "private") {
+    book.visibility = record["visibility"];
+  }
+  // The one that sends a Cloudflare API token somewhere.
+  const repo = matching(record["repo"], REPO_RE, 200);
+  if (repo !== undefined) {
+    book.repo = repo;
+  }
+  const defaultBranch = matching(record["defaultBranch"], BRANCH_RE, 255);
+  if (defaultBranch !== undefined) {
+    book.defaultBranch = defaultBranch;
+  }
+  return book;
+}
+
+function publishSection(value: unknown): NonNullable<JournalData["publish"]> | undefined {
+  const record = objectOrUndefined(value);
+  if (record === undefined) {
+    return undefined;
+  }
+  const publish: NonNullable<JournalData["publish"]> = {};
+  const workerName = matching(record["workerName"], SLUG_RE, 63);
+  if (workerName !== undefined) {
+    publish.workerName = workerName;
+  }
+  const siteUrl = httpsUrl(record["siteUrl"]);
+  if (siteUrl !== undefined) {
+    publish.siteUrl = siteUrl;
+  }
+  const customDomain = matching(record["customDomain"], HOSTNAME_RE, 253);
+  if (customDomain !== undefined) {
+    publish.customDomain = customDomain;
+  }
+  return publish;
+}
+
+function collaborateSection(value: unknown): NonNullable<JournalData["collaborate"]> | undefined {
+  const record = objectOrUndefined(value);
+  if (record === undefined) {
+    return undefined;
+  }
+  const collaborate: NonNullable<JournalData["collaborate"]> = {};
+  const d1Name = matching(record["d1Name"], D1_NAME_RE, 63);
+  if (d1Name !== undefined) {
+    collaborate.d1Name = d1Name;
+  }
+  const d1Id = matching(record["d1Id"], UUID_RE, 36);
+  if (d1Id !== undefined) {
+    collaborate.d1Id = d1Id;
+  }
+  const appSlug = matching(record["appSlug"], APP_SLUG_RE, 100);
+  if (appSlug !== undefined) {
+    collaborate.appSlug = appSlug;
+  }
+  const installationId = matching(record["installationId"], INSTALLATION_ID_RE, 20);
+  if (installationId !== undefined) {
+    collaborate.installationId = installationId;
+  }
+  if (typeof record["apiVerified"] === "boolean") {
+    collaborate.apiVerified = record["apiVerified"];
+  }
+  return collaborate;
+}
+
+function agentSection(value: unknown): NonNullable<JournalData["agent"]> | undefined {
+  const record = objectOrUndefined(value);
+  if (record === undefined) {
+    return undefined;
+  }
+  const agent: NonNullable<JournalData["agent"]> = {};
+  const name = text(record["name"], 60);
+  if (name !== undefined) {
+    agent.name = name;
+  }
+  const promptPath = text(record["promptPath"], 4096);
+  if (promptPath !== undefined) {
+    agent.promptPath = promptPath;
+  }
+  return agent;
 }
 
 function stringMap(value: unknown): Record<string, string> {

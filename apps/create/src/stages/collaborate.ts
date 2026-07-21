@@ -33,10 +33,41 @@ import {
   type ManifestConversion,
 } from "../github/manifest-flow.js";
 import { waitForInstallation } from "../github/installation.js";
-import { readBookIdentity, requireBookDirectory, setApiUrl } from "./shared.js";
+import { looksLikeFlag, validateD1Name, validateWorkerName } from "../slug.js";
+import {
+  readBookIdentity,
+  requireBookDirectory,
+  resolveSiteUrl,
+  setApiUrl,
+} from "./shared.js";
 
 /** How long the author has for each browser step before the wizard gives up. */
 const BROWSER_STEP_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
+ * A journal-supplied name, or the fallback — never an unchecked value.
+ *
+ * Every one of these ends up in an argv slot where the receiving tool would
+ * read a leading `-` as the start of an option rather than as a name.
+ */
+function usableName(
+  ctx: WizardContext,
+  candidate: string | undefined,
+  validate: (value: string) => string | null,
+  fallback: string,
+  what: string,
+): string {
+  if (candidate === undefined) {
+    return fallback;
+  }
+  if (validate(candidate) === null && !looksLikeFlag(candidate)) {
+    return candidate;
+  }
+  ctx.reporter.warn(
+    `The setup journal records a ${what} that is not a usable name, so "${fallback}" is being used instead.`,
+  );
+  return fallback;
+}
 
 export const collaborateStage: Stage = async (ctx: WizardContext): Promise<StageOutcome> => {
   ctx.reporter.heading("Turning on collaboration");
@@ -52,7 +83,9 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
 
   // §3.4: "Only offered after `publish` succeeds." A site that is not live has
   // no origin to put the callback URL on, and same-origin is the only shape.
-  const siteUrl = ctx.journal.data.publish?.siteUrl;
+  // Corroborated against the Worker name rather than taken from the journal on
+  // trust: this value receives sign-in codes, webhooks, and a maintainer token.
+  const siteUrl = await resolveSiteUrl(ctx, ctx.journal.data.publish?.workerName);
   if (siteUrl === undefined) {
     throw new WizardError(
       "Your reading site is not published yet, and collaboration lives on the same address as the site.",
@@ -88,7 +121,16 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
 
   const apiBase = ctx.env.env["AUTHORBOT_GITHUB_API"] ?? GITHUB_API_BASE;
   const webBase = ctx.env.env["AUTHORBOT_GITHUB_WEB"] ?? GITHUB_WEB_BASE;
-  const workerName = ctx.journal.data.publish?.workerName ?? book.slug;
+  // Same reasoning as the database name: this reaches
+  // `wrangler secret put NAME --name <workerName>` from the journal without
+  // ever passing the prompt's validator, so it is checked here instead.
+  const workerName = usableName(
+    ctx,
+    ctx.journal.data.publish?.workerName,
+    validateWorkerName,
+    book.slug,
+    "Worker name",
+  );
 
   // ---- the Worker code that serves the API --------------------------------
 
@@ -290,9 +332,21 @@ interface DatabaseRef {
  */
 async function ensureDatabase(ctx: WizardContext, slug: string): Promise<DatabaseRef> {
   const recorded = ctx.journal.data.collaborate;
+  // The resume path gets the same check as the prompt, not a weaker one. This
+  // name becomes a *positional* argument to `wrangler d1 migrations apply` and
+  // `wrangler d1 execute`, where a value like `--config=/tmp/evil.jsonc` is
+  // read as a flag rather than a name — wrangler would load someone else's
+  // configuration and act on the author's live Cloudflare account. Validating
+  // only what was typed left the far more likely path (a journal on disk)
+  // unguarded.
   if (recorded?.d1Name !== undefined && recorded.d1Id !== undefined) {
-    ctx.reporter.info(`Reusing the database created earlier (${recorded.d1Name}).`);
-    return { name: recorded.d1Name, id: recorded.d1Id };
+    if (validateD1Name(recorded.d1Name) === null && !looksLikeFlag(recorded.d1Name)) {
+      ctx.reporter.info(`Reusing the database created earlier (${recorded.d1Name}).`);
+      return { name: recorded.d1Name, id: recorded.d1Id };
+    }
+    ctx.reporter.warn(
+      "The setup journal records a database name that is not a usable name, so it is being ignored.",
+    );
   }
 
   const name = await ctx.prompter.text({
@@ -300,10 +354,7 @@ async function ensureDatabase(ctx: WizardContext, slug: string): Promise<Databas
     message: "What should the database be called?",
     hint: "It remembers who commented, what was voted on, and what was agreed. The name is only ever seen by you.",
     defaultValue: `${slug}-authorbot`,
-    validate: (value) =>
-      /^[a-z0-9][a-z0-9_-]{0,62}$/.test(value)
-        ? null
-        : "Use lowercase letters, numbers, hyphens, and underscores.",
+    validate: validateD1Name,
   });
 
   ctx.reporter.step("Creating the database");
@@ -558,6 +609,15 @@ async function putSecret(
   name: string,
   value: string,
 ): Promise<void> {
+  // Defence in depth: `workerName` is validated where it is chosen, and this
+  // refuses to hand wrangler a "name" that is really an option even if a future
+  // path forgets.
+  if (validateWorkerName(workerName) !== null || looksLikeFlag(workerName)) {
+    throw new WizardError(
+      `"${workerName}" is not a usable Cloudflare Worker name, so no credential was sent anywhere.`,
+      "Run `create-authorbot publish` and choose a name made of lowercase letters, numbers, and hyphens, then run `create-authorbot collaborate` again.",
+    );
+  }
   const result = await runWrangler(ctx, ["secret", "put", name, "--name", workerName], {
     purpose: `store ${name} on your Worker`,
     mutates: true,
@@ -646,17 +706,72 @@ async function verifyHealth(
     ],
     { purpose: "confirm your book is registered and you are its maintainer", mutates: false, timeoutMs: 120_000 },
   );
+  // §3.4 requires this check to *pass* before the stage declares success, so a
+  // read-back that did not happen is a failure rather than a warning. Warning
+  // and carrying on set `publication.api_url` — the flag that puts sign-in and
+  // the New chapter button in front of readers — on the strength of a check
+  // that never ran.
   if (seeded === null || seeded.code !== 0) {
-    ctx.reporter.warn(
-      "Could not read the database back to confirm the first-boot setup. The API itself answered correctly.",
+    throw new WizardError(
+      "The API answered correctly, but the database could not be read back to confirm that your book is registered with you as its maintainer.",
+      "The site was NOT switched over, so your readers are unaffected. Check that wrangler is signed in (`npx wrangler whoami`), then run `create-authorbot collaborate` again — everything already done is skipped.",
     );
-    return;
   }
-  const text = seeded.stdout;
-  if (!text.includes(projectSlug) || !text.includes(`github:${login}`)) {
+  if (!hasMaintainerRow(seeded.stdout, projectSlug, `github:${login}`)) {
     throw new WizardError(
       "The API is running but has not yet registered your book with you as its maintainer.",
       "The site was NOT switched over. Wait a few seconds for the first request to finish setting up, then run `create-authorbot collaborate` again.",
     );
   }
+}
+
+/**
+ * Whether the read-back contains a row that is *both* this book and this
+ * author.
+ *
+ * The previous test was `text.includes(slug) && text.includes("github:" + login)`
+ * over the whole result set, which two unrelated rows satisfy just as well as
+ * one correct one — and on a shared database (or simply a second project) that
+ * is not a hypothetical. The rows are parsed and matched field by field
+ * instead. Parsing rather than adding a `WHERE` also keeps the author's GitHub
+ * login out of the SQL string entirely.
+ */
+export function hasMaintainerRow(stdout: string, slug: string, maintainer: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return false;
+  }
+  return rowsOf(parsed).some(
+    (row) => row["slug"] === slug && row["maintainer"] === maintainer,
+  );
+}
+
+/**
+ * `wrangler d1 execute --json` has shipped both shapes across versions: an
+ * array of statement results each carrying `results`, and a bare array of rows.
+ * Both are unwrapped rather than pinning to whichever one is current.
+ */
+function rowsOf(parsed: unknown): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        visit(entry);
+      }
+      return;
+    }
+    if (typeof value !== "object" || value === null) {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record["results"])) {
+      visit(record["results"]);
+      return;
+    }
+    rows.push(record);
+  };
+  visit(parsed);
+  return rows;
 }

@@ -11,7 +11,7 @@
  */
 import path from "node:path";
 import { Actions } from "./actions.js";
-import { EXAMPLE_CONFIG, parseConfig } from "./config.js";
+import { EXAMPLE_CONFIG, parseConfig, secretAnswersIn } from "./config.js";
 import type { WizardContext, WizardOptions } from "./context.js";
 import { NonInteractiveError, WizardError } from "./errors.js";
 import { Journal } from "./journal.js";
@@ -28,7 +28,7 @@ import type {
   RandomSource,
 } from "./ports.js";
 import { NonInteractivePrompter } from "./runtime/prompt.js";
-import { SecretVault } from "./secrets.js";
+import { SecretVault, registerEnvironmentCredentials } from "./secrets.js";
 import { Reporter, themeFor } from "./ui/reporter.js";
 import { STAGE_NAMES, STAGE_SUMMARIES, isStageName, type StageName } from "./stages/names.js";
 import { reportError, reportProgress, reportResources, runStages } from "./wizard.js";
@@ -73,6 +73,13 @@ export interface CliDeps {
    * caller so tests can assert the real construction path.
    */
   readonly nonInteractivePrompter?: (answers: Readonly<Record<string, unknown>>) => Prompter;
+  /**
+   * The vault to use, when the caller already built one. `bin.ts` does: the
+   * real prompter and the top-level error handler both have to redact through
+   * the *same* vault this run registers secrets with, and both are constructed
+   * before `runCli` is called.
+   */
+  readonly vault?: SecretVault;
 }
 
 interface ParsedArgs {
@@ -171,8 +178,48 @@ export function defaultFlow(): StageName[] {
   return [...STAGE_NAMES];
 }
 
+/**
+ * Says so when a config file that carries a live credential is readable by
+ * anyone but its owner.
+ *
+ * A warning rather than a refusal: the operator chose this file, it may sit on
+ * a machine where the group *is* the trust boundary, and refusing to run would
+ * break an unattended pipeline over something the wizard cannot judge. But an
+ * `publish.cloudflareApiToken` in a mode-644 file is worth one line, because
+ * the usual cause is a file created by a redirect and never chmodded, and
+ * nothing else in the system will ever mention it.
+ */
+async function warnAboutConfigPermissions(
+  deps: CliDeps,
+  reporter: Reporter,
+  configPath: string,
+  config: { readonly answers: Readonly<Record<string, unknown>> },
+): Promise<void> {
+  const secrets = secretAnswersIn(config);
+  if (secrets.length === 0 || deps.fs.mode === undefined) {
+    return;
+  }
+  const mode = await deps.fs.mode(configPath);
+  // null means "cannot tell" (Windows, or the file went away). Silence beats a
+  // guess.
+  if (mode === null || (mode & 0o077) === 0) {
+    return;
+  }
+  reporter.warn(
+    `${configPath} contains a credential (${secrets.join(", ")}) and is readable by other users on this machine.`,
+  );
+  reporter.info(
+    `Restrict it with \`chmod 600 ${configPath}\`. Anyone who can read that file can use the credential in it.`,
+  );
+}
+
 export async function runCli(argv: readonly string[], deps: CliDeps): Promise<number> {
-  const vault = new SecretVault();
+  const vault = deps.vault ?? new SecretVault();
+  // Before anything can print. A credential that arrived through the
+  // environment is just as capable of being echoed back by a failing
+  // subprocess as one the wizard minted itself, and the vault only protects
+  // what it has been told about.
+  registerEnvironmentCredentials(vault, deps.env.env);
   const reporter = new Reporter(deps.out, vault, themeFor(deps.env));
 
   let parsed: ParsedArgs;
@@ -233,6 +280,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
       }
       throw error;
     }
+    await warnAboutConfigPermissions(deps, reporter, parsed.configPath, config);
     prompter =
       deps.nonInteractivePrompter?.(config.answers) ?? new NonInteractivePrompter(config.answers);
     configDirectory = config.directory ?? null;

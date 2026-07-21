@@ -8,8 +8,9 @@
  */
 import path from "node:path";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
-import { WizardError } from "../errors.js";
+import { AbortedError, WizardError } from "../errors.js";
 import type { WizardContext } from "../context.js";
+import { nowIso } from "../context.js";
 
 export interface BookFacts {
   readonly title: string;
@@ -88,10 +89,160 @@ export async function readBookIdentity(ctx: WizardContext): Promise<BookFacts> {
       typeof (repository as Record<string, unknown>)["default_branch"] === "string"
         ? ((repository as Record<string, unknown>)["default_branch"] as string)
         : "main",
-    repo: ctx.journal.data.book?.repo ?? (await gitRemoteRepo(ctx)),
+    repo: await resolveRepo(ctx),
     apiUrl: typeof apiUrl === "string" ? apiUrl : null,
   };
   return facts;
+}
+
+/**
+ * Which GitHub repository this book actually lives in.
+ *
+ * **The remote is asked first, and it wins.** The journal used to outrank it,
+ * which meant the true `origin` was never consulted at all — and `book.repo`
+ * decides which repository receives the author's Cloudflare API token
+ * (`gh secret set CLOUDFLARE_API_TOKEN --repo <repo>`). A `.authorbot-setup.json`
+ * committed to a shared or forked book could therefore redirect that token to
+ * a repository the author has never heard of, and nothing would contradict it.
+ * The doc comment at the top of this file already said the repository is the
+ * truth; this makes that true of the repository's identity too, not only its
+ * `book.yml`.
+ *
+ * A disagreement is not resolved silently in either direction: it is exactly
+ * the situation an author must look at, so it stops and asks.
+ */
+export async function resolveRepo(ctx: WizardContext): Promise<string | null> {
+  const actual = await gitRemoteRepo(ctx);
+  const recorded = ctx.journal.data.book?.repo;
+
+  if (actual === null) {
+    if (recorded === undefined) {
+      return null;
+    }
+    // A dry run legitimately reaches here with nothing on disk: the `book`
+    // stage planned the repository this same run, and later stages must be
+    // able to plan against it (§2.4 — the plan covers every stage).
+    if (ctx.actions.dryRun) {
+      return recorded;
+    }
+    // Otherwise the journal names a repository the repository itself does not
+    // corroborate. Proceeding would mean acting on an unverifiable claim, so
+    // the claim is dropped and the caller sees "no repository" — which every
+    // caller already handles, and which changes nothing outside this machine.
+    ctx.reporter.warn(
+      `The setup journal says this book lives at ${recorded}, but no \`origin\` remote could be read from ${ctx.directory}, so that claim is being ignored.`,
+    );
+    ctx.reporter.info(
+      "If that is your repository, run `git remote add origin <url>` so the repository itself says so, then run this again.",
+    );
+    return null;
+  }
+
+  if (recorded !== undefined && recorded !== actual) {
+    ctx.reporter.blank();
+    ctx.reporter.warn(
+      `This book's setup journal names a different GitHub repository than the one it is actually connected to.`,
+    );
+    ctx.reporter.info(`The journal (.authorbot-setup.json) says: ${recorded}`);
+    ctx.reporter.info(`Your \`origin\` remote says:              ${actual}`);
+    ctx.reporter.info(
+      "Repository secrets, and the address collaboration commits to, follow whichever one is used — so this is worth a look. If you did not put that name in the journal yourself, the journal came from somewhere else and should not be trusted.",
+    );
+    const proceed = await ctx.prompter.confirm({
+      id: "book.repoConflict",
+      message: `Continue using ${actual}, the repository this book is actually connected to?`,
+      hint: "Answering no stops without changing anything, so you can look at .authorbot-setup.json first.",
+      defaultValue: false,
+      destructive: true,
+    });
+    if (!proceed) {
+      throw new AbortedError(
+        "the setup journal and the repository disagree about where this book lives",
+      );
+    }
+    // Agreed: make the journal match the repository rather than leaving the
+    // disagreement to be re-asked on every later stage of the same run.
+    await ctx.journal.update((data) => {
+      if (data.book !== undefined) {
+        data.book.repo = actual;
+      }
+    }, nowIso(ctx));
+  }
+
+  return actual;
+}
+
+/**
+ * Which address this book is actually published at.
+ *
+ * `siteUrl` decides where readers' GitHub sign-in codes are redirected
+ * (`GITHUB_REDIRECT_URI`), where the app's webhooks are delivered, and where a
+ * maintainer bearer token is sent when minting an agent credential. Like
+ * `book.repo`, it is read from a file that lives in the book repository — so a
+ * `.authorbot-setup.json` committed to a shared or forked book could name a
+ * host the author has never seen, and the wizard would wire three secrets to
+ * it. `parseJournal` can only check the value is a well-formed `https:` URL;
+ * `https://evil.example` passes that test perfectly.
+ *
+ * The corroboration available is the Worker name: a `workers.dev` address is
+ * derived from a name this wizard chose, so `<workerName>.<subdomain>.workers.dev`
+ * verifies itself. A custom domain cannot be derived from anything local, so it
+ * is not silently trusted — it is shown, with what it controls spelled out, and
+ * the author confirms. That mirrors `resolveRepo`: a claim the machine cannot
+ * corroborate is a claim the author must look at.
+ */
+export async function resolveSiteUrl(
+  ctx: WizardContext,
+  workerName: string | undefined,
+): Promise<string | undefined> {
+  const recorded = ctx.journal.data.publish?.siteUrl;
+  if (recorded === undefined) {
+    return undefined;
+  }
+
+  let host: string;
+  try {
+    host = new URL(recorded).host;
+  } catch {
+    return undefined;
+  }
+
+  // Self-corroborating: the host is built from the Worker name this wizard
+  // deployed, so it cannot name a third party.
+  if (workerName !== undefined && new RegExp(`^${escapeForRegExp(workerName)}\\.[^.]+\\.workers\\.dev$`).test(host)) {
+    return recorded;
+  }
+
+  // A dry run has nothing deployed to compare against; planning must still
+  // reach the later stages (§2.4).
+  if (ctx.actions.dryRun) {
+    return recorded;
+  }
+
+  ctx.reporter.blank();
+  ctx.reporter.warn("This book's address comes from its setup journal, and nothing local corroborates it.");
+  ctx.reporter.info(`.authorbot-setup.json says your book is published at: ${recorded}`);
+  ctx.reporter.info(
+    "That address will receive your readers' GitHub sign-in codes, this book's webhooks, and — if you mint an agent token — a maintainer credential.",
+  );
+  ctx.reporter.info(
+    "If that is your own custom domain, this is expected. If you did not put it there yourself, stop and look at .authorbot-setup.json.",
+  );
+  const proceed = await ctx.prompter.confirm({
+    id: "publish.siteUrlUncorroborated",
+    message: `Continue with ${recorded} as this book's address?`,
+    hint: "Answering no stops without changing anything.",
+    defaultValue: false,
+    destructive: true,
+  });
+  if (!proceed) {
+    throw new AbortedError("the book's address could not be corroborated");
+  }
+  return recorded;
+}
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

@@ -246,6 +246,22 @@ export class MemoryFileSystem implements FileSystemPort {
   readonly files = new Map<string, string>();
   readonly directories = new Set<string>(["/"]);
   readonly writes: string[] = [];
+  /** Permission bits per path. Anything unset reads as a private 0600 file. */
+  readonly modes = new Map<string, number>();
+
+  /** Marks a file group- or world-readable, as a careless redirect would. */
+  chmod(filePath: string, mode: number): this {
+    this.modes.set(path.resolve(filePath), mode);
+    return this;
+  }
+
+  async mode(filePath: string): Promise<number | null> {
+    const resolved = path.resolve(filePath);
+    if (!this.files.has(resolved)) {
+      return null;
+    }
+    return this.modes.get(resolved) ?? 0o600;
+  }
 
   seed(filePath: string, contents: string): this {
     this.files.set(path.resolve(filePath), contents);

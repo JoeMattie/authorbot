@@ -20,6 +20,7 @@ import { deriveSlug, validateSlug } from "../slug.js";
 import { assertBookYmlValid, scaffoldFiles, type BookIdentity } from "../scaffold/render.js";
 import { checkGh, checkGit, ghLogin, requireTool } from "../tools.js";
 import { runAuthorbot } from "../toolchain.js";
+import { resolveRepo } from "./shared.js";
 
 /** Files whose presence means "this directory already holds a book". */
 const BOOK_MARKER = "book.yml";
@@ -272,10 +273,19 @@ async function maybeCreateRemote(
   visibility: "public" | "private",
   ghReady: boolean,
 ): Promise<string | null> {
+  // "Already on GitHub" is a claim about the world, so it is checked against
+  // the world rather than read out of the journal. A planted journal must not
+  // be able to make the wizard announce — and every later stage adopt — a
+  // repository the author has no connection to.
   const recorded = ctx.journal.data.book?.repo;
   if (recorded !== undefined) {
-    ctx.reporter.info(`Already on GitHub: ${recorded}`);
-    return recorded;
+    const confirmed = await resolveRepo(ctx);
+    if (confirmed !== null) {
+      ctx.reporter.info(`Already on GitHub: ${confirmed}`);
+      return confirmed;
+    }
+    // The journal's claim did not survive (no readable `origin`); fall through
+    // and offer to create the repository properly.
   }
 
   if (!ghReady) {

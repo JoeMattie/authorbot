@@ -51,3 +51,28 @@ export class TimeoutError extends WizardError {
     this.name = "TimeoutError";
   }
 }
+
+/**
+ * The last resort: renders anything that escaped every other handler.
+ *
+ * `runCli` handles failures from the stages, but several things run outside
+ * that `try` — `Journal.open`, `printPlan`, `reportResources`, argument
+ * parsing's rethrow — and an `uncaughtException` or `unhandledRejection` can
+ * arrive from a listener nobody is awaiting. With no handler at the top, all of
+ * those reach Node itself and print a raw stack trace, which §5 forbids and
+ * which can carry a secret that appeared as a call argument.
+ *
+ * Written here rather than inline in `bin.ts` so it can be tested: `bin.ts` is
+ * a top-level-await script whose whole body is a side effect on import.
+ */
+export function reportFatal(
+  out: { error(line: string): void },
+  redact: (error: unknown) => string,
+  error: unknown,
+): void {
+  const summary = redact(error);
+  out.error(`Problem: ${summary === "" ? "Setup stopped unexpectedly." : summary}`);
+  out.error(
+    "What to do: run the same command again — everything already finished is skipped. If it keeps happening, please report it with the message above.",
+  );
+}

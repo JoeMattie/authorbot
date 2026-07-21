@@ -105,6 +105,27 @@ export function parseConfig(text: string, source: string): WizardConfig {
 }
 
 /**
+ * Prompt ids answered with `prompter.secret` — the ids whose value in a config
+ * file is a live credential rather than a preference.
+ *
+ * A `--config` file is allowed to carry these (that is the point of
+ * `--non-interactive`: the value comes from the operator's secret store), so
+ * the file itself becomes a secret and its permissions start to matter. Kept
+ * beside the parser so it is one edit away from any new secret prompt.
+ */
+export const SECRET_ANSWER_IDS: readonly string[] = [
+  "publish.cloudflareApiToken",
+  "agent.maintainerToken",
+];
+
+/** The secret-typed answers a parsed config actually carries. */
+export function secretAnswersIn(config: WizardConfig): string[] {
+  return SECRET_ANSWER_IDS.filter(
+    (id) => Object.hasOwn(config.answers, id) && config.answers[id] !== undefined,
+  );
+}
+
+/**
  * A commented example, printed by `create-authorbot --help` and used by the
  * documentation. Every id here is a real prompt id; a test asserts that.
  */

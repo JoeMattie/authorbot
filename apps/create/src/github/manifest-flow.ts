@@ -20,6 +20,7 @@
  *   error all run through the same `finally`. A leaked loopback listener is a
  *   leaked callback endpoint.
  */
+import { timingSafeEqual } from "node:crypto";
 import { randomToken } from "../ids.js";
 import { TimeoutError, WizardError } from "../errors.js";
 import type {
@@ -73,6 +74,26 @@ export interface ManifestFlowDeps {
 
 export const GITHUB_API_BASE = "https://api.github.com";
 export const GITHUB_WEB_BASE = "https://github.com";
+
+/**
+ * Constant-time `state` comparison.
+ *
+ * `!==` short-circuits at the first differing byte, so the time it takes to
+ * refuse a callback leaks how much of `state` the caller guessed. It is not
+ * practically exploitable here — 32 CSPRNG bytes behind a 16-byte unguessable
+ * callback path, over a single-shot loopback listener — but the fix costs one
+ * function and removes the need for anyone to re-derive that argument. Lengths
+ * are compared first because `timingSafeEqual` throws on a mismatch; a length
+ * difference is not a secret.
+ */
+export function statesMatch(returned: string | null, expected: string): boolean {
+  if (returned === null) {
+    return false;
+  }
+  const a = Buffer.from(returned, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 /**
  * The manifest GitHub is asked to create an app from.
@@ -223,7 +244,7 @@ export async function runManifestFlow(
     }
     if (url.pathname === callbackPath) {
       const returnedState = url.searchParams.get("state");
-      if (returnedState !== state) {
+      if (!statesMatch(returnedState, state)) {
         // Refused, and the flow fails rather than continuing with a code whose
         // provenance is unknown. Reporting "mismatch" back to the browser is
         // safe; the value itself is not echoed.

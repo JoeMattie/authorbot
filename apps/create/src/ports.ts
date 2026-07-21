@@ -143,6 +143,13 @@ export interface FileSystemPort {
   exists(path: string): Promise<boolean>;
   /** Entry names of a directory, or [] when it does not exist. */
   readDir(path: string): Promise<string[]>;
+  /**
+   * POSIX permission bits, or null where they cannot be read or do not mean
+   * anything (Windows). Optional so an implementation that has no concept of
+   * them is still a valid port; callers must treat null as "cannot tell" and
+   * stay silent rather than guess.
+   */
+  mode?(path: string): Promise<number | null>;
 }
 
 export interface OutputPort {

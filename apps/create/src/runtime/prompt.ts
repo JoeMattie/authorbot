@@ -17,6 +17,7 @@ import type {
   TextPrompt,
 } from "../ports.js";
 import { NonInteractiveError, WizardError } from "../errors.js";
+import type { SecretVault } from "../secrets.js";
 import { wrap } from "../ui/reporter.js";
 
 const WIDTH = 80;
@@ -25,15 +26,31 @@ export interface TtyPrompterOptions {
   readonly input: NodeJS.ReadStream;
   readonly output: OutputPort;
   readonly rawInput?: NodeJS.ReadStream;
+  /**
+   * The run's vault. Prompt text is composed from values the wizard is holding
+   * (a Worker name, a site URL, a repository), and `secrets.ts` describes
+   * redaction as covering *every* way text leaves this process. Writing
+   * straight to the OutputPort made this a fourth sink outside that guarantee —
+   * latent today only because no prompt happens to interpolate a secret, which
+   * is a property of the current call sites rather than of the design.
+   */
+  readonly vault?: SecretVault;
 }
 
 export class TtyPrompter implements Prompter {
   readonly #input: NodeJS.ReadStream;
   readonly #output: OutputPort;
+  readonly #vault: SecretVault | undefined;
 
   constructor(options: TtyPrompterOptions) {
     this.#input = options.input;
     this.#output = options.output;
+    this.#vault = options.vault;
+  }
+
+  /** The only way this class writes. Everything goes through the vault. */
+  #write(line: string): void {
+    this.#output.write(this.#vault === undefined ? line : this.#vault.redact(line));
   }
 
   #ask(question: string): Promise<string> {
@@ -53,11 +70,11 @@ export class TtyPrompter implements Prompter {
 
   #preamble(message: string, hint?: string): void {
     for (const line of wrap(message, WIDTH)) {
-      this.#output.write(line);
+      this.#write(line);
     }
     if (hint !== undefined) {
       for (const line of wrap(hint, WIDTH, "  ")) {
-        this.#output.write(line);
+        this.#write(line);
       }
     }
   }
@@ -72,7 +89,7 @@ export class TtyPrompter implements Prompter {
       if (error === null) {
         return value;
       }
-      this.#output.write(`  ${error}`);
+      this.#write(`  ${error}`);
     }
   }
 
@@ -92,7 +109,7 @@ export class TtyPrompter implements Prompter {
       if (raw === "n" || raw === "no") {
         return false;
       }
-      this.#output.write('  Please answer "y" or "n".');
+      this.#write('  Please answer "y" or "n".');
     }
   }
 
@@ -101,10 +118,10 @@ export class TtyPrompter implements Prompter {
       this.#preamble(prompt.message);
       for (const [index, choice] of prompt.choices.entries()) {
         const marker = choice.value === prompt.defaultValue ? "*" : " ";
-        this.#output.write(`  ${marker} ${String(index + 1)}. ${choice.label}`);
+        this.#write(`  ${marker} ${String(index + 1)}. ${choice.label}`);
         if (choice.hint !== undefined) {
           for (const line of wrap(choice.hint, WIDTH, "       ")) {
-            this.#output.write(line);
+            this.#write(line);
           }
         }
       }
@@ -123,7 +140,7 @@ export class TtyPrompter implements Prompter {
       if (byValue !== undefined) {
         return byValue.value;
       }
-      this.#output.write(`  Enter a number from 1 to ${String(prompt.choices.length)}.`);
+      this.#write(`  Enter a number from 1 to ${String(prompt.choices.length)}.`);
     }
   }
 
@@ -135,7 +152,7 @@ export class TtyPrompter implements Prompter {
         "Run the wizard in a terminal, or use --non-interactive with a config file that supplies the value from your secret store.",
       );
     }
-    this.#output.write("> (typing is hidden)");
+    this.#write("> (typing is hidden)");
     return await readHidden(this.#input);
   }
 }

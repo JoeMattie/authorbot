@@ -5,7 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type {
   BrowserOpener,
@@ -45,6 +45,19 @@ export class NodeFileSystem implements FileSystemPort {
       return await readdir(dirPath);
     } catch {
       return [];
+    }
+  }
+
+  async mode(filePath: string): Promise<number | null> {
+    if (process.platform === "win32") {
+      // The bits exist but do not describe who can read the file, so reporting
+      // them would produce confident nonsense.
+      return null;
+    }
+    try {
+      return (await stat(filePath)).mode & 0o777;
+    } catch {
+      return null;
     }
   }
 }

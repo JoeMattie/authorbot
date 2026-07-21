@@ -101,6 +101,47 @@ export class SecretVault {
 }
 
 /**
+ * Environment variables that carry a credential, and which therefore have to
+ * be registered before any of them can be echoed back at the author.
+ *
+ * These are not values the wizard *asks* for, which is exactly why they were
+ * missed: `CLOUDFLARE_API_TOKEN` is read straight out of the environment, and
+ * `NodeProcessRunner` spreads the whole environment into every child process.
+ * A failing `wrangler deploy` that mentions its own token in the last ten lines
+ * of stderr has those lines quoted into a `WizardError` and printed — verbatim,
+ * because the vault was never told the value was a secret.
+ *
+ * The vault's guarantee only ever covered secrets it was told about, so the
+ * fix is to tell it about these at startup rather than to add another sink.
+ */
+export const CREDENTIAL_ENV_VARS = [
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_API_KEY",
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "NPM_TOKEN",
+] as const;
+
+/**
+ * Registers every credential-bearing environment variable that is actually
+ * set. Returns the names registered, which is what a test can assert against.
+ */
+export function registerEnvironmentCredentials(
+  vault: SecretVault,
+  env: Readonly<Record<string, string | undefined>>,
+): string[] {
+  const registered: string[] = [];
+  for (const name of CREDENTIAL_ENV_VARS) {
+    const value = env[name];
+    if (value !== undefined && value.length > 0) {
+      vault.register(name, value);
+      registered.push(name);
+    }
+  }
+  return registered;
+}
+
+/**
  * Renders an unknown thrown value as a redacted, human-readable string.
  * Stack traces are deliberately dropped: contract §5 requires "a
  * human-readable failure message naming the next action, never a bare stack
