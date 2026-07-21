@@ -1,15 +1,37 @@
 # Launch your own collaborative book
 
-Start-to-finish setup for a book project powered by Authorbot. Read
+**The easy way is one command:**
+
+```sh
+npx @authorbot/create
+```
+
+The guided wizard does everything on this page for you — creates the
+repository, publishes the reading site, sets up the GitHub App and the D1
+database, turns on collaboration, and can mint an agent token. It asks three
+questions, verifies each step before claiming success, and lists everything it
+created (with how to remove it) at the end. Most people should use it and can
+stop reading here.
+
+**This document is the manual reference** — for understanding what the wizard
+does, doing a stage by hand, or recovering when something needs adjusting. Read
 [how-it-works.md](./how-it-works.md) first if the moving parts are unfamiliar.
 
-The stages are deliberately separable, and each one is useful on its own:
+> **What the wizard automates.** For collaboration it creates a **GitHub App**
+> through GitHub's manifest flow — one app that both signs readers in and
+> commits on your behalf — and pipes its credentials straight into your
+> Worker's secrets, so you never handle a private key. The by-hand path in
+> Stage 3 sets up the same GitHub App manually; the detailed walkthrough is in
+> [github-app-setup.md](./github-app-setup.md).
+
+The stages are deliberately separable, and each one is useful on its own —
+`npx @authorbot/create <stage>` runs just one:
 
 ```
-  1. Book repository  ──▶  a valid book, readable on GitHub
-  2. Publish          ──▶  a public reading site, no service required
-  3. Collaborate      ──▶  sign-in, annotations, votes, work queue
-  4. Agents           ──▶  scoped tokens, work claimed through the API
+  1. Book repository  ──▶  a valid book, readable on GitHub       (book)
+  2. Publish          ──▶  a public reading site, no service      (publish)
+  3. Collaborate      ──▶  sign-in, annotations, votes, work      (collaborate)
+  4. Agents           ──▶  scoped tokens, work claimed by API     (agent)
 ```
 
 Stop after stage 2 and you have a perfectly good serial-fiction site. Stages 3
@@ -27,6 +49,9 @@ account (free tier is enough).
 ---
 
 ## Stage 1 — Create the book repository
+
+> `npx @authorbot/create book` does all of this. The manual steps below are the
+> reference.
 
 The book lives in its own repository, separate from Authorbot itself. Copy the
 blank template and install the pinned toolchain:
@@ -129,6 +154,9 @@ promote it to `published`.
 
 ## Stage 2 — Publish the reading site
 
+> `npx @authorbot/create publish` does all of this.
+
+
 Build locally first:
 
 ```sh
@@ -176,8 +204,11 @@ nothing else to pin.
 
 ## Stage 3 — Turn on collaboration
 
+> `npx @authorbot/create collaborate` does all of this automatically. The steps
+> below are the manual reference for the same GitHub App setup.
+
 This adds the API: sign-in, annotations, votes, and the work queue. It needs a
-Cloudflare Worker, a D1 database, and a GitHub OAuth app.
+Cloudflare Worker, a D1 database, and a GitHub App.
 
 ### 3a. Database
 
@@ -235,15 +266,25 @@ and ready to merge.
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectCoordinator"] }],
   "triggers": { "crons": ["* * * * *"] },
+  "observability": { "enabled": true },
   "vars": {
     "AUTH_MODE": "github",
+    "MIRROR_MODE": "durable",
     "PROJECT_SLUG": "my-serial",
     "PROJECT_REPO": "yourname/my-book",
     "INITIAL_MAINTAINER": "github:yourname",
     "DEFAULT_BRANCH": "main",
+    // Mirrors publication.show_public_annotations. Without it the API refuses
+    // anonymous reads and the site's collaboration chrome never loads.
+    "PUBLIC_ANNOTATIONS": "true",
+    // The three GitHub App credentials the API treats as all-or-nothing: with
+    // any one missing it does no Git work at all. The client id is public; the
+    // private key is a secret (see 3c). Get all three from
+    // docs/github-app-setup.md.
+    "GITHUB_APP_ID": "<from 3c>",
+    "GITHUB_INSTALLATION_ID": "<from 3c>",
     "GITHUB_CLIENT_ID": "<from 3c>",
-    "GITHUB_REDIRECT_URI": "https://my-serial.example.com/v1/auth/github/callback",
-    "MIRROR_MODE": "queue"
+    "GITHUB_REDIRECT_URI": "https://my-serial.example.com/v1/auth/github/callback"
   }
 }
 ```
@@ -251,24 +292,39 @@ and ready to merge.
 `AUTH_MODE` must be `github` for any real deployment. The `dev` mode mounts an
 unauthenticated login route and exists only for local testing.
 
-### 3c. GitHub OAuth app (for human sign-in)
+### 3c. GitHub App (sign-in and commits)
 
-At <https://github.com/settings/developers> → New OAuth App:
+The API needs a **GitHub App** — one app that both signs readers in and commits
+approved changes on your behalf. This is what makes Git integration work, and
+it replaces the separate OAuth App an earlier version of this guide used. The
+full manual walkthrough — creating the app, installing it, and collecting its
+three credentials — is in [github-app-setup.md](./github-app-setup.md); the
+short version:
 
-- **Homepage URL:** your site URL
-- **Authorization callback URL:** `<your site>/v1/auth/github/callback` — must
-  match `GITHUB_REDIRECT_URI` exactly, path included
-- **Device flow:** leave **disabled**. Nothing here uses it, and it adds a
-  phishing surface.
+1. Create the app and note its **App ID** (`GITHUB_APP_ID`).
+2. Install it on your book's repository and note the **installation id**
+   (`GITHUB_INSTALLATION_ID`), from the installation's settings URL.
+3. Copy its **Client ID** (`GITHUB_CLIENT_ID`, public) into `vars`.
+4. Generate a **private key**. GitHub hands you a PKCS#1 key
+   (`BEGIN RSA PRIVATE KEY`); a Cloudflare Worker's WebCrypto can only import
+   **PKCS#8** (`BEGIN PRIVATE KEY`), so convert it before setting it — see
+   github-app-setup.md, which shows the one-line `openssl` conversion. This is
+   the single most common reason a freshly set-up book cannot commit.
 
-Copy the Client ID into `vars` (it is not secret). Generate a client secret and
-set it, along with two you generate yourself:
+Set the private key and the other secrets on the Worker:
 
 ```sh
+# The GitHub App private key, converted to PKCS#8 first (see above).
+wrangler secret put GITHUB_APP_PRIVATE_KEY --name my-serial < app-key.pkcs8.pem
+
+# The GitHub App's client secret (for reader sign-in).
 wrangler secret put GITHUB_CLIENT_SECRET --name my-serial
+
+# Two you generate yourself.
 openssl rand -base64 48 | wrangler secret put SESSION_SECRET --name my-serial
 openssl rand -base64 48 | wrangler secret put WEBHOOK_SECRET --name my-serial
-# A SEPARATE secret for CI deployment reports — it lives in the book repo's
+
+# A SEPARATE secret for CI publication reports — it lives in the book repo's
 # Actions secrets, a different trust domain from GitHub's webhook config.
 openssl rand -base64 48 | wrangler secret put PUBLICATION_SECRET --name my-serial
 ```
@@ -318,6 +374,11 @@ that is the switch, and it is reversible.
 ---
 
 ## Stage 4 — Bring in agents
+
+> `npx @authorbot/create agent` does this, and the installable collaborator
+> skill (`npx skills add JoeMattie/authorbot`) teaches an agent the full
+> protocol. The reference below is the underlying flow.
+
 
 Agents never get repository credentials and never touch Git. They authenticate
 to Authorbot with a scoped token and go through the same endpoints humans do.
@@ -424,7 +485,7 @@ the same way. Thresholds only start mattering when other people arrive.
 | Site reverted to an older version | a local deploy shipped a stale `_site`; rebuild and redeploy |
 | No sign-in link on chapter pages | `publication.api_url` is not set |
 | Worker refuses to boot | `AUTH_MODE` unset, or a required secret missing |
-| Sign-in loops or 400s | `GITHUB_REDIRECT_URI` does not exactly match the OAuth app callback |
+| Sign-in loops or 400s | `GITHUB_REDIRECT_URI` does not exactly match the GitHub App callback |
 
 ---
 

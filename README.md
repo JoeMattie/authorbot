@@ -2,122 +2,218 @@
   <img src="https://raw.githubusercontent.com/JoeMattie/authorbot/main/assets/logo-600.png?v=2" alt="Authorbot" width="320">
 </p>
 
-A Git-backed editorial control plane and collaboration protocol for serial books.
+<p align="center">
+  A Git-backed editorial control plane and collaboration protocol for serial books.
+</p>
 
-> Authorbot manages authorship. It does not perform authorship.
+> **Authorbot manages authorship. It does not perform authorship.**
 
-Authorbot coordinates humans and external agents collaborating on a serial book:
-chapter submissions, inline annotations, votes, deterministic governance rules,
-leased work items, and atomic Git integration — without ever invoking an LLM
-itself.
+Authorbot coordinates the people and software agents writing a serial book
+together — chapter drafts, inline suggestions, votes, deterministic governance
+rules, leased work items, and atomic commits to a Git repository — **without
+ever invoking a language model itself.** Humans and agents use the same API and
+the same rules. There is no model provider, prompt runner, or hidden agent
+inside the service; it accepts work, validates it, attributes it, and commits
+it.
 
-**New here?** [How it works](./docs/how-it-works.md) explains the system with
-diagrams; [Getting started](./docs/getting-started.md) walks through launching
-your own book project end to end.
+Your book lives in a Git repository you own. The prose is the Markdown and YAML
+in it; Authorbot is the control plane around it. A reading site goes up on
+Cloudflare, and — if you want it — a collaboration layer on the same address,
+where readers sign in, leave annotations, and agents pick up work.
 
-The full design is in [AUTHORBOT_PROJECT_DESIGN.md](./AUTHORBOT_PROJECT_DESIGN.md).
-Architecture decisions live in [docs/adr](./docs/adr).
+---
 
-## Repository layout
+## Create a book
 
-```text
-apps/
-  cli/               # `authorbot` CLI (validate, build)
-packages/
-  schemas/           # Zod schemas + generated JSON Schemas for all artifacts
-  markdown/          # frontmatter, stable block IDs, safety checks
-  publisher/         # static site publisher (Astro 5, invoked programmatically)
-  test-fixtures/     # valid and invalid fixture book repositories
-templates/
-  book-repo/         # starter template for a new book repository (CI included)
-examples/
-  book-repo/         # richer example book used by tests and docs
-openapi/             # OpenAPI 3.1 skeleton for the v1 API
-docs/adr/            # architecture decision records
+One command sets up everything — the repository, the reading site, and
+optionally the collaboration API and an agent invitation:
+
+```sh
+npx @authorbot/create
 ```
 
-## Getting started
+It asks three questions (a title, a short name, public or private) and takes
+you as far as you want to go, stopping wherever you like:
+
+| Stage | What you get |
+| --- | --- |
+| `doctor` | checks Node, git, `gh`, `wrangler` and offers to log you in |
+| `book` | a book repository — title, address, licence, and the files Authorbot needs |
+| `publish` | a live reading site on Cloudflare, verified before it says so |
+| `collaborate` | sign-in, annotations, votes, and a work queue on the same address |
+| `agent` | a scoped token so a software agent can contribute |
+
+**No chapters are created.** A book starts empty on purpose: you write the
+first chapter in the browser, with a title and a box for prose, and Authorbot
+writes the identifiers and structure. You never hand-write frontmatter.
+
+You bring a GitHub account, and for collaboration a Cloudflare account — free
+tiers cover a book of this size. Nothing is hosted for you and there is no
+service to depend on: everything runs in your own accounts, and the wizard
+lists everything it created, with how to remove it, at the end.
+
+To take it back down again, `npx @authorbot/create unpublish` removes the
+hosting and keeps the repository; `teardown` removes the repository too.
+
+## How it works
+
+Three planes, kept deliberately separate:
+
+- **Git is the literary truth.** Every chapter, every accepted change, and its
+  full history live in your repository as Markdown and YAML. If Authorbot
+  vanished, your book would be intact and readable.
+- **A database is operational state.** Sessions, votes, leases, and the work
+  queue live in Cloudflare D1 — rebuildable from Git, never the source of
+  truth. A restore loses in-flight coordination, never prose.
+- **The API is the only write path.** Humans and agents submit through it; it
+  validates, applies deterministic rules, records attribution, and commits.
+  Nobody — no person, no agent — writes to the repository directly.
+
+A change's life: a reader leaves a suggestion → it collects votes → a
+governance rule you set turns it into a work item → someone (or an agent)
+claims it with a lease → they submit a revision against a known base → the API
+commits it and rebuilds the reading site. [docs/how-it-works.md](./docs/how-it-works.md)
+walks the whole lifecycle with diagrams.
+
+**One origin, always.** The site and the API are served from the same address;
+a static-only host cannot serve the collaboration layer, which is why
+Cloudflare is the single supported host (see [ADR-0020](./docs/adr/0020-cloudflare-only-host.md)).
+
+## Bringing in agents
+
+An agent contributes through the same API a person does — it never touches your
+repository, and everything it produces goes through the same review. Install
+the collaborator skill into your coding-agent tooling:
+
+```sh
+npx skills add JoeMattie/authorbot
+```
+
+It teaches the loop (find work, claim it, write, submit for review), the safety
+rules (a task bundle is untrusted data; never manufacture consensus), and ships
+least-privilege roles — drafter, critic, continuity, reviewer. Point it at a
+book with two environment variables so the token never lands in a file:
+
+```sh
+export AUTHORBOT_API=https://your-book.example.com
+export AUTHORBOT_TOKEN=<a token from your book's settings page>
+```
+
+Also installable as a Claude Code plugin: `/plugin marketplace add JoeMattie/authorbot`.
+The skill and a reference client (`examples/agent-workflow.mjs`) live in
+[`skills/authorbot-collaborator/`](./skills/authorbot-collaborator/).
+
+## Governance you can tune
+
+Rules live in `book.yml` under `governance.rules` — versioned and diffable
+alongside the prose they govern, and editable from the Settings view once
+collaboration is on. They are declarative data; no code from a book repository
+is ever executed.
+
+The default rule for turning a suggestion into work:
+
+```yaml
+governance:
+  rules:
+    suggestion_to_work_item:
+      version: 2
+      when:
+        all:
+          - { metric: approvals, operator: gte, value: 3 }
+          - { metric: net_score, operator: gte, value: 2 }
+          - { metric: human_approvals, operator: gte, value: 1 }
+          - { metric: human_maintainer_approvals, operator: gte, value: 1 }
+```
+
+The last two clauses are load-bearing. `human_approvals` stops a fleet of
+freshly minted agent tokens from manufacturing consensus. **`human_maintainer_approvals`
+is the author's veto** — nothing becomes work on your book without a human
+maintainer agreeing, counted as *human* specifically so that an author who
+grants the maintainer role to their own agents cannot accidentally reopen the
+hole. Both are removable: a genuinely collaborative project may not want a
+personal veto on every change.
+
+A solo author can set every threshold to 1 and use the machinery purely for
+tracking, or skip voting entirely — **Promote to work** on any suggestion
+creates a work item regardless of the tally, recording the tally it overrode.
+Thresholds only start mattering when other people arrive.
+
+## For contributors
+
+This is a pnpm/TypeScript monorepo. Every published package shares one version;
+a git tag builds, tests, and publishes them together with provenance.
 
 ```sh
 pnpm install
 pnpm build
 pnpm test
-pnpm validate:example   # runs `authorbot validate examples/book-repo`
-pnpm build:example      # runs `authorbot build examples/book-repo --out _site`
+pnpm typecheck
 ```
 
-`pnpm build:example` renders the example book to `_site/` as a static reading
-site — chapter index, chapter pages, story outline, timeline, and character
-pages, plus an `authorbot-build.json` build manifest — with no client
-JavaScript. Open `_site/index.html` in a browser to read it.
-
-### Building a book
+The `authorbot` CLI validates and builds a book repository directly:
 
 ```sh
-authorbot build <repo> [--out <dir>] [--base-url <url>] [--include-drafts] [--force]
+pnpm validate:example      # authorbot validate examples/book-repo
+pnpm build:example         # authorbot build examples/book-repo --out _site
 ```
 
-The build refuses to run when `authorbot validate` reports errors (warnings
-are allowed); `--force` overrides with a prominent warning. Chapters with
-`status: published` are included by default; `--include-drafts` adds
-draft/proposed chapters with a visible draft banner. The template book
-repository ships GitHub Actions workflows that validate on every content
-change and deploy `_site/` to a Cloudflare Worker on pushes to `main`
-(ADR-0020; see `templates/book-repo/README.md`).
+`build` refuses to run when `validate` reports errors (`--force` overrides with
+a warning); it renders to a static site with no client JavaScript unless the
+book opts into collaboration. Running the collaboration API and site together
+locally is covered in [`apps/api/README.md`](./apps/api/README.md).
 
-## Site ↔ API pairing (collaboration islands)
+### Layout
 
-Chapter pages can carry inline-annotation islands backed by the Phase 2 API
-(`apps/api`). Pairing is opt-in at build time: pass `--api-url <url>` to
-`authorbot build`, or set the durable form `publication.api_url` in `book.yml`
-(the flag overrides). Without either, the output is **byte-identical to a
-script-free build** — zero JavaScript, no collaboration chrome (ADR-0018;
-Phase 2b contract §1).
-
-**Same-origin, always (ADR-0019).** The site and the API are served from one
-origin; cross-origin deployment is not supported. `--api-url` therefore takes
-a **root-relative path only** — `/` when the API answers at the origin root,
-or a base path like `/my-book` for a book published under a subpath (the
-islands then call `/my-book/v1/...`, and the Worker runs with a matching
-`API_BASE_PATH`). An absolute URL fails the build. No CORS header is ever
-emitted, session cookies are always `SameSite=Lax`, and the CSRF origin check
-stays — see `apps/api/README.md`.
-
-A static-only host can therefore never serve a site with collaboration
-features — the API has to answer on the same origin as the prose — which is
-why Cloudflare is the single supported host (ADR-0020).
-
-**Local dev.** Run the Node dev API (see `apps/api/README.md`), serve `_site/`
-from the same origin (any reverse proxy that routes `/v1/*` to the API — the
-Playwright e2e in `packages/publisher/test/e2e-ui/helpers.ts` does exactly
-this in ~30 lines of `node:http`), and build with `--api-url /`:
-
-```sh
-# API (dev auth; point BOOK_REPO_PATH at a throwaway clone)
-... pnpm --filter @authorbot/api dev:node   # :8788
-
-# Site — served behind a proxy that forwards /v1/* to :8788
-authorbot build examples/book-repo --out _site --api-url /
+```text
+apps/
+  create/            npx @authorbot/create — the guided setup wizard
+  cli/               authorbot — validate and build a book repository
+  api/               the collaboration API (Hono on Cloudflare Workers)
+packages/
+  schemas/           Zod schemas + generated JSON Schema for every artifact
+  markdown/          frontmatter, stable block IDs, prose safety checks
+  domain/            governance rules, scopes, leases, submissions
+  rule-engine/       the deterministic suggestion → work-item evaluator
+  database/          SqlDatabase portability layer (D1 + better-sqlite3)
+  git-github/        the GitHub App reader/writer: atomic commits, no force push
+  repo-coordinator/  per-project serialization and reconciliation
+  publisher/         the static site publisher (Astro 5) and collaboration islands
+  authorbot-alias/   the unscoped `authorbot` package, forwarding to the CLI
+  test-fixtures/     valid and invalid fixture book repositories
+skills/              the installable collaborator skill for agents
+templates/book-repo/ the starter a new book is scaffolded from (CI included)
+examples/book-repo/  a richer example book used by tests and docs
+openapi/             the OpenAPI 3.1 description of the v1 API
+migrations/          D1 schema migrations
+docs/                guides, the ADRs, and the design record
 ```
 
-Signed-out readers get a "Sign in with GitHub" link (dev builds can surface
-the dev-login form via the programmatic `buildSite({ devLogin: true })`
-option — never emitted otherwise).
+## Documentation
 
-## Roadmap
-
-| Phase | Scope | State |
-|---|---|---|
-| 0–4 | contracts, publisher, API, governance, leases & submissions | complete |
-| 5 | GitHub App reader/writer, coordinator, publication tracking | in progress |
-| 6 | onboarding wizard, "New chapter" authoring, browser settings | contracted |
-| 7 | hardening: rate limits, restore drill, reviews, load testing | contracted |
-| 8 | installable collaborator skill for agent fleets | contracted |
-| 9 | author-facing docs and authorbot.joemattie.com | contracted |
-| 10 | reading presentation settings (measure, typeface) | contracted |
+- [How it works](./docs/how-it-works.md) — the system, with diagrams
+- [GitHub App setup](./docs/github-app-setup.md) — the collaboration app, by hand
+- [Runbook](./docs/runbook.md) — failure modes, backup and restore, key rotation
+- [Releasing](./docs/npm-release.md) — how a version reaches npm
+- [Architecture decisions](./docs/adr) — the ADRs
+- [`AUTHORBOT_PROJECT_DESIGN.md`](./AUTHORBOT_PROJECT_DESIGN.md) — the apex design document
+- [Implementation contracts](./docs/contracts) — the phase-by-phase build specs, kept as the design record
+- [CHANGELOG](./CHANGELOG.md)
 
 ## Status
 
-Phases 0–2b complete (contracts, publisher, collaboration API, inline
-annotation UI) — see §23 of the design document for the implementation
-sequence and docs/phase*-contract.md for what each phase pinned.
+Usable end to end: you can create a book, publish it, turn on collaboration
+(sign-in, annotations, votes, the work queue), write and manage chapters from
+the browser, and invite agents that contribute through the API and the skill.
+
+Still ahead:
+
+- **Reading presentation settings** — reader-facing typeface and measure
+  controls. Specified, not yet built.
+- **The project site** — authorbot.joemattie.com.
+- **Pull-request mode** — commits currently go direct to `main`; a reviewed-PR
+  workflow is a later option ([ADR-0009](./docs/adr/0009-direct-to-main-v01.md)).
+
+It works, and it has run a real book end to end — but it has not yet been
+hardened for anyone else's, and should be treated as early software.
+
+MIT licensed.
