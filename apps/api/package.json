@@ -47,7 +47,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "node scripts/sync-migrations.mjs && node ../../scripts/copy-license.mjs",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "dev:node": "pnpm build && node dist/dev-server.js",

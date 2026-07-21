@@ -799,3 +799,20 @@ this document and one of these disagree, the test is right.
 | `apps/api/test/recovery-restore-drill.test.ts` | [§4](#4-backup-and-restore) — destroys the database, rebuilds from Git, asserts what returns *and* what deliberately does not |
 | `apps/api/test/resilience-failure-injection.test.ts` | [§2](#2-failure-modes-what-each-looks-like-from-outside) — backlog, rate limiting, outage, D1 errors, stale/diverged submissions |
 | `apps/api/test/resilience-load-concurrency.test.ts` | Phase 4 invariants under sustained concurrent claims and submissions |
+
+## 11. Why the test timeout is 30 seconds, not vitest's 5
+
+Every package runs `vitest run --testTimeout=30000`.
+
+The 5-second default is sized for unit tests. This repository also has
+property tests that loop 120+ generated documents through parse → patch →
+re-parse, exhaustive adversarial tables, and integration tests that spawn real
+`git` against temporary repositories. Several of those sat just under 5s on a
+developer machine and timed out on a slower CI runner — green where they were
+written, red where the release is gated, which is the worst place to discover
+a limit.
+
+30s is deliberately generous rather than tuned. It is not a substitute for
+noticing genuinely slow tests, and it still catches a hang: the outbox spin
+bug (a deferred row re-picked by the same drain, forever) ran for over two
+minutes before anything killed it, and would still fail this ceiling loudly.

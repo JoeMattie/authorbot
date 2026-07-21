@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

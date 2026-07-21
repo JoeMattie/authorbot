@@ -43,7 +43,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node dist/scripts/generate-json-schemas.js",
     "prepack": "node ../../scripts/copy-license.mjs",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

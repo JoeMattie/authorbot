@@ -46,7 +46,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/bin.js', 0o755)\"",
     "prepack": "node ../../scripts/copy-license.mjs",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000",
     "typecheck": "tsc --noEmit",
     "start": "cd ../.. && node apps/cli/dist/bin.js"
   },
