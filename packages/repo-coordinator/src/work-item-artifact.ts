@@ -36,11 +36,12 @@
  * heading, or like a Markdown code fence (` ``` ` / `~~~`). To keep parsing
  * exact — and to keep a quoted code fence from swallowing a delimiter line so
  * the Phase 0 delimiter validator no longer sees it as an HTML comment — the
- * renderer escapes any free-text line that starts with
- * `<!-- authorbot:original:`, opens/closes a fenced code block, or is exactly
- * equal to one of the five section headings, by prefixing it with the escape
- * marker `<!-- authorbot:original:escape -->`. The parser strips exactly one
- * escape marker per line. This is a proper prefix code:
+ * renderer escapes any free-text line MATCHING `/^\s*<!--\s*authorbot:original:/`
+ * (the same whitespace tolerance the validator's own regex has — see
+ * `DANGEROUS_LINE`), opening/closing a fenced code block, or exactly equal to
+ * one of the five section headings, by prefixing it with the escape marker
+ * `<!-- authorbot:original:escape -->`. The parser strips exactly one escape
+ * marker per line. This is a proper prefix code:
  *
  * - After escaping, no free-text line equals a heading or a delimiter, so the
  *   real headings and delimiters are globally unique in the document and the
@@ -84,8 +85,28 @@ export const ORIGINAL_TEXT_ESCAPE = "<!-- authorbot:original:escape -->";
  */
 export const SUBMITTED_TEXT_START = "<!-- authorbot:original:submitted:start -->";
 export const SUBMITTED_TEXT_END = "<!-- authorbot:original:submitted:end -->";
-/** Any free-text line starting with this must be escaped. */
-const DANGEROUS_PREFIX = "<!-- authorbot:original:";
+/**
+ * Any free-text line matching this must be escaped.
+ *
+ * A REGEX, not a `startsWith` on the literal prefix, because the validator this
+ * escaping exists to satisfy is itself a regex:
+ * `/^\s*<!--\s*authorbot:original:(start|end)\s*-->\s*$/`
+ * (`@authorbot/markdown` `delimiters.ts`). It tolerates leading whitespace and
+ * whitespace after `<!--`; the old literal `"<!-- authorbot:original:"` did
+ * not. Anything the validator counts and the escaper misses is a hole, and this
+ * one was reachable from an annotation body: a comment containing a delimiter
+ * line with a single leading space passed the markdown safety scan, was emitted
+ * verbatim into `## Context`, and the committed artifact then failed
+ * `checkWorkItemDelimiters` with `WORK_ITEM_DELIMITER_INVALID` — permanently,
+ * because the write path does not run that check and the bad bytes land first.
+ *
+ * The predicate is deliberately WIDER than the validator (no `(start|end)`, no
+ * end anchor): over-escaping a line that was never dangerous is invisible —
+ * `unescapeWorkItemText` restores it byte for byte — while under-escaping one
+ * breaks the repository. When the two cannot be identical, the escaper is the
+ * one that should err.
+ */
+const DANGEROUS_LINE = /^\s*<!--\s*authorbot:original:/;
 /**
  * A free-text line that could open or close a Markdown fenced code block. Such
  * a line, left bare, would make the delimiter validator (which only counts a
@@ -150,7 +171,7 @@ export function escapeWorkItemText(text: string): string {
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) =>
-      line.startsWith(DANGEROUS_PREFIX) ||
+      DANGEROUS_LINE.test(line) ||
       CODE_FENCE.test(line) ||
       ESCAPED_HEADINGS.includes(line)
         ? `${ORIGINAL_TEXT_ESCAPE}${line}`

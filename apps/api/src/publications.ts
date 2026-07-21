@@ -16,10 +16,26 @@
  * ## Signature and replay
  *
  * The callback is unauthenticated in the session/token sense and authenticated
- * by HMAC-SHA256 with `WEBHOOK_SECRET`, compared in constant time — the same
- * primitive and the same ordering as the GitHub webhook in app.ts (verify
+ * by HMAC-SHA256 with `PUBLICATION_SECRET`, compared in constant time — the
+ * same primitive and the same ordering as the GitHub webhook in app.ts (verify
  * before parsing, before touching the database, before allocating anything
  * keyed on request content).
+ *
+ * ## Why this is not `WEBHOOK_SECRET`
+ *
+ * It used to be, and one key signing two protocols in two trust domains is a
+ * key that grants each domain the other's authority. `WEBHOOK_SECRET` is
+ * GitHub's — it is pasted into a GitHub App's webhook configuration.
+ * `PUBLICATION_SECRET` is the book repository's CI — the documented wiring puts
+ * it in the repo's Actions secrets, where every workflow, and everyone who can
+ * open a pull request that runs one, is within reach of it. Sharing them meant
+ * whoever held the CI copy could forge `push` webhooks (driving projection
+ * rebuilds at will), and whoever held GitHub's copy could forge deployment
+ * reports. Two secrets, two blast radii.
+ *
+ * `WEBHOOK_SECRET` remains the fallback when `PUBLICATION_SECRET` is unset, so
+ * an existing deployment keeps working through the rotation rather than losing
+ * its publication reports the moment it upgrades.
  *
  * **The signed material is `<deliveryId>.<timestamp>.<rawBody>`, not the body
  * alone.** Signing only the body left the delivery id — the sole
@@ -221,7 +237,7 @@ export function registerPublicationRoutes(ctx: PublicationRoutesContext): void {
       return problem(c, "signature-invalid", { detail: "missing publication signature" });
     }
     const expected = `sha256=${await hmacSha256Hex(
-      deps.config.webhookSecret,
+      deps.config.publicationSecret ?? deps.config.webhookSecret,
       publicationSigningMaterial(deliveryId, timestamp, rawBody),
     )}`;
     if (!timingSafeEqual(signature, expected)) {

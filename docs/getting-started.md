@@ -268,6 +268,9 @@ set it, along with two you generate yourself:
 wrangler secret put GITHUB_CLIENT_SECRET --name my-serial
 openssl rand -base64 48 | wrangler secret put SESSION_SECRET --name my-serial
 openssl rand -base64 48 | wrangler secret put WEBHOOK_SECRET --name my-serial
+# A SEPARATE secret for CI deployment reports — it lives in the book repo's
+# Actions secrets, a different trust domain from GitHub's webhook config.
+openssl rand -base64 48 | wrangler secret put PUBLICATION_SECRET --name my-serial
 ```
 
 `--name` targets the Worker regardless of your current directory — without it,

@@ -90,6 +90,22 @@ export interface AppConfig {
   ssePollMs?: number;
   /** SSE heartbeat-comment interval (ms). Contract §5: default 15000. */
   sseHeartbeatMs?: number;
+  /**
+   * Server-side cap on one SSE connection's lifetime (ms). Default 5 minutes
+   * (`DEFAULT_SSE_MAX_LIFETIME_MS`); clients resume transparently via
+   * `Last-Event-ID`, so this is invisible except as a periodic reconnect.
+   */
+  sseMaxLifetimeMs?: number;
+  /**
+   * Concurrent SSE connections one client address may hold, per isolate.
+   * Default `DEFAULT_SSE_MAX_STREAMS_PER_CLIENT`.
+   */
+  sseMaxStreamsPerClient?: number;
+  /**
+   * HMAC key for CI publication callbacks (`POST /v1/publications`). Absent
+   * falls back to `webhookSecret` for compatibility — see publications.ts.
+   */
+  publicationSecret?: string;
 }
 
 export interface AppDeps {

@@ -13,6 +13,8 @@
 // Secrets are NOT set here: run
 //   wrangler secret put SESSION_SECRET
 //   wrangler secret put WEBHOOK_SECRET
+//   wrangler secret put PUBLICATION_SECRET     (CI publication callbacks;
+//                                               falls back to WEBHOOK_SECRET)
 //   wrangler secret put GITHUB_CLIENT_SECRET   (github mode only)
 //   wrangler secret put GITHUB_APP_PRIVATE_KEY (Phase 5 Git integration only)
 //

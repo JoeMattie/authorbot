@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Collab from "../components/Collab.astro";
+import { SITE_CSP } from "../lib/csp.js";
 import { site } from "virtual:authorbot-site";
 
 // One route per included chapter, at the path derived from
@@ -25,12 +26,9 @@ const showFooter = site.book.showRevision || site.book.showAttribution;
 // mount element, and the bundled script. Without an API base this page is
 // byte-identical with a pre-2b build.
 const collab = site.collab;
-const csp = collab
-  ? "default-src 'self'; " +
-    // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
-    "connect-src 'self'; " +
-    "img-src 'self' data:"
-  : undefined;
+// Unconditional: this page renders chapter prose through `set:html`, so it
+// carries the policy whether or not it also loads the islands (lib/csp.ts).
+const csp = SITE_CSP;
 const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;
 ---
 

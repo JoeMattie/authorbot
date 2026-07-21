@@ -72,12 +72,45 @@ describe("api-url-less build (script-free regression)", () => {
       const html = await readFile(file, "utf8");
       expect(html, file).not.toContain("<script");
       expect(html, file).not.toContain("authorbot-collab");
-      expect(html, file).not.toContain("Content-Security-Policy");
       expect(html, file).not.toContain("<authorbot-collab");
       // Phase 7's access-control island is bundled separately; it must be just
       // as absent from an api-url-less build as the collaboration one.
       expect(html, file).not.toContain("authorbot-access");
       expect(html, file).not.toContain("<authorbot-access");
+    }
+  });
+
+  /**
+   * The CSP is NOT a collaboration artifact (design §19.4).
+   *
+   * It used to be emitted only by pages that loaded an island, which meant the
+   * two page types that inject author-supplied markup with `set:html` — the
+   * chapter page of an api-url-less build, and every character page — shipped
+   * with no policy at all. Nothing exploitable reaches that HTML today, but the
+   * book that legitimately enables `content.raw_html` is exactly the book where
+   * these pages render markup the author did not hand-audit, and a static page
+   * pays nothing for the header. A CSP is a defence-in-depth layer, so it is
+   * attached to what the page RENDERS, not to what it loads.
+   */
+  it("still carries a CSP on every page that renders prose through set:html", async () => {
+    const proseFiles = (await collectFiles(outPlain)).filter(
+      (file) =>
+        file.endsWith(".html") &&
+        (file.includes(`${path.sep}chapters${path.sep}`) ||
+          file.includes(`${path.sep}characters${path.sep}`)),
+    );
+    // Guard against the filter silently matching nothing and the test passing
+    // vacuously.
+    expect(proseFiles.length).toBeGreaterThan(1);
+    for (const file of proseFiles) {
+      const html = await readFile(file, "utf8");
+      if (!html.includes('class="prose"')) continue;
+      expect(html, file).toContain(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
+          `connect-src 'self'; img-src 'self' data:">`,
+      );
+      // …and it is still a build with no JavaScript in it at all.
+      expect(html, file).not.toContain("<script");
     }
   });
 
@@ -129,6 +162,9 @@ describe("api-url-less build (script-free regression)", () => {
         // invariant that still matters — and that the sibling test asserts —
         // is that the api-url-less build stays byte-identically script-free;
         // a collab build was always allowed to differ by exactly the islands.
+        // The CSP meta is stripped from BOTH sides now: prose pages emit it in
+        // either build (design §19.4), so it is no longer an island insertion,
+        // while the island-only pages still add one the plain build lacks.
         collab = collab
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
@@ -137,7 +173,9 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/>\s+</g, "> <");
-        plain = plain.replace(/>\s+</g, "> <");
+        plain = plain
+          .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
+          .replace(/>\s+</g, "> <");
       }
       expect(collab, file).toBe(plain);
     }

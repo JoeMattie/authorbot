@@ -176,6 +176,122 @@ describe("escape helpers", () => {
   });
 });
 
+/**
+ * The escaper must cover everything the VALIDATOR counts (security review).
+ *
+ * The escape predicate used to be `line.startsWith("<!-- authorbot:original:")`
+ * while `@authorbot/markdown` counts a delimiter with
+ * `/^\s*<!--\s*authorbot:original:(start|end)\s*-->\s*$/`. The gap between a
+ * literal prefix and a whitespace-tolerant regex was reachable from ordinary
+ * user input: an annotation body containing a delimiter line with ONE LEADING
+ * SPACE passed the markdown safety scan, was emitted unescaped into
+ * `## Context`, and the committed artifact then failed `checkWorkItemDelimiters`
+ * — `WORK_ITEM_DELIMITER_INVALID`, permanently, because nothing on the write
+ * path runs that check and the bad bytes land first. Repeatable at will by
+ * anyone who could comment.
+ *
+ * These cases enumerate the whitespace variations the validator tolerates and
+ * assert the two properties that together close the hole: the rendered artifact
+ * VALIDATES, and the free text still round-trips byte for byte.
+ */
+describe("adversarial free text cannot break repo validation", () => {
+  /** Every whitespace shape `DELIMITER_LINE` in delimiters.ts accepts. */
+  const delimiterVariants: string[] = [];
+  for (const which of ["start", "end"]) {
+    for (const lead of ["", " ", "  ", "\t", "   "]) {
+      for (const inner of [" ", "", "  ", "\t"]) {
+        for (const before of [" ", "", "  "]) {
+          for (const trail of ["", " ", "  "]) {
+            delimiterVariants.push(
+              `${lead}<!--${inner}authorbot:original:${which}${before}-->${trail}`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  it("renders a valid artifact for every delimiter-lookalike a body can carry", () => {
+    for (const variant of delimiterVariants) {
+      const body = ["Please fix this:", variant, "…and that."].join("\n");
+      // Through each free-text section in turn: all three are escaped by the
+      // same predicate, and a hole in any one of them breaks the artifact.
+      for (const field of ["context", "requestedChange", "originalText"] as const) {
+        const file = renderWorkItemArtifact({ ...BASE, [field]: body });
+        const check = checkWorkItemDelimiters(file.content);
+        expect(check.valid, `${field} = ${JSON.stringify(variant)}: ${JSON.stringify(check.issues)}`)
+          .toBe(true);
+        // Exactly one real section, opened and closed by the renderer's own
+        // delimiters — not by anything the body smuggled in.
+        expect(check.sections, JSON.stringify(variant)).toHaveLength(1);
+        expect(parseWorkItemArtifact(file.content).sections[field], JSON.stringify(variant)).toBe(
+          body,
+        );
+      }
+    }
+  });
+
+  it("escape/unescape stays the identity over those same variants", () => {
+    for (const variant of delimiterVariants) {
+      expect(unescapeWorkItemText(escapeWorkItemText(variant))).toBe(variant);
+    }
+  });
+
+  it("renders and validates for pseudo-random hostile bodies", () => {
+    // A small deterministic generator rather than a fuzzing dependency: the
+    // alphabet is exactly the fragments that have historically broken either
+    // the delimiter validator or the section parser, so a random arrangement
+    // of them is a far denser search than any hand-written list.
+    const fragments = [
+      "ordinary prose",
+      " <!-- authorbot:original:start -->",
+      "\t<!--  authorbot:original:end  -->",
+      "<!-- authorbot:original:escape -->",
+      "<!-- authorbot:original:submitted:start -->",
+      "## Context",
+      "  ## Original text",
+      "## Completion",
+      "```",
+      "  ~~~ts",
+      "---",
+      "",
+    ];
+    let seed = 0x9e3779b9;
+    const next = (bound: number): number => {
+      // xorshift32 — deterministic, so a failure is reproducible.
+      seed ^= seed << 13;
+      seed ^= seed >>> 17;
+      seed ^= seed << 5;
+      return Math.abs(seed) % bound;
+    };
+    for (let iteration = 0; iteration < 250; iteration += 1) {
+      const lines: string[] = [];
+      for (let i = 0; i < 1 + next(6); i += 1) {
+        lines.push(fragments[next(fragments.length)] as string);
+      }
+      const body = lines.join("\n");
+      const file = renderWorkItemArtifact({
+        ...BASE,
+        context: body,
+        originalText: body,
+        requestedChange: body,
+      });
+      const check = checkWorkItemDelimiters(file.content);
+      expect(check.valid, `body ${JSON.stringify(body)}: ${JSON.stringify(check.issues)}`).toBe(
+        true,
+      );
+      const parsed = parseWorkItemArtifact(file.content);
+      // Context and Requested change are `normalizeTrim`ed on the way in by
+      // design (they are prose, not a quoted span), so the round-trip identity
+      // for them is against the trimmed text. Original text is preserved
+      // byte-exactly and is compared as written.
+      expect(parsed.sections.context, JSON.stringify(body)).toBe(body.trim());
+      expect(parsed.sections.requestedChange, JSON.stringify(body)).toBe(body.trim());
+      expect(parsed.sections.originalText, JSON.stringify(body)).toBe(body);
+    }
+  });
+});
+
 function diffLines(a: string, b: string): string[] {
   const la = a.split("\n");
   const lb = b.split("\n");

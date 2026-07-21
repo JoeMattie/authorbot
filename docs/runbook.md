@@ -520,20 +520,36 @@ decided you can absorb the mass logout for. Note that rotation is currently
 the *only* way to invalidate all sessions at once (see [§9](#9-known-gaps)),
 which makes it your emergency "log everybody out" button.
 
-### 5.2 `WEBHOOK_SECRET`
+### 5.2 `WEBHOOK_SECRET` and `PUBLICATION_SECRET`
 
-**What it protects — two different things with one value.** This is the trap.
+**Two protocols, two secrets — set both.**
 
-| Consumer | Header | Signed material |
-|---|---|---|
-| GitHub push webhook | `x-hub-signature-256` | raw body only |
-| CI publication callback | `x-authorbot-signature-256` | `<deliveryId>.<timestamp>.<rawBody>` |
+| Consumer | Secret | Header | Signed material |
+|---|---|---|---|
+| GitHub push webhook | `WEBHOOK_SECRET` | `x-hub-signature-256` | raw body only |
+| CI publication callback | `PUBLICATION_SECRET` | `x-authorbot-signature-256` | `<deliveryId>.<timestamp>.<rawBody>` |
 
-They are signed differently but keyed identically, so you **cannot rotate them
-atomically**. There will be a window in which one producer is signing with the
-wrong key.
+These used to be one value, which was the trap: `WEBHOOK_SECRET` lives in the
+GitHub App's webhook configuration while the publisher's copy lives in the book
+repository's **Actions secrets**, so a single shared value meant whoever held
+either could forge the other's requests, and you could not rotate them
+atomically.
 
-**What breaks.**
+**If `PUBLICATION_SECRET` is unset, the API falls back to `WEBHOOK_SECRET`** —
+purely for compatibility with deployments that predate the split. Treat that as
+a state to leave, not a configuration to keep. To split them, with no window in
+which anything is signed with the wrong key:
+
+1. `wrangler secret put PUBLICATION_SECRET` with a fresh random value.
+2. Update the CI publisher's copy of the secret to that same value.
+3. Trigger a build; confirm `publication.buildStatus` moves.
+
+The GitHub webhook secret is untouched throughout, so pushes never stop.
+
+**Rotating either one afterwards** touches one producer, so it is an ordinary
+rotation: change the Worker secret, change the single consumer, confirm.
+
+**What breaks if a value goes wrong.**
 
 - **GitHub pushes: recoverable.** A push signed with the old secret gets
   `401`, and — importantly — the failing request returns *before* recording a
@@ -546,17 +562,25 @@ wrong key.
   callback signed with the wrong key is simply lost; the site will look stale
   until the next successful build reports.
 
-**Do, in this order:**
+**Rotating `WEBHOOK_SECRET`, in this order:**
 
-1. Pick a maintenance moment with no build running.
-2. `wrangler secret put WEBHOOK_SECRET`.
-3. Immediately update the GitHub App's webhook secret (App settings →
+1. `wrangler secret put WEBHOOK_SECRET`.
+2. Immediately update the GitHub App's webhook secret (App settings →
    Webhook → Secret).
-4. Immediately update the CI publisher's copy of the secret.
-5. Redeliver the most recent `push` from Recent Deliveries to confirm, and
-   trigger a build to confirm the callback path.
-6. Verify: `GET /v1/projects/{project}` shows `projection.stale: false` and a
-   `publication.buildStatus` that moved.
+3. Redeliver the most recent `push` from Recent Deliveries to confirm.
+4. Verify: `GET /v1/projects/{project}` shows `projection.stale: false`.
+
+**Rotating `PUBLICATION_SECRET`, in this order:**
+
+1. Pick a maintenance moment with no build running — a callback signed with
+   the old key is lost, not retried.
+2. `wrangler secret put PUBLICATION_SECRET`.
+3. Immediately update the CI publisher's copy of the secret.
+4. Trigger a build and verify `publication.buildStatus` moved.
+
+**If the two are still sharing `WEBHOOK_SECRET`** (no `PUBLICATION_SECRET`
+set), you cannot rotate them atomically and every rotation is the combined
+procedure with both windows open at once. Split them first.
 
 ### 5.3 GitHub App private key
 
@@ -643,7 +667,7 @@ commit exists and the *site* is behind. Look at `buildStatus`:
 
 | `buildStatus` | Reading |
 |---|---|
-| `null` | CI has never reported for this commit. Is the publisher wired up? Is `WEBHOOK_SECRET` right on both sides ([§5.2](#52-webhook_secret))? |
+| `null` | CI has never reported for this commit. Is the publisher wired up? Is `PUBLICATION_SECRET` (or, if unset, `WEBHOOK_SECRET`) right on both sides ([§5.2](#52-webhook_secret-and-publication_secret))? |
 | `queued` / `building` | It is in flight. Wait. |
 | `failed` | The build broke. Go look at CI. |
 | `succeeded` with a lagging `deployedCommit` | The build passed but the deploy did not land, or the callback reporting the deploy was lost. |

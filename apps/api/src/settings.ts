@@ -222,7 +222,22 @@ export interface SettingsContext {
   serialize: ProjectSerializer;
   /** Boot-time rules: `RULES_JSON`, else the built-in default. */
   bootstrapRules: readonly RuleEntry[];
+  /** Read guard: project match + membership + `chapters:read`. */
   requireProject(
+    c: Context<AppEnv>,
+  ): Promise<{ project: ProjectRecord } | { response: Response }>;
+  /**
+   * Write guard: the same, but requiring `members:manage`.
+   *
+   * Settings is a control-plane surface — it is where `annotation_policy` is
+   * set, so a credential that can PATCH here can reopen a `locked` book. For a
+   * human session this changes nothing (the maintainer bundle contains
+   * `members:manage`). For an agent token it is the difference between "role
+   * alone decides" and the Phase 2 §3 intersection actually binding: an agent
+   * granted the maintainer role so it can annotate a locked book must not
+   * thereby be able to unlock it.
+   */
+  requireProjectWrite(
     c: Context<AppEnv>,
   ): Promise<{ project: ProjectRecord } | { response: Response }>;
   claimStatements(c: Context<AppEnv>, status: number, body: unknown): SqlStatement[];
@@ -390,7 +405,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
   // ---- PATCH --------------------------------------------------------------
 
   app.patch("/v1/projects/:projectId/settings", auth, idem, async (c) => {
-    const guard = await ctx.requireProject(c);
+    const guard = await ctx.requireProjectWrite(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;

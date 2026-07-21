@@ -1603,6 +1603,11 @@ paths:
         "200":
           description: |
             An open SSE stream, or — with `poll=1` — a JSON page of events.
+
+            A stream is bounded on both axes: the server closes it after five
+            minutes (reconnect with `Last-Event-ID`; no events are missed), and
+            one client address may hold only a small number of streams at once.
+            Exceeding the concurrency cap returns `429` with `Retry-After`.
           content:
             text/event-stream:
               schema:

@@ -1,5 +1,6 @@
 ---
 import Base from "../../../layouts/Base.astro";
+import { SITE_CSP } from "../../../lib/csp.js";
 import { site } from "virtual:authorbot-site";
 
 export function getStaticPaths() {
@@ -13,7 +14,11 @@ const { index } = Astro.props;
 const character = site.characters[index];
 ---
 
-<Base title={`${character.name} · ${site.book.title}`} description={character.summary}>
+<Base
+  title={`${character.name} · ${site.book.title}`}
+  description={character.summary}
+  csp={SITE_CSP}
+>
   <article class="character">
     <header>
       <h1>{character.name}</h1>

@@ -569,7 +569,19 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/agent-tokens", auth, mintIdem, async (c) => {
-    const guard = await requireProjectScope(c, services, "tokens:manage");
+    /**
+     * CONTROL surface (Phase 7): a freeze must not block this.
+     *
+     * access-control.ts is explicit that "stop everything while I look" is
+     * precisely the moment an author needs to revoke a token — and revoking the
+     * leaked credential their agents were using is worth very little if they
+     * cannot then mint the replacement those agents need to keep running. The
+     * freeze already stops everything those credentials could DO; refusing to
+     * issue one adds no safety and turns a freeze into an outage.
+     */
+    const guard = await requireProjectScope(c, services, "tokens:manage", {
+      surface: "control",
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -669,7 +681,16 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.delete("/v1/projects/:projectId/agent-tokens/:tokenId", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "tokens:manage");
+    /**
+     * CONTROL surface: access-control.ts names "revoke a token" as one of the
+     * things a freeze must not refuse. Before this it was the only one that
+     * did — `agent-tokens/revoke-all` answered 200 under a freeze while
+     * revoking ONE token answered 423, so an author looking at a single leaked
+     * credential could either burn every agent they had or nothing at all.
+     */
+    const guard = await requireProjectScope(c, services, "tokens:manage", {
+      surface: "control",
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1766,6 +1787,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     serialize,
     bootstrapRules,
     requireProject: (c) => requireProjectScope(c, services, "chapters:read"),
+    requireProjectWrite: (c) => requireProjectScope(c, services, "members:manage"),
     claimStatements,
     commandStatements,
     readJson,

@@ -191,7 +191,31 @@ wrangler secret put GITHUB_APP_PRIVATE_KEY --name YOUR-WORKER < authorbot-key-pk
 
 # Also set the webhook secret if you generated a new one in "Before you start".
 wrangler secret put WEBHOOK_SECRET --name YOUR-WORKER
+
+# And a SEPARATE secret for the CI publication callback (see below).
+openssl rand -base64 48 | wrangler secret put PUBLICATION_SECRET --name YOUR-WORKER
 ```
+
+#### Why `PUBLICATION_SECRET` is not `WEBHOOK_SECRET`
+
+Two protocols verify HMACs against a shared secret: GitHub's `push` webhook,
+and the book repository's CI reporting a finished deployment to
+`POST /v1/publications`. They live in **different trust domains**.
+`WEBHOOK_SECRET` is pasted into the GitHub App's webhook configuration;
+`PUBLICATION_SECRET` goes into the book repository's **Actions secrets**, where
+every workflow — and anyone who can get a workflow to run — is within reach of
+it.
+
+While the two were one value, whoever held the CI copy could forge `push`
+webhooks (driving projection rebuilds at will), and whoever held GitHub's copy
+could forge deployment reports. Setting both keeps each blast radius to its own
+domain.
+
+If `PUBLICATION_SECRET` is unset the API falls back to `WEBHOOK_SECRET`, so an
+existing deployment keeps reporting while you rotate. To rotate: set
+`PUBLICATION_SECRET` on the Worker, put the same value in the book repo's
+Actions secrets, confirm a deployment reports, and you are done — the GitHub
+webhook secret never has to change.
 
 The two ids are ordinary variables. Add them to the `vars` block of **your
 deployment's** wrangler config:
@@ -386,7 +410,8 @@ accepting the repository's current state.
 | `GITHUB_APP_ID` | var | for Git integration | The App's numeric **App ID** |
 | `GITHUB_INSTALLATION_ID` | var | for Git integration | The numeric id of the App's installation on the book repo |
 | `GITHUB_APP_PRIVATE_KEY` | **secret** | for Git integration | PKCS#8 PEM private key |
-| `WEBHOOK_SECRET` | **secret** | yes | Shared with GitHub's webhook config; also signs publication callbacks |
+| `WEBHOOK_SECRET` | **secret** | yes | Shared with GitHub's webhook config. Verifies `push` webhooks and nothing else |
+| `PUBLICATION_SECRET` | **secret** | recommended | Shared with the book repository's CI. Verifies `POST /v1/publications` deployment reports. Falls back to `WEBHOOK_SECRET` when unset — see below |
 | `PROJECT_REPO` | var | yes | `owner/name` of the book repository |
 | `DEFAULT_BRANCH` | var | no (default `main`) | Branch Authorbot reads and commits to |
 | `MIRROR_MODE` | var | no (default `queue`) | `durable` to commit through the coordinator |

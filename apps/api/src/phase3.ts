@@ -52,8 +52,10 @@ import type { ProjectSerializer } from "./serializer.js";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_POLL_MS,
+  createStreamLimiter,
   eventJson,
   sseResponse,
+  streamClientKey,
 } from "./sse.js";
 import { adjustTally, tallyJson, tallyToMetrics, type Voter, type VoterActorType } from "./tally.js";
 
@@ -185,6 +187,14 @@ const VOTABLE_STATUSES = new Set(["open", "work_item_created"]);
 
 export function registerPhase3Routes(ctx: Phase3Context): void {
   const { app, deps, repos, clock, services, auth, maybeAuth, idem, serialize, now } = ctx;
+
+  /**
+   * One limiter per app instance, so the cap is shared by every stream this
+   * isolate serves rather than reset per request.
+   */
+  const streamLimiter = createStreamLimiter(
+    deps.config.sseMaxStreamsPerClient ?? undefined,
+  );
 
   const appendEventStatement = (
     projectId: string,
@@ -698,7 +708,19 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     const nextStatus = action === "reject" ? "rejected" : "open";
     const fromStatus = action === "reject" ? "open" : "rejected";
     return async (c: Context<AppEnv>) => {
-      const guard = await requireProjectScope(c, services, null);
+      /**
+       * A real scope, not `null`.
+       *
+       * `scope: null` told `requireProjectScope` to skip the scope check
+       * entirely AND — through `capabilityForScope(null)` — the annotation
+       * policy gate with it, so these routes were authorized by the membership
+       * role alone. For a human session that is the same answer; for an agent
+       * token it is not, because effective scopes are `token ∩ role bundle` and
+       * an intersection nobody consults binds nothing. Rejecting or reopening a
+       * suggestion changes an annotation, so it asks for `annotations:write`
+       * and picks up the policy gate that goes with it.
+       */
+      const guard = await requireProjectScope(c, services, "annotations:write");
       if ("response" in guard) {
         return guard.response;
       }
@@ -828,7 +850,14 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     auth,
     idem,
     async (c) => {
-      const guard = await requireProjectScope(c, services, null);
+      /**
+       * `work:claim`, not `null`: forcing a work item into existence is a write
+       * to the work queue, and it must require a work-related scope. Without
+       * one, a credential holding nothing but `chapters:read` could create a
+       * suggestion and then manufacture work on it — no vote, no rule, and no
+       * scope that says anything about work.
+       */
+      const guard = await requireProjectScope(c, services, "work:claim");
       if ("response" in guard) {
         return guard.response;
       }
@@ -943,7 +972,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   );
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/cancel", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, null);
+    /** `work:claim`, not `null` — see force-create-work-item above. */
+    const guard = await requireProjectScope(c, services, "work:claim");
     if ("response" in guard) {
       return guard.response;
     }
@@ -1140,6 +1170,22 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
 
     // SSE. Without a cursor the stream starts at the current head (clients
     // fetch authoritative state first, then stream deltas).
+    //
+    // A slot is taken BEFORE the stream is built, so a client already at its
+    // concurrency cap is refused with a cheap 429 instead of being handed
+    // another second-by-second poll. The slot is handed to `onClose`, which
+    // every termination path runs — disconnect, lifetime cap, write failure.
+    const slot = streamLimiter.acquire(streamClientKey(c.req.raw.headers));
+    if (slot === null) {
+      const refusal = problem(c, "rate-limited", {
+        detail: `this client already holds the maximum of ${streamLimiter.max} concurrent event streams. Close one, or poll with ?poll=1 instead.`,
+        limitClass: "event-stream",
+        limit: streamLimiter.max,
+        scope: "client",
+      });
+      refusal.headers.set("Retry-After", "5");
+      return refusal;
+    }
     const initialCursor = afterParam ?? lastEventId ?? (await repos.events.latestId(project.id));
     const headers = new Headers();
     const correlationId = c.get("correlationId");
@@ -1152,6 +1198,10 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         initialCursor,
         pollMs: deps.config.ssePollMs ?? DEFAULT_SSE_POLL_MS,
         heartbeatMs: deps.config.sseHeartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS,
+        ...(deps.config.sseMaxLifetimeMs !== undefined
+          ? { maxLifetimeMs: deps.config.sseMaxLifetimeMs }
+          : {}),
+        onClose: () => slot.release(),
       },
       headers,
     );

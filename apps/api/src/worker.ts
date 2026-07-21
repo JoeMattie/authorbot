@@ -36,6 +36,14 @@ export interface WorkerBindings {
   DEV_LOGIN_ENABLED?: string;
   SESSION_SECRET?: string;
   WEBHOOK_SECRET?: string;
+  /**
+   * HMAC key for CI publication callbacks. Optional: absent falls back to
+   * `WEBHOOK_SECRET` so an existing deployment keeps reporting through the
+   * rotation. Set it — the two secrets live in different trust domains
+   * (GitHub's webhook config vs. the book repo's Actions secrets), and sharing
+   * one lets either forge the other's requests.
+   */
+  PUBLICATION_SECRET?: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   GITHUB_REDIRECT_URI?: string;
@@ -126,6 +134,9 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
     basePath: normalizeBasePath(bindings.API_BASE_PATH),
     publicAnnotations: bindings.PUBLIC_ANNOTATIONS === "true",
   };
+  if (bindings.PUBLICATION_SECRET !== undefined && bindings.PUBLICATION_SECRET.length > 0) {
+    config.publicationSecret = bindings.PUBLICATION_SECRET;
+  }
   if (bindings.RULES_JSON !== undefined && bindings.RULES_JSON.length > 0) {
     config.rulesJson = bindings.RULES_JSON;
   }

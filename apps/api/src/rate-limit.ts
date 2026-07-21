@@ -232,6 +232,33 @@ export async function consumeRateLimit(
     windowStart,
     expiresAt,
   });
+
+  /**
+   * An agent also spends its OWNER's allowance.
+   *
+   * The module's own guarantee above is that "the ACTOR limit bounds what one
+   * identity can do however many credentials it holds" — and minting is what
+   * broke it: every token gets a brand-new agent actor of its own, so ten
+   * tokens are ten actors, ten separate `actor:` counters, and ten times the
+   * ceiling. A fleet then scales linearly with token count, which is exactly
+   * the runaway the limits exist to blunt.
+   *
+   * Charging the owning human as well restores the guarantee at the level the
+   * guarantee was always about: the person. Their agents share one allowance
+   * between them, and their own session shares it too — which is the honest
+   * reading of "one identity, however many credentials it holds".
+   */
+  const ownerActorId = auth.kind === "token" ? auth.actor.ownerActorId : null;
+  let ownerCount: number | null = null;
+  if (ownerActorId !== null && ownerActorId !== auth.actor.id) {
+    ownerCount = await deps.repos.rateLimitCounters.increment({
+      subject: `actor:${ownerActorId}`,
+      class: className,
+      windowStart,
+      expiresAt,
+    });
+  }
+
   let tokenCount: number | null = null;
   if (auth.kind === "token" && auth.tokenId !== undefined) {
     tokenCount = await deps.repos.rateLimitCounters.increment({
@@ -252,7 +279,7 @@ export async function consumeRateLimit(
       className,
     };
   }
-  if (actorCount > ceiling.perActor) {
+  if (actorCount > ceiling.perActor || (ownerCount !== null && ownerCount > ceiling.perActor)) {
     return {
       allowed: false,
       scope: "actor",
@@ -266,7 +293,7 @@ export async function consumeRateLimit(
     allowed: true,
     scope: null,
     limit: ceiling.perActor,
-    remaining: Math.max(0, ceiling.perActor - actorCount),
+    remaining: Math.max(0, ceiling.perActor - Math.max(actorCount, ownerCount ?? 0)),
     retryAfter,
     className,
   };
@@ -316,7 +343,7 @@ export function rateLimitsJson(): Record<string, unknown> {
     ),
     notes: [
       "Limits apply to mutations only; reads are never counted and never refused by a limit.",
-      "Every mutation is counted against its actor; a request authenticated by an agent token is counted against the token as well, and must satisfy both ceilings.",
+      "Every mutation is counted against its actor; a request authenticated by an agent token is counted against the token, against the agent's own actor, and against the human who minted it, and must satisfy every ceiling. Minting more tokens therefore does not buy more throughput.",
       "Exceeding a ceiling returns 429 with a Retry-After header giving the seconds until the current window closes.",
     ],
   };

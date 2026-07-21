@@ -38,7 +38,7 @@ import type {
 import { roleSchema, type Role } from "@authorbot/domain";
 import { z } from "zod";
 import { accessStateJson, loadAccessState } from "./access-control.js";
-import { apiRoleScopes } from "./api-scopes.js";
+import { apiRoleScopes, type ApiScope } from "./api-scopes.js";
 import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
 import type { AppDeps, AppEnv, Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
@@ -246,11 +246,33 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * Guard for the maintainer control plane: project match, membership, scope,
    * the agent pause, and rate limits — but NOT the freeze, because a freeze
    * that blocked its own reversal would be a one-way door.
+   *
+   * ## Why the scope argument exists (and why it is not `chapters:read`)
+   *
+   * Every route here also calls `requireMaintainer`, and for a human session
+   * the role IS the whole answer — a session's effective scopes are its role
+   * bundle, so role and scope say the same thing. For an AGENT TOKEN they do
+   * not: effective scopes are `token ∩ role bundle` (Phase 2 §3), and asking
+   * for `chapters:read` — the weakest scope in the vocabulary, present in every
+   * bundle — made that intersection vacuous. Role alone then decided, and the
+   * contract's deliberate grant of the maintainer role to an author's agent (so
+   * a `locked` book stays annotatable) silently carried the entire control
+   * plane with it: such a token could freeze the book, reopen the policy,
+   * revoke every other credential, and delete the human author's membership.
+   *
+   * So the *changing* routes name a genuinely maintainer-only scope —
+   * `members:manage` for the book's own controls and its people,
+   * `tokens:manage` for credentials. A human maintainer holds both through
+   * their role and notices nothing. An agent holds one only if its token was
+   * minted asking for it AND its membership was raised to maintainer: two
+   * explicit acts by a human, which is what "a deliberate grant rather than an
+   * implicit inheritance" is supposed to mean.
    */
   const controlGuard = (
     c: Context<AppEnv>,
+    scope: ApiScope = "chapters:read",
   ): Promise<{ project: ProjectRecord } | { response: Response }> =>
-    requireProjectScope(c, services, "chapters:read", {
+    requireProjectScope(c, services, scope, {
       surface: "control",
       capability: null,
     });
@@ -258,8 +280,9 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
   /** The same guard, but frozen with the book (moderation approval commits). */
   const collaborationGuard = (
     c: Context<AppEnv>,
+    scope: ApiScope = "chapters:read",
   ): Promise<{ project: ProjectRecord } | { response: Response }> =>
-    requireProjectScope(c, services, "chapters:read", { capability: null });
+    requireProjectScope(c, services, scope, { capability: null });
 
   // =========================================================================
   // Seeing (contract "Seeing")
@@ -467,7 +490,9 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * self-explanatory — the emergency is over.
    */
   const freezeRoute = (frozen: boolean) => async (c: Context<AppEnv>) => {
-    const guard = await controlGuard(c);
+    // `members:manage`, not `chapters:read`: the freeze is the book's stop
+    // button, and a credential that can press it can also stop everyone else.
+    const guard = await controlGuard(c, "members:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -528,8 +553,21 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
         }),
         repos.events.appendStatement({
           projectId: guard.project.id,
+          /**
+           * NO `reason` in the payload.
+           *
+           * The event feed is served by `requireReadOrPublic`, which on a
+           * deployment with `PUBLIC_ANNOTATIONS=true` answers a caller holding
+           * no credential at all — while `GET /access`, which carries the same
+           * reason, correctly 401s that caller. A freeze reason is incident
+           * prose written by a maintainer in a hurry ("rotating the leaked
+           * token tok_…"), so publishing it to the internet is a disclosure the
+           * author never agreed to. The fact that the book froze is not
+           * sensitive and is what a listening client needs; the reason stays in
+           * the audit row and in `/access`, both of which require membership.
+           */
           type: frozen ? "project_frozen" : "project_unfrozen",
-          payload: { reason },
+          payload: {},
           createdAt: at,
         }),
         ...ctx.claimStatements(c, 200, responseBody),
@@ -552,13 +590,21 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * and its outbox row back to `pending`. It re-runs the existing plan; it
    * does not rewrite it. An operation that failed because its content is
    * invalid will fail again, which is the honest outcome.
+   *
+   * COLLABORATION surface, not control: requeuing puts a payload back on the
+   * path to a commit, and access-control.ts applies exactly this reasoning to
+   * moderation approval — "approval commits new content, which is the thing the
+   * freeze exists to stop". A retry accepted during a freeze would have the
+   * mirror committing while the author was still looking, which is precisely
+   * what they pressed the stop button to prevent. The operation is not lost:
+   * it stays `failed` and can be requeued the moment the freeze lifts.
    */
   app.post(
     "/v1/projects/:projectId/operations/:operationId/retry",
     auth,
     idem,
     async (c: Context<AppEnv>) => {
-      const guard = await controlGuard(c);
+      const guard = await collaborationGuard(c);
       if ("response" in guard) return guard.response;
       const denied = requireMaintainer(c);
       if (denied !== null) return denied;
@@ -626,7 +672,9 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * destructive sibling is `agent-tokens/revoke-all` below.
    */
   const pauseRoute = (paused: boolean) => async (c: Context<AppEnv>) => {
-    const guard = await controlGuard(c);
+    // Pausing agents is a statement about credentials, so it is gated on the
+    // credential scope: `tokens:manage`.
+    const guard = await controlGuard(c, "tokens:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -686,7 +734,8 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
         repos.events.appendStatement({
           projectId: guard.project.id,
           type: paused ? "agents_paused" : "agents_resumed",
-          payload: { reason, affectedTokens: affected.length },
+          /** No `reason`, for the same disclosure reason as `project_frozen`. */
+          payload: { affectedTokens: affected.length },
           createdAt: at,
         }),
         ...ctx.claimStatements(c, 200, responseBody),
@@ -718,7 +767,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * deliberate grant rather than an implicit inheritance from their owner".
    */
   app.patch("/v1/projects/:projectId/collaborators/:actorId", auth, idem, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await controlGuard(c, "members:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -753,10 +802,16 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
       }
       if (membership.role === "maintainer" && parsed.data.role !== "maintainer") {
         const remaining = await countMaintainers(repos, guard.project.id, targetActorId);
-        if (remaining === 0) {
+        if (remaining.total === 0) {
           return problem(c, "domain-rule-failed", {
             detail:
               "this is the book's last maintainer. Promote someone else to maintainer first — a book with no maintainer cannot change its own settings, tokens, roles, or freeze.",
+          });
+        }
+        if (remaining.human === 0 && (await isHumanActor(repos, targetActorId))) {
+          return problem(c, "domain-rule-failed", {
+            detail:
+              "this is the book's last human maintainer. Promote another person to maintainer first — the remaining maintainers are agents, and a book administered only by agents has no one who can revoke them.",
           });
         }
       }
@@ -814,7 +869,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * they already contributed is left untouched.
    */
   app.delete("/v1/projects/:projectId/collaborators/:actorId", auth, idem, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await controlGuard(c, "members:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -836,10 +891,16 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
       }
       if (membership.role === "maintainer") {
         const remaining = await countMaintainers(repos, guard.project.id, targetActorId);
-        if (remaining === 0) {
+        if (remaining.total === 0) {
           return problem(c, "domain-rule-failed", {
             detail:
               "this is the book's last maintainer and cannot be removed. Promote someone else to maintainer first.",
+          });
+        }
+        if (remaining.human === 0 && (await isHumanActor(repos, targetActorId))) {
+          return problem(c, "domain-rule-failed", {
+            detail:
+              "this is the book's last human maintainer and cannot be removed. Promote another person to maintainer first — the remaining maintainers are agents, and a book administered only by agents has no one who can revoke them.",
           });
         }
       }
@@ -908,7 +969,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * mid-submission must not get its edit committed after the alarm was raised.
    */
   app.post("/v1/projects/:projectId/agent-tokens/revoke-all", auth, idem, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await controlGuard(c, "tokens:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -1047,6 +1108,23 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * Attribution stays with the SUBMITTER, not the approving maintainer: the
    * outbox payload carries the author's actor ref, so the commit trailer
    * credits the person who wrote the words.
+   *
+   * ## The anchor is re-checked here, not trusted from the queue row
+   *
+   * `POST .../annotations` enforces two things unconditionally (contract §4):
+   * the submitted `chapterRevision` must match the projected revision, and a
+   * non-chapter-scoped `target.blockId` must exist in that revision. A queued
+   * annotation satisfied both WHEN IT WAS WRITTEN — and then sat in the queue
+   * while the chapter kept moving. Approving it without re-asking would commit
+   * an annotation anchored at revision 4 into a book at revision 7, pointing at
+   * a block id that may no longer exist: a permanent, mirrored record that the
+   * create path would have refused outright. The queue delays the write; it
+   * does not exempt it.
+   *
+   * A stale anchor is reported as its own outcome rather than a generic
+   * failure, because it is recoverable in a way "author unknown" is not — the
+   * author can re-anchor and resubmit, and in bulk the other 199 items must not
+   * be held hostage to it.
    */
   const approveOne = async (input: {
     c: Context<AppEnv>;
@@ -1055,11 +1133,48 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
     approverActorId: string;
     correlationId: string;
     at: string;
-  }): Promise<{ statements: SqlStatement[]; operationId: string } | { problem: Response }> => {
+  }): Promise<
+    | { statements: SqlStatement[]; operationId: string }
+    | { problem: Response; outcome: "author-unknown" | "stale-anchor" }
+  > => {
     const { c, project, pending, approverActorId, correlationId, at } = input;
     const author = await repos.actors.getById(pending.authorActorId);
     if (author === null) {
-      return { problem: problem(c, "state-conflict", { detail: "annotation author is unknown" }) };
+      return {
+        outcome: "author-unknown",
+        problem: problem(c, "state-conflict", { detail: "annotation author is unknown" }),
+      };
+    }
+
+    const chapter = await repos.chapters.getById(pending.chapterId);
+    if (chapter === null || chapter.projectId !== project.id) {
+      return {
+        outcome: "stale-anchor",
+        problem: problem(c, "state-conflict", {
+          detail: "the chapter this annotation targets no longer exists",
+        }),
+      };
+    }
+    if (pending.chapterRevision !== chapter.revision) {
+      return {
+        outcome: "stale-anchor",
+        problem: problem(c, "revision-conflict", {
+          detail: `this annotation was queued against chapter revision ${pending.chapterRevision}; the chapter is now at revision ${chapter.revision}. Approving it would commit an annotation anchored to text that has since changed.`,
+          projectedRevision: chapter.revision,
+          queuedRevision: pending.chapterRevision,
+        }),
+      };
+    }
+    if (pending.scope !== "chapter") {
+      const blockId = (pending.target as { blockId?: unknown } | null)?.blockId;
+      if (typeof blockId !== "string" || !chapter.blockIds.includes(blockId)) {
+        return {
+          outcome: "stale-anchor",
+          problem: problem(c, "unknown-block", {
+            detail: `block ${String(blockId)} does not exist in chapter revision ${chapter.revision}`,
+          }),
+        };
+      }
     }
     const command = ctx.commandStatements({
       project,
@@ -1319,7 +1434,9 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
             at,
           });
           if ("problem" in built) {
-            results.push({ pendingId: id, outcome: "author-unknown" });
+            // Per-item, never fatal: one annotation whose chapter moved on must
+            // not fail the other hundred and ninety-nine.
+            results.push({ pendingId: id, outcome: built.outcome });
             continue;
           }
           statements.push(...built.statements);
@@ -1401,16 +1518,41 @@ export function pendingAnnotationJson(p: PendingAnnotationRecord): Record<string
   };
 }
 
-/** Live maintainers other than `excludingActorId`. */
+/**
+ * Live maintainers other than `excludingActorId`, counted twice: in total, and
+ * restricted to HUMAN actors.
+ *
+ * The human count exists because "the book still has a maintainer" turned out
+ * to be too weak a guard rail. An author's agent may legitimately hold the
+ * maintainer role (that is how a `locked` book stays annotatable), and the
+ * total-count check was happy to let the last human maintainer be demoted or
+ * removed as long as such an agent remained — leaving a book administered
+ * exclusively by a machine, with the person who wrote it locked out and no way
+ * back that does not involve a database console. That is the exact outcome
+ * every other guard rail in this section exists to prevent, so it is checked
+ * for the population that matters rather than for the row count.
+ */
 async function countMaintainers(
   repos: Repositories,
   projectId: string,
   excludingActorId: string,
-): Promise<number> {
+): Promise<{ total: number; human: number }> {
   const memberships = await repos.projectMemberships.listByProject(projectId);
-  return memberships.filter(
+  const others = memberships.filter(
     (m) => m.revokedAt === null && m.role === "maintainer" && m.actorId !== excludingActorId,
-  ).length;
+  );
+  const actors = await Promise.all(others.map((m) => repos.actors.getById(m.actorId)));
+  return {
+    total: others.length,
+    // An actor row that has vanished is not evidence of a human maintainer.
+    human: actors.filter((a) => a !== null && a.type === "human").length,
+  };
+}
+
+/** True when this actor is a person rather than an agent token's identity. */
+async function isHumanActor(repos: Repositories, actorId: string): Promise<boolean> {
+  const actor = await repos.actors.getById(actorId);
+  return actor !== null && actor.type === "human";
 }
 
 /**
