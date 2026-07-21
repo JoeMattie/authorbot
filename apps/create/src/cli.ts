@@ -10,6 +10,7 @@
  * real entry point rather than a test-only approximation of it.
  */
 import path from "node:path";
+import { TOOLCHAIN_VERSION } from "./scaffold/render.js";
 import { Actions } from "./actions.js";
 import { EXAMPLE_CONFIG, parseConfig, secretAnswersIn } from "./config.js";
 import type { WizardContext, WizardOptions } from "./context.js";
@@ -55,7 +56,13 @@ Nothing destructive happens without you agreeing to it, secrets are never
 shown or written down, and everything created outside your machine is listed
 at the end with how to remove it.`;
 
-export const VERSION = "0.1.0";
+/**
+ * What `--version` reports. Derived from the single pin rather than written
+ * again: this shipped as 0.1.0 inside the 0.1.1 package, because a second
+ * copy of a version is a copy that goes stale. `scripts/bump-version.mjs`
+ * sets TOOLCHAIN_VERSION, and everything else follows from it.
+ */
+export const VERSION = TOOLCHAIN_VERSION;
 
 export interface CliDeps {
   readonly runner: ProcessRunner;
