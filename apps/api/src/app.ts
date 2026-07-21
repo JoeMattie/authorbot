@@ -411,6 +411,34 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return limit;
   };
 
+  // ---- health --------------------------------------------------------------
+
+  /**
+   * Whether this deployment can actually do the work it was set up to do.
+   *
+   * Unauthenticated on purpose, because the one caller that most needs it has
+   * no credential: `create-authorbot` finishes by checking the API before it
+   * switches a book's collaboration controls on, and it makes that check as an
+   * anonymous stranger.
+   *
+   * Without this, the only signal available was "does /v1/me refuse me?" — and
+   * a Worker with no usable GitHub App refuses anonymous callers exactly as
+   * correctly as a healthy one. That is how a release shipped in which
+   * collaboration was switched on over an integration that could not commit,
+   * could not project, and could not read the book's own book.yml: every
+   * read-only route answered perfectly, so the wizard reported success.
+   *
+   * A status word and nothing else. No credential, no configuration, no
+   * identifier: `gitIntegration` says whether the app is usable, never what it
+   * is. That is the whole reason this can be public.
+   */
+  app.get("/v1/health", async (c) => {
+    return c.json({
+      status: "ok",
+      gitIntegration: deps.config.gitIntegration ?? "unconfigured",
+    });
+  });
+
   // ---- identity ------------------------------------------------------------
 
   app.get("/v1/me", auth, async (c) => {

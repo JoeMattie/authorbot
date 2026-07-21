@@ -274,3 +274,31 @@ describe("signing out", () => {
     expect(out.status).toBe(204);
   });
 });
+
+describe("the health endpoint", () => {
+  let h: TestHarness;
+
+  beforeEach(async () => {
+    h = await makeHarness();
+  });
+  afterEach(() => h.close());
+
+  it("answers an anonymous caller", async () => {
+    // The caller that most needs this has no credential: the setup wizard
+    // checks the API before switching a book's collaboration controls on, and
+    // does it as a stranger.
+    const res = await h.app.request("/v1/health");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; gitIntegration: string };
+    expect(body.status).toBe("ok");
+    expect(["configured", "incomplete", "unconfigured"]).toContain(body.gitIntegration);
+  });
+
+  it("reports whether Git work is possible, and nothing about the credential", async () => {
+    // A status word only. If this ever grew an app id, an installation id, or
+    // a key fingerprint, it would stop being safe to serve publicly.
+    const res = await h.app.request("/v1/health");
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["gitIntegration", "status"]);
+  });
+});

@@ -774,6 +774,33 @@ async function verifyHealth(
     );
   }
 
+  // Ask the deployed Worker whether it can actually do Git work, rather than
+  // inferring it from a route that answers the same either way.
+  //
+  // The credential check before the deploy catches a value this wizard
+  // dropped. This catches everything after that: a malformed key, an
+  // installation that was revoked, an app deleted between runs. In all of
+  // those the wizard used to report "The API answers correctly" over a book
+  // that could not sync a single chapter, and the author found out three
+  // symptoms later.
+  const health = await ctx.http.request(`${base}/v1/health`, { timeoutMs: 20_000 });
+  if (health.status === 200) {
+    let gitIntegration: unknown;
+    try {
+      gitIntegration = (JSON.parse(health.body) as { gitIntegration?: unknown }).gitIntegration;
+    } catch {
+      gitIntegration = undefined;
+    }
+    if (gitIntegration === "incomplete" || gitIntegration === "unconfigured") {
+      throw new WizardError(
+        `The API is running but reports its GitHub App as "${String(gitIntegration)}", so it cannot commit anything back to your book.`,
+        "The site was NOT switched over, so your readers are unaffected. Collaboration would have looked switched on while every chapter silently failed to save. Delete the app at https://github.com/settings/apps and run `create-authorbot collaborate` again to create a fresh one.",
+      );
+    }
+  }
+  // A 404 means an older API that predates this endpoint: nothing to assert,
+  // and refusing to proceed would be worse than the check being absent.
+
   const start = await ctx.http.request(`${base}/v1/auth/github`, {
     timeoutMs: 20_000,
     followRedirects: false,

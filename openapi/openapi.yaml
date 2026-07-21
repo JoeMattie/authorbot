@@ -139,6 +139,34 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /v1/health:
+    get:
+      operationId: health
+      tags: [identity]
+      summary: Whether this deployment can do the work it was set up to do.
+      description: >-
+        Unauthenticated, because the caller that most needs it has no
+        credential: the setup wizard checks the API before switching a book's
+        collaboration controls on, and does so anonymously. `gitIntegration`
+        says whether the GitHub App is usable — never what it is. A status word
+        and nothing else, which is why it can be public.
+      security: []
+      responses:
+        "200":
+          description: Deployment status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, gitIntegration]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  gitIntegration:
+                    type: string
+                    enum: [configured, incomplete, unconfigured]
+
   /v1/auth/logout:
     post:
       operationId: signOut
