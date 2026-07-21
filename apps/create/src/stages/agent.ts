@@ -193,7 +193,14 @@ async function mintToken(
     }
     credential = await ctx.prompter.secret({
       id: "agent.maintainerToken",
-      message: "Maintainer bearer token (hidden, sent only to your own site):",
+      // The escape hatch has always existed — an empty value falls through to
+      // the settings-page instructions — and was never mentioned, so the field
+      // read as a demand rather than an offer. The first author to reach it
+      // answered yes, met a cursor, and had nothing telling them either how to
+      // get the credential or how to leave.
+      message:
+        "Maintainer bearer token — or press Enter to skip and use your book's settings page instead:",
+      hint: "Hidden as you type, and sent only to your own site. Almost nobody has one of these: signing in gives a session cookie, not a token. Skipping is the normal answer.",
     });
   }
   if (credential.length === 0) {

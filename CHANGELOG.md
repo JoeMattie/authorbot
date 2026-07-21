@@ -9,6 +9,13 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.23
+
+- **Every hint under every question came back.** Moving prompts to clack
+  dropped them silently five releases ago: the explanatory line under each
+  text and confirm question stopped being shown, so questions arrived without
+  the sentence that made them answerable.
+
 ## 0.1.22
 
 - **You can create an agent token from your book's settings.** Until now

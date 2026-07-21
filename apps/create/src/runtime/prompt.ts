@@ -140,7 +140,7 @@ export class TtyPrompter implements Prompter {
 
   async secret(prompt: SecretPrompt): Promise<string> {
     const answer = await password({
-      message: this.#redact(prompt.message),
+      message: this.#withHint(prompt.message, prompt.hint),
       input: this.#input,
       output: this.#output,
       // Asterisks rather than nothing. A field that gives no feedback at all
