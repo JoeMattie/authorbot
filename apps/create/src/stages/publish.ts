@@ -54,7 +54,7 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
   const customDomain = await ctx.prompter.text({
     id: "publish.customDomain",
     message: "A custom domain for the site? Leave blank to use the workers.dev address.",
-    hint: "Cloudflare must already manage DNS for that domain. You can add one later without redoing any of this.",
+    hint: "The whole hostname, exactly as a reader would type it — book.example.com, not example.com and not just `book`. Whatever you enter is the address your book takes over, so an apex domain means the site at that apex. Cloudflare must already manage DNS for it. You can add one later without redoing any of this.",
     defaultValue: ctx.journal.data.publish?.customDomain ?? "",
     validate: (value) => {
       if (value.length === 0) {
@@ -66,6 +66,10 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
       return null;
     },
   });
+
+  if (customDomain.length > 0) {
+    await confirmDomainIsFree(ctx, customDomain);
+  }
 
   // ---- configuration ------------------------------------------------------
 
@@ -290,8 +294,24 @@ async function configureRepositorySecrets(ctx: WizardContext, repo: string | nul
     return;
   }
 
+  // The template is a starting point, not the finished token. It omits D1 —
+  // which the collaborate stage needs, and whose absence shows up much later
+  // as a migration failing in CI rather than as anything wrong here — and it
+  // leaves the two resource scopes empty, which a token cannot be saved with.
+  // Both were left for the author to work out from Cloudflare's error
+  // messages, which do not mention Authorbot at all.
   ctx.reporter.info(
-    "Create a token at https://dash.cloudflare.com/profile/api-tokens using the \"Edit Cloudflare Workers\" template, then paste it here. It is sent straight to GitHub and never written down.",
+    "Create a token at https://dash.cloudflare.com/profile/api-tokens, starting from the \"Edit Cloudflare Workers\" template. It is sent straight to GitHub and never written down.",
+  );
+  ctx.reporter.info("Before saving it, adjust three things the template leaves out:");
+  ctx.reporter.info(
+    "  1. Add the permission `Account > D1 > Edit`. Publishing works without it, but turning on collaboration later does not.",
+  );
+  ctx.reporter.info(
+    "  2. Account Resources: Include > your account. The template leaves this empty and the token cannot be saved.",
+  );
+  ctx.reporter.info(
+    "  3. Zone Resources: Include > All zones (or just the zone holding your custom domain, if you gave one).",
   );
 
   const token = ctx.vault.register(
@@ -390,6 +410,79 @@ export function deployedUrl(
  * to become reachable, so a single request immediately after deploy would
  * report failure for a site that is about to work.
  */
+/**
+ * Refuses to take over a hostname that is already serving a site, unless the
+ * author says so in as many words.
+ *
+ * A Worker custom domain is not additive: Cloudflare routes that hostname to
+ * this Worker, and whatever answered there before stops answering. Typing a
+ * domain one letter shorter than intended — `example.com` where
+ * `book.example.com` was meant — therefore replaces a personal site with a
+ * book that has no chapters in it yet, and the wizard's own promise is that
+ * nothing destructive happens without asking first.
+ *
+ * The check is a plain GET. Anything that answers counts as occupied: this
+ * cannot tell a beloved blog from a parking page, so it does not try to judge,
+ * it just makes sure a human looked. A domain that does not answer is left to
+ * proceed silently, which is the ordinary case for a subdomain minted for the
+ * book.
+ */
+async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<void> {
+  // Already ours. Re-running `publish` — after a failed deploy, or to pick up
+  // a new chapter — would otherwise find the book itself sitting there and ask
+  // the author to confirm replacing their own site, every time. The stage is
+  // meant to be re-runnable, and a prompt that cries wolf on the ordinary path
+  // is how a genuine warning stops being read.
+  if (ctx.journal.data.publish?.customDomain === domain) {
+    return;
+  }
+
+  if (ctx.actions.dryRun) {
+    ctx.actions.note(
+      `check: GET https://${domain}`,
+      "Confirms the hostname is free before the book takes it over.",
+    );
+    return;
+  }
+
+  let occupied = false;
+  try {
+    const response = await ctx.http.request(`https://${domain}`, { timeoutMs: 10_000 });
+    occupied = response.status >= 200 && response.status < 400;
+  } catch {
+    // Unreachable, no DNS, TLS failure: nothing is being replaced, so there is
+    // nothing to warn about. A domain Cloudflare does not manage yet fails the
+    // deploy later with an error that says so.
+    return;
+  }
+  if (!occupied) {
+    return;
+  }
+
+  ctx.reporter.blank();
+  ctx.reporter.warn(`https://${domain} is already serving a site.`);
+  ctx.reporter.info(
+    `Adding it as a custom domain sends that hostname to your book instead. Whatever lives there now stops being reachable at ${domain}.`,
+  );
+  ctx.reporter.info(
+    `If you meant a subdomain of it — book.${domain}, say — answer no and enter that instead.`,
+  );
+
+  const proceed = await ctx.prompter.confirm({
+    id: "publish.replaceExistingSite",
+    message: `Replace what is at ${domain} with your book?`,
+    hint: "This is the answer that cannot be undone by re-running the wizard: the previous site has to be put back by whoever deployed it.",
+    defaultValue: false,
+  });
+
+  if (!proceed) {
+    throw new WizardError(
+      `Stopped before taking over ${domain}.`,
+      "Run `create-authorbot publish` again and give a hostname that is not already serving something — a subdomain like book.example.com is the usual choice. Nothing was deployed.",
+    );
+  }
+}
+
 async function waitForSite(ctx: WizardContext, url: string): Promise<boolean> {
   const deadline = ctx.clock.now().getTime() + 120_000;
   let attempt = 0;
