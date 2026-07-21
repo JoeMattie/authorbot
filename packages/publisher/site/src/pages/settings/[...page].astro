@@ -30,6 +30,14 @@ const csp =
   "img-src 'self' data:";
 const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
 const src = `${site.basePath}_astro/authorbot-collab.js`;
+/**
+ * Phase 7's access-control surface ships as its own bundle (see `buildIslands`)
+ * and is loaded HERE ONLY — a collaborator table, a token list, an audit view
+ * and a moderation queue are maintainer-only and have no business in the
+ * chapter-page budget every reader pays.
+ */
+const accessStylesHref = `${site.basePath}_astro/authorbot-access.css`;
+const accessSrc = `${site.basePath}_astro/authorbot-access.js`;
 ---
 
 <Base
@@ -38,6 +46,7 @@ const src = `${site.basePath}_astro/authorbot-collab.js`;
   noindex={true}
   csp={csp}
   collabStylesHref={collabStylesHref}
+  extraStylesHrefs={[accessStylesHref]}
 >
   <section class="settings-page">
     <h1>Book settings</h1>
@@ -55,5 +64,20 @@ const src = `${site.basePath}_astro/authorbot-collab.js`;
       </p>
     </authorbot-settings>
   </section>
+  <section class="access-page">
+    <h2>People, agents, and access</h2>
+    <p class="settings-intro">
+      Who can touch this book, what each of them may do, and how to stop them. Unlike the settings
+      above, these are not <code>book.yml</code> changes: they take effect immediately, on the very
+      next request, and every one of them is recorded in this book's activity log.
+    </p>
+    <authorbot-access data-api-base={collab.apiBase} data-project={collab.projectSlug}>
+      <p class="settings-fallback">
+        Collaborators, agent tokens, the approval queue and this book's activity log load here once
+        JavaScript is enabled. Sign in as a maintainer to manage them.
+      </p>
+    </authorbot-access>
+  </section>
   <script is:inline type="module" src={src}></script>
+  <script is:inline type="module" src={accessSrc}></script>
 </Base>

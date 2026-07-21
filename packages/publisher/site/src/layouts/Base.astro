@@ -2,7 +2,19 @@
 import { site } from "virtual:authorbot-site";
 import "../styles/site.css";
 
-const { title, description, noindex = false, csp, collabStylesHref } = Astro.props;
+const {
+  title,
+  description,
+  noindex = false,
+  csp,
+  collabStylesHref,
+  /**
+   * Additional island stylesheets. `/settings/` loads the Phase 7 access-control
+   * sheet on top of the collaboration one; every other page passes nothing, so
+   * no reader downloads a maintainer-only stylesheet.
+   */
+  extraStylesHrefs = [],
+} = Astro.props;
 const base = site.basePath;
 // Astro escapes attribute quotes but keeps `<`/`>` inside attribute values;
 // dropping them here guarantees the built output never contains a literal
@@ -21,6 +33,7 @@ const safeDescription =
     {safeDescription && <meta name="description" content={safeDescription} />}
     {noindex && <meta name="robots" content="noindex" />}
     {collabStylesHref && <link rel="stylesheet" href={collabStylesHref} />}
+    {extraStylesHrefs.map((href: string) => <link rel="stylesheet" href={href} />)}
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>

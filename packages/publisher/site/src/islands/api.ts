@@ -326,6 +326,13 @@ export interface GuardedField {
   consequence: string;
 }
 
+/**
+ * Who may comment and suggest, and whether it appears immediately (Phase 7
+ * contract "Restricting"). A progression from public to private workspace that
+ * an author moves up and down freely.
+ */
+export type AnnotationPolicy = "open" | "approval-gated" | "collaborators-only" | "locked";
+
 /** `GET .../settings` — mirrors the API's field taxonomy exactly. */
 export interface SettingsDocument {
   settings: {
@@ -336,6 +343,18 @@ export interface SettingsDocument {
       show_revision: boolean | null;
       show_attribution: boolean | null;
       show_public_annotations: boolean | null;
+    };
+    /**
+     * Phase 7 "Restricting". `options` is the API's own plain-language account
+     * of each mode, so the picker never keeps a second copy of what `locked`
+     * actually does. Optional because a deployment predating Phase 7 omits the
+     * whole section; the view then falls back to its shipped wording.
+     */
+    collaboration?: {
+      annotation_policy: AnnotationPolicy;
+      /** `default` when the book has declared nothing, `book` once it has. */
+      source?: string;
+      options?: Record<string, string>;
     };
   };
   guarded: Record<string, GuardedField>;
@@ -358,6 +377,8 @@ export interface SettingsDocument {
 
 /** PATCH body. `null` clears an optional field; absent leaves it alone. */
 export interface SettingsPatch {
+  /** `null` returns the book to the default `collaborators-only`. */
+  collaboration?: { annotation_policy?: AnnotationPolicy | null };
   title?: string;
   language?: string;
   license?: string | null;
@@ -410,7 +431,12 @@ interface PageBody {
   nextCursor: string | null;
 }
 
-async function problemMessage(response: Response): Promise<string> {
+/**
+ * The `detail`/`title` of an `application/problem+json` body. Exported so the
+ * Phase 7 client (`access-api.ts`) surfaces API errors through exactly this
+ * path rather than growing a second, subtly different one.
+ */
+export async function problemMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { detail?: string; title?: string };
     return body.detail ?? body.title ?? `request failed (${response.status})`;
@@ -425,7 +451,7 @@ export class CollabApi {
     readonly project: string,
   ) {}
 
-  private projectUrl(path: string): string {
+  protected projectUrl(path: string): string {
     return `${this.base}/v1/projects/${encodeURIComponent(this.project)}${path}`;
   }
 
@@ -434,11 +460,11 @@ export class CollabApi {
     return `${this.base}/v1/auth/github?return_to=${encodeURIComponent(returnTo)}`;
   }
 
-  private async get(url: string): Promise<Response> {
+  protected async get(url: string): Promise<Response> {
     return fetch(url, { credentials: "include", headers: { accept: "application/json" } });
   }
 
-  private async post(url: string, body: unknown): Promise<Response> {
+  protected async post(url: string, body: unknown): Promise<Response> {
     return this.mutate("POST", url, body);
   }
 
@@ -447,7 +473,7 @@ export class CollabApi {
    * is set by the browser and satisfies the API's CSRF check (contract §3);
    * the `Idempotency-Key` makes retries safe (contract §2.4).
    */
-  private async mutate(
+  protected async mutate(
     method: "POST" | "PUT" | "PATCH" | "DELETE",
     url: string,
     body?: unknown,
@@ -680,7 +706,7 @@ export class CollabApi {
    * Shared response funnel: `status: 0` means "unreachable" (the islands' cue
    * to stay quiet), any HTTP error carries the parsed problem body.
    */
-  private async jsonResult<T>(
+  protected async jsonResult<T>(
     pending: Promise<Response>,
     okStatuses: readonly number[],
   ): Promise<ApiResult<T>> {

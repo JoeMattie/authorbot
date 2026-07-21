@@ -208,6 +208,49 @@ the moment the lease is released, submitted, or expires.
 Node script (claim → print bundle → submit → poll → report commit); the
 Playwright suite runs both paths over the same `revise_range` work-item type.
 
+## The `/settings/` page — access control (Phase 7)
+
+Collab builds emit `/settings/`, which mounts two independent islands: the
+Phase 6 `<authorbot-settings>` form over `book.yml`, and Phase 7's
+`<authorbot-access data-api-base data-project>` — the author-facing access
+control surface (collaborators, agent tokens, the audit view, the annotation
+policy, freeze, pause-agents, the approval queue, and the revocations).
+
+**It is a second bundle, not more of the first.** `buildIslands()` runs Vite
+twice, emitting `_astro/authorbot-access.js|.css` alongside
+`authorbot-collab.js|.css`, and only `/settings/` links it. The reason is the
+contract's 35 KB budget: that number exists because `authorbot-collab.js` is
+what *every reader* downloads on *every chapter page*, and a collaborator
+table, a token list, an audit log and a moderation queue are maintainer-only.
+For the same reason the Phase 7 routes live on `AccessApi extends CollabApi`
+in `site/src/islands/access-api.ts` rather than on `CollabApi` itself — class
+methods do not tree-shake, so putting them on the shared client would cost
+every reader ~400 bytes gzipped of code they can never call. Both bundles are
+regression-tested: the collab bundle must not contain the access view, and an
+api-url-less build emits neither.
+
+Author-facing wording lives in `site/src/islands/access-model.ts` (pure, no
+DOM), so it is unit-testable and so the rules the contract cares about are
+enforceable by test rather than by review:
+
+- role and policy descriptions prefer **the server's own text**
+  (`roleConsequences`, `collaboration.options`) over the shipped fallbacks, so
+  the interface cannot drift from what the API actually grants;
+- `locked` is described as **author-only, not off** — the book stays usable by
+  its maintainers and collaborators keep their membership and history;
+- every destructive confirmation states **what stops and what stays**: access
+  ends on the next request and claimed work returns to the queue, but existing
+  contributions and attribution remain. Removing someone is not erasing them,
+  and a build test greps the shipped bundle for that sentence.
+
+Confirmations are never default-yes: an unticked checkbox, a disabled confirm
+button, and a "Keep access" escape that takes focus first. Annotation bodies
+in the moderation queue are untrusted prose and render through `textContent`
+only. Key selectors: `.ab-access-body`, `.ab-access-policy`,
+`.ab-policy-radio`, `.ab-access-emergency`, `.ab-access-freeze`,
+`.ab-access-agents`, `.ab-collaborator`, `.ab-role-select`, `.ab-token`,
+`.ab-pending`, `.ab-bulk-approve`, `.ab-audit-list`, `.ab-access-confirm`.
+
 ## Chapter selection
 
 `status: published` is included by default; `--include-drafts` adds

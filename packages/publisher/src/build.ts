@@ -83,31 +83,59 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
   const assetDir = path.join(outDir, "_astro");
   await mkdir(assetDir, { recursive: true });
   const { build: viteBuild } = await import("vite");
-  try {
-    await viteBuild({
-      configFile: false,
-      logLevel: "warn",
-      root: siteRoot,
-      build: {
-        outDir: assetDir,
-        emptyOutDir: false,
-        target: "es2022",
-        minify: "esbuild",
-        rollupOptions: {
-          input: path.join(siteRoot, "src/islands/index.ts"),
-          output: { entryFileNames: "authorbot-collab.js", format: "es" },
+
+  /**
+   * Two entries, bundled independently rather than as one multi-input build.
+   *
+   * `authorbot-collab` is what every reader downloads on every chapter page,
+   * and Phase 2b §1 budgets it at 35 KB gzipped for exactly that reason.
+   * `authorbot-access` is the Phase 7 maintainer surface — a collaborator
+   * table, an agent-token list, an audit view and a moderation queue — which
+   * only `/settings/` ever loads and which no reader should pay for.
+   *
+   * Independent builds (rather than shared chunks) keep both output names
+   * stable and unhashed, which is what the page templates reference. The cost
+   * is that the small shared helpers are duplicated into the access bundle;
+   * that duplication is paid only on the settings page, by a maintainer, and
+   * is far cheaper than putting the whole surface in every reader's page load.
+   */
+  const entries = [
+    { input: "src/islands/index.ts", js: "authorbot-collab.js" },
+    { input: "src/islands/access.ts", js: "authorbot-access.js" },
+  ] as const;
+
+  for (const entry of entries) {
+    try {
+      await viteBuild({
+        configFile: false,
+        logLevel: "warn",
+        root: siteRoot,
+        build: {
+          outDir: assetDir,
+          emptyOutDir: false,
+          target: "es2022",
+          minify: "esbuild",
+          rollupOptions: {
+            input: path.join(siteRoot, entry.input),
+            output: { entryFileNames: entry.js, format: "es" },
+          },
         },
-      },
-    });
-  } catch (error) {
-    throw new PublisherError(
-      `islands bundle failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+      });
+    } catch (error) {
+      throw new PublisherError(
+        `islands bundle failed (${entry.js}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
-  await copyFile(
-    path.join(siteRoot, "src/islands/collab.css"),
-    path.join(assetDir, "authorbot-collab.css"),
-  );
+
+  // Stylesheets are plain copied assets (never JS-injected), so the contract
+  // §3 CSP works without 'unsafe-inline' styles.
+  for (const [source, target] of [
+    ["collab.css", "authorbot-collab.css"],
+    ["access.css", "authorbot-access.css"],
+  ] as const) {
+    await copyFile(path.join(siteRoot, "src/islands", source), path.join(assetDir, target));
+  }
 }
 
 /**

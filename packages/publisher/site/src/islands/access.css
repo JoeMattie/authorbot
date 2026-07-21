@@ -1,0 +1,516 @@
+/* Phase 7 — author-facing access control (`<authorbot-access>`).
+ *
+ * Loaded only by /settings/, alongside authorbot-collab.css, whose base tokens
+ * (.ab-btn, .ab-input, .ab-field, .ab-field-check, .ab-badge sizing, the
+ * --border/--surface/--link/--fg custom properties) this sheet builds on rather
+ * than duplicates. Keeping it out of the collaboration bundle keeps a
+ * maintainer-only surface out of every reader's chapter page.
+ *
+ * Accessibility (contract §16.6, Phase 2b §4): every interactive control has a
+ * visible focus ring, touch targets reach 44px on coarse pointers, state is
+ * carried by border/weight/text as well as by colour, and both colour schemes
+ * are styled explicitly.
+ */
+
+.ab-access-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.ab-access-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.ab-access-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.ab-access-intro,
+.ab-access-note,
+.ab-access-empty,
+.ab-access-since,
+.ab-access-reason,
+.ab-role-means,
+.ab-pending-target,
+.ab-pending-history {
+  margin: 0;
+  max-width: 66ch;
+}
+
+.ab-access-intro,
+.ab-access-note {
+  font-size: 0.92rem;
+  opacity: 0.9;
+}
+
+.ab-access-empty {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.ab-access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ab-access-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.ab-access-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ab-collaborator-name,
+.ab-token-name,
+.ab-pending-who {
+  font-weight: 600;
+}
+
+.ab-access-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+/* ---- badges -------------------------------------------------------------- */
+/* Never colour alone: each badge carries its own text, and the border keeps it
+   legible for anyone who cannot distinguish the fills. */
+
+.ab-badge {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.ab-badge-agent,
+.ab-badge-role {
+  font-weight: 600;
+}
+
+.ab-badge-revoked,
+.ab-badge-expired {
+  border-color: #a03434;
+  color: #a03434;
+}
+
+.ab-badge-active {
+  border-color: var(--link);
+  color: var(--link);
+}
+
+/* ---- fact lists ---------------------------------------------------------- */
+
+.ab-access-facts {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.ab-fact-term {
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.ab-fact-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- annotation policy --------------------------------------------------- */
+/* All four modes visible at once: they are a progression, and a dropdown would
+   hide three quarters of a consequential decision behind a click. */
+
+.ab-policy-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.ab-policy-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+/* The mode in force is marked by a border and a "Current" badge as well as by
+   the checked radio — never by colour alone. */
+.ab-policy-current {
+  border-color: var(--link);
+  background: var(--surface);
+}
+
+.ab-policy-label {
+  align-items: flex-start;
+  font-weight: 600;
+}
+
+.ab-policy-means {
+  margin: 0;
+  padding-left: 1.7rem;
+  max-width: 66ch;
+  font-size: 0.9rem;
+  opacity: 0.95;
+}
+
+.ab-policy-pending,
+.ab-policy-anonymous,
+.ab-policy-queue-note {
+  margin: 0;
+  max-width: 66ch;
+}
+
+.ab-policy-apply {
+  align-self: flex-start;
+}
+
+.ab-policy-apply[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---- emergency controls -------------------------------------------------- */
+/* Visually distinct from everything else on the page, because a freeze is not
+   a setting: it is the control an author reaches for when something is wrong.
+   The block reads as a bordered panel of its own even before its heading. */
+
+.ab-access-emergency {
+  border-width: 2px;
+  border-color: #a03434;
+  background: color-mix(in srgb, #a03434 4%, transparent);
+}
+
+.ab-access-emergency .ab-access-heading {
+  color: #a03434;
+}
+
+/* A frozen book announces itself: the state is visible from the top of the
+   page, not only from the button's label. */
+.ab-access-is-frozen {
+  border-style: double;
+  border-width: 4px;
+}
+
+.ab-access-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.ab-access-control-name {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.ab-access-control-means {
+  margin: 0;
+  max-width: 66ch;
+  font-size: 0.92rem;
+}
+
+.ab-access-since,
+.ab-access-reason {
+  font-size: 0.88rem;
+  opacity: 0.9;
+}
+
+.ab-access-revoke-all {
+  border-color: #a03434;
+}
+
+/* ---- reason fields ------------------------------------------------------- */
+
+.ab-reason-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: min(100%, 42rem);
+}
+
+.ab-reason-input {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg);
+  resize: vertical;
+}
+
+/* ---- role change --------------------------------------------------------- */
+
+.ab-role-change {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ab-role-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 18rem;
+}
+
+.ab-role-preview {
+  margin: 0;
+  max-width: 62ch;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--link);
+  font-size: 0.9rem;
+}
+
+/* ---- moderation queue ---------------------------------------------------- */
+
+.ab-pending-body {
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  border-left: 3px solid var(--border);
+  background: var(--surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 68ch;
+}
+
+.ab-pending-when {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.ab-pending-target,
+.ab-pending-history {
+  font-size: 0.88rem;
+  opacity: 0.9;
+}
+
+.ab-access-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.ab-bulk-count {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: 0.9rem;
+}
+
+.ab-reject {
+  color: #a03434;
+}
+
+/* ---- audit --------------------------------------------------------------- */
+
+.ab-audit-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 20rem;
+}
+
+.ab-audit-list {
+  gap: 0.5rem;
+  counter-reset: none;
+}
+
+.ab-audit-event {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.ab-audit-what {
+  font-size: 0.94rem;
+}
+
+.ab-audit-when {
+  font-size: 0.82rem;
+  opacity: 0.8;
+}
+
+.ab-audit-reason {
+  margin: 0.15rem 0 0;
+  font-size: 0.88rem;
+  max-width: 62ch;
+  opacity: 0.9;
+}
+
+/* ---- destructive confirmation -------------------------------------------- */
+/* Never default-yes: the panel is loud, the acknowledgement starts unticked,
+   the confirm button starts disabled, and the safe escape is a real button
+   with a name that says what it does. */
+
+.ab-access-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  padding: 0.85rem 0.95rem;
+  border: 2px solid #a03434;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ab-confirm-heading {
+  margin: 0;
+  font-size: 1rem;
+  color: #a03434;
+}
+
+.ab-confirm-consequences {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  max-width: 64ch;
+  font-size: 0.92rem;
+}
+
+.ab-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+/* The safe option carries the visual weight; the destructive one does not. */
+.ab-confirm-cancel {
+  font-weight: 600;
+  border-color: var(--link);
+  color: var(--link);
+}
+
+.ab-confirm-go[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---- status and errors --------------------------------------------------- */
+
+.ab-access-status,
+.ab-access-error {
+  margin: 1rem 0 0;
+  max-width: 68ch;
+}
+
+.ab-access-error {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #a03434;
+  border-radius: 4px;
+  color: #a03434;
+}
+
+.ab-access-report {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.ab-access-report-line {
+  font-size: 0.93rem;
+}
+
+/* ---- focus, dark mode, touch --------------------------------------------- */
+
+.ab-access-body :focus-visible,
+.ab-access-confirm :focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-access-emergency,
+  .ab-access-revoke-all,
+  .ab-access-confirm,
+  .ab-access-error,
+  .ab-badge-revoked,
+  .ab-badge-expired {
+    border-color: #e09a9a;
+  }
+
+  .ab-access-emergency .ab-access-heading,
+  .ab-confirm-heading,
+  .ab-access-error,
+  .ab-reject,
+  .ab-badge-revoked,
+  .ab-badge-expired {
+    color: #e09a9a;
+  }
+
+  .ab-access-emergency {
+    background: color-mix(in srgb, #e09a9a 7%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ab-access-body * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .ab-access-body .ab-btn,
+  .ab-access-body .ab-input,
+  .ab-access-body select,
+  .ab-access-confirm .ab-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .ab-access-body .ab-field-check {
+    min-height: 44px;
+  }
+
+  .ab-access-body .ab-field-check input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+  }
+}

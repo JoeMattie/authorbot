@@ -74,18 +74,27 @@ describe("api-url-less build (script-free regression)", () => {
       expect(html, file).not.toContain("authorbot-collab");
       expect(html, file).not.toContain("Content-Security-Policy");
       expect(html, file).not.toContain("<authorbot-collab");
+      // Phase 7's access-control island is bundled separately; it must be just
+      // as absent from an api-url-less build as the collaboration one.
+      expect(html, file).not.toContain("authorbot-access");
+      expect(html, file).not.toContain("<authorbot-access");
     }
   });
 
   it("differs from a collab build only by the island additions (byte-comparable)", async () => {
     const plainFiles = rel(outPlain, await collectFiles(outPlain));
     const collabFiles = rel(outCollab, await collectFiles(outCollab));
-    // The collab build adds exactly the two island assets plus the pages that
+    // The collab build adds exactly the island assets plus the pages that
     // exist only when an API base is configured: /work/ (Phase 3 contract §6)
     // and, from Phase 6, /settings/ (§3.6) and /write/ (§3.5). Each is gated
     // by `getStaticPaths` returning nothing without collab, which is what
     // keeps the api-url-less build byte-identical rather than merely similar.
+    //
+    // `authorbot-access.*` is Phase 7's maintainer surface, bundled apart from
+    // the collaboration islands so no reader's chapter page carries it.
     expect(collabFiles.filter((file) => !plainFiles.includes(file))).toEqual([
+      path.join("_astro", "authorbot-access.css"),
+      path.join("_astro", "authorbot-access.js"),
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
       path.join("settings", "index.html"),
@@ -243,6 +252,68 @@ describe("collab-enabled build", () => {
     expect(js).toContain("authorbot-collab");
     // §3: bodies render as plain text; the bundle must not assign innerHTML.
     expect(js).not.toContain("innerHTML");
+  });
+
+  /**
+   * Phase 7's access-control surface (collaborator table, agent tokens, audit
+   * view, moderation queue) is maintainer-only, so it ships as its OWN bundle
+   * loaded only by /settings/. These assertions are what keep it that way: the
+   * chapter-page budget above stays a real constraint only if this code cannot
+   * quietly migrate into it.
+   */
+  describe("Phase 7 access-control bundle", () => {
+    it("is a separate bundle, loaded by /settings/ and by nothing else", async () => {
+      const settings = await readFile(path.join(outCollab, "settings/index.html"), "utf8");
+      expect(settings).toContain("<authorbot-access");
+      // Asset hrefs follow the SITE's base path (unset here), not the API
+      // base — the two are independent halves of a deployment (ADR-0019 §6).
+      expect(settings).toContain('<script type="module" src="/_astro/authorbot-access.js">');
+      expect(settings).toContain('<link rel="stylesheet" href="/_astro/authorbot-access.css">');
+      // The mount still carries the API base the islands must call.
+      expect(settings).toContain(`<authorbot-access data-api-base="${API_URL}"`);
+
+      // Every other emitted page, chapter pages included, must not carry it.
+      for (const file of await collectFiles(outCollab)) {
+        if (!file.endsWith(".html") || file.endsWith(path.join("settings", "index.html"))) continue;
+        const html = await readFile(file, "utf8");
+        expect(html, file).not.toContain("authorbot-access");
+      }
+    });
+
+    it("keeps the maintainer surface out of the chapter-page budget", async () => {
+      const chapter = await readFile(
+        path.join(outCollab, "chapters/baseline/index.html"),
+        "utf8",
+      );
+      expect(chapter).not.toContain("authorbot-access");
+      // And the collaboration bundle itself contains none of the Phase 7 view:
+      // a stray import would put the moderation queue in every reader's page.
+      const collabJs = await readFile(path.join(outCollab, "_astro/authorbot-collab.js"), "utf8");
+      expect(collabJs).not.toContain("authorbot-access");
+      expect(collabJs).not.toContain("Removing someone is not erasing them");
+    });
+
+    it("has its own gzipped budget and never uses innerHTML", async () => {
+      const js = await readFile(path.join(outCollab, "_astro/authorbot-access.js"), "utf8");
+      const css = await readFile(path.join(outCollab, "_astro/authorbot-access.css"), "utf8");
+      expect(js).toContain("authorbot-access");
+      // Untrusted annotation bodies reach this surface; plain text only.
+      expect(js).not.toContain("innerHTML");
+      const total = gzipSync(Buffer.from(js)).length + gzipSync(Buffer.from(css)).length;
+      // Generous next to the reading bundle's 35 KB because this is one page
+      // loaded by one maintainer — but bounded, so it cannot grow unwatched.
+      expect(total).toBeLessThanOrEqual(20 * 1024);
+    });
+
+    it("carries the contract's non-negotiable revocation sentence", async () => {
+      // The interface "must not imply" that removing someone erases them, so
+      // the sentence that says otherwise has to survive minification into the
+      // shipped artifact rather than living only in a source comment.
+      const js = await readFile(path.join(outCollab, "_astro/authorbot-access.js"), "utf8");
+      expect(js).toContain("Removing someone is not erasing them");
+      // And `locked` must never be described as switching collaboration off.
+      expect(js).toContain("Author only");
+    });
   });
 });
 
