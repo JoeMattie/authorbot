@@ -172,6 +172,24 @@ are none. Diagnosing §1 needed `wrangler tail` and direct D1 queries.
 
 1–5 and 7 ship together. 6 waits on the maintainer.
 
+## 8. Smaller items still open
+
+- **`npm install` timeout is 300s.** The maintainer's cold install of the
+  pinned toolchain (wrangler → miniflare, workerd, esbuild) took ~4 minutes
+  against that cap. It did not trip, but a first-time author on a slower link
+  will hit it, and the failure mode — a warning and a book with no lockfile —
+  is one CI then fails on. Raise it, or report progress instead of a silent
+  wait.
+- **Story pages have no edit affordance — CHECKED, by design.** Outline,
+  Timeline and Characters import static site data only, with no islands, and
+  the API has no routes for story data of any kind. It is edited by changing
+  the YAML in the repository and opening a pull request. An edit button would
+  lead nowhere. Whether the site *should* be able to edit the story bible is a
+  product question, not a defect.
+- **The e2e suite is no longer hermetic.** `book` now runs a real `npm install`,
+  so `e2e-book.test.ts` went 7.8s → 26s and an npm outage fails the suite.
+  Stub the install.
+
 ## Not in scope
 
 - Cloudflare's analytics beacon is blocked by the site's CSP. Real, harmless,

@@ -456,6 +456,20 @@ export class CollabApi {
   }
 
   /** OAuth start URL with `return_to` back to the current page (§2.4). */
+  /**
+   * Ends the session. Returns false only when the request could not be made or
+   * the API refused it — the caller keeps the button and says so, rather than
+   * reloading into a page where the reader is still signed in.
+   */
+  async signOut(): Promise<boolean> {
+    try {
+      const response = await this.post(`${this.base}/v1/auth/logout`, {});
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   signInUrl(returnTo: string): string {
     return `${this.base}/v1/auth/github?return_to=${encodeURIComponent(returnTo)}`;
   }

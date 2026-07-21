@@ -1227,3 +1227,53 @@ main.ab-enabled {
     min-height: 44px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Account strip in the site header.
+
+   Sits on every page of a collaboration build, so signing in, signing out and
+   reaching Settings or Work never depend on the book already having a chapter.
+   Renders nothing at all until its island has an answer from the API, so the
+   header must not reserve space for it or every page would jump on load.
+   --------------------------------------------------------------------------- */
+
+.ab-account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+
+.ab-account-who {
+  font-weight: 600;
+}
+
+.ab-account-link,
+.ab-account-signin {
+  text-decoration: none;
+}
+
+.ab-account-link:hover,
+.ab-account-link:focus-visible,
+.ab-account-signin:hover,
+.ab-account-signin:focus-visible {
+  text-decoration: underline;
+}
+
+/* A button, because signing out is a state change and not a destination —
+   styled to sit beside the links rather than shout over them. */
+.ab-account-signout {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.ab-account-signout[disabled] {
+  cursor: default;
+  opacity: 0.6;
+}

@@ -16,6 +16,18 @@ const {
   extraStylesHrefs = [],
 } = Astro.props;
 const base = site.basePath;
+// The account strip — sign in, sign out, and the way into Settings and Work.
+//
+// Shown on every page that already loads the islands bundle, which is the same
+// condition as `collabStylesHref`. Deliberately NOT on the story pages: those
+// are read-only and stay script-free, and pushing the whole bundle (annotation
+// gutters, composer, work queue, settings) onto an outline nobody can edit
+// would cost every reader real bytes to render one link.
+//
+// The index is in the set, which is what matters most: it is where the author
+// of a book with no chapters lands, and where there was previously no way to
+// sign in at all.
+const account = site.collab && collabStylesHref ? site.collab : undefined;
 // Astro escapes attribute quotes but keeps `<`/`>` inside attribute values;
 // dropping them here guarantees the built output never contains a literal
 // `<script` anywhere, even inside a quoted attribute (contract section 6).
@@ -45,6 +57,13 @@ const safeDescription =
           <li><a href={`${base}story/timeline/`}>Timeline</a></li>
           <li><a href={`${base}story/characters/`}>Characters</a></li>
         </ul>
+        {account && (
+          <authorbot-account
+            data-api-base={account.apiBase}
+            data-project={account.projectSlug}
+            data-base={base}
+          ></authorbot-account>
+        )}
       </nav>
     </header>
     <main id="main">

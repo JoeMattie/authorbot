@@ -170,6 +170,11 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
+          // The header account strip: sign in, sign out, Settings, Work. An
+          // island like any other, on every page that already loads the
+          // bundle — which is why the story pages, which do not, are still
+          // byte-identical without stripping anything.
+          .replace(/<authorbot-account[^>]*>\s*<\/authorbot-account>/, "")
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/>\s+</g, "> <");
@@ -189,6 +194,30 @@ describe("collab-enabled build", () => {
       `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
         `connect-src 'self'; img-src 'self' data:">`,
     );
+  });
+
+  it("puts the account strip on the index, where an empty book's author lands", async () => {
+    // The hole this closes: a book with no chapters had no sign-in anywhere.
+    // The only "Sign in with GitHub" lived in the collab island, which renders
+    // only on chapter pages — while the wizard signs off telling the author to
+    // sign in and press "New chapter".
+    const page = await readFile(path.join(outCollab, "index.html"), "utf8");
+    const mount = /<authorbot-account[^>]*>/.exec(page)?.[0] ?? "";
+    expect(mount).toContain(`data-api-base="${API_URL}"`);
+    expect(mount).toContain("data-project=");
+  });
+
+  it("puts the account strip on chapter pages too, so signing out is always reachable", async () => {
+    const page = await readFile(path.join(outCollab, "chapters/baseline/index.html"), "utf8");
+    expect(page).toContain("<authorbot-account");
+  });
+
+  it("keeps the account strip off the story pages, which stay script-free", async () => {
+    // Rendering it there would drag the whole islands bundle onto read-only
+    // pages to show one link. The sibling test asserts those pages ship no
+    // script at all; this is the other half of that bargain.
+    const page = await readFile(path.join(outCollab, "story/index.html"), "utf8");
+    expect(page).not.toContain("<authorbot-account");
   });
 
   it("stamps the mount element with the data the islands need", async () => {

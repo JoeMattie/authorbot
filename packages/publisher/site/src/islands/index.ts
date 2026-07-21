@@ -6,6 +6,7 @@
  * chapter composer, and `/settings/` mounts the maintainer settings view.
  * Emitted only for builds given an API base.
  */
+import { AuthorbotAccount } from "./account.js";
 import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
@@ -14,6 +15,8 @@ import { AuthorbotWorkQueue } from "./work-queue.js";
 
 const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-collab", AuthorbotCollab],
+  // The header strip: sign in, sign out, and the way into Settings and Work.
+  ["authorbot-account", AuthorbotAccount],
   ["authorbot-work-queue", AuthorbotWorkQueue],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
   ["authorbot-new-chapter", AuthorbotNewChapter],
