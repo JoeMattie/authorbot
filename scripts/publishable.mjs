@@ -24,4 +24,8 @@ export const PUBLISHABLE = [
   "packages/publisher",
   "apps/cli",
   "apps/api",
+  // The wizard. It was built after this list was written and so missed the
+  // first release — `npx @authorbot/create`, the documented way an author
+  // starts, resolved to nothing.
+  "apps/create",
 ];

@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/create",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Guided setup for an Authorbot book project.",
   "license": "MIT",
   "type": "module",
@@ -12,20 +12,24 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "LICENSE",
+    "README.md",
+    "!dist/**/*.map"
   ],
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/JoeMattie/authorbot.git"
+    "url": "git+https://github.com/JoeMattie/authorbot.git",
+    "directory": "apps/create"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/bin.js', 0o755)\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=30000",
-    "sync-templates": "node scripts/sync-templates.mjs"
+    "sync-templates": "node scripts/sync-templates.mjs",
+    "prepack": "node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
     "@authorbot/schemas": "workspace:*",
