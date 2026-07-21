@@ -574,7 +574,8 @@ async function ensureGitHubApp(
       kind: "github-app",
       name: options.appName,
       description: "The GitHub App that signs readers in and commits approved changes.",
-      deleteWith: "Delete it at https://github.com/settings/apps (Advanced > Delete GitHub App).",
+      deleteWith:
+        "Delete it at https://github.com/settings/apps/<app>/advanced — the button is at the bottom.",
     });
     return {
       clientId: "<created during the real run>",
@@ -617,7 +618,9 @@ async function ensureGitHubApp(
     kind: "github-app",
     name: conversion.slug,
     description: "The GitHub App that signs readers in and commits approved changes.",
-    deleteWith: `Delete it at ${conversion.htmlUrl} (Advanced > Delete GitHub App).`,
+    // The app's own settings page, not the public listing: straight to the
+    // page carrying the button, rather than three navigations away from it.
+    deleteWith: `Delete it at https://github.com/settings/apps/${conversion.slug}/advanced — the button is at the bottom.`,
   });
 
   ctx.reporter.step("Storing the credentials in Cloudflare (they are never shown or saved)");
@@ -792,9 +795,16 @@ async function verifyHealth(
     } catch {
       gitIntegration = undefined;
     }
-    if (gitIntegration === "incomplete" || gitIntegration === "unconfigured") {
+    // Anything but "configured". The first version of this listed the bad
+    // values — "incomplete" and "unconfigured" — and missed "invalid", which
+    // is the status a real book got: all three credentials present, and the
+    // private key in a format the Worker cannot import. It passed the check
+    // and collaboration was switched on over an integration that could not
+    // save a chapter. Listing the good value is the only version of this that
+    // cannot be wrong about a status added later.
+    if (typeof gitIntegration === "string" && gitIntegration !== "configured") {
       throw new WizardError(
-        `The API is running but reports its GitHub App as "${String(gitIntegration)}", so it cannot commit anything back to your book.`,
+        `The API is running but reports its GitHub App as "${gitIntegration}", so it cannot commit anything back to your book.`,
         "The site was NOT switched over, so your readers are unaffected. Collaboration would have looked switched on while every chapter silently failed to save. Delete the app at https://github.com/settings/apps and run `create-authorbot collaborate` again to create a fresh one.",
       );
     }
