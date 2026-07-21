@@ -13,7 +13,7 @@
     "upgrade": "authorbot upgrade"
   },
   "devDependencies": {
-    "@authorbot/cli": "0.1.18",
+    "@authorbot/cli": "0.1.19",
     "wrangler": "^4.0.0"
   }
 }

@@ -9,6 +9,15 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.19
+
+- Spinners with an elapsed timer on the steps that take minutes — installing
+  the toolchain, waiting for a site to answer, checking the API. Silence for
+  four minutes reads as a hang.
+- The mark is centred on the terminal's true width.
+- `npx authorbot` with no arguments now points at `npx @authorbot/create`
+  instead of listing validate/build/upgrade and stopping.
+
 ## 0.1.18
 
 - The wizard opens with the Authorbot mark, drawn in the logo's own orange and
