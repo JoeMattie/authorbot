@@ -11,6 +11,7 @@ import { collaborateStage } from "./stages/collaborate.js";
 import { doctorStage } from "./stages/doctor.js";
 import { publishStage } from "./stages/publish.js";
 import { upgradeStage } from "./stages/upgrade.js";
+import { teardownStage, unpublishStage } from "./stages/teardown.js";
 import {
   OPTIONAL_STAGES,
   STAGE_NAMES,
@@ -25,6 +26,8 @@ export const STAGES: Record<StageName, Stage> = {
   collaborate: collaborateStage,
   agent: agentStage,
   upgrade: upgradeStage,
+  unpublish: unpublishStage,
+  teardown: teardownStage,
 };
 
 export interface RunResult {

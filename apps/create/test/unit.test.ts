@@ -11,6 +11,7 @@ import { deriveSlug, validateSlug, validateWorkerName } from "../src/slug.js";
 import { Journal, emptyJournal, parseJournal } from "../src/journal.js";
 import { EXAMPLE_CONFIG, parseConfig } from "../src/config.js";
 import { defaultFlow, parseArgs } from "../src/cli.js";
+import { DESTRUCTIVE_STAGES, OPTIONAL_STAGES, isStageName } from "../src/stages/names.js";
 import { SecretVault } from "../src/secrets.js";
 import type { WizardError } from "../src/errors.js";
 import { themeFor, wrap } from "../src/ui/reporter.js";
@@ -277,9 +278,15 @@ describe("argument parsing", () => {
     expect(parseArgs(["book"]).stage).toBe("book");
   });
 
-  it("defaults to the whole flow", () => {
+  it("defaults to the whole flow, minus the stages that destroy things", () => {
     expect(parseArgs([]).stage).toBeNull();
-    expect(defaultFlow()).toEqual([...STAGE_NAMES]);
+    // Every stage except `unpublish` and `teardown`. Those exist so that
+    // typing their name works; a default flow that could reach one would be a
+    // wizard that deletes a book because someone pressed enter too many times.
+    expect(defaultFlow()).toEqual(
+      STAGE_NAMES.filter((name) => !DESTRUCTIVE_STAGES.includes(name)),
+    );
+    expect(defaultFlow().length).toBe(STAGE_NAMES.length - DESTRUCTIVE_STAGES.length);
   });
 
   it("reads --dir in both spellings", () => {
@@ -392,5 +399,26 @@ describe("the GitHub App name", () => {
 
   it("leaves a short slug alone", () => {
     expect(gitHubAppName("Y", "short")).toBe("authorbot-short");
+  });
+});
+
+describe("destructive stages are never walked", () => {
+  // `unpublish` and `teardown` are in STAGE_NAMES so that typing their name
+  // resolves. A flow that could walk into one would be a wizard that deletes
+  // an author's book because they pressed enter too many times.
+  it("keeps them out of the default flow", () => {
+    const flow = defaultFlow();
+    expect(flow).not.toContain("unpublish");
+    expect(flow).not.toContain("teardown");
+  });
+
+  it("keeps them out of the stages a run offers to continue into", () => {
+    expect(OPTIONAL_STAGES).not.toContain("unpublish");
+    expect(OPTIONAL_STAGES).not.toContain("teardown");
+  });
+
+  it("still resolves them when named explicitly", () => {
+    expect(isStageName("unpublish")).toBe(true);
+    expect(isStageName("teardown")).toBe(true);
   });
 });

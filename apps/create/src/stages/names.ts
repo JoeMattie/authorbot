@@ -13,6 +13,8 @@ export const STAGE_NAMES = [
   "collaborate",
   "agent",
   "upgrade",
+  "unpublish",
+  "teardown",
 ] as const;
 
 export type StageName = (typeof STAGE_NAMES)[number];
@@ -33,7 +35,17 @@ export const STAGE_SUMMARIES: Record<StageName, string> = {
   collaborate: "Turn on sign-in, comments, and the work queue (optional).",
   agent: "Invite a writing agent with a scoped token (optional).",
   upgrade: "Move an existing book to a newer version of Authorbot.",
+  unpublish: "Take the site and database down, keeping the repository.",
+  teardown: "Delete everything this created, including the repository.",
 };
+
+/**
+ * Stages that destroy things, and so are never walked by any flow — only ever
+ * run because someone typed their name. Keeping them in `STAGE_NAMES` is what
+ * makes `create-authorbot teardown` resolve at all; keeping them out of every
+ * flow is what stops a bare `create-authorbot` from walking into one.
+ */
+export const DESTRUCTIVE_STAGES: readonly StageName[] = ["unpublish", "teardown"];
 
 /**
  * Stages that a fresh `create-authorbot` run offers to continue into rather

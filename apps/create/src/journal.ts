@@ -558,6 +558,25 @@ export class Journal {
     return this.#data.resources;
   }
 
+  /**
+   * Drops a resource that no longer exists.
+   *
+   * The counterpart to `recordResource`, for `unpublish` and `teardown`. A
+   * journal that keeps listing a deleted Worker would tell the author, at the
+   * end of every future run, to clean up something that is already gone — and
+   * a second teardown would try to delete it again and report a failure that
+   * is really a success.
+   */
+  async forgetResource(kind: string, name: string, now: string): Promise<void> {
+    const before = this.#data.resources.length;
+    this.#data.resources = this.#data.resources.filter(
+      (entry) => !(entry.kind === kind && entry.name === name),
+    );
+    if (this.#data.resources.length !== before) {
+      await this.save(now);
+    }
+  }
+
   async update(mutate: (data: JournalData) => void, now: string): Promise<void> {
     mutate(this.#data);
     await this.save(now);

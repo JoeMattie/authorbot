@@ -31,7 +31,13 @@ import type {
 import { NonInteractivePrompter } from "./runtime/prompt.js";
 import { SecretVault, registerEnvironmentCredentials } from "./secrets.js";
 import { Reporter, themeFor } from "./ui/reporter.js";
-import { STAGE_NAMES, STAGE_SUMMARIES, isStageName, type StageName } from "./stages/names.js";
+import {
+  DESTRUCTIVE_STAGES,
+  STAGE_NAMES,
+  STAGE_SUMMARIES,
+  isStageName,
+  type StageName,
+} from "./stages/names.js";
 import { reportError, reportProgress, reportResources, runStages } from "./wizard.js";
 
 export const USAGE = `Usage: create-authorbot [stage] [options]
@@ -182,7 +188,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
  * would be theatre.
  */
 export function defaultFlow(): StageName[] {
-  return [...STAGE_NAMES];
+  // Never `unpublish` or `teardown`. They are in STAGE_NAMES so that typing
+  // their name works; a flow that could walk into one would be a wizard that
+  // deletes an author's book because they pressed enter too many times.
+  return STAGE_NAMES.filter((name) => !DESTRUCTIVE_STAGES.includes(name));
 }
 
 /**
