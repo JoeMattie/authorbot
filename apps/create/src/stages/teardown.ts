@@ -75,10 +75,14 @@ function removalFor(resource: CreatedResource): Removal | null {
     case "github-app":
       // GitHub has no API for deleting an app: the manifest flow creates it in
       // a browser and only a browser can remove it.
+      // Straight to the page with the button on it. "Open the apps list, find
+      // yours, then Advanced" is three navigations to reach a link we can
+      // simply give them — and the app's name is its slug, because the wizard
+      // names it `authorbot-<slug>` precisely so GitHub does not reshape it.
       return {
         resource,
         command: null,
-        manual: `https://github.com/settings/apps — open ${name}, then Advanced > Delete GitHub App.`,
+        manual: `https://github.com/settings/apps/${name}/advanced — the Delete GitHub App button is at the bottom.`,
       };
     default:
       // An agent token is a row in the book's own database, which the D1
@@ -195,6 +199,20 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
     for (const line of leftBehind) {
       ctx.reporter.info(`  ${line}`);
     }
+  }
+
+  // The Cloudflare API token is not on the resource list, because the wizard
+  // never created it — the author made it in the dashboard and pasted it in.
+  // That is exactly why it needs saying: it is a live credential with rights
+  // over every Worker in the account, it outlives everything this just
+  // deleted, and nothing else is ever going to mention it again.
+  if (ctx.journal.hasSecret("CLOUDFLARE_API_TOKEN")) {
+    ctx.reporter.blank();
+    ctx.reporter.warn("One credential is left, and only you can remove it:");
+    ctx.reporter.info(
+      "  The Cloudflare API token you created for CI. It still works, and still has permission over your Workers.",
+    );
+    ctx.reporter.literal("https://dash.cloudflare.com/profile/api-tokens");
   }
 
   if (wantRepo) {

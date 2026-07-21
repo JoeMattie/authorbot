@@ -141,7 +141,7 @@ describe("the whole flow", () => {
     expect(output).toMatch(/gh repo delete/);
     expect(output).toMatch(/wrangler delete --name/);
     expect(output).toMatch(/wrangler d1 delete/);
-    expect(output).toMatch(/Delete GitHub App/);
+    expect(output).toMatch(/github\.com\/settings\/apps\/[^\s]*\/advanced/);
   });
 
   it("never prints a secret, and never writes one to the journal", async () => {

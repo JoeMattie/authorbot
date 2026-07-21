@@ -93,5 +93,29 @@ try {
   // early. Here the handle is real work's leftovers, so pause rather than
   // destroy: anything still legitimately reading stdin keeps its data, and a
   // process with nothing left to do simply exits.
+  //
+  // Three steps, because the earlier one-liner was not enough and the hang
+  // came back the moment a prompt library owned the terminal: raw mode has to
+  // be released or the shell inherits a terminal with no echo, the stream has
+  // to stop flowing, and `unref` is the one that actually lets Node exit —
+  // pausing a referenced handle still counts as work outstanding.
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
   process.stdin.pause();
+  process.stdin.unref();
 }
+
+// Exit explicitly.
+//
+// `@clack/prompts` does not hand the event loop back after a prompt — its own
+// examples call `process.exit()` after a cancellation, and an isolated clack
+// prompt with none of this wizard's code around it hangs exactly the same way.
+// So a run that has printed everything it has to say, including the summary of
+// what was created, would otherwise sit there until Ctrl-C. That is what
+// happened to the first author who pressed Esc to back out.
+//
+// Placed after the `finally` above, so the terminal is already out of raw mode
+// and stdin is already released: this is the last statement of the program,
+// not a shortcut out of the middle of it.
+process.exit(process.exitCode ?? 0);
