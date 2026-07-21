@@ -91,6 +91,25 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(happy-dom@18.0.1)(supports-color@10.2.2)(yaml@2.9.0)
 
+  apps/create:
+    dependencies:
+      '@authorbot/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      yaml:
+        specifier: ^2.5.0
+        version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(happy-dom@18.0.1)(supports-color@10.2.2)(yaml@2.9.0)
+
   packages/database:
     dependencies:
       better-sqlite3:
