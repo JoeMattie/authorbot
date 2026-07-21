@@ -7,7 +7,7 @@ Accepted (2026-07-19)
 ## Context
 
 Phase 2b adds the inline annotation UI to published chapter pages
-(`docs/phase2b-contract.md`; design §16.2, §22.1), backed by the Phase 2 API.
+(`docs/contracts/phase2b-contract.md`; design §16.2, §22.1), backed by the Phase 2 API.
 Constraints in tension:
 
 - Design §16.1 and ADR-0013 make no-JavaScript readability a hard rule; the

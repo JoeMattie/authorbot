@@ -1,7 +1,7 @@
 # How Authorbot works
 
 A map of the system for people who have to reason about it — not a spec. The
-binding details live in `docs/phase*-contract.md`; this page is the mental
+binding details live in `docs/contracts/phase*-contract.md`; this page is the mental
 model those contracts assume you already have.
 
 The one-sentence version:

@@ -1,7 +1,7 @@
 # ADR-0019: The API is same-origin with the site, by design
 
 **Status:** Accepted (2026-07-20). Supersedes the cross-origin provisions of
-`docs/phase2b-contract.md` §3.
+`docs/contracts/phase2b-contract.md` §3.
 
 ## Context
 
@@ -74,5 +74,5 @@ Landed as a Phase 6 prerequisite (after Phase 5): delete `cors.ts` and the
 cross-origin half of `origins.ts`, simplify `sessions.ts`, drop
 `ALLOWED_ORIGINS` from configuration and documentation, tighten the
 publisher's `api_url` validation, and add base-path support end to end.
-`docs/phase2b-contract.md` §3 is superseded by this record rather than
+`docs/contracts/phase2b-contract.md` §3 is superseded by this record rather than
 rewritten, so the history of the decision stays legible.

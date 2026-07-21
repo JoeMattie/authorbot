@@ -2,9 +2,9 @@
 
 Decisions binding for Phase 0+. Format: MADR-ish (Status / Context / Decision
 / Consequences). Section references cite `AUTHORBOT_PROJECT_DESIGN.md`
-(design), `docs/phase0-contract.md` (contract), `docs/phase1-contract.md`
-(phase1-contract), `docs/phase2-contract.md` (phase2-contract), and
-`docs/phase2b-contract.md` (phase2b-contract). ADRs
+(design), `docs/contracts/phase0-contract.md` (contract), `docs/contracts/phase1-contract.md`
+(phase1-contract), `docs/contracts/phase2-contract.md` (phase2-contract), and
+`docs/contracts/phase2b-contract.md` (phase2b-contract). ADRs
 0001–0012 record the
 design §26.1 defaults adopted by the Phase 0 contract (contract §6.5);
 later ADRs record per-phase decisions.
@@ -29,8 +29,10 @@ later ADRs record per-phase decisions.
 | [0016](0016-transactional-outbox-inline-processor.md) | Transactional outbox + inline processor for Phase 2 Git mirroring, Durable Object wiring in Phase 5 | design §7.3, §14.3, §20.1–20.2; phase2-contract §5 |
 | [0017](0017-agent-token-format-hash-only-storage.md) | Agent-token format `authorbot_<base64url>` with hash-only storage | design §19.2, §19.3; phase2-contract §3, §7.5 |
 | [0018](0018-framework-free-islands-cors-csrf.md) | Framework-free collaboration islands, plain-text bodies, explicit CORS/CSRF model | design §16.1–16.2, §16.6, §19.4; phase2b-contract §1, §3 |
+| [0019](0019-same-origin-only.md) | The API is same-origin with the site; no cross-origin deployment | design §16.2, §19.4; contracts/phase2b-contract §3 |
+| [0020](0020-cloudflare-only-host.md) | GitHub for the repository, Cloudflare for hosting — no other host | design §14, §18 |
+| [0021](0021-versioning-and-upgrades.md) | Versioning and the author upgrade path | design §26 |
+| [0022](0022-npm-distribution.md) | Distribute prebuilt packages on npm | design §21 |
 
 New ADRs: next number, same format, add a row here. Superseding an ADR: mark
 the old one `Superseded by ADR NNNN` in its Status line.
-| 0021 | [Versioning and the author upgrade path](./0021-versioning-and-upgrades.md) | Accepted |
-| 0022 | [Distribute prebuilt packages on npm](./0022-npm-distribution.md) | Accepted |
