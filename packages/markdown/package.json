@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/markdown",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Markdown parsing, block-marker extraction, safety scanning, work-item delimiter checks, and normalized text streams for Authorbot chapter files (Phase 0 contract section 3)",
   "keywords": [
     "authorbot",
