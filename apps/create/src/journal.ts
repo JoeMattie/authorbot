@@ -72,6 +72,8 @@ export interface JournalData {
     d1Id?: string;
     appSlug?: string;
     installationId?: string;
+    /** GitHub App id. The Worker needs it, and a resumed run must not lose it. */
+    appId?: string;
     apiVerified?: boolean;
   };
   agent?: {
@@ -349,6 +351,12 @@ function collaborateSection(value: unknown): NonNullable<JournalData["collaborat
   const installationId = matching(record["installationId"], INSTALLATION_ID_RE, 20);
   if (installationId !== undefined) {
     collaborate.installationId = installationId;
+  }
+  // Same shape as an installation id: a positive integer from GitHub. Dropped
+  // rather than adopted if it is anything else, like every other field here.
+  const appId = matching(record["appId"], INSTALLATION_ID_RE, 20);
+  if (appId !== undefined) {
+    collaborate.appId = appId;
   }
   if (typeof record["apiVerified"] === "boolean") {
     collaborate.apiVerified = record["apiVerified"];

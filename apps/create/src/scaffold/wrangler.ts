@@ -26,6 +26,17 @@ export interface CollaborationSettings {
   readonly redirectUri: string;
   /** GitHub App installation id. */
   readonly installationId: string;
+  /**
+   * GitHub App id.
+   *
+   * The Worker treats its three GitHub App credentials as all-or-nothing: with
+   * any one missing it reports `gitIntegration: "incomplete"` and does no Git
+   * work at all. This one was read from the manifest conversion, used to poll
+   * for the installation, and then dropped — so every book the wizard has ever
+   * produced had collaboration switched on over an integration that could not
+   * commit, project, or read its own book.yml.
+   */
+  readonly appId: string;
   /** Base path when the book is served under a subpath, e.g. `/my-book`. */
   readonly basePath?: string;
   /**
@@ -93,6 +104,10 @@ export function renderWrangler(settings: WranglerSettings): string {
       "  // your Worker code can never be different releases.",
       `  "main": "node_modules/@authorbot/api/dist/worker.js",`,
       `  "compatibility_flags": ["nodejs_compat"],`,
+      "  // Logs, so a failure can be read instead of guessed at. The wizard's",
+      "  // own error text tells authors to check the Worker's logs in the",
+      "  // Cloudflare dashboard, and without this there are none to check.",
+      `  "observability": { "enabled": true },`,
       "  // @authorbot/database also re-exports a native SQLite adapter used by",
       "  // the toolchain's own tests. The Worker never calls it — it uses the D1",
       "  // binding — so it is aliased to a stub that throws, keeping a native",
@@ -150,7 +165,12 @@ export function renderWrangler(settings: WranglerSettings): string {
       "    // and never appear in this file.",
       `    "GITHUB_CLIENT_ID": ${json(c.githubClientId)},`,
       `    "GITHUB_REDIRECT_URI": ${json(c.redirectUri)},`,
-      `    "GITHUB_INSTALLATION_ID": ${json(c.installationId)}${
+      `    "GITHUB_INSTALLATION_ID": ${json(c.installationId)},`,
+      // The third of the Worker's three GitHub App credentials. It treats them
+      // as all-or-nothing: with any one missing it reports
+      // `gitIntegration: "incomplete"` and does no Git work at all — no
+      // commits, no projection, no reading the book's own book.yml.
+      `    "GITHUB_APP_ID": ${json(c.appId)}${
         c.basePath === undefined || c.basePath === "" ? "" : ","
       }`,
     );

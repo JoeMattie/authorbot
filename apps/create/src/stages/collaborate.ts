@@ -215,8 +215,31 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
     githubClientId: credentials.clientId,
     redirectUri: `${siteUrl.replace(/\/$/, "")}/v1/auth/github/callback`,
     installationId: credentials.installationId,
+    appId: credentials.appId,
     publicAnnotations: book.showPublicAnnotations,
   };
+
+  // The Worker treats its three GitHub App credentials as all-or-nothing, and
+  // reports `gitIntegration: "incomplete"` for a partial set — then does no Git
+  // work while every read-only route keeps answering perfectly. That is exactly
+  // how a dropped app id shipped: the wizard's health check asked /v1/me for a
+  // 401, got one, and reported success over an integration that could not
+  // commit, project, or read the book's own book.yml.
+  //
+  // So assert the set is whole here, at the seam where it is assembled, rather
+  // than trusting a later check that cannot see it.
+  for (const [name, value] of [
+    ["app id", collaboration.appId],
+    ["installation id", collaboration.installationId],
+    ["client id", collaboration.githubClientId],
+  ] as const) {
+    if (value.trim() === "") {
+      throw new WizardError(
+        `The GitHub App's ${name} is missing, so the Worker would be deployed with an incomplete credential.`,
+        "Nothing was deployed. This is a bug in the wizard rather than something you did — please report it. Deleting the app at https://github.com/settings/apps and running `create-authorbot collaborate` again creates a fresh one.",
+      );
+    }
+  }
 
   ctx.reporter.step("Updating your Worker configuration");
   await ctx.actions.writeFile({
@@ -509,6 +532,12 @@ async function lookupDatabaseId(ctx: WizardContext, name: string): Promise<strin
 interface AppCredentials {
   readonly clientId: string;
   readonly installationId: string;
+  /**
+   * GitHub App id. Read from the manifest conversion, and — until this was
+   * fixed — used only to poll for the installation and then dropped, so the
+   * Worker never received it and did no Git work at all.
+   */
+  readonly appId: string;
 }
 
 /**
@@ -536,9 +565,9 @@ async function ensureGitHubApp(
     // but the client id is public and lives in wrangler.jsonc, so a resumed
     // run reads it back rather than creating a second app.
     const clientId = await readClientIdFromWrangler(ctx);
-    if (clientId !== null) {
+    if (clientId !== null && already.appId !== undefined) {
       ctx.reporter.info("Reusing the GitHub App created earlier.");
-      return { clientId, installationId: already.installationId };
+      return { clientId, installationId: already.installationId, appId: already.appId };
     }
   }
 
@@ -569,7 +598,11 @@ async function ensureGitHubApp(
       description: "The GitHub App that signs readers in and commits approved changes.",
       deleteWith: "Delete it at https://github.com/settings/apps (Advanced > Delete GitHub App).",
     });
-    return { clientId: "<created during the real run>", installationId: "<created during the real run>" };
+    return {
+      clientId: "<created during the real run>",
+      installationId: "<created during the real run>",
+      appId: "<created during the real run>",
+    };
   }
 
   const conversion: ManifestConversion = await runManifestFlow(
@@ -640,10 +673,10 @@ async function ensureGitHubApp(
   ctx.reporter.ok(`Installed on ${options.repo}.`);
 
   await ctx.journal.update((data) => {
-    data.collaborate = { ...data.collaborate, installationId };
+    data.collaborate = { ...data.collaborate, installationId, appId: conversion.appId };
   }, nowIso(ctx));
 
-  return { clientId: conversion.clientId, installationId };
+  return { clientId: conversion.clientId, installationId, appId: conversion.appId };
 }
 
 /**
@@ -707,6 +740,39 @@ async function readClientIdFromWrangler(ctx: WizardContext): Promise<string | nu
  * API: it refuses anonymous callers, it can start a sign-in, and it has seeded
  * the project with the author as maintainer.
  */
+/**
+ * Polls a URL until it answers with `want`, or the deadline passes.
+ *
+ * Returns the last response either way, so the caller reports what it actually
+ * saw rather than a timeout. A request that throws — DNS not resolving here
+ * yet, connection refused mid-rollout — counts as "not yet", not as an answer.
+ */
+async function pollForStatus(
+  ctx: WizardContext,
+  url: string,
+  want: number,
+): Promise<{ status: number }> {
+  const deadline = ctx.clock.now().getTime() + 45_000;
+  let last: { status: number } = { status: 0 };
+  let attempt = 0;
+  for (;;) {
+    attempt += 1;
+    try {
+      const response = await ctx.http.request(url, { timeoutMs: 20_000 });
+      last = { status: response.status };
+      if (response.status === want) {
+        return last;
+      }
+    } catch {
+      // Unreachable from here for now; the deadline decides.
+    }
+    if (ctx.clock.now().getTime() >= deadline) {
+      return last;
+    }
+    await ctx.clock.sleep(Math.min(2_000 * attempt, 8_000));
+  }
+}
+
 async function verifyHealth(
   ctx: WizardContext,
   siteUrl: string,
@@ -716,7 +782,14 @@ async function verifyHealth(
 ): Promise<void> {
   const base = siteUrl.replace(/\/$/, "");
 
-  const me = await ctx.http.request(`${base}/v1/me`, { timeoutMs: 20_000 });
+  // A Worker that was deployed seconds ago is not reachable everywhere yet, and
+  // a hostname created minutes ago may still be cached locally as
+  // non-existent. Both produce a confident failure about an API that is
+  // perfectly fine — and both have: this check reported "answered 404" on
+  // three separate runs that passed on retry with no change to anything.
+  //
+  // So poll. The deadline is what decides, not the first answer.
+  const me = await pollForStatus(ctx, `${base}/v1/me`, 401);
   if (me.status !== 401) {
     throw new WizardError(
       `The API at ${base}/v1/me answered ${String(me.status)} instead of refusing an anonymous caller (401).`,

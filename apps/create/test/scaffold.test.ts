@@ -200,6 +200,7 @@ describe("wrangler.jsonc", () => {
         githubClientId: "Iv1.public_client_id",
         redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
         installationId: "777777",
+        appId: "424242",
       publicAnnotations: true,
       },
     });
@@ -225,6 +226,7 @@ describe("wrangler.jsonc", () => {
       githubClientId: "Iv1.x",
       redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
       installationId: "777777",
+      appId: "424242",
       publicAnnotations: true,
     };
     const text = renderWrangler({ workerName: "my-book", collaboration });
@@ -237,6 +239,35 @@ describe("wrangler.jsonc", () => {
     expect(text).toContain("ProjectCoordinator");
     // The callback must be on the site's own origin (ADR-0019).
     expect(text).toContain('"GITHUB_REDIRECT_URI": "https://my-book.workers.dev/v1/auth/github/callback"');
+  });
+
+  it("emits all three GitHub App credentials the Worker needs", () => {
+    // The Worker treats them as all-or-nothing: with any one missing it
+    // reports gitIntegration "incomplete" and does no Git work at all. The app
+    // id was read from the manifest conversion, used to poll for the
+    // installation, then dropped — so every book the wizard produced had
+    // collaboration switched on over an integration that could not commit,
+    // could not project, and could not read its own book.yml.
+    const text = renderWrangler({
+      workerName: "my-book",
+      collaboration: {
+        d1Name: "db",
+        d1Id: "11111111-2222-4333-8444-555555555555",
+        projectSlug: "my-book",
+        projectRepo: "novelist/my-book",
+        maintainerLogin: "novelist",
+        defaultBranch: "main",
+        githubClientId: "Iv1.x",
+        redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
+        installationId: "777777",
+        appId: "424242",
+        publicAnnotations: true,
+      },
+    });
+
+    expect(text).toContain('"GITHUB_APP_ID": "424242"');
+    expect(text).toContain('"GITHUB_INSTALLATION_ID": "777777"');
+    expect(text).toContain('"GITHUB_CLIENT_ID": "Iv1.x"');
   });
 
   it("mirrors show_public_annotations into the Worker's PUBLIC_ANNOTATIONS", () => {
@@ -255,6 +286,7 @@ describe("wrangler.jsonc", () => {
       githubClientId: "Iv1.x",
       redirectUri: "https://my-book.workers.dev/v1/auth/github/callback",
       installationId: "777777",
+      appId: "424242",
     };
 
     const open = renderWrangler({
@@ -284,6 +316,7 @@ describe("wrangler.jsonc", () => {
         githubClientId: "Iv1.x",
         redirectUri: "https://book.example.com/v1/auth/github/callback",
         installationId: "777777",
+        appId: "424242",
       publicAnnotations: true,
         basePath: "/my-book",
       },
