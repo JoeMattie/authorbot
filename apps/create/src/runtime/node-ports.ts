@@ -69,8 +69,14 @@ export class SystemClock implements Clock {
 
   sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, ms);
-      timer.unref?.();
+      // NOT unref'd, deliberately. An unref'd timer does not hold the event
+      // loop open, so whenever a sleep was the only thing pending — which is
+      // exactly the case while polling a freshly deployed site, with the
+      // prompts finished and no fetch in flight — Node found nothing left to
+      // do and exited mid-wait. The wizard vanished after "Waiting for
+      // <url> to answer" with only V8's "unsettled top-level await" notice,
+      // having neither confirmed nor denied that the deploy worked.
+      setTimeout(resolve, ms);
     });
   }
 }
