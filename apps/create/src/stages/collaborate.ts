@@ -69,6 +69,58 @@ function usableName(
   return fallback;
 }
 
+/**
+ * A GitHub App name that says what it is inside GitHub's 34-character limit.
+ *
+ * The name used to be `${title} (${slug})` truncated to 34, which for any
+ * real book cut mid-word and left the author staring at "The Causal Projector
+ * (causal-proje" — a name they cannot change from here and that appears on
+ * every authorization screen their readers will ever see.
+ *
+ * The slug is the part worth keeping: it is unique per book, already
+ * URL-shaped, and becomes the app's public handle. So prefer the title while
+ * it fits, and fall back to the slug alone rather than to a severed one.
+ */
+export function gitHubAppName(title: string, slug: string): string {
+  const LIMIT = 34;
+  const full = `${title} (${slug})`;
+  if (full.length <= LIMIT) {
+    return full;
+  }
+  // Trim the title until the whole thing fits, on a word boundary, keeping the
+  // slug intact.
+  const bracketed = ` (${slug})`;
+  const room = LIMIT - bracketed.length;
+  if (room >= 8) {
+    // Cut at the last whole word that fits, not at the character that happens
+    // to land on the limit: "The Causal Proj" is no better to look at than
+    // "causal-proje" was.
+    let head = title.slice(0, room);
+    if (title.length > room && !/\s/.test(title[room] ?? "")) {
+      const lastSpace = head.lastIndexOf(" ");
+      if (lastSpace > 0) {
+        head = head.slice(0, lastSpace);
+      }
+    }
+    const trimmed = head.trimEnd().replace(/[\s\p{P}]+$/u, "");
+    if (trimmed.length > 0) {
+      return `${trimmed}${bracketed}`;
+    }
+  }
+  // No room for a meaningful title: the slug alone is honest. Slugs may be up
+  // to 64 characters, so this one may still need cutting — at a hyphen, which
+  // is the slug's own word separator, rather than through the middle of a
+  // word. Two books whose slugs agree for 34 characters would collide either
+  // way; GitHub rejects a duplicate app name, which is a better failure than a
+  // silently confusing one.
+  if (slug.length <= LIMIT) {
+    return slug;
+  }
+  const cut = slug.slice(0, LIMIT);
+  const lastHyphen = cut.lastIndexOf("-");
+  return lastHyphen >= 8 ? cut.slice(0, lastHyphen) : cut;
+}
+
 export const collaborateStage: Stage = async (ctx: WizardContext): Promise<StageOutcome> => {
   ctx.reporter.heading("Turning on collaboration");
   ctx.reporter.explain(
@@ -143,7 +195,7 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
   // ---- the GitHub App -----------------------------------------------------
 
   const credentials = await ensureGitHubApp(ctx, {
-    appName: `${book.title} (${book.slug})`.slice(0, 34),
+    appName: gitHubAppName(book.title, book.slug),
     siteUrl,
     repo,
     apiBase,
