@@ -560,6 +560,15 @@ export class Journal {
       return;
     }
     this.#data.updatedAt = now;
+    // The journal lives inside the book directory, and the first write happens
+    // when the wizard marks a stage started — before the stage that creates
+    // that directory has run. Pointing `--dir` (or a --config `directory:`) at
+    // a path that does not exist yet therefore failed with a bare ENOENT on
+    // this file, which is the wizard's own bookkeeping and nothing the author
+    // could act on. Creating the directory here also keeps `Journal` honest
+    // about its one file rather than making every caller order itself around
+    // an invariant it cannot see.
+    await this.#fs.mkdirp(path.dirname(this.#path));
     // Redaction applies to the serialized text, not to individual fields: it
     // is the last gate before the bytes hit the disk, so it catches a value
     // that arrived through any field at all.
