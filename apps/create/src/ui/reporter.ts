@@ -18,6 +18,7 @@ import { BINARY_NAME } from "../invocation.js";
 import { logoLines } from "./logo.js";
 import { RedactingStream } from "./redacting-stream.js";
 import { spinner } from "@clack/prompts";
+import { Chalk, type ChalkInstance } from "chalk";
 
 const MAX_WIDTH = 80;
 const MIN_WIDTH = 40;
@@ -64,13 +65,30 @@ export function themeFor(env: Environment): Theme {
   };
 }
 
-const CODES: Record<string, [string, string]> = {
-  bold: ["\u001b[1m", "\u001b[22m"],
-  dim: ["\u001b[2m", "\u001b[22m"],
-  green: ["\u001b[32m", "\u001b[39m"],
-  yellow: ["\u001b[33m", "\u001b[39m"],
-  red: ["\u001b[31m", "\u001b[39m"],
-  cyan: ["\u001b[36m", "\u001b[39m"],
+/**
+ * Colour, via chalk.
+ *
+ * The escape sequences were written out by hand here, which worked and meant
+ * every new colour was another pair of magic numbers to get right. chalk also
+ * knows what a terminal can actually take — 16 colours, 256, or truecolor — so
+ * the palette can be richer than the eight that were safe to hardcode.
+ *
+ * `this.#theme.colour` decides *whether* to colour anything, and this instance
+ * is constructed with colour forced on so that stays true. chalk does its own
+ * environment detection, and left to itself it would be a second opinion —
+ * output coloured in one place and not another for reasons neither party fully
+ * owns. The theme already answers to NO_COLOR, TERM=dumb and a non-TTY stdout;
+ * it is the authority, and `#style` is where it is consulted.
+ */
+const paint = new Chalk({ level: 3 });
+
+const STYLES: Record<string, ChalkInstance> = {
+  bold: paint.bold,
+  dim: paint.dim,
+  green: paint.green,
+  yellow: paint.yellow,
+  red: paint.red,
+  cyan: paint.cyan,
 };
 
 /**
@@ -145,12 +163,12 @@ export class Reporter {
     return this.#theme;
   }
 
-  #style(text: string, name: keyof typeof CODES): string {
+  #style(text: string, name: keyof typeof STYLES): string {
     if (!this.#theme.colour) {
       return text;
     }
-    const pair = CODES[name];
-    return pair === undefined ? text : `${pair[0]}${text}${pair[1]}`;
+    const style = STYLES[name];
+    return style === undefined ? text : style(text);
   }
 
   /**
