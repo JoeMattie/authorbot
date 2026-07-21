@@ -1,6 +1,6 @@
 {
   "name": "authorbot",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Alias for @authorbot/cli — the Git-backed editorial control plane and collaboration protocol for serial books.",
   "license": "MIT",
   "type": "module",
