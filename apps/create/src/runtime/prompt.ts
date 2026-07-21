@@ -19,7 +19,6 @@
  * narrower than "not redacted at all", which is what handing over the real
  * stdout would have meant.
  */
-import { Writable } from "node:stream";
 import { confirm, isCancel, password, select, text } from "@clack/prompts";
 import type {
   ConfirmPrompt,
@@ -31,6 +30,7 @@ import type {
 } from "../ports.js";
 import { AbortedError, NonInteractiveError, WizardError } from "../errors.js";
 import type { SecretVault } from "../secrets.js";
+import { RedactingStream } from "../ui/redacting-stream.js";
 
 export interface TtyPrompterOptions {
   readonly input: NodeJS.ReadStream;
@@ -42,36 +42,9 @@ export interface TtyPrompterOptions {
   readonly target?: NodeJS.WritableStream;
 }
 
-/**
- * A stream that redacts on its way to the terminal.
- *
- * This is what made adopting a prompt library acceptable: without it, every
- * byte clack writes would be output the vault has never seen.
- */
-class RedactingStream extends Writable {
-  readonly #target: NodeJS.WritableStream;
-  readonly #vault: SecretVault | undefined;
-
-  constructor(target: NodeJS.WritableStream, vault: SecretVault | undefined) {
-    super();
-    this.#target = target;
-    this.#vault = vault;
-  }
-
-  override _write(
-    chunk: unknown,
-    _encoding: BufferEncoding,
-    callback: (error?: Error | null) => void,
-  ): void {
-    const written = String(chunk);
-    this.#target.write(this.#vault === undefined ? written : this.#vault.redact(written));
-    callback();
-  }
-}
-
 export class TtyPrompter implements Prompter {
   readonly #input: NodeJS.ReadStream;
-  readonly #output: Writable;
+  readonly #output: RedactingStream;
   readonly #vault: SecretVault | undefined;
 
   constructor(options: TtyPrompterOptions) {

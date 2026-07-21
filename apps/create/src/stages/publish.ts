@@ -177,8 +177,9 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
     return { continue: true, note: "deployed; URL unknown" };
   }
 
-  ctx.reporter.step(`Waiting for ${siteUrl} to answer`);
-  const live = await waitForSite(ctx, siteUrl);
+  const live = await ctx.reporter.during(`Waiting for ${siteUrl} to answer`, () =>
+    waitForSite(ctx, siteUrl),
+  );
   if (!live) {
     // Before calling a deploy failed, ask a resolver that is not this
     // machine's. A brand-new hostname is very often looked up (and cached as

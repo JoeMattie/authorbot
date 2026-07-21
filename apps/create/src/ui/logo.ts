@@ -62,14 +62,18 @@ export function logoLines(options: LogoOptions): readonly string[] {
     options.colour ? `\u001b[${code}m${text}\u001b[0m` : text;
   const dim = (text: string): string => (options.colour ? `\u001b[2m${text}\u001b[22m` : text);
 
-  const sparkles = `${INDENT}${" ".repeat(Math.floor(MARK_WIDTH * 0.55))}${paint(GOLD, "✦")}   ${paint(TEAL, "·")}`;
+  // Centre the whole block in the terminal, not just the mark over the
+  // wordmark. A mark pinned to the left edge of a wide terminal looks like a
+  // rendering accident rather than a decision.
+  const outer = " ".repeat(Math.max(0, Math.floor((options.width - WORD_WIDTH) / 2)));
+  const sparkles = `${outer}${INDENT}${" ".repeat(Math.floor(MARK_WIDTH * 0.55))}${paint(GOLD, "✦")}   ${paint(TEAL, "·")}`;
 
   return [
     sparkles,
-    `${INDENT}${paint(NAVY, BORDER)}`,
-    `${INDENT}${paint(NAVY, "│")} ${dim("───")}   ${paint(NAVY, "│")} ${paint(NAVY, "╭")}${paint(TEAL, "◉ ◉")}${paint(NAVY, "╮")} ${paint(NAVY, "│")}`,
-    `${INDENT}${paint(NAVY, SPINE_LEFT)}${paint(TEAL, "╲▼╱")}${paint(NAVY, SPINE_RIGHT)}`,
+    `${outer}${INDENT}${paint(NAVY, BORDER)}`,
+    `${outer}${INDENT}${paint(NAVY, "│")} ${dim("───")}   ${paint(NAVY, "│")} ${paint(NAVY, "╭")}${paint(TEAL, "◉ ◉")}${paint(NAVY, "╮")} ${paint(NAVY, "│")}`,
+    `${outer}${INDENT}${paint(NAVY, SPINE_LEFT)}${paint(TEAL, "╲▼╱")}${paint(NAVY, SPINE_RIGHT)}`,
     "",
-    ...WORDMARK.map(([left, right]) => `${paint(ORANGE, left)}${paint(TEAL, right)}`),
+    ...WORDMARK.map(([left, right]) => `${outer}${paint(ORANGE, left)}${paint(TEAL, right)}`),
   ];
 }

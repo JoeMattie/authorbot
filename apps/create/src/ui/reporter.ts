@@ -16,6 +16,8 @@ import type { Environment, OutputPort } from "../ports.js";
 import type { SecretVault } from "../secrets.js";
 import { BINARY_NAME } from "../invocation.js";
 import { logoLines } from "./logo.js";
+import { RedactingStream } from "./redacting-stream.js";
+import { spinner } from "@clack/prompts";
 
 const MAX_WIDTH = 80;
 const MIN_WIDTH = 40;
@@ -36,6 +38,15 @@ export interface Theme {
    * the same thing, so nothing is carried by the glyph alone.
    */
   readonly unicode: boolean;
+  /**
+   * The terminal's true width, unclamped.
+   *
+   * `width` is capped at 80 because prose past that is hard to read. The mark
+   * is not prose: centring it inside an 80-column box on a 200-column terminal
+   * leaves it sitting off to the left, which looks like a bug rather than a
+   * decision.
+   */
+  readonly terminalWidth: number;
 }
 
 export function themeFor(env: Environment): Theme {
@@ -49,6 +60,7 @@ export function themeFor(env: Environment): Theme {
     colour,
     unicode: colour,
     width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(columns))),
+    terminalWidth: Math.max(MIN_WIDTH, Math.floor(columns)),
   };
 }
 
@@ -170,13 +182,54 @@ export class Reporter {
   }
 
   /**
+   * Runs `work` under a spinner, when the terminal can show one.
+   *
+   * For the steps that take minutes rather than moments — installing the
+   * toolchain, deploying, waiting for a site to answer. Silence for four
+   * minutes reads as a hang: the first author to meet the cold toolchain
+   * install asked whether to kill the process, and was right to, because
+   * nothing on screen distinguished "downloading wrangler" from "stopped".
+   *
+   * The `timer` indicator is deliberate. A spinning character says only that
+   * the process is alive; elapsed time answers the question actually being
+   * asked, which is whether this is taking longer than it should.
+   *
+   * Degrades to the ordinary step line whenever the terminal cannot take a
+   * spinner — a redrawing cursor in a log file is worse than no spinner at
+   * all — so the caller's output is the same either way, minus the animation.
+   */
+  async during<T>(label: string, work: () => Promise<T>): Promise<T> {
+    if (!this.#theme.unicode) {
+      this.step(label);
+      return await work();
+    }
+    const spin = spinner({
+      indicator: "timer",
+      // Never `process.stdout`: a spinner draws its own output, and the vault
+      // has to see it like everything else.
+      output: new RedactingStream(process.stdout, this.#vault),
+    });
+    spin.start(this.#named(this.#vault.redact(label)));
+    try {
+      const result = await work();
+      spin.stop(this.#named(this.#vault.redact(label)));
+      return result;
+    } catch (error) {
+      // Stop before rethrowing, or the spinner keeps drawing over the error
+      // that explains why it stopped.
+      spin.error(this.#named(this.#vault.redact(label)));
+      throw error;
+    }
+  }
+
+  /**
    * The mark, once, at the top of a run.
    *
    * Not per stage: a logo that reappears every few seconds stops being a mark
    * and becomes noise between the author and what they are being told.
    */
   logo(): void {
-    for (const line of logoLines(this.#theme)) {
+    for (const line of logoLines({ ...this.#theme, width: this.#theme.terminalWidth })) {
       this.#emit(line);
     }
     this.blank();

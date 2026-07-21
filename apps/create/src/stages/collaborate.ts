@@ -288,8 +288,9 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
     return { continue: true, note: "planned only" };
   }
 
-  ctx.reporter.step("Checking the API is really working before switching it on");
-  await verifyHealth(ctx, siteUrl, database.name, book.slug, login);
+  await ctx.reporter.during("Checking the API is really working before switching it on", () =>
+    verifyHealth(ctx, siteUrl, database.name, book.slug, login),
+  );
   ctx.reporter.ok("The API answers correctly and knows you are the book's maintainer.");
 
   await ctx.journal.update((data) => {

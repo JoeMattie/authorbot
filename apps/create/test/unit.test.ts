@@ -438,11 +438,22 @@ describe("the logo", () => {
     const lines = logoLines({ colour: false, unicode: true, width: 80 });
     const border = lines[1] ?? "";
     const wordmark = lines[5] ?? "";
-    const indent = border.length - border.trimStart().length;
-    const markWidth = [...border.trim()].length;
-    const slack = [...wordmark].length - markWidth;
+    // Both lines carry the same outer indent that centres the block in the
+    // terminal, so the mark's own offset is the difference between them.
+    const outer = wordmark.length - wordmark.trimStart().length;
+    const inner = border.length - border.trimStart().length - outer;
+    const slack = [...wordmark.trim()].length - [...border.trim()].length;
     // Centred to within a column, which is all an odd difference allows.
-    expect(Math.abs(indent - Math.round(slack / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(inner - Math.round(slack / 2))).toBeLessThanOrEqual(1);
+  });
+
+  it("centres the whole block in the terminal", () => {
+    // A mark pinned to the left edge of a wide terminal reads as a rendering
+    // accident rather than a decision.
+    const wide = logoLines({ colour: false, unicode: true, width: 100 });
+    const narrow = logoLines({ colour: false, unicode: true, width: 40 });
+    const indentOf = (line: string): number => line.length - line.trimStart().length;
+    expect(indentOf(wide[5] ?? "")).toBeGreaterThan(indentOf(narrow[5] ?? ""));
   });
 
   it("falls back to one plain line where box characters cannot be drawn", () => {

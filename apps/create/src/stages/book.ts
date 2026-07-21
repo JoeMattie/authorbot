@@ -420,11 +420,6 @@ async function installToolchain(ctx: WizardContext): Promise<void> {
   const MAX_ATTEMPTS = 3;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    ctx.reporter.step(
-      attempt === 1
-        ? "Installing the Authorbot toolchain this book pins"
-        : `Installing the Authorbot toolchain (attempt ${String(attempt)})`,
-    );
     if (attempt === 1) {
       // Said before the wait, not after it: a cold install of wrangler and its
       // build tools runs to minutes, and silence for that long reads as a hang.
@@ -433,14 +428,24 @@ async function installToolchain(ctx: WizardContext): Promise<void> {
       );
     }
 
-    const install = await ctx.actions.run({
-      purpose: "install the toolchain pinned in the book's package.json",
-      command: "npm",
-      args: ["install", "--no-audit", "--no-fund"],
-      cwd: ctx.directory,
-      mutates: true,
-      timeoutMs: 900_000,
-    });
+    // Under a spinner with an elapsed timer: this is the step that runs to
+    // minutes, and the question an author is actually asking while it does is
+    // "has this stopped?", which a clock answers and a spinning character does
+    // not.
+    const install = await ctx.reporter.during(
+      attempt === 1
+        ? "Installing the Authorbot toolchain this book pins"
+        : `Installing the Authorbot toolchain (attempt ${String(attempt)})`,
+      () =>
+        ctx.actions.run({
+          purpose: "install the toolchain pinned in the book's package.json",
+          command: "npm",
+          args: ["install", "--no-audit", "--no-fund"],
+          cwd: ctx.directory,
+          mutates: true,
+          timeoutMs: 900_000,
+        }),
+    );
 
     if (install.code === 0) {
       ctx.reporter.ok("Toolchain installed, and package-lock.json now pins it.");
