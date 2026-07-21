@@ -15,7 +15,7 @@
  * empty state.
  */
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, symlink, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -52,6 +52,42 @@ async function linkToolchain(directory: string): Promise<void> {
   await symlink(cliBin, path.join(binDir, "authorbot"));
 }
 
+/**
+ * The real runner, minus the one command that would reach the network.
+ *
+ * `book` installs the toolchain its package.json pins, which is right in a
+ * real book and wrong here twice over: `linkToolchain` has already put the
+ * binary in place, and a suite that shells out to the registry stops being a
+ * test of this repository and starts being a test of npm's availability. It
+ * took this file from 7.8s to 26s and made an npm outage a red build.
+ *
+ * Everything else — git, the toolchain binary itself — runs for real, which is
+ * the point of an end-to-end test. Only the install is answered locally, and
+ * the lockfile it would have produced is written here so the assertions about
+ * a committed lockfile still mean something.
+ */
+class OfflineInstallRunner extends NodeProcessRunner {
+  readonly installs: string[] = [];
+
+  override async run(
+    command: string,
+    args: readonly string[],
+    options?: Parameters<NodeProcessRunner["run"]>[2],
+  ): ReturnType<NodeProcessRunner["run"]> {
+    if (command === "npm" && args[0] === "install") {
+      const cwd = options?.cwd ?? process.cwd();
+      this.installs.push(cwd);
+      await writeFile(
+        path.join(cwd, "package-lock.json"),
+        `${JSON.stringify({ name: "book", lockfileVersion: 3, requires: true, packages: {} }, null, 2)}\n`,
+        "utf8",
+      );
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    return super.run(command, args, options);
+  }
+}
+
 const toolchainBuilt = existsSync(cliBin);
 
 describe.skipIf(!toolchainBuilt)("a real book on a real disk", () => {
@@ -63,7 +99,7 @@ describe.skipIf(!toolchainBuilt)("a real book on a real disk", () => {
 
     const out = new CollectingOutput();
     const code = await runCli(["book", "--dir", bookDir], {
-      runner: new NodeProcessRunner({
+      runner: new OfflineInstallRunner({
         ...process.env,
         // Isolate from the developer's own Git identity and config, so the
         // commit works the same on a laptop and in CI.
@@ -169,7 +205,7 @@ describe.skipIf(!toolchainBuilt)("a real book on a real disk", () => {
     const { stdout: before } = await run("git", ["rev-parse", "HEAD"], { cwd: bookDir });
     const out = new CollectingOutput();
     const code = await runCli(["book", "--dir", bookDir], {
-      runner: new NodeProcessRunner({
+      runner: new OfflineInstallRunner({
         ...process.env,
         GIT_AUTHOR_NAME: "Authorbot Test",
         GIT_AUTHOR_EMAIL: "test@example.invalid",
