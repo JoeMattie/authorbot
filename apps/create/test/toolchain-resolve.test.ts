@@ -48,7 +48,7 @@ describe("resolveTool", () => {
     // npx is installed, but `--no-install` refuses because the package is not
     // cached — precisely the situation in a freshly scaffolded book.
     const runner = new FakeProcessRunner(["npx"]);
-    runner.on(["npx", "--no-install", "authorbot", "--version"], {
+    runner.on(["npx", "--no-install", "authorbot", "--help"], {
       code: 1,
       stdout: "",
       stderr: 'npx canceled due to missing packages and no YES option: ["authorbot@0.0.2"]',
@@ -61,7 +61,7 @@ describe("resolveTool", () => {
 
   it("offers npx when the tool is genuinely cached there", async () => {
     const runner = new FakeProcessRunner(["npx"]);
-    runner.on(["npx", "--no-install", "authorbot", "--version"], {
+    runner.on(["npx", "--no-install", "authorbot", "--help"], {
       code: 0,
       stdout: "0.1.3\n",
       stderr: "",
@@ -76,5 +76,17 @@ describe("resolveTool", () => {
   it("returns null when the tool is nowhere at all", async () => {
     const runner = new FakeProcessRunner([]);
     await expect(resolveTool(contextWith(runner), "authorbot")).resolves.toBeNull();
+  });
+
+  it("probes with a flag the toolchain actually accepts", async () => {
+    // `authorbot --version` is not a command and exits non-zero, so probing
+    // with it reported a working toolchain as missing. Both tools resolved
+    // here accept `--help` and exit 0; this pins that choice rather than
+    // leaving it to be rediscovered.
+    const runner = new FakeProcessRunner(["npx"]);
+    await resolveTool(contextWith(runner), "authorbot");
+
+    const probe = runner.calls.find((c) => c.command === "npx");
+    expect(probe?.args).toEqual(["--no-install", "authorbot", "--help"]);
   });
 });

@@ -57,9 +57,16 @@ export async function resolveTool(
  * Probing keeps the two apart. An unrunnable tool resolves to null, which
  * callers already handle by saying the toolchain is not installed yet rather
  * than blaming the author's files for a failure that never involved them.
+ *
+ * `--help` is the probe because both tools this resolves accept it and exit 0.
+ * `--version` does not qualify: `authorbot` has no such command and exits
+ * non-zero, which would report a perfectly usable toolchain as missing. If a
+ * future tool disagrees about `--help` too, the cost is that same conservative
+ * answer — a warning that it is not installed, never a false claim about the
+ * author's book, which is the direction this whole function exists to protect.
  */
 async function npxCanRun(ctx: WizardContext, tool: string): Promise<boolean> {
-  const probe = await ctx.runner.run("npx", ["--no-install", tool, "--version"], {
+  const probe = await ctx.runner.run("npx", ["--no-install", tool, "--help"], {
     cwd: ctx.directory,
   });
   return probe.code === 0;

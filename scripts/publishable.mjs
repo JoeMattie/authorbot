@@ -28,4 +28,11 @@ export const PUBLISHABLE = [
   // first release — `npx @authorbot/create`, the documented way an author
   // starts, resolved to nothing.
   "apps/create",
+  // The unscoped `authorbot` name, forwarding to apps/cli — which is why it
+  // follows it here. It predates this list as a hand-published 0.0.2 that then
+  // sat unmaintained while the toolchain moved on, so `npx authorbot` (what
+  // the generated workflows and our own error messages tell people to run)
+  // could resolve to something unrelated. Releasing it with everything else is
+  // what keeps that instruction honest.
+  "packages/authorbot-alias",
 ];
