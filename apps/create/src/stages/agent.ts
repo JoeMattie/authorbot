@@ -176,32 +176,23 @@ async function mintToken(
   projectSlug: string,
   name: string,
 ): Promise<string | null> {
-  const existing = ctx.env.env["AUTHORBOT_API_TOKEN"];
-  let credential = existing;
+  // NOT A QUESTION ANY MORE.
+  //
+  // This used to ask whether to mint now, and then for a maintainer bearer
+  // token. No author has one: signing in produces a session cookie, and
+  // nothing in Authorbot issues bearer tokens to people. So the question could
+  // only ever be answered by an operator running this with a credential from
+  // somewhere else — while every actual author met a hidden field, no way to
+  // obtain what it wanted, and no indication that leaving it empty was the
+  // way out.
+  //
+  // `AUTHORBOT_API_TOKEN` is still honoured, because that path is real: a
+  // pipeline, or a maintainer who already minted one, can set it and have this
+  // stage do the work. Everyone else is sent to the button on their settings
+  // page, which is where a person can actually get one.
+  const credential = ctx.env.env["AUTHORBOT_API_TOKEN"];
   if (credential === undefined || credential.length === 0) {
-    if (ctx.options.nonInteractive) {
-      return null;
-    }
-    const supply = await ctx.prompter.confirm({
-      id: "agent.mintNow",
-      message: "Mint the token now?",
-      hint: "Only if you already hold a maintainer bearer token — most authors do not, because signing in gives a session cookie rather than a token. Say no, which is the usual answer, and you are pointed at the button on your book's settings page that creates one.",
-      defaultValue: false,
-    });
-    if (!supply) {
-      return null;
-    }
-    credential = await ctx.prompter.secret({
-      id: "agent.maintainerToken",
-      // The escape hatch has always existed — an empty value falls through to
-      // the settings-page instructions — and was never mentioned, so the field
-      // read as a demand rather than an offer. The first author to reach it
-      // answered yes, met a cursor, and had nothing telling them either how to
-      // get the credential or how to leave.
-      message:
-        "Maintainer bearer token — or press Enter to skip and use your book's settings page instead:",
-      hint: "Hidden as you type, and sent only to your own site. Almost nobody has one of these: signing in gives a session cookie, not a token. Skipping is the normal answer.",
-    });
+    return null;
   }
   if (credential.length === 0) {
     return null;
