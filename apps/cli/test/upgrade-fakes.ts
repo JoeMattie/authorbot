@@ -259,6 +259,7 @@ export interface DepsOverrides {
 
 export function makeDeps(overrides: DepsOverrides = {}): UpgradeDeps {
   return {
+    lockfile: { relock: async () => true },
     fs: nodeFs,
     git: overrides.git ?? fakeGit(),
     releases: overrides.releases ?? fakeReleases(["1.0.0", "1.1.0"]),

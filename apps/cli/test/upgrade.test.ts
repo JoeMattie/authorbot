@@ -321,7 +321,10 @@ describe("authorbot upgrade — the pull request (ADR-0021 §3 step 4)", () => {
 
     // Two commits, in this order, so `git revert` can undo either alone.
     expect(git.commits).toHaveLength(2);
-    expect(git.commits[0]?.paths).toEqual(["package.json"]);
+    // The lockfile rides with the pin: `npm ci` refuses a lockfile that
+    // disagrees with its manifest, so committing package.json alone opened a
+    // pull request whose own CI could not pass.
+    expect(git.commits[0]?.paths).toEqual(["package.json", "package-lock.json"]);
     expect(git.commits[0]?.message).toContain("upgrade toolchain 1.0.0 -> 1.1.0");
     expect(git.commits[1]?.paths).toEqual(["README.md"]);
     expect(git.commits[1]?.message).toContain("book-format migrations for 1.1.0");
@@ -339,6 +342,22 @@ describe("authorbot upgrade — the pull request (ADR-0021 §3 step 4)", () => {
     expect(await nodeFs.readFile(path.join(repoPath, "README.md"))).toContain(
       "<!-- migrated by 0001-a -->",
     );
+  });
+
+  it("commits package.json alone, and says so, when the lockfile cannot be refreshed", async () => {
+    // Offline, or no npm. The upgrade is still worth having — but a lockfile
+    // left pinning the old version fails `npm ci` in CI, and the author has to
+    // be told that rather than discovering it on a red pull request.
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const git = fakeGit();
+    const io = captureIo();
+    const offline = { ...makeDeps({ git }), lockfile: { relock: async () => false } };
+
+    expect(await runUpgrade([repoPath], io.io, offline)).toBe(0);
+
+    expect(git.commits[0]?.paths).toEqual(["package.json"]);
+    expect(io.stderr()).toContain("package-lock.json");
+    expect(io.stderr()).toContain("npm ci");
   });
 
   it("makes a single commit when only the pin moves", async () => {

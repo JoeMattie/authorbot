@@ -116,6 +116,7 @@ async function defaultDeps(): Promise<UpgradeDeps> {
   return {
     fs: ports.nodeFs,
     git: ports.nodeGit,
+    lockfile: ports.nodeLockfile,
     releases: ports.npmReleases,
     wrangler: ports.wranglerCli,
     health: ports.httpHealth,
@@ -469,13 +470,26 @@ async function runUpgradeFlow(
       path.join(plan.repoPath, "package.json"),
       rewritePin(plan.pinLocation.packageJsonText, newSpec),
     );
+    // The lockfile has to move with the pin. `npm ci` — which both generated
+    // workflows run, and which exists to refuse a lockfile that disagrees with
+    // its manifest — otherwise fails on this pull request, so every upgrade
+    // opened one whose CI could not pass.
+    const relocked = await deps.lockfile.relock(plan.repoPath);
+    const pinPaths = relocked ? ["package.json", "package-lock.json"] : ["package.json"];
+    if (!relocked) {
+      io.err(
+        "authorbot: could not refresh package-lock.json (npm unavailable, or offline). " +
+          "Run `npm install --package-lock-only` on the upgrade branch and commit it, " +
+          "or CI will fail on `npm ci` because the lockfile still pins the old version.",
+      );
+    }
     await deps.git.commit(plan.repoPath, {
       message:
         `chore(authorbot): upgrade toolchain ${plan.current.raw} -> ${plan.target.raw}\n\n` +
         `Pins ${plan.pinLocation.field}["@authorbot/cli"] to ${newSpec}.\n` +
         "Reverting this commit rolls the toolchain back; it does NOT undo any\n" +
         "book-format migration (ADR-0021 §5).",
-      paths: ["package.json"],
+      paths: pinPaths,
     });
     completed.push("committed the toolchain pin");
 
@@ -883,12 +897,13 @@ async function runRollback(
       path.join(plan.repoPath, "package.json"),
       rewritePin(plan.pinLocation.packageJsonText, newSpec),
     );
+    const rollbackRelocked = await deps.lockfile.relock(plan.repoPath);
     await deps.git.commit(plan.repoPath, {
       message:
         `chore(authorbot): roll back toolchain ${current.raw} -> ${plan.target.raw}\n\n` +
         "Toolchain only. Book-format migrations, if any ran, are reverted separately\n" +
         "(ADR-0021 §5).",
-      paths: ["package.json"],
+      paths: rollbackRelocked ? ["package.json", "package-lock.json"] : ["package.json"],
     });
     completed.push("committed the pin rollback");
     await deps.git.push(plan.repoPath, branch);

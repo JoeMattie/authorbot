@@ -101,9 +101,29 @@ export interface HealthPort {
  * demand — the gate is the safety property most worth testing, and it is
  * untestable if the only way to trip it is to author a genuinely broken book.
  */
+/**
+ * Bringing `package-lock.json` back into agreement with a just-rewritten
+ * `package.json`.
+ *
+ * The toolchain bump used to change the pin and commit that alone, leaving the
+ * lockfile pinning the version being upgraded away from. `npm ci` — which both
+ * generated workflows run, and which exists precisely to refuse a lockfile
+ * that disagrees with its manifest — then failed on the upgrade's own pull
+ * request. Every upgrade opened a pull request whose CI could not pass.
+ */
+export interface LockfilePort {
+  /**
+   * Regenerate the lockfile from package.json without installing anything.
+   * Returns false when it could not be done (no npm, no network), which is a
+   * reason to warn rather than to abandon an otherwise good upgrade.
+   */
+  relock(repoPath: string): Promise<boolean>;
+}
+
 export interface UpgradeDeps {
   readonly fs: UpgradeFs;
   readonly git: GitPort;
+  readonly lockfile: LockfilePort;
   readonly releases: ReleasesPort;
   readonly wrangler: WranglerPort;
   readonly health: HealthPort;

@@ -19,6 +19,7 @@ import type {
   DeployResult,
   GitPort,
   HealthPort,
+  LockfilePort,
   HealthResult,
   ReleasesPort,
   UpgradeFs,
@@ -109,6 +110,24 @@ export const nodeFs: UpgradeFs = {
   },
   async removeTree(target) {
     await rm(target, { recursive: true, force: true });
+  },
+};
+
+export const nodeLockfile: LockfilePort = {
+  async relock(repoPath) {
+    // `--package-lock-only` rewrites the lockfile from package.json without
+    // touching node_modules: this runs inside a temporary working copy, and
+    // installing there would be minutes of work thrown away. It still needs
+    // the registry to resolve the new versions, so it can fail offline —
+    // hence the boolean rather than a throw. An upgrade that is otherwise
+    // good should not be abandoned because a lockfile could not be refreshed;
+    // it should say so.
+    try {
+      await run("npm", ["install", "--package-lock-only", "--no-audit", "--no-fund"], repoPath);
+      return true;
+    } catch {
+      return false;
+    }
   },
 };
 
