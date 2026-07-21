@@ -859,9 +859,66 @@ main.ab-enabled {
   text-decoration: underline;
 }
 
+/* Maintainer-only draft workspace on the home page. The element has no
+   fallback content, so non-maintainers do not get an empty heading or teaser. */
+.ab-drafts {
+  margin: 1.5rem 0 2rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--draft-border);
+  border-radius: 6px;
+  background: var(--draft-bg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.9rem;
+}
+
+.ab-drafts-heading {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.ab-drafts-note {
+  margin: 0.3rem 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ab-draft-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ab-draft-item {
+  padding: 0.8rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.ab-draft-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.ab-draft-title {
+  font-weight: 600;
+}
+
+.ab-draft-revision {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.ab-draft-panel .ab-chapter-composer {
+  margin-top: 0.8rem;
+  background: var(--bg);
+}
+
 /* Focus must be visible on every control here (contract §4). */
 .ab-chapter-composer .ab-input:focus-visible,
 .ab-chapter-composer .ab-btn:focus-visible,
+.ab-draft-review:focus-visible,
 .ab-new-chapter:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;

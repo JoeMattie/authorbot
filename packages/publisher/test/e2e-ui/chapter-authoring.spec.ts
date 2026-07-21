@@ -43,7 +43,10 @@ async function assertNoIdsOrMarkers(page: Page, step: string): Promise<void> {
   expect(composed, `${step}: the prose box holds no frontmatter`).not.toMatch(/^---/);
 }
 
-test("a maintainer writes a new chapter, saves a draft, and publishes it", async ({ page }) => {
+test("a maintainer writes a new chapter, reviews the draft from home, and publishes it", async ({
+  page,
+  browser,
+}) => {
   // Sign in on a chapter page — the "New chapter" button is an affordance for
   // actors who may use it, not a login prompt, so it renders nothing until the
   // API says who this is.
@@ -88,6 +91,23 @@ test("a maintainer writes a new chapter, saves a draft, and publishes it", async
   await rebuildSite();
   await reader.goto(`${siteUrl()}/`);
   await expect(reader.locator(".chapter-index")).not.toContainText(TITLE);
+
+  // The signed-in maintainer still sees the unpublished chapter in a private
+  // home-page workspace and can reopen the existing composer from there.
+  const drafts = reader.locator(".ab-drafts");
+  await expect(drafts).toContainText(TITLE);
+  const submittedDraft = drafts.locator(".ab-draft-item").filter({ hasText: TITLE });
+  await expect(submittedDraft.locator(".ab-chip")).toHaveText("draft");
+  await submittedDraft.getByRole("button", { name: `Review draft: ${TITLE}` }).click();
+  await expect(submittedDraft.locator("textarea.ab-chapter-text")).toHaveValue(PROSE);
+
+  // A fresh, signed-out browser gets neither the draft title nor its prose.
+  const visitorContext = await browser.newContext();
+  const visitor = await visitorContext.newPage();
+  await visitor.goto(`${siteUrl()}/`);
+  await expect(visitor.locator("body")).not.toContainText(TITLE);
+  await expect(visitor.locator("authorbot-draft-chapters")).toBeEmpty();
+  await visitorContext.close();
 
   // Publish — the separate, explicit action, offered to a maintainer once the
   // chapter exists.

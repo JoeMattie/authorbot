@@ -178,7 +178,9 @@ currently marked planned in the OpenAPI document).
   only to actors who may use it, opening a plain title-and-prose composer
   (Markdown, no frontmatter, no marker syntax). Saving creates a draft;
   publishing is a separate explicit action. Editing an existing chapter uses
-  the same composer.
+  the same composer. The home page gives maintainers a private list of draft
+  and proposed chapters; opening one loads that composer from the authenticated
+  source route. Draft prose is never embedded in the public static build.
 - Story documents (outline nodes, character files) get the same treatment
   where cheap; if effort forces a choice, **chapters come first** — an author
   with no outline can still write, but an author who cannot write is stuck.
@@ -378,20 +380,23 @@ the repository, this replaces the separate OAuth App. Requirements:
    work unchanged.
 8. A chapterless book validates, builds, publishes, and renders a welcoming
    empty state; `templates/book-repo` ships blank and self-consistent.
-9. No CORS header is emitted under any configuration; a book deployed under a
+9. After an editor or agent saves a draft, a maintainer sees it in a private
+   home-page workspace and can review and publish it there; a signed-out reader
+   receives neither the draft metadata nor its prose.
+10. No CORS header is emitted under any configuration; a book deployed under a
    base path works end to end (site, API, sign-in, and islands).
-10. A maintainer changes the book's title, license, display options, and
+11. A maintainer changes the book's title, license, display options, and
     governance thresholds entirely in the browser, and can promote or reject a
     suggestion against its tally with a recorded reason; a suggestion reaching
     the numeric threshold without a human maintainer's approval does **not**
     become work under the default rule; each lands as a validated, attributed
     commit to `book.yml`, and guarded fields require confirmation while
     never-editable fields are absent from the interface.
-11. No GitHub Pages code, workflow step, or documentation remains.
-12. `upgrade` moves a book across a release that includes a book-format
+12. No GitHub Pages code, workflow step, or documentation remains.
+13. `upgrade` moves a book across a release that includes a book-format
     migration, producing a pull request that validates before and after; the
     publish workflow applies pending D1 migrations before deploying.
-13. A generated book publishes with no clone or compile of this repository:
+14. A generated book publishes with no clone or compile of this repository:
     author CI installs pinned npm packages and runs the binary. Releases
     publish with provenance.
-14. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+15. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.

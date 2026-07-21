@@ -441,7 +441,10 @@ block marker, assigns `order` as the last one plus ten, defaults to
 committing it with attribution. Publishing a draft is a separate, explicit,
 maintainer-only action. Editing an existing chapter uses the same composer, and
 markers are reused for blocks whose text did not change, so annotations stay
-anchored across a revision.
+anchored across a revision. Draft and proposed chapters appear in a private
+**Drafts** section on the home page for maintainers, where **Review draft**
+opens that composer and its Publish control. The static site still contains no
+draft prose; the browser fetches it only after the API confirms the maintainer.
 
 **Settings.** A maintainer-only view editing the same `book.yml` that lives in
 Git, through the same outbox, validation, and attribution path as any other

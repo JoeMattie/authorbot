@@ -22,11 +22,17 @@ const src = `${site.basePath}_astro/authorbot-collab.js`;
   <h1>{site.book.title}</h1>
   {
     collab && (
-      <authorbot-new-chapter
-        data-api-base={collab.apiBase}
-        data-project={collab.projectSlug}
-        data-href={`${site.basePath}write/`}
-      />
+      <>
+        <authorbot-new-chapter
+          data-api-base={collab.apiBase}
+          data-project={collab.projectSlug}
+          data-href={`${site.basePath}write/`}
+        />
+        <authorbot-draft-chapters
+          data-api-base={collab.apiBase}
+          data-project={collab.projectSlug}
+        />
+      </>
     )
   }
   {
