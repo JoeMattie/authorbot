@@ -99,9 +99,20 @@ export function statesMatch(returned: string | null, expected: string): boolean 
  *
  * Permissions are the minimum the API actually uses: `contents: write` to
  * commit prose, `metadata: read` because GitHub requires it alongside any
- * repository permission. `request_oauth_on_install` is what lets this one app
- * both authenticate readers and write to the repository, replacing the
- * separate OAuth App.
+ * repository permission.
+ *
+ * `request_oauth_on_install` is FALSE, and that is load-bearing. It does not
+ * decide whether this app can authenticate readers — the client credentials do
+ * that, and sign-in works either way. All it decides is whether GitHub runs
+ * the OAuth flow *during installation*, which sent the author straight to
+ * `/v1/auth/github/callback` at the one moment it could not exist: the Worker
+ * config needs the installation id, so the API cannot be deployed until the
+ * installation it is waiting for has happened. Every author met a 404 in the
+ * middle of setup, on a page the wizard does not control, while the terminal
+ * behind it carried on working.
+ *
+ * With it false, GitHub sends them to `setup_url` — the book's own site, which
+ * `publish` put up minutes earlier and which answers 200.
  */
 export function buildManifest(
   options: ManifestFlowOptions,
@@ -137,7 +148,7 @@ export function buildManifest(
       contents: "write",
       metadata: "read",
     },
-    request_oauth_on_install: true,
+    request_oauth_on_install: false,
     setup_on_update: false,
   };
 }

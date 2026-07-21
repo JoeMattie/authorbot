@@ -102,8 +102,19 @@ describe("the manifest itself", () => {
     expect(manifest["default_events"]).toEqual(["push"]);
   });
 
-  it("requests OAuth on install, which is what replaces the separate OAuth App", () => {
-    expect(manifest["request_oauth_on_install"]).toBe(true);
+  it("does not run OAuth during installation", () => {
+    // Not a capability switch: sign-in works either way, because the client
+    // credentials are what authenticate readers. This only decides whether
+    // GitHub runs OAuth *while installing* — which sent the author to
+    // /v1/auth/github/callback at the one moment it could not exist, since the
+    // Worker config needs the installation id that installing produces.
+    expect(manifest["request_oauth_on_install"]).toBe(false);
+  });
+
+  it("sends the author somewhere that exists after installing", () => {
+    // setup_url is where GitHub lands them instead: the book's own site, which
+    // `publish` put up minutes earlier.
+    expect(manifest["setup_url"]).toBe(OPTIONS.siteUrl);
   });
 
   it("sends the creation code to the loopback and readers to the site", () => {
