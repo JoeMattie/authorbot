@@ -166,13 +166,25 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
 
   if (!ctx.actions.dryRun) {
     ctx.reporter.step("Installing the Authorbot toolchain this book pins");
+    // Said before the wait, not after it: the pinned toolchain pulls wrangler,
+    // which pulls miniflare, workerd and esbuild, and a cold resolve of that
+    // tree runs to several minutes on a first install. With nothing on screen
+    // it reads as a hang — the first author to hit it asked whether to kill it.
+    ctx.reporter.info(
+      "This is the slow step, and only slow once: a first install downloads wrangler and its build tools, which can take a few minutes.",
+    );
     const install = await ctx.actions.run({
       purpose: "install the toolchain pinned in the book's package.json",
       command: "npm",
       args: ["install", "--no-audit", "--no-fund"],
       cwd: ctx.directory,
       mutates: true,
-      timeoutMs: 300_000,
+      // Fifteen minutes, not five. A cold install of this tree took ~4 minutes
+      // on a fast connection, which left almost no margin for a slow one — and
+      // the failure is not harmless: the warning it prints leaves a book with
+      // no package-lock.json, which is the one file both generated workflows
+      // refuse to run without.
+      timeoutMs: 900_000,
     });
     if (install.code === 0) {
       ctx.reporter.ok("Toolchain installed, and package-lock.json now pins it.");
