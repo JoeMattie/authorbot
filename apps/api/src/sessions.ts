@@ -58,6 +58,18 @@ export function sessionCookieHeader(value: string): string {
   );
 }
 
+/**
+ * Clears the session cookie.
+ *
+ * Same attributes as `sessionCookieHeader` minus the value, because a browser
+ * only replaces a cookie when Path, Domain, Secure and SameSite all match the
+ * one it holds — a clear that differs in any of them silently leaves the
+ * original in place, and the reader stays signed in with no way to tell.
+ */
+export function clearSessionCookieHeader(): string {
+  return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
 /** Short-lived signed OAuth state cookie (github mode). */
 export const OAUTH_STATE_COOKIE = "authorbot_oauth_state";
 

@@ -228,3 +228,49 @@ describe("authentication and authorization", () => {
     expect(actions).toContain("session.login");
   });
 });
+
+describe("signing out", () => {
+  let h: TestHarness;
+
+  beforeEach(async () => {
+    h = await makeHarness();
+  });
+  afterEach(() => h.close());
+
+  it("ends the session so the same cookie stops working", async () => {
+    const cookie = await devLogin(h, "alice", "contributor");
+
+    // The cookie works before.
+    expect((await h.app.request("/v1/me", { headers: { cookie } })).status).toBe(200);
+
+    const out = await h.app.request("/v1/auth/logout", { method: "POST" , headers: { cookie } });
+    expect(out.status).toBe(204);
+
+    // And is dead after — revoked server-side, not merely forgotten by the
+    // browser. Replaying the exact same value must fail.
+    expect((await h.app.request("/v1/me", { headers: { cookie } })).status).toBe(401);
+  });
+
+  it("clears the cookie with attributes that actually replace it", async () => {
+    const cookie = await devLogin(h, "alice", "contributor");
+    const out = await h.app.request("/v1/auth/logout", { method: "POST", headers: { cookie } });
+
+    // A browser only replaces a cookie when Path, Secure, HttpOnly and
+    // SameSite match the one it holds; a clear that differs in any of them
+    // leaves the original in place and the reader still signed in.
+    const setCookie = out.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("authorbot_session=;");
+    expect(setCookie).toContain("Max-Age=0");
+    expect(setCookie).toContain("Path=/");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("Secure");
+    expect(setCookie).toContain("SameSite=Lax");
+  });
+
+  it("succeeds for a caller with no session at all", async () => {
+    // "Sign me out" is satisfied either way, and the response must not reveal
+    // whether the cookie was real.
+    const out = await h.app.request("/v1/auth/logout", { method: "POST" });
+    expect(out.status).toBe(204);
+  });
+});

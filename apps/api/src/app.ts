@@ -83,8 +83,11 @@ import {
   packOauthState,
   unpackOauthState,
   OAUTH_STATE_COOKIE,
+  SESSION_COOKIE,
+  clearSessionCookieHeader,
   sessionCookieHeader,
   signSessionCookieValue,
+  verifySessionCookieValue,
 } from "./sessions.js";
 import { getCookie } from "hono/cookie";
 
@@ -1485,6 +1488,39 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   // ---- identity providers -------------------------------------------------------
+
+  /**
+   * Ending a session.
+   *
+   * Registered for every auth mode, because until now there was no way to sign
+   * out at all: two routes existed to create a session and none to end one, so
+   * a reader on a shared machine stayed signed in until the cookie expired,
+   * with nothing in the UI or the API able to help them.
+   *
+   * Both halves are needed. Clearing the cookie alone leaves a live row that
+   * still authenticates anyone holding a copy of the value; revoking alone
+   * leaves the browser presenting a dead cookie on every request. Revoke
+   * first, then clear — a failure between the two leaves the session dead
+   * rather than merely forgotten, which is the safe way round.
+   *
+   * Always 204, whether or not a live session was found: the caller learns
+   * nothing about whether their cookie was real, and "sign me out" is
+   * satisfied either way.
+   */
+  app.post("/v1/auth/logout", async (c) => {
+    const sessionId = await verifySessionCookieValue(
+      deps.config.sessionSecret,
+      getCookie(c, SESSION_COOKIE),
+    );
+    if (sessionId !== null) {
+      const session = await repos.humanSessions.getBySessionHash(await sha256Hex(sessionId));
+      if (session !== null && session.revokedAt === null) {
+        await repos.humanSessions.revoke(session.id, clock.now().toISOString());
+      }
+    }
+    c.header("Set-Cookie", clearSessionCookieHeader(), { append: true });
+    return c.body(null, 204);
+  });
 
   if (deps.identityProvider.mode === "dev") {
     // Mounted ONLY in dev mode (contract §3): in github mode this route does

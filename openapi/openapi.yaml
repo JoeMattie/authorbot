@@ -139,6 +139,22 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /v1/auth/logout:
+    post:
+      operationId: signOut
+      tags: [identity]
+      summary: End the current session.
+      description: >-
+        Revokes the session server-side and clears its cookie. Always 204,
+        whether or not a live session was found, so a caller learns nothing
+        about whether their cookie was real. Registered in every auth mode:
+        before this existed there were two routes to create a session and none
+        to end one.
+      security: []
+      responses:
+        "204":
+          description: Signed out; the session cookie is cleared.
+
   /v1/auth/github:
     get:
       operationId: startGithubLogin
