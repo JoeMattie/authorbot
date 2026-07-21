@@ -364,47 +364,33 @@ describe("output parsing helpers", () => {
 });
 
 describe("the GitHub App name", () => {
-  // GitHub caps this at 34 characters, and the name cannot be changed from the
-  // wizard afterwards — it becomes the app's handle and appears on every
-  // authorization screen the book's readers see. A blind slice(0, 34) cut
-  // "The Causal Projector (causal-projector)" to "The Causal Projector
-  // (causal-proje", which is what the first real book got.
-  it("keeps the whole thing when it fits", () => {
-    expect(gitHubAppName("Short", "short")).toBe("Short (short)");
-  });
-
-  it("never exceeds GitHub's limit", () => {
-    const name = gitHubAppName("The Causal Projector", "causal-projector");
-    expect(name.length).toBeLessThanOrEqual(34);
-  });
-
-  it("keeps the slug intact rather than severing it", () => {
-    const name = gitHubAppName("The Causal Projector", "causal-projector");
-    expect(name).toContain("(causal-projector)");
-    expect(name).not.toContain("causal-proje)");
-  });
-
-  it("cuts the title at a whole word, never mid-word", () => {
-    // " (causal-projector)" is 19 of the 34, leaving 15 for the title. A blind
-    // slice gives "The Causal Proj"; the last whole word that fits is "The
-    // Causal".
+  // GitHub caps this at 34 characters and slugifies it into the app's public
+  // handle, which cannot be changed from the wizard and shows on every
+  // authorization screen. `${title} (${slug})` produced
+  // `the-causal-causal-projector` — the same words twice, one truncated.
+  it("is authorbot- plus the slug, and nothing else", () => {
     expect(gitHubAppName("The Causal Projector", "causal-projector")).toBe(
-      "The Causal (causal-projector)",
+      "authorbot-causal-projector",
     );
   });
 
-  it("cuts an over-long slug at a hyphen rather than mid-word", () => {
-    // Slugs are allowed up to 64 characters, so the slug alone can exceed
-    // GitHub's 34 and still needs cutting somewhere sensible.
-    const name = gitHubAppName("Tiny", "a-slug-that-is-itself-far-longer-than-thirty-four-chars");
+  it("ignores the title entirely", () => {
+    // The slug already identifies the book; the title only ever added
+    // duplication once GitHub slugified it.
+    expect(gitHubAppName("Something Else Entirely", "causal-projector")).toBe(
+      gitHubAppName("The Causal Projector", "causal-projector"),
+    );
+  });
+
+  it("never exceeds GitHub's limit, cutting an over-long slug at a hyphen", () => {
+    // Slugs are allowed up to 64 characters.
+    const name = gitHubAppName("X", "a-very-long-book-slug-that-exceeds-the-limit-easily");
     expect(name.length).toBeLessThanOrEqual(34);
-    expect(name).toBe("a-slug-that-is-itself-far-longer");
+    expect(name).toBe("authorbot-a-very-long-book-slug");
     expect(name).not.toMatch(/-$/);
   });
 
-  it("falls back to the slug when the title cannot fit meaningfully", () => {
-    const name = gitHubAppName("A Very Long Title Indeed", "a-rather-long-book-slug-here");
-    expect(name).toBe("a-rather-long-book-slug-here");
-    expect(name.length).toBeLessThanOrEqual(34);
+  it("leaves a short slug alone", () => {
+    expect(gitHubAppName("Y", "short")).toBe("authorbot-short");
   });
 });
