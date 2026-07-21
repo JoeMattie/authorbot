@@ -9,6 +9,20 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.21
+
+- **Installing the GitHub App no longer lands you on a 404.** GitHub was asked
+  to run its OAuth flow during installation, which redirected to a callback
+  that cannot exist yet — the Worker's config needs the installation id that
+  installing is in the middle of producing. It now returns you to your book's
+  own site.
+- **The agent stage stopped asking for a credential nobody has.** It wanted "a
+  maintainer token you already hold"; signing in gives you a session cookie and
+  nothing in Authorbot issues bearer tokens. It now prints a request you can
+  actually run from your signed-in site. (A create control on the settings page
+  is the real fix and is still to come.)
+- Colour is drawn with chalk, so it adapts to what your terminal supports.
+
 ## 0.1.20
 
 - **The GitHub App key was stored in a format the Worker cannot read.** GitHub's
