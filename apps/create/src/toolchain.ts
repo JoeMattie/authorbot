@@ -38,10 +38,31 @@ export async function resolveTool(
     return { command: tool, args: [], source: "path" };
   }
   const npx = await ctx.runner.which("npx");
-  if (npx !== null) {
+  if (npx !== null && (await npxCanRun(ctx, tool))) {
     return { command: "npx", args: ["--no-install", tool], source: "npx" };
   }
   return null;
+}
+
+/**
+ * Whether `npx --no-install <tool>` would actually run something.
+ *
+ * `--no-install` succeeds only when the package is already in npx's cache.
+ * When it is not, npx exits non-zero with a registry error — and a caller
+ * comparing exit codes cannot tell that apart from the tool running and
+ * reporting a genuine problem. That is exactly how a book that validates
+ * cleanly was reported as failing validation: `authorbot` was merely absent,
+ * and npx's refusal to install it was read as the book being invalid.
+ *
+ * Probing keeps the two apart. An unrunnable tool resolves to null, which
+ * callers already handle by saying the toolchain is not installed yet rather
+ * than blaming the author's files for a failure that never involved them.
+ */
+async function npxCanRun(ctx: WizardContext, tool: string): Promise<boolean> {
+  const probe = await ctx.runner.run("npx", ["--no-install", tool, "--version"], {
+    cwd: ctx.directory,
+  });
+  return probe.code === 0;
 }
 
 export interface RunToolOptions {

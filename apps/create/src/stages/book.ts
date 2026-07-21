@@ -149,6 +149,45 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
     };
   }, nowIso(ctx));
 
+  // ---- the pinned toolchain -----------------------------------------------
+  //
+  // ADR-0022 puts the toolchain pin in the book's own package.json, so the
+  // book is not self-sufficient until its dependencies are installed. Doing it
+  // here rather than leaving it to the author serves three things at once:
+  // the validation gate below gets the pinned `authorbot` instead of falling
+  // through to whatever npx can find; `package-lock.json` comes into existence
+  // and is committed by the git step that follows; and both generated
+  // workflows stop failing on their first run, because `npm ci` refuses to
+  // work without that lockfile.
+  //
+  // A failure here is not fatal. The book on disk is complete and valid
+  // without it — the author can install later — so this reports and moves on
+  // rather than discarding a scaffold over a network problem.
+
+  if (!ctx.actions.dryRun) {
+    ctx.reporter.step("Installing the Authorbot toolchain this book pins");
+    const install = await ctx.actions.run({
+      purpose: "install the toolchain pinned in the book's package.json",
+      command: "npm",
+      args: ["install", "--no-audit", "--no-fund"],
+      cwd: ctx.directory,
+      mutates: true,
+      timeoutMs: 300_000,
+    });
+    if (install.code === 0) {
+      ctx.reporter.ok("Toolchain installed, and package-lock.json now pins it.");
+    } else {
+      ctx.reporter.warn(
+        "Could not install the toolchain (`npm install` failed). Your book is complete and valid; run `npm install` here when you can, and commit package-lock.json — CI needs it.",
+      );
+    }
+  } else {
+    ctx.actions.note(
+      "run: npm install",
+      "Installs the toolchain the book pins and writes package-lock.json, which both generated workflows require.",
+    );
+  }
+
   // ---- validation gate ----------------------------------------------------
   //
   // Contract §3.2: "Runs `authorbot validate` and does not proceed until it
