@@ -1,12 +1,12 @@
-# Phase 4 implementation contract — leases and submissions
+# Phase 4 implementation contract - leases and submissions
 
-Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§9.5, §10.2–10.3, §12, §13,
-§15.3, §23 Phase 4) and additive to Phase 0–3 contracts. Exit criteria
+Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§9.5, §10.2-10.3, §12, §13,
+§15.3, §23 Phase 4) and additive to Phase 0-3 contracts. Exit criteria
 (design §23/§27): humans and agents complete the same task type through
 documented interfaces; two simultaneous claims cannot both succeed; an
 expired or stale lease cannot submit; an accepted edit updates all related
 artifacts in one commit; a concurrent chapter change produces a clean
-deterministic rebase or an explicit conflict — never a clobber.
+deterministic rebase or an explicit conflict - never a clobber.
 
 ## 1. Scope
 
@@ -18,7 +18,7 @@ re-anchoring of unaffected annotations; attribution records; lease/work-item
 events; claim-and-edit UI in the islands; a runnable example agent script.
 
 **Out (deferred):** GitHub App writes and PR mode (Phase 5), fuzzy re-anchor
-(design §10.2 step 5 — bounded to steps 1–4, else `needs_reanchor`),
+(design §10.2 step 5 - bounded to steps 1-4, else `needs_reanchor`),
 `write_chapter`/`planning` submission flows (work items claimable; submission
 types above only), rich editor, notifications, rate limits (Phase 6).
 
@@ -29,9 +29,9 @@ types above only), rich editor, notifications, rate limits (Phase 6).
   (`LEASE_*`), validated at boot.
 - `leases` table: id, work_item_id, holder actor, token **hash** (SHA-256,
   constant-time compare), issued/expires/max_expires, renewal count,
-  released_at, revoked_at. Exactly one active lease per work item —
+  released_at, revoked_at. Exactly one active lease per work item -
   enforced by a partial unique index, not application hope.
-- Claim `POST /work-items/{id}/claim`: serialized compare-and-set — item is
+- Claim `POST /work-items/{id}/claim`: serialized compare-and-set - item is
   `ready` (or its lease expired: expire it in the same batch), actor has
   `work:claim` + capability for the type; creates the lease (opaque 256-bit
   token, returned exactly once), transitions `ready → leased`, emits
@@ -49,8 +49,8 @@ types above only), rich editor, notifications, rate limits (Phase 6).
 
 Claim response exactly: `workItem { id, type, acceptanceCriteria[],
 priority }`, `lease { id, token, expiresAt, maxExpiresAt, renewalPromptAt }`
-(amended 2026-07-20: `renewalPromptAt` — `expiresAt` minus the configured
-`LEASE_RENEWAL_PROMPT_BEFORE` — was omitted from the original contract, which
+(amended 2026-07-20: `renewalPromptAt` - `expiresAt` minus the configured
+`LEASE_RENEWAL_PROMPT_BEFORE` - was omitted from the original contract, which
 forced the §7 UI to hardcode the 5-minute default on a freshly claimed lease
 and ignore a deployment's configured lead time until the first renewal, where
 the renew response already carries the field. It is a derived timestamp, not
@@ -78,23 +78,23 @@ applying` in the command, then the pipeline below.
 
 - `@authorbot/markdown` gains the patch engine: `applyRangeReplacement`
   (only when the stored selector maps to one contiguous source span in the
-  base block — Phase 0 §8.4 rule; normalized-offset → source-span mapping),
+  base block - Phase 0 §8.4 rule; normalized-offset → source-span mapping),
   `applyBlockReplacement` (replace block content, preserve its marker; new
   blocks in replacement content get fresh UUIDv7 markers),
-  `applyChapterReplacement` (body swap; markers required on the result —
+  `applyChapterReplacement` (body swap; markers required on the result -
   reuse ids where blocks are textually identical, else new ids). All three:
   never alter text outside the declared target; property-tested.
 - Current revision == baseRevision → validate result (chapter-level Phase 0
   checks) → outbox commit: chapter file (bumped `revision`), work item
   `done` disposition, annotation `accepted`, attribution entry, decision
-  linkage — **one commit** with §14.3 trailers. `applying → completed`.
+  linkage - **one commit** with §14.3 trailers. `applying → completed`.
 - Current revision ≠ base: resolve target against the new revision via
-  design §10.2 steps 1–4 (blockId → position+quote → quote+context in block
+  design §10.2 steps 1-4 (blockId → position+quote → quote+context in block
   → quote+context in chapter). Unique match AND no overlap with the changed
   regions → rebase (recompute span) and apply against current revision.
   Ambiguous/overlapping/absent → `applying → conflict`, create a
   `resolve_conflict` work item (artifact per §13 carrying both texts),
-  409-style problem recorded on the operation, submission `conflicted` —
+  409-style problem recorded on the operation, submission `conflicted` -
   the newer chapter is NEVER overwritten.
 - After a successful apply, re-anchor other annotations on that chapter
   (§10.3): blockId survives + exact quote still present → keep (bump
@@ -113,7 +113,7 @@ applying` in the command, then the pipeline below.
   DB rows; content retained until completed/conflict resolution + 7 days
   (documented; no purge job yet). Rebuild restores work-item/annotation
   statuses from artifacts as in Phase 3; active leases intentionally do not
-  survive a fresh-DB rebuild (design §7.5) — documented.
+  survive a fresh-DB rebuild (design §7.5) - documented.
 
 ## 7. UI and example agent
 
@@ -127,7 +127,7 @@ applying` in the command, then the pipeline below.
   documented API only (env: API base, agent token or dev-login; args:
   work-item id + replacement text): claim → print bundle → submit → poll
   operation → report commit. Used by an integration test (agent path) while
-  Playwright covers the human path — same work-item type for both (§27.5).
+  Playwright covers the human path - same work-item type for both (§27.5).
 
 ## 8. Exit criteria
 

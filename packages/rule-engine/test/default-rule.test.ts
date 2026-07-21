@@ -12,7 +12,7 @@ import {
 
 const h = (value: VoteTuple["value"]): VoteTuple => ({ value, actorType: "human" });
 const a = (value: VoteTuple["value"]): VoteTuple => ({ value, actorType: "agent" });
-/** A human maintainer — typically the author (Phase 6 contract section 3.6). */
+/** A human maintainer - typically the author (Phase 6 contract section 3.6). */
 const m = (value: VoteTuple["value"]): VoteTuple => ({
   value,
   actorType: "human",

@@ -106,7 +106,7 @@ describe("computeVoteMetrics", () => {
  * `human_maintainer_approvals`, so an author's own agent cannot manufacture the
  * author's consent.
  */
-describe("computeVoteMetrics — maintainer metrics (Phase 6 §3.6)", () => {
+describe("computeVoteMetrics - maintainer metrics (Phase 6 §3.6)", () => {
   const maintainer = (
     value: VoteTuple["value"],
     actorType: VoteTuple["actorType"],

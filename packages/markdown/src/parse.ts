@@ -9,7 +9,7 @@ import { extractBlocks, type BlockScanResult } from "./blocks.js";
 export interface ParsedChapter {
   /**
    * Parsed YAML frontmatter, or undefined when the document has none (or the
-   * YAML failed to parse — see `frontmatterError`). Raw data: schema
+   * YAML failed to parse - see `frontmatterError`). Raw data: schema
    * validation is the CLI's concern.
    */
   frontmatter: unknown;
@@ -33,7 +33,7 @@ const processor = unified()
   .use(remarkFrontmatter, ["yaml"]);
 
 /**
- * Same dialect WITHOUT frontmatter support — for text that is a chapter
+ * Same dialect WITHOUT frontmatter support - for text that is a chapter
  * BODY rather than a chapter file (submission payloads, patch replacements).
  *
  * The distinction is a safety boundary, not a nicety. `remark-frontmatter`
@@ -49,7 +49,7 @@ const proseProcessor = unified().use(remarkParse).use(remarkGfm);
 
 /**
  * Parse chapter BODY text (no frontmatter): mdast tree plus the block-marker
- * scan. Use this — never {@link parseChapterMarkdown} — whenever the input is
+ * scan. Use this - never {@link parseChapterMarkdown} - whenever the input is
  * untrusted body content such as a submission's `content`.
  */
 export function parseProseMarkdown(source: string): Pick<ParsedChapter, "ast" | "blocks"> {

@@ -8,7 +8,7 @@
  * - When a usable `EventSource` exists, subscribe to the named events. The
  *   browser resumes with `Last-Event-ID` automatically; each successful
  *   (re)open after an error fires `onReconnect`, because events are
- *   notifications — the client must refetch authoritative state after a gap.
+ *   notifications - the client must refetch authoritative state after a gap.
  * - If the stream never opens within `openTimeoutMs` (e.g. a dev bridge that
  *   buffers the response) or errors before ever opening, fall back to polling
  *   `?poll=1`, which carries a cursor and cannot lose rows.

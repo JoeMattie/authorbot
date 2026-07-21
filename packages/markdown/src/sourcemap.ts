@@ -6,7 +6,7 @@ import type { Position } from "unist";
  * contract §5; design §8.4). Builds the same normalized plain-text stream as
  * `normalizeBlockText` (a property test guards against drift) but records,
  * per UTF-16 code unit of the normalized text, the exact source byte span
- * that produced it — when such a span exists.
+ * that produced it - when such a span exists.
  *
  * Conservatism (documented behavior, never a guess):
  *
@@ -17,8 +17,8 @@ import type { Position } from "unist";
  *   contiguous source slice. All must be NFC-stable in source.
  * - Everything else (NFD source, entities, indented code, multi-line text
  *   inside blockquotes, hard breaks, joiner spaces between inline nodes)
- *   maps to `null`. A replacement span touching an unmapped character — or
- *   spanning two different atoms, i.e. crossing a markup boundary — is NOT
+ *   maps to `null`. A replacement span touching an unmapped character - or
+ *   spanning two different atoms, i.e. crossing a markup boundary - is NOT
  *   one contiguous source span and must be refused (§8.4).
  */
 
@@ -223,7 +223,7 @@ export function buildBlockCharMap(source: string, node: Nodes): BlockCharMap {
 /**
  * Map a normalized-offset span back to ONE contiguous source span (§8.4).
  * Returns null when the span is out of bounds, splits a surrogate pair,
- * touches unmappable characters, or crosses a markup (atom) boundary —
+ * touches unmappable characters, or crosses a markup (atom) boundary -
  * callers turn null into the typed NotContiguous refusal.
  */
 export function mapNormalizedSpanToSource(

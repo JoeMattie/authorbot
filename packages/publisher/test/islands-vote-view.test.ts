@@ -62,7 +62,7 @@ describe("tally rendering", () => {
     );
   });
 
-  it("never leaks per-voter identity — summary is aggregate arithmetic only", () => {
+  it("never leaks per-voter identity - summary is aggregate arithmetic only", () => {
     const summary = tallySummary(
       tally({ approvals: 2, humanApprovals: 1, agentApprovals: 1, distinctVoters: 2, netScore: 2 }),
     );

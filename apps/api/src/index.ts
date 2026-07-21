@@ -1,5 +1,5 @@
 /**
- * @authorbot/api — runtime-agnostic surface. Node-only pieces (local FS book
+ * @authorbot/api - runtime-agnostic surface. Node-only pieces (local FS book
  * repo reader) live in `@authorbot/api/local`; the Worker entry is
  * src/worker.ts (bundled by wrangler, not exported).
  */

@@ -6,7 +6,7 @@
  * item. Plus: a signed-out reader sees tallies but no controls, and a
  * keyboard-only voting round trip.
  *
- * Default rule (design §25): approvals ≥ 3, net ≥ 2, human_approvals ≥ 1 —
+ * Default rule (design §25): approvals ≥ 3, net ≥ 2, human_approvals ≥ 1 -
  * so three human contributors approving crosses it exactly.
  */
 import { expect, test } from "@playwright/test";
@@ -63,7 +63,7 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
   const carol = await loginCookie("vote-carol", "maintainer");
   await voteViaApi(carol, annotationId, "approve");
 
-  // Alice's still-open page shows the badge with NO reload — delivered by the
+  // Alice's still-open page shows the badge with NO reload - delivered by the
   // event feed (SSE, or its poll fallback). Generous timeout: the poll
   // fallback engages after the stream's open timeout.
   await expect(card.locator(".ab-badge", { hasText: "Queued as work item" })).toBeVisible({

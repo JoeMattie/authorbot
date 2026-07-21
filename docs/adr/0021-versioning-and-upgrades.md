@@ -25,13 +25,13 @@ So the upgrade path is a product feature, not an operational procedure.
 ## Three layers drift independently
 
 ```
-  1. TOOLCHAIN — our code            pinned ref in the book repo
-  2. OPERATIONAL DB — D1 schema      migrations, applied to their database
-  3. BOOK FORMAT — their files       schema versions inside their prose
+  1. TOOLCHAIN - our code            pinned ref in the book repo
+  2. OPERATIONAL DB - D1 schema      migrations, applied to their database
+  3. BOOK FORMAT - their files       schema versions inside their prose
 ```
 
 Layer 1 is solved: `AUTHORBOT_REF` names what to build. Layer 2 was **not
-automated** — nothing applied D1 migrations, so bumping the pin could deploy
+automated** - nothing applied D1 migrations, so bumping the pin could deploy
 a Worker expecting columns the database lacked. Layer 3 was unaddressed:
 nothing rewrites an author's chapter files when an artifact schema changes.
 
@@ -65,7 +65,7 @@ One command, and it must be safe to run on a book that matters:
   1. resolve current pin → target release; show what changed
   2. run the target's book-repo migrations against a working copy
   3. validate BEFORE and AFTER; abort on any new error
-  4. open a PULL REQUEST — never push to main
+  4. open a PULL REQUEST - never push to main
   5. apply pending D1 migrations
   6. redeploy, and verify health before declaring success
 ```
@@ -85,7 +85,7 @@ The publish workflow gains a `wrangler d1 migrations apply` step, ordered
 **before** the Worker deploy. Migrations must follow expand/contract: the
 currently-deployed Worker keeps serving during a deploy, so a migration must
 be compatible with the code already running. Destructive changes (dropping a
-column, tightening a constraint) require two releases — expand in one,
+column, tightening a constraint) require two releases - expand in one,
 contract in the next.
 
 ### 5. Rollback
@@ -94,14 +94,14 @@ Rolling back the toolchain is setting the pin to the previous tag and
 redeploying. Rolling back a *format* migration is reverting its commit. These
 are different operations and the documentation must say so, because an author
 who reverts the pin without reverting a format migration has a new toolchain
-expectation with old files — the exact state validation is meant to catch, so
+expectation with old files - the exact state validation is meant to catch, so
 `upgrade` re-validates on rollback too.
 
 ### 6. The build-time dependency, stated plainly
 
 An author's CI depends on our published packages at build time (ADR-0022
 replaced the git checkout this originally described). If they became
-unavailable, the next build fails — while the deployed site and API keep
+unavailable, the next build fails - while the deployed site and API keep
 serving untouched. Mitigation is ordinary npm tooling: `npm pack` a tarball
 into the repository, a populated offline cache, or a registry mirror. This
 remains the only dependency an author has on us, and it must never grow into
@@ -121,5 +121,5 @@ books.
 
 **Unchanged.** The safety net stays what it always was: the book is Markdown
 and YAML in a repository the author owns. The worst realistic outcome of any
-upgrade failure is a book that stops gaining features — never one that stops
+upgrade failure is a book that stops gaining features - never one that stops
 being readable.

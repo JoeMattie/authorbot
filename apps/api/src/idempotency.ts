@@ -9,7 +9,7 @@
  *   - same key + same request hash + stored response → replay it;
  *   - same key + different request hash → 409 `idempotency-key-mismatch`;
  *   - two concurrent requests with the same key: both may run their handlers,
- *     but only one batch commits — the loser's batch fails on the unique
+ *     but only one batch commits - the loser's batch fails on the unique
  *     index, is rolled back atomically (no duplicate annotation/operation/
  *     outbox/token rows), and the loser replays the winner's stored response;
  *   - a crash before the batch leaves nothing behind (a retry re-executes);
@@ -126,7 +126,7 @@ export function idempotency(
     await next();
 
     // Lost claim race: Hono routes handler exceptions to `onError` at the
-    // innermost dispatch level — they do NOT propagate through `next()` — so
+    // innermost dispatch level - they do NOT propagate through `next()` - so
     // a batch that failed on the unique (project, actor, key) index surfaces
     // here as `c.error` plus the onError 500 response. The batch is atomic:
     // nothing of this attempt persisted, so replaying the winner's stored
@@ -140,12 +140,12 @@ export function idempotency(
         return;
       }
       // Some other unique index fired and no stored response exists: keep
-      // the onError 500 — the mutation did not persist.
+      // the onError 500 - the mutation did not persist.
     }
 
     // Fallback for 2xx handlers that did not batch a claim (none today, but
     // the contract must hold even if a future handler forgets): store the
-    // response post-hoc. Losing this insert race is fine — a stored response
+    // response post-hoc. Losing this insert race is fine - a stored response
     // already exists and our own response was produced normally.
     const status = c.res.status;
     if (status >= 200 && status < 300 && !handle.claimed) {

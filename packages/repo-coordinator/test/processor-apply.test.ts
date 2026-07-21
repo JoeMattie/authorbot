@@ -1,5 +1,5 @@
 /**
- * `submission.apply` processing (Phase 4 contract §5–§6): the atomic apply
+ * `submission.apply` processing (Phase 4 contract §5-§6): the atomic apply
  * commit (chapter bump + work item done + annotation accepted + attribution,
  * §14.3 trailers), the both-texts conflict commit (newer chapter untouched),
  * outcome persistence for crash recovery, and retry re-resolution.
@@ -137,7 +137,7 @@ async function eventTypes(): Promise<string[]> {
   return rows.map((row) => String(row["type"]));
 }
 
-describe("submission.apply — applied path", () => {
+describe("submission.apply - applied path", () => {
   it("stages chapter + work item + annotation + attribution in ONE commit with §14.3 trailers", async () => {
     await commitChapterFixture();
     const { applier, blockId } = makeAppliedApplier();
@@ -293,7 +293,7 @@ describe("submission.apply — applied path", () => {
   });
 });
 
-describe("submission.apply — conflict path", () => {
+describe("submission.apply - conflict path", () => {
   it("commits the both-texts conflict artifact and never touches the newer chapter", async () => {
     const newerChapter = await commitChapterFixture(3);
     const { applier, conflictWorkItemId } = makeConflictApplier();
@@ -385,7 +385,7 @@ describe("submission.apply — conflict path", () => {
  * bytes computed from a head the branch has since left, and a `submission.apply`
  * row that dies must hand its work item back instead of holding it forever.
  */
-describe("submission.apply — crash and failure recovery", () => {
+describe("submission.apply - crash and failure recovery", () => {
   /** Put the row/operation back in the pre-commit `committing` window. */
   async function rewindToCommitting(outboxId: string, operationId: string): Promise<void> {
     await seed.db
@@ -495,7 +495,7 @@ describe("submission.apply — crash and failure recovery", () => {
     await commitChapterFixture();
     const { workItemId, submissionId } = await enqueueSubmissionApply(seed);
     // A writer without `readFile` fails every apply row (the GitHub adapter
-    // gains it only in Phase 5) — an ordinary, non-exotic failure.
+    // gains it only in Phase 5) - an ordinary, non-exotic failure.
     const writeOnly: BookRepoWriter = { commitFiles: (input) => writer.commitFiles(input) };
 
     const { outcomes } = await processor(makeAppliedApplier().applier, writeOnly).drain(
@@ -505,7 +505,7 @@ describe("submission.apply — crash and failure recovery", () => {
 
     // The submit command already released the lease and moved the item to
     // `applying`. Leaving it there made it unclaimable, unreleasable,
-    // un-resubmittable and uncancellable — dead, and silently so.
+    // un-resubmittable and uncancellable - dead, and silently so.
     const workItem = await seed.repos.workItems.getById(workItemId);
     expect(workItem?.status).toBe("conflict");
     expect(workItem?.status).not.toBe("applying");

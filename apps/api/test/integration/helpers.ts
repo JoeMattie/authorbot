@@ -43,9 +43,9 @@ export const CHAPTER_1 = {
   revision: 3,
   firstBlockId: "019cadfe-7360-7049-a30b-1f5898a5020a",
 } as const;
-/** Chapter 002 — the example repo's committed annotation targets it. */
+/** Chapter 002 - the example repo's committed annotation targets it. */
 export const CHAPTER_2 = { id: "019d0bc2-a980-734d-b0c1-aa819448d107", revision: 2 } as const;
-/** Chapter 003 — revision 1; used by the webhook rebuild test. */
+/** Chapter 003 - revision 1; used by the webhook rebuild test. */
 export const CHAPTER_3 = { id: "019d7c32-d780-7cc1-817a-a1369297a9fc", revision: 1 } as const;
 export const EXAMPLE_ANNOTATION_ID = "019f32b1-7b00-7896-92ab-30424bda2cd7";
 
@@ -71,7 +71,7 @@ export interface BookRepoClone {
   root: string;
   /** The origin repository initialized from examples/book-repo. */
   sourcePath: string;
-  /** `git clone` of the origin — the work tree the app reads and commits to. */
+  /** `git clone` of the origin - the work tree the app reads and commits to. */
   workTreePath: string;
   cleanup(): Promise<void>;
 }
@@ -211,7 +211,7 @@ export function jsonRequest(
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": uuidv7(),
-      // The API's own origin under Hono#request — satisfies the Phase 2b
+      // The API's own origin under Hono#request - satisfies the Phase 2b
       // CSRF origin check on cookie-authed mutations (contract 2b §3).
       Origin: "http://localhost",
       ...headers,

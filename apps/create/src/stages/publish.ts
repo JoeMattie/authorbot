@@ -1,5 +1,5 @@
 /**
- * `publish` — the reading site (Phase 6 contract §3.3).
+ * `publish` - the reading site (Phase 6 contract §3.3).
  *
  * Cloudflare only (ADR-0020), so there is no host question to ask. The stage
  * is not complete until the site actually loads: a deploy command that exits
@@ -20,7 +20,7 @@ import { commitGenerated, requireBookDirectory, readBookIdentity } from "./share
 export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutcome> => {
   ctx.reporter.heading("Publishing your reading site");
   ctx.reporter.explain(
-    "This puts your book on the web at an address you can share. Cloudflare's free tier covers a book of this size. Nothing here is finished until the site actually loads — the wizard waits and checks.",
+    "This puts your book on the web at an address you can share. Cloudflare's free tier covers a book of this size. Nothing here is finished until the site actually loads - the wizard waits and checks.",
   );
 
   await requireBookDirectory(ctx);
@@ -54,7 +54,7 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
   const customDomain = await ctx.prompter.text({
     id: "publish.customDomain",
     message: "A custom domain for the site? Leave blank to use the workers.dev address.",
-    hint: "The whole hostname, exactly as a reader would type it — book.example.com, not example.com and not just `book`. Whatever you enter is the address your book takes over, so an apex domain means the site at that apex. Cloudflare must already manage DNS for it. You can add one later without redoing any of this.",
+    hint: "The whole hostname, exactly as a reader would type it - book.example.com, not example.com and not just `book`. Whatever you enter is the address your book takes over, so an apex domain means the site at that apex. Cloudflare must already manage DNS for it. You can add one later without redoing any of this.",
     defaultValue: ctx.journal.data.publish?.customDomain ?? "",
     validate: (value) => {
       if (value.length === 0) {
@@ -110,7 +110,7 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
     push: false,
     done: "Committed the publishing configuration, so CI deploys what you just deployed.",
     failed:
-      "Could not commit the publishing configuration. Commit wrangler.jsonc and package.json yourself — CI deploys from the commit, not from your working tree.",
+      "Could not commit the publishing configuration. Commit wrangler.jsonc and package.json yourself - CI deploys from the commit, not from your working tree.",
   });
 
   // ---- CI credentials -----------------------------------------------------
@@ -194,8 +194,8 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
   if (!live) {
     // Before calling a deploy failed, ask a resolver that is not this
     // machine's. A brand-new hostname is very often looked up (and cached as
-    // "does not exist") moments before it is created — including by this
-    // wizard's own check that the domain was free — and a negative cache
+    // "does not exist") moments before it is created - including by this
+    // wizard's own check that the domain was free - and a negative cache
     // outlives the poll. The site is then live to the entire internet while
     // the one machine that just deployed it insists it is not.
     const published = await resolvesPublicly(ctx, siteUrl);
@@ -206,7 +206,7 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
         "Your machine cannot see it yet, but public DNS can, so the deploy worked.",
       );
       ctx.reporter.info(
-        "This is a stale negative DNS entry on your side: the name was looked up just before it existed, and that answer is cached until it expires — usually a few minutes. Everyone else can already read the site.",
+        "This is a stale negative DNS entry on your side: the name was looked up just before it existed, and that answer is cached until it expires - usually a few minutes. Everyone else can already read the site.",
       );
       await ctx.journal.update((data) => {
         data.publish = { ...data.publish, workerName, siteUrl };
@@ -235,7 +235,7 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
 
 /**
  * `npm install` in the book directory. This is what produces
- * `package-lock.json`, which both workflows require — `npm ci` refuses to run
+ * `package-lock.json`, which both workflows require - `npm ci` refuses to run
  * without it, deliberately, because an install without a lockfile is an
  * unpinned install.
  */
@@ -247,7 +247,7 @@ async function installBookDependencies(ctx: WizardContext): Promise<void> {
   }
   ctx.reporter.step("Installing the toolchain your book pins (npm install)");
   ctx.reporter.info(
-    "This creates package-lock.json, which records the exact versions with their checksums. Commit it — your CI refuses to build without it.",
+    "This creates package-lock.json, which records the exact versions with their checksums. Commit it - your CI refuses to build without it.",
   );
   const result = await ctx.actions.run({
     purpose: "install the pinned Authorbot toolchain and wrangler",
@@ -269,7 +269,7 @@ async function installBookDependencies(ctx: WizardContext): Promise<void> {
 /**
  * Stores the Cloudflare credentials CI needs, as GitHub repository secrets.
  *
- * The token is read with hidden input and handed to `gh secret set` on stdin —
+ * The token is read with hidden input and handed to `gh secret set` on stdin -
  * never as an argument (argv is visible in the process table) and never
  * written to a file.
  */
@@ -330,9 +330,9 @@ async function configureRepositorySecrets(ctx: WizardContext, repo: string | nul
     return;
   }
 
-  // The template is a starting point, not the finished token. It omits D1 —
+  // The template is a starting point, not the finished token. It omits D1 -
   // which the collaborate stage needs, and whose absence shows up much later
-  // as a migration failing in CI rather than as anything wrong here — and it
+  // as a migration failing in CI rather than as anything wrong here - and it
   // leaves the two resource scopes empty, which a token cannot be saved with.
   // Both were left for the author to work out from Cloudflare's error
   // messages, which do not mention Authorbot at all.
@@ -421,7 +421,7 @@ function deployFailure(output: string, workerName: string): WizardError {
 /**
  * Extracts the live URL from wrangler's output, preferring a custom domain
  * when one was configured. Parsing output is unpleasant but it is where the
- * *actual* deployed address appears — the workers.dev subdomain is account
+ * *actual* deployed address appears - the workers.dev subdomain is account
  * specific and cannot be predicted.
  */
 export function deployedUrl(
@@ -452,8 +452,8 @@ export function deployedUrl(
  *
  * A Worker custom domain is not additive: Cloudflare routes that hostname to
  * this Worker, and whatever answered there before stops answering. Typing a
- * domain one letter shorter than intended — `example.com` where
- * `book.example.com` was meant — therefore replaces a personal site with a
+ * domain one letter shorter than intended - `example.com` where
+ * `book.example.com` was meant - therefore replaces a personal site with a
  * book that has no chapters in it yet, and the wizard's own promise is that
  * nothing destructive happens without asking first.
  *
@@ -464,8 +464,8 @@ export function deployedUrl(
  * book.
  */
 async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<void> {
-  // Already ours. Re-running `publish` — after a failed deploy, or to pick up
-  // a new chapter — would otherwise find the book itself sitting there and ask
+  // Already ours. Re-running `publish` - after a failed deploy, or to pick up
+  // a new chapter - would otherwise find the book itself sitting there and ask
   // the author to confirm replacing their own site, every time. The stage is
   // meant to be re-runnable, and a prompt that cries wolf on the ordinary path
   // is how a genuine warning stops being read.
@@ -501,7 +501,7 @@ async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<
     `Adding it as a custom domain sends that hostname to your book instead. Whatever lives there now stops being reachable at ${domain}.`,
   );
   ctx.reporter.info(
-    `If you meant a subdomain of it — book.${domain}, say — answer no and enter that instead.`,
+    `If you meant a subdomain of it - book.${domain}, say - answer no and enter that instead.`,
   );
 
   const proceed = await ctx.prompter.confirm({
@@ -514,7 +514,7 @@ async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<
   if (!proceed) {
     throw new WizardError(
       `Stopped before taking over ${domain}.`,
-      "Run `create-authorbot publish` again and give a hostname that is not already serving something — a subdomain like book.example.com is the usual choice. Nothing was deployed.",
+      "Run `create-authorbot publish` again and give a hostname that is not already serving something - a subdomain like book.example.com is the usual choice. Nothing was deployed.",
     );
   }
 }
@@ -526,7 +526,7 @@ async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<
  * Asked over DNS-over-HTTPS precisely because it is not the system resolver:
  * an ordinary lookup would consult the same cache that is the problem. A
  * hostname that answers here but not locally means the deploy landed and this
- * machine is holding a stale "does not exist" — the difference between "your
+ * machine is holding a stale "does not exist" - the difference between "your
  * book is live" and "your deploy failed", which is not a distinction to leave
  * to a coin toss.
  *

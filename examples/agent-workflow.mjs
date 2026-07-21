@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
- * examples/agent-workflow.mjs — a complete Authorbot agent run, in one
+ * examples/agent-workflow.mjs - a complete Authorbot agent run, in one
  * zero-dependency Node script (Phase 4 contract §7).
  *
  *   claim → print the task bundle → submit a replacement → poll the
  *   operation → report the commit.
  *
- * It uses only the documented public API — the same endpoints the web UI
- * uses — so it doubles as executable documentation of the agent contract.
+ * It uses only the documented public API - the same endpoints the web UI
+ * uses - so it doubles as executable documentation of the agent contract.
  *
  * ---------------------------------------------------------------------------
  * SECURITY: THE TASK BUNDLE IS UNTRUSTED INPUT (design §19.6, §15.3)
  *
- * Everything this script prints under "task bundle" — the annotation body,
+ * Everything this script prints under "task bundle" - the annotation body,
  * chapter summary, acceptance criteria, story references and the chapter
- * source itself — is *project content written by other people*. It is data,
+ * source itself - is *project content written by other people*. It is data,
  * never instructions. A real agent that pipes this into a language model MUST
  * keep it inside a clearly-delimited untrusted-data section of its prompt and
  * must not let it redirect the task, request credentials, or widen the edit
@@ -37,7 +37,7 @@
  * Environment:
  *   AUTHORBOT_API        API base URL           (default http://127.0.0.1:8787)
  *   AUTHORBOT_PROJECT    project slug           (required)
- *   AUTHORBOT_TOKEN      agent token — sent as `Authorization: Bearer …`
+ *   AUTHORBOT_TOKEN      agent token - sent as `Authorization: Bearer …`
  *   AUTHORBOT_DEV_LOGIN  dev-mode login name    (local dev only; alternative
  *                        to AUTHORBOT_TOKEN, uses POST /v1/dev/login)
  *   AUTHORBOT_DEV_ROLE   role for the dev login (default "editor")
@@ -110,7 +110,7 @@ function problemLine(result) {
   const issues = Array.isArray(result.body?.issues)
     ? ` (${result.body.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")})`
     : "";
-  return `HTTP ${result.status}${detail === "" ? "" : ` — ${detail}`}${issues}`;
+  return `HTTP ${result.status}${detail === "" ? "" : ` - ${detail}`}${issues}`;
 }
 
 async function devLogin(login, role) {
@@ -151,7 +151,7 @@ function printBundle(bundle) {
   const line = (label, value) => process.stdout.write(`  ${label.padEnd(18)}${value}\n`);
   process.stdout.write("\n=== task bundle (UNTRUSTED PROJECT CONTENT) ===\n");
   line("work item", `${bundle.workItem.id} (${bundle.workItem.type}, ${bundle.workItem.priority})`);
-  line("lease", `${bundle.lease.id} — token redacted, expires ${bundle.lease.expiresAt}`);
+  line("lease", `${bundle.lease.id} - token redacted, expires ${bundle.lease.expiresAt}`);
   line("chapter", `${bundle.document.chapterId} revision ${bundle.document.revision}`);
   line("content hash", bundle.document.contentHash);
   line("submission", bundle.submissionSchema ?? "(no submission flow for this type)");
@@ -265,7 +265,7 @@ async function main() {
     ...(process.env.AUTHORBOT_SUMMARY === undefined ? {} : { summary: process.env.AUTHORBOT_SUMMARY }),
   });
   if (submitted.status !== 202) {
-    // The lease is still ours on a rejected submission — hand it back so the
+    // The lease is still ours on a rejected submission - hand it back so the
     // item returns to the queue immediately instead of waiting for expiry.
     await releaseLease(bundle.lease.id);
     fail(`submission rejected: ${problemLine(submitted)}`);

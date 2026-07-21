@@ -4,7 +4,7 @@
 // for the API on its own: `name` is "authorbot-api", there is no `assets`
 // binding, and AUTH_MODE plus the OAuth vars are deliberately absent (see the
 // SECURITY note below). A real deployment is the COMBINED config described in
-// docs/getting-started.md §3b — the one that owns `assets`, AUTH_MODE=github
+// docs/getting-started.md §3b - the one that owns `assets`, AUTH_MODE=github
 // and the OAuth vars, and whose name is the live Worker (`causal-projector`
 // for this project). Do not `wrangler deploy` this file at a live Worker:
 // wrangler replaces the plain-text `vars` set wholesale, which would wipe the
@@ -19,16 +19,16 @@
 //   wrangler secret put GITHUB_APP_PRIVATE_KEY (Phase 5 Git integration only)
 //
 // GIT INTEGRATION (Phase 5 contract §2), all optional and all-or-nothing:
-//   GITHUB_APP_ID           var    — the GitHub App's numeric id
-//   GITHUB_APP_PRIVATE_KEY  SECRET — PKCS#8 PEM ("BEGIN PRIVATE KEY"). GitHub's
+//   GITHUB_APP_ID           var    - the GitHub App's numeric id
+//   GITHUB_APP_PRIVATE_KEY  SECRET - PKCS#8 PEM ("BEGIN PRIVATE KEY"). GitHub's
 //                                    download button gives PKCS#1 ("BEGIN RSA
 //                                    PRIVATE KEY"); convert with
 //                                    `openssl pkcs8 -topk8 -nocrypt -in key.pem`
-//   GITHUB_INSTALLATION_ID  var    — the installation on the book repository
+//   GITHUB_INSTALLATION_ID  var    - the installation on the book repository
 // App permissions: contents:write, metadata:read. Webhook events: push.
 // With none of them set the deployment reports gitIntegration "unconfigured":
 // reads work, mutations queue, nothing commits. With some but not all set it
-// reports "incomplete" and still does no Git work — a half-configured app
+// reports "incomplete" and still does no Git work - a half-configured app
 // must never half-work. NO CREDENTIAL VALUE IS SET IN THIS FILE.
 // For `wrangler dev`, put dev-only values in .dev.vars (gitignored).
 //
@@ -75,7 +75,7 @@
   // Self-starting maintenance loop (contract §5). The coordinator's periodic
   // alarm is armed by `ensureAlarm()` inside the Durable Object's fetch, and
   // the only two callers of that fetch are durable-mode mutations and the
-  // GitHub push webhook — neither of which exists on a `queue`-mode
+  // GitHub push webhook - neither of which exists on a `queue`-mode
   // deployment without a GitHub App. Without this trigger no alarm is ever
   // set and `sweepExpiredLeases` never runs in production, leaving expired
   // leases stranded and their work items unclaimable.
@@ -87,7 +87,7 @@
       "tag": "v1",
       // SQLite-backed storage: the current default for new classes. The
       // coordinator stores only scheduling bookkeeping (the alarm and a
-      // projection-stale flag) — D1 stays the source of operational truth,
+      // projection-stale flag) - D1 stays the source of operational truth,
       // so a DO reset loses nothing.
       "new_sqlite_classes": ["ProjectCoordinator"]
     }

@@ -24,7 +24,7 @@ load-bearing, not a convenience.
   - **`dev`**: active only when `AUTH_MODE=dev`; `POST /v1/dev/login
     {login, role}` creates or loads the actor and membership and issues a
     normal session.
-- The dev route is **never mounted** when `AUTH_MODE=github` — mode
+- The dev route is **never mounted** when `AUTH_MODE=github` - mode
   selection happens at router construction, so in github mode the route
   does not exist to be misconfigured, and requests to it 404
   (phase2-contract §3, §4).
@@ -37,8 +37,8 @@ load-bearing, not a convenience.
 ## Consequences
 
 - Testability: the full authorization matrix and the Phase 2 exit test run
-  offline and deterministically — any role is one `POST /v1/dev/login`
-  away — while still exercising the real session, scope, and audit code
+  offline and deterministically - any role is one `POST /v1/dev/login`
+  away - while still exercising the real session, scope, and audit code
   paths, because only the identity *source* is faked.
 - The dev provider is a deliberate authentication bypass, contained by
   construction (route not mounted in github mode) rather than by a runtime

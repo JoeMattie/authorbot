@@ -23,7 +23,7 @@ concurrency must be explicit (design §3.6, §12).
 - Expiration is enforced lazily on every relevant command and eagerly by a
   scheduled sweep/alarm (§12.4). Submissions are verified against holder,
   token, expiry, state, and base revision (§12.5); a lease does not freeze the
-  chapter — conflicts follow §12.6.
+  chapter - conflicts follow §12.6.
 
 ## Consequences
 

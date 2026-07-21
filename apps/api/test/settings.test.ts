@@ -2,8 +2,8 @@
  * Phase 6 contract §3.6: book settings and in-book governance.
  *
  * These cover the API surface against the fake reader (fast, no git). The
- * genuine round trip — PATCH, drain, a real commit, `book.yml` still valid on
- * disk — lives in `test/integration/settings.test.ts`, because "settings
+ * genuine round trip - PATCH, drain, a real commit, `book.yml` still valid on
+ * disk - lives in `test/integration/settings.test.ts`, because "settings
  * changes are commits" is only actually proved by a commit.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -132,7 +132,7 @@ describe("GET /v1/projects/:id/settings", () => {
   });
 });
 
-describe("PATCH /v1/projects/:id/settings — editable fields", () => {
+describe("PATCH /v1/projects/:id/settings - editable fields", () => {
   let h: TestHarness;
   let maintainer: string;
   beforeEach(async () => {
@@ -154,7 +154,7 @@ describe("PATCH /v1/projects/:id/settings — editable fields", () => {
     expect(body.changed).toEqual(["title"]);
     expect(body.settings.title).toBe("The Hollow Creek Anomaly");
 
-    // The projection is updated immediately — the change is live now, not
+    // The projection is updated immediately - the change is live now, not
     // whenever the outbox happens to drain.
     const row = await h.repos.bookConfigs.get(h.projectId);
     expect(row?.status).toBe("pending_git");
@@ -219,7 +219,7 @@ describe("PATCH /v1/projects/:id/settings — editable fields", () => {
   });
 });
 
-describe("PATCH — never-editable fields (contract §3.6)", () => {
+describe("PATCH - never-editable fields (contract §3.6)", () => {
   let h: TestHarness;
   let maintainer: string;
   beforeEach(async () => {
@@ -272,7 +272,7 @@ describe("PATCH — never-editable fields (contract §3.6)", () => {
   });
 });
 
-describe("PATCH — guarded fields need confirmation (contract §3.6)", () => {
+describe("PATCH - guarded fields need confirmation (contract §3.6)", () => {
   let h: TestHarness;
   let maintainer: string;
   beforeEach(async () => {
@@ -339,7 +339,7 @@ describe("PATCH — guarded fields need confirmation (contract §3.6)", () => {
   });
 });
 
-describe("PATCH — governance rules (contract §3.6 amendment to Phase 3 §3)", () => {
+describe("PATCH - governance rules (contract §3.6 amendment to Phase 3 §3)", () => {
   let h: TestHarness;
   let maintainer: string;
   beforeEach(async () => {
@@ -407,7 +407,7 @@ describe("PATCH — governance rules (contract §3.6 amendment to Phase 3 §3)",
    *
    * Decisions are keyed `(source_annotation_id, action_type, rule_version)`
    * with no rule name, so the re-added rule's first evaluation matched a
-   * decision row produced by materially different semantics — the exact
+   * decision row produced by materially different semantics - the exact
    * ambiguity `DEFAULT_SUGGESTION_TO_WORK_ITEM_RULE` is pinned at version 2 to
    * avoid, now re-created against real decision rows.
    */
@@ -431,7 +431,7 @@ describe("PATCH — governance rules (contract §3.6 amendment to Phase 3 §3)",
       updatedAt: "2026-01-01T00:00:00Z",
     });
 
-    // The maintainer removes it — legal, since another rule remains.
+    // The maintainer removes it - legal, since another rule remains.
     const removed = await patch(h, maintainer, {
       governance: {
         rules: {
@@ -522,7 +522,7 @@ describe("PATCH — governance rules (contract §3.6 amendment to Phase 3 §3)",
       ruleSatisfied: boolean;
       decision: { result: string } | null;
     };
-    // One contributor approval — impossible under the default rule, correct
+    // One contributor approval - impossible under the default rule, correct
     // under the rule the maintainer just saved.
     expect(body.ruleSatisfied).toBe(true);
     expect(body.decision?.result).toBe("create_work_item");
@@ -534,7 +534,7 @@ describe("PATCH — governance rules (contract §3.6 amendment to Phase 3 §3)",
     expect(decisions[0]?.ruleVersion).toBe(3);
   });
 
-  it("removing the human-maintainer clause is allowed — the veto is the author's to drop", async () => {
+  it("removing the human-maintainer clause is allowed - the veto is the author's to drop", async () => {
     await patch(
       h,
       maintainer,
@@ -613,7 +613,7 @@ describe("the default rule requires the author's approval (contract §3.6)", () 
 });
 
 /**
- * Mark the pending config committed without running a real drain — these are
+ * Mark the pending config committed without running a real drain - these are
  * fake-reader tests and the point here is the *next* PATCH, not the commit.
  * The genuine transition is exercised in the integration suite.
  */

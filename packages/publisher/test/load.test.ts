@@ -76,7 +76,7 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
   return dir;
 }
 
-describe("loadSiteModel — chapter selection and ordering", () => {
+describe("loadSiteModel - chapter selection and ordering", () => {
   it("includes only published chapters by default, sorted by order", async () => {
     const repo = await makeRepo([
       { id: CH[0], slug: "third", order: 30, status: "published" },
@@ -227,7 +227,7 @@ describe("chapterRoutePath", () => {
   });
 });
 
-describe("loadSiteModel — route collisions (hard errors even under --force)", () => {
+describe("loadSiteModel - route collisions (hard errors even under --force)", () => {
   it("throws when two chapters expand to the same route", async () => {
     const repo = await makeRepo([
       { id: CH[0], slug: "same", order: 10, status: "published", file: "a.md" },
@@ -257,7 +257,7 @@ describe("loadSiteModel — route collisions (hard errors even under --force)", 
   });
 });
 
-describe("loadSiteModel — unpublished chapters stay out of the story views", () => {
+describe("loadSiteModel - unpublished chapters stay out of the story views", () => {
   async function makeStoryRepo(): Promise<string> {
     const repo = await makeRepo([
       { id: CH[0], slug: "pub", order: 10, status: "published", title: "Public Chapter" },
@@ -348,7 +348,7 @@ describe("loadSiteModel — unpublished chapters stay out of the story views", (
   });
 });
 
-describe("loadSiteModel — outline parent cycles", () => {
+describe("loadSiteModel - outline parent cycles", () => {
   it("renders cycle members as top-level entries and warns", async () => {
     // Regression: a parent cycle made every member unreachable from a root
     // and the outline page silently rendered empty.
@@ -382,7 +382,7 @@ describe("loadSiteModel — outline parent cycles", () => {
   });
 });
 
-describe("loadSiteModel — duplicate character ids", () => {
+describe("loadSiteModel - duplicate character ids", () => {
   it("keeps the first record and warns about the duplicate", async () => {
     // Regression: the second record silently replaced the first's page.
     const repo = await makeRepo([

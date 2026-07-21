@@ -1,5 +1,5 @@
 /**
- * `book` — create the book repository (Phase 6 contract §3.2).
+ * `book` - create the book repository (Phase 6 contract §3.2).
  *
  * Three questions, and no more: **title**, **slug**, and **public or
  * private**. Everything else an author might eventually want to decide is
@@ -8,7 +8,7 @@
  *
  * There are no chapters and no sample content. That is deliberate: a book
  * with zero chapters validates, builds, and publishes, and the first chapter
- * comes from the site's "New chapter" button — an author's first act should
+ * comes from the site's "New chapter" button - an author's first act should
  * not be hand-writing frontmatter and block markers.
  */
 import path from "node:path";
@@ -28,7 +28,7 @@ const BOOK_MARKER = "book.yml";
 export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome> => {
   ctx.reporter.heading("Creating your book");
   ctx.reporter.explain(
-    "This makes a folder that is your book: a title, a web address, and the files Authorbot needs. It has no chapters yet — that is normal, and you will write the first one in your browser rather than in a text editor.",
+    "This makes a folder that is your book: a title, a web address, and the files Authorbot needs. It has no chapters yet - that is normal, and you will write the first one in your browser rather than in a text editor.",
   );
 
   const git = await checkGit(ctx.actions);
@@ -80,12 +80,12 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
     choices: [
       {
         value: "private",
-        label: "Private — only you and people you invite can see it",
+        label: "Private - only you and people you invite can see it",
         hint: "The usual choice for a work in progress. Your published reading site can still be public; this is about the drafts, notes, and history.",
       },
       {
         value: "public",
-        label: "Public — anyone can read the repository",
+        label: "Public - anyone can read the repository",
         hint: "Everything, including every draft and every revision, is visible to anyone from the first commit onward.",
       },
     ],
@@ -134,7 +134,7 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
   }
   ctx.reporter.ok(
     written === 0
-      ? "Every file was already in place — nothing needed changing."
+      ? "Every file was already in place - nothing needed changing."
       : `${String(written)} files ready.`,
   );
 
@@ -161,7 +161,7 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
   // work without that lockfile.
   //
   // A failure here is not fatal. The book on disk is complete and valid
-  // without it — the author can install later — so this reports and moves on
+  // without it - the author can install later - so this reports and moves on
   // rather than discarding a scaffold over a network problem.
 
   if (!ctx.actions.dryRun) {
@@ -186,7 +186,7 @@ export const bookStage: Stage = async (ctx: WizardContext): Promise<StageOutcome
     });
     if (validation === null) {
       ctx.reporter.warn(
-        "Could not run `authorbot validate` — the toolchain is not installed yet. It will run in CI on your first push.",
+        "Could not run `authorbot validate` - the toolchain is not installed yet. It will run in CI on your first push.",
       );
     } else if (validation.code !== 0) {
       throw new WizardError(
@@ -265,7 +265,7 @@ async function initialiseGit(ctx: WizardContext, identity: BookIdentity): Promis
     mutates: false,
   });
   if (staged.code === 0) {
-    ctx.reporter.info("Nothing new to commit — the history is already up to date.");
+    ctx.reporter.info("Nothing new to commit - the history is already up to date.");
     return;
   }
 
@@ -299,7 +299,7 @@ async function maybeCreateRemote(
 ): Promise<string | null> {
   // "Already on GitHub" is a claim about the world, so it is checked against
   // the world rather than read out of the journal. A planted journal must not
-  // be able to make the wizard announce — and every later stage adopt — a
+  // be able to make the wizard announce - and every later stage adopt - a
   // repository the author has no connection to.
   const recorded = ctx.journal.data.book?.repo;
   if (recorded !== undefined) {
@@ -324,7 +324,7 @@ async function maybeCreateRemote(
     message: `Create a ${visibility} repository on GitHub for this book and push it?`,
     hint:
       visibility === "private"
-        ? "Private means only you and people you invite can read it — including every draft."
+        ? "Private means only you and people you invite can read it - including every draft."
         : "Public means anyone can read the repository, including every draft and every revision, from the first commit onward.",
     defaultValue: true,
   });
@@ -353,7 +353,7 @@ async function maybeCreateRemote(
       "origin",
       "--push",
       "--description",
-      `${identity.title} — an Authorbot book`,
+      `${identity.title} - an Authorbot book`,
     ],
     cwd: ctx.directory,
     mutates: true,
@@ -373,7 +373,7 @@ async function maybeCreateRemote(
     }
     throw new WizardError(
       `Could not create the GitHub repository:\n${message}`,
-      `Check \`gh auth status\`, then run \`create-authorbot book\` again — the local book is already made and will not be recreated.`,
+      `Check \`gh auth status\`, then run \`create-authorbot book\` again - the local book is already made and will not be recreated.`,
     );
   }
 
@@ -402,13 +402,13 @@ async function maybeCreateRemote(
  * `npm install` in the book directory, with the offer to try again.
  *
  * This is what produces `package-lock.json`, which both generated workflows
- * require — `npm ci` refuses to run without it, deliberately, because an
+ * require - `npm ci` refuses to run without it, deliberately, because an
  * install without a lockfile is an unpinned install.
  *
  * It offers a retry because the failures here are overwhelmingly transient: a
  * dropped connection, a registry blip, a VPN coming up. Carrying on with a
  * warning leaves the author a book that CI cannot build, over something that
- * would have worked five seconds later — and the alternative the wizard used
+ * would have worked five seconds later - and the alternative the wizard used
  * to offer was to notice the warning, read it, and know to run `npm install`
  * themselves.
  *
@@ -473,6 +473,6 @@ async function installToolchain(ctx: WizardContext): Promise<void> {
   }
 
   ctx.reporter.warn(
-    "Carrying on without the toolchain installed. Your book is complete and valid — run `npm install` here when you can, and commit package-lock.json.",
+    "Carrying on without the toolchain installed. Your book is complete and valid - run `npm install` here when you can, and commit package-lock.json.",
   );
 }

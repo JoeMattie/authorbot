@@ -214,7 +214,7 @@ describe("resume", () => {
       await first.run([stage, "--dir", DIR]);
     }
 
-    // A new process, sharing only what is on disk — which is the real shape
+    // A new process, sharing only what is on disk - which is the real shape
     // of "the wizard crashed and I ran it again".
     const second = fullHarness();
     for (const [name, contents] of first.fs.files) {

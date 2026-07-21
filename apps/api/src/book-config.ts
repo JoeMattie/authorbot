@@ -1,7 +1,7 @@
 /**
  * Projection of `book.yml` into `book_configs` (Phase 6 contract §3.6).
  *
- * The settings API needs the book's current config on the request path — to
+ * The settings API needs the book's current config on the request path - to
  * render the Settings view, to read-modify-write a PATCH, and to resolve
  * governance rules on every vote. Reading it from GitHub each time would put a
  * network round trip in front of every vote, so it is projected exactly like
@@ -10,7 +10,7 @@
  * The one rule that makes the copy safe is `pending_git` deference. A settings
  * PATCH writes the new config to `book_configs` immediately (so the change is
  * live on the next request) and queues the commit. Until that commit lands, the
- * repository still holds the OLD `book.yml` — so a projection pass that ran in
+ * repository still holds the OLD `book.yml` - so a projection pass that ran in
  * the meantime and blindly wrote what it read would silently revert the
  * maintainer's change while its commit was still in the outbox. A pending row
  * is therefore left alone; the finalize batch flips it to `committed` when the
@@ -27,7 +27,7 @@ import type { BookRepoReader } from "./projection/reader.js";
  * Repo-relative path of the book config (design section 8.2).
  *
  * Declared here rather than imported from `@authorbot/repo-coordinator`, whose
- * barrel pulls in `LocalGitAdapter` and therefore `node:child_process` — this
+ * barrel pulls in `LocalGitAdapter` and therefore `node:child_process` - this
  * module is reached from `reconcile.ts` and must stay Worker-safe. A test in
  * the repo-coordinator suite pins the two constants equal.
  */
@@ -57,7 +57,7 @@ export type ProjectBookConfigOutcome =
 
 /**
  * Read `book.yml` from the snapshot's tree and project it. Never throws for
- * repository-content reasons — only for genuine infrastructure failures, which
+ * repository-content reasons - only for genuine infrastructure failures, which
  * the caller already handles.
  */
 export async function projectBookConfig(
@@ -72,7 +72,7 @@ export async function projectBookConfig(
   }
 
   // Prefer the snapshot's own file text so the config comes from the SAME tree
-  // as the chapters projected beside it — the invariant reader.ts documents.
+  // as the chapters projected beside it - the invariant reader.ts documents.
   const source =
     options.files?.get(BOOK_CONFIG_PATH) ??
     // `readTextFile` is optional on the reader interface; a reader without it

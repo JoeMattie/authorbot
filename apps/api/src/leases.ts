@@ -1,7 +1,7 @@
 /**
  * Lease plumbing (Phase 4 contract §2): boot-time `LEASE_*` env validation,
  * token mint/verify helpers (hash-only storage, constant-time compare), and
- * the exported `sweepExpiredLeases(db, clock)` — the eager complement to the
+ * the exported `sweepExpiredLeases(db, clock)` - the eager complement to the
  * lazy expiry every lease-relevant command performs (design §12.4; DO alarm
  * wiring is Phase 5, the dev server runs this on a timer).
  *
@@ -38,7 +38,7 @@ export const LEASE_ENV_NAMES = {
 /**
  * Parse the `LEASE_*` env overrides (ISO-8601 durations, e.g. `PT30M`) into a
  * validated {@link LeaseConfig}. Throws on any malformed or cross-field
- * invalid value — boot must fail, never silently fall back (contract §2).
+ * invalid value - boot must fail, never silently fall back (contract §2).
  * All-absent yields the design §25 defaults.
  */
 export function leaseConfigFromEnv(env: Record<string, string | undefined>): LeaseConfig {
@@ -68,7 +68,7 @@ export function leaseConfigFromEnv(env: Record<string, string | undefined>): Lea
 export interface MintedLeaseToken {
   /** The full plaintext (`authorbot_lease_` + 43 base64url chars). Returned once. */
   token: string;
-  /** SHA-256 hex of the secret part — the only stored form. */
+  /** SHA-256 hex of the secret part - the only stored form. */
   tokenHash: string;
 }
 
@@ -99,15 +99,15 @@ export interface SweepResult {
 /**
  * The three statements that end ONE expired lease atomically: the
  * `lease_expired` event, the lease revocation, and the work item's return to
- * `ready`. They MUST be executed as a single `db.batch` — splitting them is
+ * `ready`. They MUST be executed as a single `db.batch` - splitting them is
  * what previously let a crash (or a failing second write) strand a work item
  * as `leased` with no active lease row and no event, permanently unclaimable.
  *
  * Single-winner semantics without reading an affected-row count: the event
  * insert runs FIRST and is guarded by the very predicate the revocation then
  * consumes (`active AND expires_at <= now`). Because the batch is one
- * transaction, a rival expiry either committed before us — our guard sees
- * `revoked_at` set, so no event and a 0-row revocation — or commits after us
+ * transaction, a rival expiry either committed before us - our guard sees
+ * `revoked_at` set, so no event and a 0-row revocation - or commits after us
  * and observes our revocation. Exactly one caller emits the event, whatever
  * the wall clock says (two sweeps sharing a frozen test clock included).
  *
@@ -180,7 +180,7 @@ export function expireLeaseForWorkItemStatements(
 /**
  * `lease_expired` appended only if an expired-but-active lease is still there
  * to expire. `guardColumn` is a fixed identifier chosen by the two callers
- * above — never caller data — so no value is ever spliced into SQL.
+ * above - never caller data - so no value is ever spliced into SQL.
  */
 function leaseExpiredEventStatement(
   db: SqlDatabase,
@@ -216,7 +216,7 @@ function leaseExpiredEventStatement(
 }
 
 /**
- * Return a work item to `ready` — but only while it is still `leased` AND no
+ * Return a work item to `ready` - but only while it is still `leased` AND no
  * live lease holds its slot. The second condition is what makes an already
  * stranded item safe to repair and a racing re-claim safe to leave alone.
  */
@@ -277,8 +277,8 @@ export async function sweepExpiredLeases(
  *
  * Deliberately NOT {@link expireLeaseStatements}. Both of those revoke on the
  * condition `expires_at <= now`, because both describe a lease that ran out of
- * time. A revoked collaborator's lease has not run out of time — that is the
- * whole problem, and it is why the contract calls out "for up to four hours" —
+ * time. A revoked collaborator's lease has not run out of time - that is the
+ * whole problem, and it is why the contract calls out "for up to four hours" -
  * so applying the expiry predicate here would change zero rows and strand the
  * item exactly as before.
  *
@@ -286,8 +286,8 @@ export async function sweepExpiredLeases(
  * reason the release route distinguishes the two: a feed that says a lease
  * expired when an administrator ended it is lying to everyone reading it.
  *
- * The work-item reset carries the same two guards the expiry path uses — still
- * `leased`, and no OTHER live lease in the slot — so a claim that raced in
+ * The work-item reset carries the same two guards the expiry path uses - still
+ * `leased`, and no OTHER live lease in the slot - so a claim that raced in
  * between is never stomped.
  */
 export function revokeLeaseForActorStatements(

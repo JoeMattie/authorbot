@@ -1,10 +1,10 @@
-# Phase 2 implementation contract — identity and collaboration records (API-first)
+# Phase 2 implementation contract - identity and collaboration records (API-first)
 
 Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§9, §10.1, §14.3, §15, §19, §20,
 §23 Phase 2) and additive to the Phase 0/1 contracts. Scope decision: this pass
 delivers the API and persistence; the inline annotation UI is Phase 2b. Exit
 criterion (design §23): a range suggestion survives refresh, repository
-rebuild, and service restart — provable via API.
+rebuild, and service restart - provable via API.
 
 ## 1. Shape and scope
 
@@ -17,7 +17,7 @@ annotations + replies with Git mirroring, chapter projections, GitHub webhook
 ingest, audit events, idempotency.
 
 **Out (deferred):** votes/rules/decisions (Phase 3), work items/leases
-(Phase 4), GitHub App Git writes + PR mode (Phase 5 — this phase writes Git
+(Phase 4), GitHub App Git writes + PR mode (Phase 5 - this phase writes Git
 through a local adapter), SSE events (Phase 3), rate limiting (Phase 6),
 collaborator UI (Phase 2b), multi-project.
 
@@ -97,17 +97,17 @@ returns the stored response; same key + different hash → 409.
 
 ## 5. Git mirroring (design §7.3, §20)
 
-- Command flow: within one DB batch — insert record (status `pending_git`),
+- Command flow: within one DB batch - insert record (status `pending_git`),
   audit event, and `outbox` row; respond `202` with `operationId`. The
   **processor** drains the outbox per project serially: renders artifact
   files (Phase 0 contract §4 formats: `.authorbot/annotations/<id>/annotation.md`,
   `replies/<reply-id>.md`; withdraw updates frontmatter `status`), then
   commits via `BookRepoWriter`.
 - `BookRepoWriter.commitFiles({ branch, expectedHeadOverride?, files,
-  message, trailers }) → { commitSha }` — one commit per logical mutation,
+  message, trailers }) → { commitSha }` - one commit per logical mutation,
   commit trailers per design §14.3 (`Authorbot-Actor`, `Authorbot-Annotation`,
   `Authorbot-Operation`). Implementations: **LocalGitAdapter** (Node-only,
-  spawns `git` against a work-tree path — used by tests and local dev) and a
+  spawns `git` against a work-tree path - used by tests and local dev) and a
   typed `GitHubAdapter` stub that throws `not-implemented` (Phase 5).
 - `git_operations` states per design §20.2 (`queued → preparing → committing
   → committed → verified`, failures → `conflict|failed`); bounded retries (3).
@@ -141,7 +141,7 @@ in code or fixture repos.
    from the repo** serves it again. (The Phase 2 exit criterion.)
 2. Authorization matrix tests: every endpoint × {anonymous, reader,
    contributor, maintainer, agent-with/without-scope, revoked token, expired
-   token} — enforced and audited.
+   token} - enforced and audited.
 3. Idempotency replay + mismatch tests; annotation revision-conflict test
    (stale `chapterRevision` → 409).
 4. Webhook: bad signature 401, duplicate delivery ignored, valid push

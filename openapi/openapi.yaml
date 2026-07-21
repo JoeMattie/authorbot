@@ -148,7 +148,7 @@ paths:
         Unauthenticated, because the caller that most needs it has no
         credential: the setup wizard checks the API before switching a book's
         collaboration controls on, and does so anonymously. `gitIntegration`
-        says whether the GitHub App is usable — never what it is. A status word
+        says whether the GitHub App is usable - never what it is. A status word
         and nothing else, which is why it can be public.
       security: []
       responses:
@@ -286,7 +286,7 @@ paths:
     get:
       operationId: listAgentTokens
       tags: [access]
-      summary: Agent token metadata — never the token value.
+      summary: Agent token metadata - never the token value.
       description: >-
         Name, scopes, owning human, membership role, created / last-used /
         expiry times. Tokens are never re-displayable: no code path in the
@@ -519,7 +519,7 @@ paths:
         The chapter's Markdown as an author wrote it: frontmatter removed and
         block markers stripped. Feeds the Phase 6 §3.5 composer, whose revise
         half requires a complete replacement body plus the current
-        `baseRevision` — send `revision` straight back as that value. Editor or
+        `baseRevision` - send `revision` straight back as that value. Editor or
         maintainer only, matching the write it feeds.
       responses:
         "200":
@@ -914,7 +914,7 @@ paths:
       description: |
         Requires `votes:write` (the contributor role bundle and above; agents
         vote only when their membership grants it). Votes are accepted on
-        suggestions only — a comment returns 422. Recording the vote runs the
+        suggestions only - a comment returns 422. Recording the vote runs the
         declarative rule engine in the same serialized command: a threshold
         crossing creates a sticky decision and a `ready` work item, both
         surfaced in `decision`. Tallies are aggregate-only; per-voter identity
@@ -957,7 +957,7 @@ paths:
       tags: [annotations]
       summary: Clear the caller's current vote.
       description: |
-        Removes the caller's current vote (idempotent — clearing a non-existent
+        Removes the caller's current vote (idempotent - clearing a non-existent
         vote still returns 200) and re-evaluates the rule. Dropping below a
         satisfied rule marks the existing decision `support_changed`; the
         decision and its work item are never deleted (design §11.3).
@@ -988,7 +988,7 @@ paths:
     post:
       operationId: rejectSuggestion
       tags: [annotations]
-      summary: Maintainer override — reject an open suggestion.
+      summary: Maintainer override - reject an open suggestion.
       description: |
         Maintainer-only. Transitions an `open` suggestion to `rejected` and
         records a sticky override decision (`rule_version: 0`) carrying the
@@ -1023,7 +1023,7 @@ paths:
     post:
       operationId: reopenSuggestion
       tags: [annotations]
-      summary: Maintainer override — reopen a rejected suggestion.
+      summary: Maintainer override - reopen a rejected suggestion.
       description: |
         Maintainer-only. Transitions a `rejected` suggestion back to `open` and
         records an override decision (`rule_version: 0`) with the required
@@ -1057,11 +1057,11 @@ paths:
     post:
       operationId: forceCreateWorkItem
       tags: [annotations]
-      summary: Maintainer override — force-create a work item bypassing the rule.
+      summary: Maintainer override - force-create a work item bypassing the rule.
       description: |
         Maintainer-only. Creates a `ready` work item for a suggestion without a
         satisfied rule, recorded as an override decision on the same uniqueness
-        key `(sourceAnnotationId, create_work_item, rule_version 0)` — a second
+        key `(sourceAnnotationId, create_work_item, rule_version 0)` - a second
         call returns 409. The annotation transitions to `work_item_created`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1253,7 +1253,7 @@ paths:
     post:
       operationId: cancelWorkItem
       tags: [work]
-      summary: Maintainer override — cancel a ready work item before integration.
+      summary: Maintainer override - cancel a ready work item before integration.
       description: |
         Maintainer-only. Transitions the work item to `cancelled` and records a
         sticky override decision (`rule_version: 0`) with the required `reason`.
@@ -1568,7 +1568,7 @@ paths:
         Maintainer only. Moves a `failed` operation back to `queued` and its
         outbox row back to `pending`, so the coordinator attempts it again.
         Availability failures (GitHub 5xx, rate limits) no longer consume the
-        retry budget — they are deferred to a later drain automatically — so
+        retry budget - they are deferred to a later drain automatically - so
         reaching `failed` means a bounded number of genuine attempts were made.
         This re-runs the existing plan rather than rewriting it: an operation
         that failed because its content is invalid will fail again.
@@ -1639,14 +1639,14 @@ paths:
           required: false
           description: |
             When `1`, returns a JSON page of events after the cursor instead of
-            an SSE stream — the simple-agent fallback (§26.1).
+            an SSE stream - the simple-agent fallback (§26.1).
           schema:
             type: integer
             enum: [1]
       responses:
         "200":
           description: |
-            An open SSE stream, or — with `poll=1` — a JSON page of events.
+            An open SSE stream, or - with `poll=1` - a JSON page of events.
 
             A stream is bounded on both axes: the server closes it after five
             minutes (reconnect with `Last-Event-ID`; no events are missed), and
@@ -1760,12 +1760,12 @@ paths:
         book's `book.yml`, split into three blocks that mirror the contract's
         field classes:
 
-        - `settings` — freely editable values. This is what a settings form
+        - `settings` - freely editable values. This is what a settings form
           binds to.
-        - `guarded` — `slug` and `publication.chapter_url`, each shipped with
+        - `guarded` - `slug` and `publication.chapter_url`, each shipped with
           the consequence of changing it, so the UI does not carry its own copy
           of the warning.
-        - `readOnly` — fields the API will never change, each with the reason.
+        - `readOnly` - fields the API will never change, each with the reason.
           Present so the interface can explain the boundary, never as form
           fields.
 
@@ -1865,14 +1865,14 @@ paths:
       description: |
         Maintainer-only (Phase 6 contract §3.6). This is a read-modify-write of
         `book.yml` that lands through the same outbox, coordinator, validation,
-        and attribution path as any other write — settings changes are commits:
+        and attribution path as any other write - settings changes are commits:
         diffable, revertable, audited. There is no second configuration store.
 
         Only the fields present in the body change. An explicit `null` clears an
         optional field; omitting it leaves the field alone.
 
         **`governance.rules` replaces the rule map wholesale** rather than
-        merging it, so a rule can be removed — including the default
+        merging it, so a rule can be removed - including the default
         `human_maintainer_approvals >= 1` clause, which §3.6 makes removable
         for authors running a genuinely collaborative project.
 
@@ -1926,7 +1926,7 @@ paths:
                       type: object
                       description: >
                         Replaces the whole rule map. Rule objects must NOT
-                        carry `version` — the server assigns it.
+                        carry `version` - the server assigns it.
                       additionalProperties:
                         $ref: "#/components/schemas/GovernanceRuleInput"
                 confirm:
@@ -2034,7 +2034,7 @@ paths:
       summary: Signed CI callback reporting build and deployment state.
       description: |
         Authenticated by `X-Authorbot-Signature-256`, an HMAC-SHA256 with
-        WEBHOOK_SECRET over `<delivery-id>.<timestamp>.<raw-body>` — not by
+        WEBHOOK_SECRET over `<delivery-id>.<timestamp>.<raw-body>` - not by
         session or bearer credentials. The delivery id and timestamp are part
         of the signed material precisely because the delivery id is the replay
         suppression key: signing the body alone would let anyone holding one
@@ -2224,7 +2224,7 @@ paths:
                 $ref: "#/components/schemas/Problem"
 
   # =========================================================================
-  # Phase 7 — author-facing access control
+  # Phase 7 - author-facing access control
   #
   # Every operation below is maintainer-only except `getRateLimits` and
   # `getAccessState`, which any member may read: a collaborator who receives a
@@ -2263,7 +2263,7 @@ paths:
     post:
       operationId: freezeBook
       tags: [access]
-      summary: Freeze the book — no writes from anyone, including maintainers.
+      summary: Freeze the book - no writes from anyone, including maintainers.
       description: >-
         The emergency stop. Refuses every collaboration write (annotations,
         replies, votes, claims, submissions, moderation approvals) with `423`
@@ -2345,7 +2345,7 @@ paths:
         Reversible: no token is revoked, and resuming restores every token's
         identity, scopes, expiry, and history. While paused, any request
         authenticated by an agent token that would write is refused with `403`
-        — including the control plane, so a paused agent cannot unpause itself.
+        - including the control plane, so a paused agent cannot unpause itself.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2496,7 +2496,7 @@ paths:
       tags: [access]
       summary: Change a collaborator's role.
       description: >-
-        The book's last maintainer cannot be demoted — a book with no
+        The book's last maintainer cannot be demoted - a book with no
         maintainer has no one who can mint a token, change a setting, or lift a
         freeze. This is also the route that grants an author's agent the
         `maintainer` role so it keeps working under a `locked` policy: a
@@ -2548,8 +2548,8 @@ paths:
         Revokes the membership, invalidates every session the actor holds,
         releases any lease they hold (returning the work item to `ready`),
         rejects their in-flight submissions, and revokes the agent tokens they
-        own. Their prior contributions — annotations, replies, votes, commit
-        attribution — are left entirely intact. Nothing here deletes content.
+        own. Their prior contributions - annotations, replies, votes, commit
+        attribution - are left entirely intact. Nothing here deletes content.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2671,8 +2671,8 @@ paths:
       tags: [access]
       summary: Annotations awaiting review under an `approval-gated` policy.
       description: >-
-        Queued annotations live only in the operational database — never in
-        Git — until approved. Each entry carries the comment, its target
+        Queued annotations live only in the operational database - never in
+        Git - until approved. Each entry carries the comment, its target
         passage, and the author's history with this book.
       parameters:
         - name: status
@@ -3044,7 +3044,7 @@ components:
           type: number
     RuleWhen:
       type: object
-      description: A condition group — exactly one of `all` or `any`.
+      description: A condition group - exactly one of `all` or `any`.
       minProperties: 1
       maxProperties: 1
       properties:
@@ -3290,9 +3290,9 @@ components:
       type: string
       description: >-
         Who may comment and suggest, and whether it appears immediately.
-        `open` — any signed-in user, immediately. `approval-gated` — any
-        signed-in user, after a maintainer approves. `collaborators-only` —
-        members only, immediately (the default). `locked` — maintainers only,
+        `open` - any signed-in user, immediately. `approval-gated` - any
+        signed-in user, after a maintainer approves. `collaborators-only` -
+        members only, immediately (the default). `locked` - maintainers only,
         immediately. Anonymous writing is unavailable in every mode, `open`
         included.
       enum: [open, approval-gated, collaborators-only, locked]
@@ -3351,7 +3351,7 @@ components:
         addedByActorId:
           description: >-
             From the audit log. `null` for a membership created before Phase 7
-            recorded member events — the honest answer rather than a guess.
+            recorded member events - the honest answer rather than a guess.
           oneOf:
             - $ref: "#/components/schemas/Uuid"
             - type: "null"
@@ -3422,7 +3422,7 @@ components:
       type: object
       description: >-
         An annotation awaiting review. Shaped like `Annotation` where the
-        fields coincide, with `moderation` naming the difference — this is the
+        fields coincide, with `moderation` naming the difference - this is the
         "badged as awaiting review" of the contract. It has no
         `gitOperationId` because it has never been, and while pending will
         never be, mirrored to Git.
@@ -3634,7 +3634,7 @@ components:
           properties:
             commit:
               description: >
-                Repository commit the projection was last built from — the
+                Repository commit the projection was last built from - the
                 *integrated* commit. Null before the first successful refresh.
               oneOf:
                 - type: string
@@ -3994,7 +3994,7 @@ components:
       type: object
       description: |
         Decision projection embedded in vote and work-item responses (Phase 3
-        contract §4). Aggregate metrics only — never per-voter data (§26.1).
+        contract §4). Aggregate metrics only - never per-voter data (§26.1).
       required:
         [id, sourceAnnotationId, actionType, rule, ruleVersion, metrics, result, supportChanged, createdAt, updatedAt]
       properties:
@@ -4035,7 +4035,7 @@ components:
 
     VoteResult:
       type: object
-      description: Response to casting or clearing a vote (Phase 3 contract §2–§4).
+      description: Response to casting or clearing a vote (Phase 3 contract §2-§4).
       required: [annotationId, value, votes, ruleSatisfied, decision]
       properties:
         annotationId:
@@ -4280,7 +4280,7 @@ components:
                   description: Opaque lease secret, returned once; only its hash is stored.
                 renewalPromptAt:
                   $ref: "#/components/schemas/Timestamp"
-                  description: When a client should offer renewal — expiresAt minus the configured lead time.
+                  description: When a client should offer renewal - expiresAt minus the configured lead time.
         document:
           type: object
           required: [chapterId, revision, contentHash, source]
@@ -4328,7 +4328,7 @@ components:
           description: >-
             Schema id the submission payload must satisfy, or `null` for work
             item types that are claimable but have no submission flow yet
-            (`write_chapter`, `planning` — Phase 4 contract §1). Those types
+            (`write_chapter`, `planning` - Phase 4 contract §1). Those types
             return 201 with this field present and null, so generated clients
             must treat it as nullable.
           examples:

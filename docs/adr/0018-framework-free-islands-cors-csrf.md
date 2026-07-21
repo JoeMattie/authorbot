@@ -24,9 +24,9 @@ Constraints in tension:
 
 ### Framework-free custom elements (contract §1)
 
-- The islands are **framework-free TypeScript custom elements** — a single
+- The islands are **framework-free TypeScript custom elements** - a single
   `<authorbot-collab>` root element in `packages/publisher/site/src/islands/`
-  — with zero runtime dependencies. No framework integration is added to the
+  - with zero runtime dependencies. No framework integration is added to the
   publisher; design §1.1's "small interactive islands" is satisfied with the
   platform's own component model.
 - The islands are bundled by an **explicit Vite build step** (the toolchain
@@ -51,8 +51,8 @@ Constraints in tension:
   bundle contains no `innerHTML` (asserted by test) and no client-side
   Markdown rendering; server-side sanitized rendering can be added later
   without reopening this surface.
-- Dynamic card positioning is applied through the CSSOM only — no inline
-  `style="…"` strings — so the page CSP needs no `'unsafe-inline'`. Enabled
+- Dynamic card positioning is applied through the CSSOM only - no inline
+  `style="…"` strings - so the page CSP needs no `'unsafe-inline'`. Enabled
   chapter pages emit the contract's CSP as a `<meta>` tag:
   `default-src 'self'; connect-src 'self' <api-origin>; img-src 'self'
   data:` (design §19.4); a root-relative API base is same-origin and covered
@@ -61,7 +61,7 @@ Constraints in tension:
 ### CORS/CSRF model in the API (contract §3)
 
 - **CORS**: `ALLOWED_ORIGINS` is a comma-separated list of **exact
-  http(s) origins** — no wildcards, paths, or credentials — validated at
+  http(s) origins** - no wildcards, paths, or credentials - validated at
   boot (invalid config fails startup). Listed origins get per-origin
   `Access-Control-Allow-Origin` with `Access-Control-Allow-Credentials:
   true`, preflight handling, and `X-Correlation-Id` exposure; unlisted
@@ -70,7 +70,7 @@ Constraints in tension:
   (`Referer` consulted only when `Origin` is absent) matching
   `ALLOWED_ORIGINS` or the API's own request origin; missing or foreign →
   403 problem `csrf-origin-mismatch`. The check is enforced
-  unconditionally — the API's own origin is derived from the request URL, so
+  unconditionally - the API's own origin is derived from the request URL, so
   same-origin deployments need no configuration. It runs after successful
   cookie authentication (anonymous requests stay 401) and never applies to
   bearer-token requests, which carry no ambient credential.
@@ -100,7 +100,7 @@ explicit origin configuration and `SameSite=None` cookies.
 - Reader-visible bodies cannot show rich formatting until a server-side
   sanitizer exists; that is deliberate.
 - Cross-origin deployments require operator configuration and depend on
-  third-party-cookie behavior in browsers — a further push toward the
+  third-party-cookie behavior in browsers - a further push toward the
   same-origin recommendation.
 - Any cookie-bearing non-browser client (curl, scripts) must send an
   `Origin` header on mutations; agent clients are unaffected (bearer

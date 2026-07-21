@@ -1,12 +1,12 @@
 /**
  * Phase 3 routes: votes, the serialized vote command with rule evaluation and
  * idempotent work generation, maintainer overrides, work-queue reads, and the
- * event feed (Phase 3 contract §2–§5).
+ * event feed (Phase 3 contract §2-§5).
  *
  * Concurrency model: every vote/override command runs inside a per-project
  * serial queue (contract §3 "the same serialized command"), and the decision
  * batch carries the `(source_annotation_id, action_type, rule_version)`
- * unique key (contract §4) — so even racing writers outside the queue
+ * unique key (contract §4) - so even racing writers outside the queue
  * collapse to exactly one decision: a loser's batch aborts atomically on the
  * key, is rebuilt against the now-existing decision, and proceeds
  * idempotently.
@@ -114,7 +114,7 @@ export interface Phase3Context {
  * Decision summary for the "Queued as work item" badge and the member
  * decision views. `overrideReason` is maintainer-authored free text and is
  * member-only (contract §2 threat model: member data on public books); it is
- * omitted when `includeOverrideReason` is false — the anonymous public-read
+ * omitted when `includeOverrideReason` is false - the anonymous public-read
  * path passes false so a signed-out reader never sees the maintainer's private
  * rationale, only the public result/support fields.
  */
@@ -386,8 +386,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     return serialize(guard.project.id, async () => {
       const a = authOf(c);
       // Phase 6 §3.6: the maintainer metrics need the voter's ROLE as well as
-      // their actor type. Taken from the auth context — the membership the
-      // request already resolved — so it is the same current, unrevoked role
+      // their actor type. Taken from the auth context - the membership the
+      // request already resolved - so it is the same current, unrevoked role
       // the SQL tally's join will read on the next request.
       const voter: Voter = { actorType: a.actor.type as VoterActorType, role: a.role };
 
@@ -446,8 +446,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
           repos.decisions.getWorkItemCreation(annotation.id);
 
         // No-op: same value re-vote, or clearing an absent vote. Nothing is
-        // recorded (no vote_event, no aggregate event) — the aggregate did not
-        // change — but the idempotency claim still commits.
+        // recorded (no vote_event, no aggregate event) - the aggregate did not
+        // change - but the idempotency claim still commits.
         if (previousValue === (mode === "cast" ? value : null)) {
           return respond(
             await repos.votes.tally(annotation.id),
@@ -525,7 +525,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             // First threshold crossing (only from `open`; a force-created
             // work item already moved the annotation on). Guard on ANY existing
             // create_work_item decision (any rule_version), so a rule crossing
-            // never races a force-create into a second work item (Finding 1) —
+            // never races a force-create into a second work item (Finding 1) -
             // the uniqueness index backstops the cross-isolate window.
             if (
               evaluation.satisfied &&
@@ -623,7 +623,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       // the annotation compare-and-swap) rolls the whole batch back atomically.
       // Re-run against fresh state: the next pass finds the existing decision
       // and proceeds as already-decided, or sees the new status and responds
-      // with the correct state-conflict — losers treat the violation as
+      // with the correct state-conflict - losers treat the violation as
       // already-done, not error. Bounded so a genuine persistent constraint
       // error still surfaces.
       const MAX_ATTEMPTS = 5;
@@ -712,7 +712,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
        * A real scope, not `null`.
        *
        * `scope: null` told `requireProjectScope` to skip the scope check
-       * entirely AND — through `capabilityForScope(null)` — the annotation
+       * entirely AND - through `capabilityForScope(null)` - the annotation
        * policy gate with it, so these routes were authorized by the membership
        * role alone. For a human session that is the same answer; for an agent
        * token it is not, because effective scopes are `token ∩ role bundle` and
@@ -854,7 +854,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
        * `work:claim`, not `null`: forcing a work item into existence is a write
        * to the work queue, and it must require a work-related scope. Without
        * one, a credential holding nothing but `chapters:read` could create a
-       * suggestion and then manufacture work on it — no vote, no rule, and no
+       * suggestion and then manufacture work on it - no vote, no rule, and no
        * scope that says anything about work.
        */
       const guard = await requireProjectScope(c, services, "work:claim");
@@ -972,7 +972,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   );
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/cancel", auth, idem, async (c) => {
-    /** `work:claim`, not `null` — see force-create-work-item above. */
+    /** `work:claim`, not `null` - see force-create-work-item above. */
     const guard = await requireProjectScope(c, services, "work:claim");
     if ("response" in guard) {
       return guard.response;
@@ -1020,7 +1020,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       // The cancel override decision references the work item, so its single
       // `decision.create` row re-renders the work-item Markdown with its new
       // `cancelled` status (status frontmatter, Phase 0 §4 stable paths) in
-      // the same commit — a rebuild restores `cancelled`.
+      // the same commit - a rebuild restores `cancelled`.
       const decisionCommand = ctx.commandStatements({
         project: guard.project,
         correlationId,
@@ -1174,7 +1174,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     // A slot is taken BEFORE the stream is built, so a client already at its
     // concurrency cap is refused with a cheap 429 instead of being handed
     // another second-by-second poll. The slot is handed to `onClose`, which
-    // every termination path runs — disconnect, lifetime cap, write failure.
+    // every termination path runs - disconnect, lifetime cap, write failure.
     const slot = streamLimiter.acquire(streamClientKey(c.req.raw.headers));
     if (slot === null) {
       const refusal = problem(c, "rate-limited", {

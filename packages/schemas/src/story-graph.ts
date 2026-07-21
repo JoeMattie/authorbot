@@ -57,7 +57,7 @@ export const storyGraphLinkSchema = z.strictObject({
 export type StoryGraphLink = z.infer<typeof storyGraphLinkSchema>;
 
 /**
- * Story graph `story/outline.yml` — `authorbot.story-graph/v1`
+ * Story graph `story/outline.yml` - `authorbot.story-graph/v1`
  * (design section 8.5, contract section 4).
  */
 export const storyGraphSchema = z.strictObject({

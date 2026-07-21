@@ -1,5 +1,5 @@
 /**
- * `GitHubBookRepoWriter` — the production `BookRepoWriter` (Phase 5 contract
+ * `GitHubBookRepoWriter` - the production `BookRepoWriter` (Phase 5 contract
  * §4, design §14.2/§14.3), replacing `LocalGitAdapter` on the deployed
  * Worker.
  *
@@ -21,7 +21,7 @@
  * the whole sequence restarts from a fresh ref read, bounded at
  * `maxAttempts` (default 3). Exhaustion, and a `expectedHeadOverride` that no
  * longer matches the branch, both raise a typed `non-fast-forward`
- * `GitWriteError` — a conflict the caller re-plans from, never a clobber.
+ * `GitWriteError` - a conflict the caller re-plans from, never a clobber.
  *
  * Worker-compatible: `fetch` and WebCrypto only, no `node:` imports. The
  * `fetch` implementation is injected, so tests drive the whole sequence
@@ -80,8 +80,8 @@ export type InstallationTokenGetter = (
  * new GitHubBookRepoWriter({ repo, tokens: auth });
  * ```
  *
- * The writer depends on that one *method*, not on the module — a bare async
- * function is equally accepted — so the two land independently and tests can
+ * The writer depends on that one *method*, not on the module - a bare async
+ * function is equally accepted - so the two land independently and tests can
  * supply a constant token.
  */
 export interface InstallationTokenSource {
@@ -127,7 +127,7 @@ export interface GitHubWriteErrorInit {
 /**
  * A `GitWriteError` (so `isGitWriteError` and the processor's retry
  * classification keep working) carrying the GitHub specifics an operator
- * needs. Messages quote GitHub's own `message` field only — never a token,
+ * needs. Messages quote GitHub's own `message` field only - never a token,
  * never a request header.
  *
  * The message is additionally run through {@link scrubSecrets} before it
@@ -171,9 +171,9 @@ export interface GitHubBookRepoWriterOptions {
   fetchImpl?: FetchLike;
   /** API origin; defaults to `https://api.github.com`. */
   apiOrigin?: string;
-  /** Git author/committer name — the *service* identity (design §14.3). */
+  /** Git author/committer name - the *service* identity (design §14.3). */
   authorName?: string;
-  /** Git author/committer email — the *service* identity (design §14.3). */
+  /** Git author/committer email - the *service* identity (design §14.3). */
   authorEmail?: string;
   /** Clock for commit timestamps. Defaults to `Date.now`. */
   now?: () => Date;
@@ -314,7 +314,7 @@ export class GitHubBookRepoWriter implements BookRepoWriter {
 
   /**
    * Commit every file of one logical mutation as a single commit on
-   * `branch`, following design §14.2. Returns the new commit's SHA — or, when
+   * `branch`, following design §14.2. Returns the new commit's SHA - or, when
    * this operation already landed, the SHA it landed as.
    */
   async commitFiles(input: CommitFilesInput): Promise<CommitFilesResult> {
@@ -444,7 +444,7 @@ export class GitHubBookRepoWriter implements BookRepoWriter {
    * each directory once.
    *
    * The point of the walk (rather than one recursive read) is that a huge
-   * repository never depends on an untruncated recursive tree — but
+   * repository never depends on an untruncated recursive tree - but
    * per-directory listings truncate too, and {@link #readTree} refuses them
    * rather than reporting a present file as missing.
    */
@@ -475,7 +475,7 @@ export class GitHubBookRepoWriter implements BookRepoWriter {
 
   /**
    * One tree listing, or `null` when the tree object is gone. A `truncated`
-   * listing is an ERROR, never a partial answer — the same rule the reader
+   * listing is an ERROR, never a partial answer - the same rule the reader
    * enforces with `TruncatedTreeError` (contract §3).
    *
    * Without this, a truncated listing made `readFile` return `null` for a file
@@ -552,7 +552,7 @@ export class GitHubBookRepoWriter implements BookRepoWriter {
    * Is `candidate` reachable from `head`? i.e. did it land on this branch?
    *
    * `GET /compare/{base}...{head}` answers `ahead` or `identical` exactly when
-   * `base` is an ancestor of `head`, in one request and at any distance — which
+   * `base` is an ancestor of `head`, in one request and at any distance - which
    * is the whole point: the trailer scan's answer degrades as unrelated commits
    * accumulate, this one does not. A commit GitHub no longer knows (404) is
    * not an ancestor.
@@ -599,7 +599,7 @@ export class GitHubBookRepoWriter implements BookRepoWriter {
 
   /**
    * A tree layered on the head's tree. `base_tree` is what preserves every
-   * file this mutation does not mention — without it the commit would be the
+   * file this mutation does not mention - without it the commit would be the
    * whole repository, i.e. a deletion of everything else.
    */
   async #createTree(
@@ -764,14 +764,14 @@ export class GitHubBookRepoWriter implements BookRepoWriter {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch (error) {
-      // A REJECTED fetch — connection reset, TLS failure, request cancelled —
+      // A REJECTED fetch - connection reset, TLS failure, request cancelled -
       // is not an HTTP status, so `#failure` never sees it and it would escape
       // as a raw TypeError. The processor's guard is
       // `isGitWriteError(error) && error.retryable`, so a raw TypeError falls
       // through to `failOperation`: terminal, no retry, attempts not even
       // consumed. That is the one failure mode that can leave a commit LANDED
       // (the `PATCH /git/refs` was applied, the response never arrived) with
-      // the database recording a conflict — git at revision N+1, D1 at N.
+      // the database recording a conflict - git at revision N+1, D1 at N.
       //
       // Retrying is safe precisely because it is this operation replaying:
       // `#findOperationCommit`'s `Authorbot-Operation` trailer dedup and the
@@ -877,7 +877,7 @@ function normalizeFiles(files: readonly CommitFile[]): readonly CommitFile[] {
 
 /**
  * Reject absolute paths, traversal, backslashes and NULs before any request
- * is built — identical containment rules to the local adapter, applied
+ * is built - identical containment rules to the local adapter, applied
  * without `node:path` so this stays Worker-safe.
  */
 export function safeRepoPath(filePath: string): string {

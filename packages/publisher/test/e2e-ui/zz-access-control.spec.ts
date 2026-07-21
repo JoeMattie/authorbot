@@ -13,7 +13,7 @@
  *
  * Playwright runs these specs serially against ONE book repo and ONE database
  * (workers: 1), in filename order. Everything in this file changes state that
- * is global to the book — the annotation policy decides whether every other
+ * is global to the book - the annotation policy decides whether every other
  * spec's comments publish or queue, and a freeze refuses every write in the
  * suite. Running last means a restore that somehow fails cannot take the rest
  * of the run down with it, and the `afterAll` below still puts the book back
@@ -90,7 +90,7 @@ async function accessState(cookie: string): Promise<Record<string, unknown>> {
  *
  * The wait is not politeness. The policy lives in `book.yml`, so changing it is
  * a commit, and the projection the enforcement gate reads updates only once
- * that commit lands — which is exactly why the interface refuses to claim the
+ * that commit lands - which is exactly why the interface refuses to claim the
  * new mode is already in force. A test that asserted enforcement immediately
  * would be asserting a lie the code deliberately does not tell.
  */
@@ -146,7 +146,7 @@ test.afterAll(async () => {
 });
 
 // ===========================================================================
-// A — the policy changes, and the change is enforced by the server
+// A - the policy changes, and the change is enforced by the server
 // ===========================================================================
 
 test("a maintainer changes the annotation policy and the change takes effect", async ({ page }) => {
@@ -154,7 +154,7 @@ test("a maintainer changes the annotation policy and the change takes effect", a
   await openAccess(page);
 
   // All four modes are offered at once, as the progression they are, each with
-  // what it actually means — and `locked` says the book stays the author's,
+  // what it actually means - and `locked` says the book stays the author's,
   // never that collaboration is switched off.
   const policy = page.locator(".ab-access-policy");
   await expect(policy.locator("input.ab-policy-radio")).toHaveCount(4);
@@ -181,7 +181,7 @@ test("a maintainer changes the annotation policy and the change takes effect", a
 });
 
 // ===========================================================================
-// B — the queue, and what approval actually does
+// B - the queue, and what approval actually does
 // ===========================================================================
 
 test("the approval queue shows a pending comment, and approving it makes it public", async ({
@@ -198,7 +198,7 @@ test("the approval queue shows a pending comment, and approving it makes it publ
   await expect(card.locator(".ab-pending-history")).not.toBeEmpty();
   await expect(card.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
 
-  // Nothing queued has reached Git — said plainly, because it is the whole
+  // Nothing queued has reached Git - said plainly, because it is the whole
   // point of gating.
   await expect(page.locator(".ab-access-moderation")).toContainText(/reached your repository/i);
 
@@ -208,7 +208,7 @@ test("the approval queue shows a pending comment, and approving it makes it publ
     timeout: 30_000,
   });
 
-  // Approval mirrors it to Git as a normal annotation — so a SIGNED-OUT reader
+  // Approval mirrors it to Git as a normal annotation - so a SIGNED-OUT reader
   // sees it on the published chapter, which is the observable form of "it
   // appears publicly".
   const reader = await page.context().browser()?.newContext();
@@ -227,7 +227,7 @@ test("the approval queue shows a pending comment, and approving it makes it publ
 });
 
 // ===========================================================================
-// C — removal, confirmed with the consequence stated
+// C - removal, confirmed with the consequence stated
 // ===========================================================================
 
 test("removing a collaborator is confirmed with the consequence stated", async ({ page }) => {
@@ -237,7 +237,7 @@ test("removing a collaborator is confirmed with the consequence stated", async (
 
   const row = page.locator(".ab-collaborator", { hasText: DEPARTING });
   await expect(row).toBeVisible({ timeout: 30_000 });
-  // Seeing: role, joined, added by, last acted — all four, in words.
+  // Seeing: role, joined, added by, last acted - all four, in words.
   await expect(row).toContainText("Contributor");
   await expect(row.locator(".ab-access-facts")).toContainText("Joined");
   await expect(row.locator(".ab-access-facts")).toContainText("Last acted");
@@ -250,7 +250,7 @@ test("removing a collaborator is confirmed with the consequence stated", async (
   // REQUEST, claimed work returns to the queue…
   await expect(confirm).toContainText(/next request/i);
   await expect(confirm).toContainText(/returns to the queue/i);
-  // …and — the sentence the contract makes non-negotiable — their existing
+  // …and - the sentence the contract makes non-negotiable - their existing
   // contributions and attribution remain.
   await expect(confirm).toContainText(/attribution stay exactly as they are/i);
   await expect(confirm).toContainText(/not erasing them/i);
@@ -269,7 +269,7 @@ test("removing a collaborator is confirmed with the consequence stated", async (
     timeout: 30_000,
   });
 
-  // Confirm deliberately, and it happens — with the interface reporting what
+  // Confirm deliberately, and it happens - with the interface reporting what
   // the API actually did rather than a bare "done".
   const again = page.locator(".ab-collaborator", { hasText: DEPARTING });
   await again.getByRole("button", { name: `Remove ${DEPARTING}` }).click();
@@ -291,7 +291,7 @@ test("removing a collaborator is confirmed with the consequence stated", async (
 });
 
 // ===========================================================================
-// D — freeze stops writes; the reading site is untouched
+// D - freeze stops writes; the reading site is untouched
 // ===========================================================================
 
 test("freeze visibly stops writes while the reading site still serves", async ({ page }) => {

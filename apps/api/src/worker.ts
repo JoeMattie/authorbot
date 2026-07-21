@@ -7,11 +7,11 @@
  * pay a full repository read before serving anything. All repository access
  * belongs to the `ProjectCoordinator` Durable Object (contract §5: "All
  * Git-touching work goes through it"), which refreshes on its alarm when a
- * webhook marks the projection stale — so `deps.reader` stays undefined in
+ * webhook marks the projection stale - so `deps.reader` stays undefined in
  * the Worker and `bootstrap()` behaves exactly as it does today.
  *
  * Secrets (`SESSION_SECRET`, `WEBHOOK_SECRET`, `GITHUB_CLIENT_SECRET`,
- * `GITHUB_APP_PRIVATE_KEY`) come from `wrangler secret put` — never from vars
+ * `GITHUB_APP_PRIVATE_KEY`) come from `wrangler secret put` - never from vars
  * or code, never logged, never returned in a response.
  */
 import { wrapD1Database, type D1DatabaseLike } from "@authorbot/database";
@@ -39,7 +39,7 @@ export interface WorkerBindings {
   /**
    * HMAC key for CI publication callbacks. Optional: absent falls back to
    * `WEBHOOK_SECRET` so an existing deployment keeps reporting through the
-   * rotation. Set it — the two secrets live in different trust domains
+   * rotation. Set it - the two secrets live in different trust domains
    * (GitHub's webhook config vs. the book repo's Actions secrets), and sharing
    * one lets either forge the other's requests.
    */
@@ -59,7 +59,7 @@ export interface WorkerBindings {
    */
   API_BASE_PATH?: string;
   /**
-   * "true" to serve annotation/reply reads anonymously (Phase 2b §2.1) — the
+   * "true" to serve annotation/reply reads anonymously (Phase 2b §2.1) - the
    * API-side mirror of the book's `publication.show_public_annotations`.
    */
   PUBLIC_ANNOTATIONS?: string;
@@ -71,7 +71,7 @@ export interface WorkerBindings {
   RULES_JSON?: string;
   /**
    * Lease timing overrides (Phase 4 contract §2), ISO-8601 durations, e.g.
-   * `PT30M`. Validated at boot — a malformed value throws, never degrades.
+   * `PT30M`. Validated at boot - a malformed value throws, never degrades.
    */
   LEASE_DURATION?: string;
   LEASE_RENEWAL_DURATION?: string;
@@ -83,7 +83,7 @@ export interface WorkerBindings {
    */
   COORDINATOR?: DurableObjectNamespaceLike;
   /**
-   * Coordinator alarm cadence in seconds (default 60). Validated at boot —
+   * Coordinator alarm cadence in seconds (default 60). Validated at boot -
    * a malformed value throws rather than silently disabling the periodic
    * backlog drain and lease sweep.
    */
@@ -168,8 +168,8 @@ export function configFromBindings(bindings: WorkerBindings): AppConfig {
 
 /**
  * `MIRROR_MODE` (Phase 2 contract §5 + Phase 5 contract §5). Unknown values
- * fall back to `queue` — the safe mode that records work without attempting
- * it — but `durable` without a `COORDINATOR` binding is a misconfiguration
+ * fall back to `queue` - the safe mode that records work without attempting
+ * it - but `durable` without a `COORDINATOR` binding is a misconfiguration
  * that must fail the boot, not silently degrade to a deployment whose outbox
  * never drains.
  */
@@ -190,7 +190,7 @@ export function mirrorModeFromBindings(bindings: WorkerBindings): MirrorMode {
 
 /**
  * Provider selection shared by every entry point (worker and Node dev
- * server): fail closed — a github-mode deployment without OAuth configuration
+ * server): fail closed - a github-mode deployment without OAuth configuration
  * must throw, never fall back to dev auth (which would mount the
  * unauthenticated /v1/dev/login).
  */
@@ -212,7 +212,7 @@ interface WorkerState {
 /**
  * Worker runtime with retryable bootstrap: a failed bootstrap (e.g. a
  * transient D1 error, or losing a first-boot seed race before the seed became
- * conflict-tolerant) is NOT cached — the failing request gets a 500 and the
+ * conflict-tolerant) is NOT cached - the failing request gets a 500 and the
  * next request rebuilds state and retries, instead of poisoning the isolate
  * for its whole lifetime.
  */
@@ -257,7 +257,7 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
   if (config.mirrorMode === "durable" && coordinator !== undefined) {
     // Post-commit drain (contract §5): the command's D1 batch has already
     // landed, so the coordinator reads a committed outbox row. A failure here
-    // is swallowed by `notifyMutation` — the row stays `pending` and the next
+    // is swallowed by `notifyMutation` - the row stays `pending` and the next
     // mutation or the 60s alarm drains it, so a coordinator hiccup costs
     // latency, not work.
     deps.onMutationCommitted = async (projectId: string): Promise<void> => {
@@ -265,7 +265,7 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
     };
   }
   if (coordinator !== undefined) {
-    // Webhook-driven reconciliation (contract §6) — wired whenever the
+    // Webhook-driven reconciliation (contract §6) - wired whenever the
     // binding exists, independently of MIRROR_MODE, because a `push` must be
     // reconciled even on a deployment that still queues its own writes.
     // `markStaleAndRequestRefresh` has already committed the stale flag by the
@@ -285,7 +285,7 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
  * `ensureAlarm()` inside the Durable Object's `fetch`, and `fetch` is reached
  * from exactly two places: `onMutationCommitted` (MIRROR_MODE=durable only)
  * and the GitHub push webhook. A deployment running `queue` without a GitHub
- * App — which is what the live deployment is — therefore never contacted the
+ * App - which is what the live deployment is - therefore never contacted the
  * DO at all, so no alarm was ever set and `sweepExpiredLeases` never ran in
  * production, despite §5 requiring it ("sweeps expired leases (Phase 4 §2
  * requires this in production)"). The DO cannot self-bootstrap either: an
@@ -295,7 +295,7 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
  * A cron poke closes that: it runs the sweep AND, through the same
  * `fetch` path, calls `ensureAlarm()`, so the maintenance loop is
  * self-starting independent of MIRROR_MODE and of whether GitHub credentials
- * exist. Failures are swallowed and logged nowhere sensitive — a cron that
+ * exist. Failures are swallowed and logged nowhere sensitive - a cron that
  * throws is retried on its own schedule, and the alarm remains the primary
  * loop once armed.
  */

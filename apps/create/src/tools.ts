@@ -4,7 +4,7 @@
  * Every probe here is read-only, which is why `doctor` works unchanged under
  * `--dry-run`: looking at a machine changes nothing. Nothing is ever
  * installed unasked, and the two credential flows (`gh auth login`,
- * `wrangler login`) are offered rather than scripted — both are interactive
+ * `wrangler login`) are offered rather than scripted - both are interactive
  * and browser-driven, and a wizard that tried to script them would be a
  * wizard that asked for a password.
  */
@@ -109,7 +109,7 @@ export async function checkPnpm(actions: Actions): Promise<ToolReport> {
       status: "missing",
       required: false,
       remedy:
-        "Not needed to write a book — your repository uses npm. Install with `npm install -g pnpm` only if you plan to work on Authorbot's own source.",
+        "Not needed to write a book - your repository uses npm. Install with `npm install -g pnpm` only if you plan to work on Authorbot's own source.",
     };
   }
   return {

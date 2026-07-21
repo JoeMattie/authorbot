@@ -4,7 +4,7 @@
  * `secrets.ts` describes redaction as covering *every* way text leaves this
  * process, and that guarantee is the only reason a credential cannot reach a
  * terminal, a screen share, or a scrollback buffer. Anything that draws its own
- * output — a prompt library, a spinner — would otherwise be a sink the vault
+ * output - a prompt library, a spinner - would otherwise be a sink the vault
  * has never seen.
  *
  * So those libraries are never handed `process.stdout`. They are handed this,
@@ -13,7 +13,7 @@
  *
  * One seam worth naming: redaction happens per chunk, so a secret split across
  * two writes could slip through. Everything drawn this way is composed here and
- * short, and a secret's value is masked rather than echoed — so the exposure is
+ * short, and a secret's value is masked rather than echoed - so the exposure is
  * narrow, and narrower than handing over the real stdout, which is the only
  * alternative on offer.
  */

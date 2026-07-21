@@ -4,7 +4,7 @@
  *
  * The tag is what a book repository pins and what provenance attests to, so a
  * tag that does not match the package versions publishes a version number
- * that exists nowhere in git history — unrevertable, and impossible to
+ * that exists nowhere in git history - unrevertable, and impossible to
  * explain to whoever hits it six months later.
  *
  * Usage: node scripts/check-release-versions.mjs v1.5.0

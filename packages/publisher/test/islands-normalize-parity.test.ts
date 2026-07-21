@@ -7,9 +7,9 @@ import { normalizeDomBlock } from "../site/src/islands/normalize.js";
 /**
  * Phase 2b contract §2.2: the islands ship a mirror of the
  * `@authorbot/markdown` normalizer, "with unit tests proving parity on the
- * package's own normalization fixtures". Each fixture is normalized twice —
+ * package's own normalization fixtures". Each fixture is normalized twice -
  * from the mdast AST (`normalizeBlockText`) and from the publisher-rendered
- * DOM (`normalizeDomBlock`) — and the streams must be identical.
+ * DOM (`normalizeDomBlock`) - and the streams must be identical.
  */
 
 /** Fixture sources from packages/markdown/test/normalize.test.ts, plus the

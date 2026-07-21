@@ -10,7 +10,7 @@ export const attributionEntrySchema = z.strictObject({
 export type AttributionEntry = z.infer<typeof attributionEntrySchema>;
 
 /**
- * Attribution record `.authorbot/attribution/<chapter-id>.yml` —
+ * Attribution record `.authorbot/attribution/<chapter-id>.yml` -
  * `authorbot.attribution/v1` (contract section 4). At least one entry: the
  * file only exists once a chapter revision has an author to attribute.
  */

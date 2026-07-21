@@ -5,7 +5,7 @@ import type { Annotation } from "../site/src/islands/api.js";
 
 /**
  * Phase 6 contract §3.6 "Force-promote": the maintainer overrides ("Promote to
- * work" and reject) surfaced on an open suggestion — maintainer-only, each
+ * work" and reject) surfaced on an open suggestion - maintainer-only, each
  * requiring a reason, each shown beside the tally (including the amendment's
  * role-aware maintainer / human-maintainer approval counts) that the override
  * bypasses.
@@ -173,7 +173,7 @@ describe("override surface visibility", () => {
     expect(document.querySelector(".ab-override")).not.toBeNull();
     expect(promoteBtn()?.textContent).toBe("Promote to work");
     expect(rejectBtn()?.textContent).toBe("Reject suggestion");
-    // Real, keyboard-reachable buttons — never a disabled affordance.
+    // Real, keyboard-reachable buttons - never a disabled affordance.
     expect(promoteBtn()?.tagName).toBe("BUTTON");
     expect(promoteBtn()?.disabled).toBe(false);
     expect(rejectBtn()?.disabled).toBe(false);
@@ -229,10 +229,10 @@ describe("the tally shown beside the actions", () => {
     expect(roles).toEqual(["Maintainer approvals: 1", "Human maintainer approvals: 0"]);
   });
 
-  it("shows “—” for role counts an older API did not supply", async () => {
+  it("shows “-” for role counts an older API did not supply", async () => {
     await mountAs("maintainer", [suggestion({ votes: tally({ approvals: 1, netScore: 1, distinctVoters: 1 }) })]);
     const roles = [...document.querySelectorAll(".ab-override-role")].map((n) => n.textContent);
-    expect(roles).toEqual(["Maintainer approvals: —", "Human maintainer approvals: —"]);
+    expect(roles).toEqual(["Maintainer approvals: -", "Human maintainer approvals: -"]);
   });
 
   it("names the action in the framing once a form is open", async () => {
@@ -304,7 +304,7 @@ describe("performing an override", () => {
     await expect.poll(() => overrideCall("/force-create-work-item")).toBeTruthy();
     const call = overrideCall("/force-create-work-item") as Call;
     expect(call.method).toBe("POST");
-    // Exactly {reason}, trimmed — nothing else is sent.
+    // Exactly {reason}, trimmed - nothing else is sent.
     expect(call.body).toEqual({ reason: "Solo book: promoting my own edit." });
     await expect.poll(() => document.querySelector('[role="status"]')?.textContent).toContain(
       "Promoted to work",

@@ -1,7 +1,7 @@
 /**
  * Everything a stage is allowed to touch, in one injected object.
  *
- * Stages take a `WizardContext` and nothing else — no module-level singletons,
+ * Stages take a `WizardContext` and nothing else - no module-level singletons,
  * no direct `node:*` imports, no `process.env` reads. That is what makes the
  * fakes in `test/fakes.ts` substitutions rather than monkey-patches
  * (contract §6).
@@ -56,7 +56,7 @@ export function nowIso(ctx: WizardContext): string {
 
 /**
  * What a stage reports back. `continue: false` stops the default flow without
- * being an error — the author choosing to stop is a supported ending, not a
+ * being an error - the author choosing to stop is a supported ending, not a
  * failure (contract §3: "stopping wherever the user chooses").
  */
 export interface StageOutcome {

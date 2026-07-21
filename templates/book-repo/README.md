@@ -5,7 +5,7 @@ containing no prose. Copy it, put your own title and `id` in `book.yml`, and
 `authorbot validate .` passes from the first commit.
 
 It ships with no chapters on purpose. A book with zero chapters is a
-first-class state — it validates, builds, and publishes, and the site says
+first-class state - it validates, builds, and publishes, and the site says
 "No chapters published yet." rather than rendering a broken index. Nothing
 here references content that does not exist, so you never have to delete a
 sample chapter and then repair the story files that pointed at it.
@@ -53,12 +53,12 @@ once a directory has real content.
   `<!-- authorbot:block id="<uuidv7>" -->` on its own line. Annotations anchor
   to these IDs, so deleting or duplicating one breaks anchors and fails
   validation.
-- **Slugs** (`book.slug`, chapter `slug`) match `[a-z0-9][a-z0-9-]*` — no
+- **Slugs** (`book.slug`, chapter `slug`) match `[a-z0-9][a-z0-9-]*` - no
   dots, no slashes.
 - **Story references.** Story nodes, events, and characters use
   `<kind>:<slug>` IDs (`event:opening-event`, `character:protagonist`).
   Chapter frontmatter may reference them via `timeline_refs` and
-  `character_refs`; references must resolve — which is why the empty outline
+  `character_refs`; references must resolve - which is why the empty outline
   and timeline shipped here are empty rather than pre-populated.
 - **Timestamps** are RFC 3339 UTC (`2026-07-19T18:00:00Z`).
 - **`.authorbot/` is written by Authorbot.** The directories are scaffolded
@@ -97,7 +97,7 @@ To enable it:
    it as `CLOUDFLARE_API_TOKEN` and add your account id as
    `CLOUDFLARE_ACCOUNT_ID`.
 3. Run `npm install` once and **commit `package-lock.json`**. Both workflows
-   run `npm ci`, which refuses to install without a lockfile — deliberately,
+   run `npm ci`, which refuses to install without a lockfile - deliberately,
    because an install without one is an unpinned install.
 4. **Only if** your book lives under a sub-path of a larger site (for example
    `https://example.com/my-book/`), set the `AUTHORBOT_BASE_URL` repository
@@ -112,7 +112,7 @@ binary. They do not clone the Authorbot repository and do not compile
 TypeScript, so publishing a chapter takes seconds rather than minutes.
 
 The version that runs is the one in this repository's `package.json`, locked
-with integrity hashes by `package-lock.json`. That is the whole pin — there is
+with integrity hashes by `package-lock.json`. That is the whole pin - there is
 no `AUTHORBOT_REF` repository variable any more, and if you are migrating an
 older book, delete it once nothing reads it.
 
@@ -135,19 +135,19 @@ gitignored). A local `wrangler deploy` publishes whatever happens to be in
 that directory, and a stale one quietly replaces your live book with an older
 version.
 
-Turning on collaboration later — sign-in, annotations, votes, the work queue —
+Turning on collaboration later - sign-in, annotations, votes, the work queue -
 upgrades this same Worker in place: same name, same origin, same URL, with the
 API served at `/v1/*`. See stage 3 of the Authorbot `docs/getting-started.md`.
 
 ## First steps
 
 1. Edit `book.yml`: title, slug, language, license, and a fresh `id`
-   (a lowercase UUIDv7 — generate one, and never change it afterwards).
+   (a lowercase UUIDv7 - generate one, and never change it afterwards).
 2. Set up publishing (previous section) and push. You get a live site that
    says it has no chapters yet, which is the correct thing for it to say.
 3. Write chapter one. Once collaboration is switched on, the site's
    **New chapter** button gives you a plain title-and-prose composer and
-   generates the frontmatter and block markers for you — you never hand-write
+   generates the frontmatter and block markers for you - you never hand-write
    a UUID. To do it by hand instead, copy a chapter from
    `examples/book-repo/chapters/` and replace every `id` with a fresh UUIDv7.
 4. Grow `story/outline.yml`, `story/timeline.yml`, and `story/characters/` as

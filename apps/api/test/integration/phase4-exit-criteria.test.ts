@@ -3,8 +3,8 @@
  *
  * `phase4-submissions.test.ts` proves the apply pipeline against an in-memory
  * writer, so it can assert commit contents but never that the committed tree
- * is still a *valid book repo*. That last clause of exit criterion 3 —
- * "validated by the Phase 0 validator post-commit" — had no coverage
+ * is still a *valid book repo*. That last clause of exit criterion 3 -
+ * "validated by the Phase 0 validator post-commit" - had no coverage
  * anywhere: nothing in the workspace ran `validateBookRepo` on a tree that
  * an apply had written to. This file closes that gap by driving the
  * documented endpoints (annotation → votes → work item → claim → submit)

@@ -12,7 +12,7 @@ import type { SiteModel } from "./model.js";
  *
  * The Astro project root is the `site/` directory shipped inside this
  * package; repository data crosses into it through a Vite virtual module
- * (`virtual:authorbot-site`) registered by an inline plugin below — see the
+ * (`virtual:authorbot-site`) registered by an inline plugin below - see the
  * package README for why that mechanism was chosen.
  */
 
@@ -70,7 +70,7 @@ function siteDataPlugin(model: SiteModel): {
 
 /**
  * Bundle the collaboration islands (Phase 2b contract §1) into
- * `_astro/authorbot-collab.js` + `.css` — stable, unhashed names the chapter
+ * `_astro/authorbot-collab.js` + `.css` - stable, unhashed names the chapter
  * template references. This is an explicit Vite step rather than an Astro
  * `<script>`: Astro emits every discovered script chunk into `_astro/` even
  * when no page renders it, which would break the contract's byte-comparable
@@ -89,8 +89,8 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
    *
    * `authorbot-collab` is what every reader downloads on every chapter page,
    * and Phase 2b §1 budgets it at 35 KB gzipped for exactly that reason.
-   * `authorbot-access` is the Phase 7 maintainer surface — a collaborator
-   * table, an agent-token list, an audit view and a moderation queue — which
+   * `authorbot-access` is the Phase 7 maintainer surface - a collaborator
+   * table, an agent-token list, an audit view and a moderation queue - which
    * only `/settings/` ever loads and which no reader should pay for.
    *
    * Independent builds (rather than shared chunks) keep both output names
@@ -165,10 +165,10 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   // `<cwd>/.astro`, where a pnpm workspace root cannot resolve Astro's own
   // dependencies. Building with cwd at this package's root keeps the staging
   // dir inside the package (resolvable) while staying distinct from the site
-  // root's `.astro` metadata dir — a collision there would sweep Astro's
+  // root's `.astro` metadata dir - a collision there would sweep Astro's
   // content-layer artifacts into the published output.
   // A base path nests the emitted tree, because `base` only rewrites the URLs
-  // Astro *writes* — it does not move the files those URLs point at. Building
+  // Astro *writes* - it does not move the files those URLs point at. Building
   // `--base-url /my-book` therefore used to emit `index.html` and `_astro/` at
   // the root while every link pointed at `/my-book/…`. Cloudflare Workers
   // static assets resolve a request path directly against the tree

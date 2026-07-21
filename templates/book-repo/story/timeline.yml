@@ -6,7 +6,7 @@
 # This template ships EMPTY. The calendar below is a neutral default: story
 # time is measured relative to whatever you decide the beginning is. Change
 # `type` to `absolute` for real-world dates, or to a label of your own for a
-# custom calendar — nothing parses this value; it tells collaborators and
+# custom calendar - nothing parses this value; it tells collaborators and
 # agents how to read `display_time`.
 #
 # Add events as the story takes shape, for example:
@@ -24,7 +24,7 @@
 #         - Continuity facts live here as short declarative sentences.
 #
 # `participants` must name characters that exist in story/characters/, and
-# `chapter_refs` must name real chapter IDs — `authorbot validate` checks both.
+# `chapter_refs` must name real chapter IDs - `authorbot validate` checks both.
 #
 # A filled-in example lives in examples/book-repo/story/timeline.yml.
 schema: authorbot.timeline/v1

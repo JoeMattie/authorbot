@@ -19,12 +19,12 @@
  * 3. **Divergence.** When the repository broke an invariant Authorbot cannot
  *    reconcile deterministically, the project is marked `diverged`, the
  *    projection is left ALONE, and prose writes are refused. Reads keep
- *    serving the last coherent projection — design §14.5's "block prose
+ *    serving the last coherent projection - design §14.5's "block prose
  *    writes until invalid state is repaired, but continue safe reads".
  *
  * ## Why "without an Authorbot operation" is decided structurally
  *
- * The contract asks for external edits — a projected chapter whose content
+ * The contract asks for external edits - a projected chapter whose content
  * changed *without* an Authorbot operation. Attributing a file change to a
  * commit author would need per-file commit history (an extra API call per
  * chapter per push) and would still be wrong for a squashed or amended
@@ -34,10 +34,10 @@
  *
  * - The re-projection is an upsert at the file's own frontmatter revision,
  *   which for an Authorbot-authored commit is exactly what the projection
- *   already holds — a no-op.
+ *   already holds - a no-op.
  * - The re-anchor pass skips annotations already decided at that revision
  *   (reanchor.ts), which for an Authorbot-authored commit the post-drain hook
- *   already did — also a no-op.
+ *   already did - also a no-op.
  *
  * So a push produced by Authorbot's own writer flows through this path and
  * changes nothing, while a push produced by a human editing on GitHub does the
@@ -49,7 +49,7 @@
  * An outside editor is under no obligation to bump frontmatter `revision`.
  * Their prose change can move or delete the text an annotation quotes while
  * the revision number stays put, which leaves annotations that *look*
- * correctly anchored and are not — the §10.2 step 6 hazard. So when the
+ * correctly anchored and are not - the §10.2 step 6 hazard. So when the
  * content hash changed, the re-anchor pass runs with `force`, re-deciding
  * every live annotation against the new source regardless of revision.
  */
@@ -78,7 +78,7 @@ import { rebuildProjection, type RebuildResult } from "./projection/rebuild.js";
  * Implementations may return as soon as the request is durably accepted; the
  * caller treats this as fire-and-forget and never blocks the webhook response
  * on a repository read. A rejection is logged-and-swallowed by the caller
- * because the stale flag — already committed — is the durable record of the
+ * because the stale flag - already committed - is the durable record of the
  * owed work.
  */
 export interface ProjectionRefresher {
@@ -115,7 +115,7 @@ export interface ReconcileContext {
 
 /**
  * Mark the projection stale and ask for a refresh. Returns whether the
- * refresher accepted the request; a refusal is not an error — the stale flag
+ * refresher accepted the request; a refusal is not an error - the stale flag
  * carries the work forward.
  */
 export interface StalenessOutcome {
@@ -266,7 +266,7 @@ export async function analyzeSnapshot(
       continue;
     }
 
-    // (3) Ordinary content change — re-project at the file's own revision and
+    // (3) Ordinary content change - re-project at the file's own revision and
     // re-anchor. See the module docs on why this is safe for Authorbot's own
     // commits too.
     externalEdits.push({
@@ -287,7 +287,7 @@ export async function analyzeSnapshot(
  * `survivingBlocks`. Only `open` / `work_item_created` annotations count:
  * a resolved, rejected, withdrawn, or already-`needs_reanchor` annotation has
  * no live claim on a block, so its block disappearing is not a broken
- * invariant — it is history.
+ * invariant - it is history.
  */
 async function strandedAnnotations(
   ctx: ReconcileContext,
@@ -394,7 +394,7 @@ export async function reconcileProjection(
     // can clear, so it must never be declared on evidence the snapshot itself
     // undermines. If the branch head moved while this pass was reading, the
     // classification compared a snapshot from one commit against a projection
-    // some later commit may already have advanced — exactly the shape a
+    // some later commit may already have advanced - exactly the shape a
     // `revision-regressed` false positive takes. Leave the flag stale and let
     // the next pass decide from a consistent read.
     if (await snapshotWentStale(reader, snapshot)) {
@@ -424,7 +424,7 @@ export async function reconcileProjection(
   });
 
   // Re-anchor every chapter whose bytes changed. In recovery mode the
-  // divergent chapters are re-anchored too — that is the point of accepting
+  // divergent chapters are re-anchored too - that is the point of accepting
   // the repository: annotations whose anchors are gone become
   // `needs_reanchor` rather than staying quietly wrong.
   const toReanchor = options.acceptRepository === true
@@ -473,7 +473,7 @@ export async function reconcileProjection(
 
   // Phase 6 §3.6: `book.yml` is projected alongside everything else in this
   // snapshot, from the same tree. A malformed config is recorded and skipped
-  // rather than allowed to abort a pass that has already rebuilt the prose —
+  // rather than allowed to abort a pass that has already rebuilt the prose -
   // a typo in the book's title must not take the book's chapters offline.
   const bookConfig = await projectBookConfig(ctx, project.id, reader, {
     sourceCommit: projectedCommit,
@@ -544,7 +544,7 @@ async function readSource(reader: BookRepoReader, path: string): Promise<string 
 
 /**
  * Did the branch move under this pass? `false` when the reader cannot answer
- * or the snapshot carries no commit — an unknown is never treated as
+ * or the snapshot carries no commit - an unknown is never treated as
  * evidence, in either direction: the caller still refuses to diverge only on
  * a POSITIVE answer.
  */
@@ -684,7 +684,7 @@ export function isDiverged(project: ProjectRecord): boolean {
  * Prose-write guard (design §14.5). Returns a problem response when the
  * project is diverged, else null.
  *
- * Applied to the submission endpoint only — the one route that changes
+ * Applied to the submission endpoint only - the one route that changes
  * chapter prose. Annotations, replies, votes, and lease lifecycle keep working
  * while diverged: they record intent about prose rather than rewriting it, and
  * refusing them would turn a repository problem into a total outage for

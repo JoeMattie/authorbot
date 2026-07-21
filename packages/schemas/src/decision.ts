@@ -12,7 +12,7 @@ export const decisionResultSchema = z.enum(DECISION_RESULTS);
 export type DecisionResult = z.infer<typeof decisionResultSchema>;
 
 /**
- * Decision record `.authorbot/decisions/<id>.yml` — `authorbot.decision/v1`
+ * Decision record `.authorbot/decisions/<id>.yml` - `authorbot.decision/v1`
  * (contract section 4). `effective_at` is required; only `work_item_id` and
  * `override_reason` are optional per the contract wording.
  */

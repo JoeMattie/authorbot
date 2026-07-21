@@ -1,11 +1,11 @@
-# Phase 6 implementation contract — guided onboarding
+# Phase 6 implementation contract - guided onboarding
 
-Additive to Phase 0–5 contracts. (The design document's §23 Phase 6
+Additive to Phase 0-5 contracts. (The design document's §23 Phase 6
 "hardening" becomes **Phase 7**; getting authors through the door precedes
 load-testing a system nobody can start.)
 
 **Goal:** a novelist with a GitHub account and no command-line fluency gets a
-validated book repository, a published reading site, and — if they want it — a
+validated book repository, a published reading site, and - if they want it - a
 working collaboration API, by answering questions in a terminal.
 
 The measure of success is not "a script exists". It is that someone who has
@@ -29,7 +29,7 @@ understands what they now own.
 
 ## 2. Interaction rules
 
-These are requirements, not style preferences — they are what separates a
+These are requirements, not style preferences - they are what separates a
 wizard from a trap.
 
 1. **Nothing destructive without explicit confirmation**, and never a default
@@ -41,8 +41,8 @@ wizard from a trap.
 3. **Secrets are never echoed, logged, or written to the journal.** Prompts
    for secret values use hidden input; values are piped directly to their
    destination. The journal records *that* a secret was set, never its value.
-4. **`--dry-run` prints the full plan** — every command, file, and remote
-   resource — and changes nothing.
+4. **`--dry-run` prints the full plan** - every command, file, and remote
+   resource - and changes nothing.
 5. **`--non-interactive` with a config file** for scripted/CI use; it must
    fail loudly on anything that would otherwise prompt.
 6. **Every externally-created resource is reported at the end**, with how to
@@ -88,7 +88,7 @@ have to generate twice:
 Each stage is independently runnable (`create-authorbot <stage>`) and the
 default flow runs them in order, stopping wherever the user chooses.
 
-### 3.1 `doctor` — prerequisites
+### 3.1 `doctor` - prerequisites
 
 Detect and report, with install guidance and without installing anything
 unasked: Node ≥ 22, pnpm, git, `gh`, `wrangler`, and the auth state of `gh`
@@ -96,9 +96,9 @@ and `wrangler`. Offer to run `gh auth login` / `wrangler login` (which are
 interactive and browser-driven) rather than attempting to script credentials.
 `doctor` also runs standalone against an existing project to diagnose it.
 
-### 3.2 `book` — create the book repository
+### 3.2 `book` - create the book repository
 
-Prompts, kept to the irreducible minimum — everything else is editable later
+Prompts, kept to the irreducible minimum - everything else is editable later
 in the browser (§3.6), so the wizard must not front-load decisions an author
 cannot yet make: **title**, **slug** (derived from the title, editable, and
 explained as "part of your URLs"), and **public or private repository**.
@@ -111,13 +111,13 @@ and does not proceed until it passes. Initialises git and makes the first
 commit.
 
 **No chapters, and no sample content.** The wizard must never ask an author to
-begin by hand-writing frontmatter or block markers — that is the job of the
+begin by hand-writing frontmatter or block markers - that is the job of the
 "New chapter" button (§3.5). A book with zero chapters is a first-class state:
 it validates, builds, and publishes, and the site says so plainly rather than
 rendering a broken index. (Verified: a chapterless book already validates,
 builds, and renders "No chapters published yet.")
 
-`templates/book-repo` is corrected to match: it ships **blank** — empty
+`templates/book-repo` is corrected to match: it ships **blank** - empty
 `nodes: []` outline, empty `events: []` timeline, no chapters, and therefore
 no dangling references. (Today its story files reference its sample chapter,
 so deleting that chapter makes the template invalid.) The rich worked example
@@ -126,40 +126,40 @@ stays at `examples/book-repo`, which is what tests and documentation use.
 Offers to create the GitHub repository via `gh repo create` (asking public or
 private, explaining the consequence for a work-in-progress novel).
 
-### 3.3 `publish` — the reading site
+### 3.3 `publish` - the reading site
 
 Cloudflare only (ADR-0020); there is no host question to ask. Creates or
 reuses the Worker, guides `CLOUDFLARE_API_TOKEN` creation (or reuses an
 authenticated `wrangler`), offers a custom domain or the `workers.dev`
 default, and pins `AUTHORBOT_REF` to the toolchain commit the wizard itself
 ran, explaining why pinning matters. Triggers the first deploy and **waits for
-it, reporting the live URL** — the stage is not complete until the site
+it, reporting the live URL** - the stage is not complete until the site
 actually loads.
 
-### 3.4 `collaborate` — the API (optional)
+### 3.4 `collaborate` - the API (optional)
 
 Only offered after `publish` succeeds. States plainly what it adds and what it
 costs (a Cloudflare account; free tier suffices).
 
 - Creates the D1 database and applies migrations.
-- **GitHub App via the manifest flow** (§4) — one browser click, no secret
+- **GitHub App via the manifest flow** (§4) - one browser click, no secret
   copy-pasting.
 - Generates `SESSION_SECRET` locally with a CSPRNG and sets it without
   displaying it.
 - Deploys the combined same-origin Worker; **verifies health** (`/v1/me`
   returns 401, the OAuth start redirects correctly, the project seeded with
   the user as maintainer) before declaring success.
-- Sets `publication.api_url` and rebuilds **only after** health checks pass —
+- Sets `publication.api_url` and rebuilds **only after** health checks pass -
   never leaving sign-in buttons that lead nowhere.
 
-### 3.5 The "New chapter" button — what setup hands you
+### 3.5 The "New chapter" button - what setup hands you
 
 Setup finishes at a **blank slate the author can sign into and start writing
 in**. That requires one capability the collaboration phases deliberately did
-not cover: authoring from nothing. Phases 2b–4 give a reader ways to *react*
+not cover: authoring from nothing. Phases 2b-4 give a reader ways to *react*
 to existing prose (annotate, vote, claim work). None of that helps an author
 facing an empty book, and routing a book's own author through
-annotation → vote → work item to write chapter one would be absurd — there is
+annotation → vote → work item to write chapter one would be absurd - there is
 nobody to vote.
 
 So: a **direct authoring path for editors and maintainers**, which the design
@@ -168,7 +168,7 @@ currently marked planned in the OpenAPI document).
 
 - **API**: create a chapter (title, optional slug/order, body) and revise an
   existing one, requiring `submissions:write` plus the editor or maintainer
-  role. The server generates the chapter id and block markers — an author
+  role. The server generates the chapter id and block markers - an author
   writes prose, never UUIDs. It assigns `order` (last + 10), defaults
   `status: draft`, validates the result exactly as any other write, and
   commits through the same outbox and coordinator path with attribution.
@@ -182,7 +182,7 @@ currently marked planned in the OpenAPI document).
   and proposed chapters; opening one loads that composer from the authenticated
   source route. Draft prose is never embedded in the public static build.
 - Story documents (outline nodes, character files) get the same treatment
-  where cheap; if effort forces a choice, **chapters come first** — an author
+  where cheap; if effort forces a choice, **chapters come first** - an author
   with no outline can still write, but an author who cannot write is stuck.
 
 This is what makes the wizard's promise true. Without it, setup produces a
@@ -196,7 +196,7 @@ Everything not required to *create* the book is configured afterwards in the
 site itself, signed in with the GitHub account that owns the project.
 
 A **Settings** view, visible only to maintainers, editing the same `book.yml`
-that lives in Git — through the same outbox, coordinator, validation, and
+that lives in Git - through the same outbox, coordinator, validation, and
 attribution path as any other write. Settings changes are commits: diffable,
 revertable, audited. There is no second configuration store.
 
@@ -205,17 +205,17 @@ revertable, audited. There is no second configuration store.
 - Title, language, license (offered with plain-language summaries).
 - Publication display: show revision, show attribution, show public
   annotations.
-- Governance thresholds — the vote rule from Phase 3, in author-facing terms
+- Governance thresholds - the vote rule from Phase 3, in author-facing terms
   ("how many approvals before a suggestion becomes work?"), with each
   requirement explained rather than merely rendered.
 
-**Amendment to Phase 3 §3 — the author's approval is required by default.**
+**Amendment to Phase 3 §3 - the author's approval is required by default.**
 
 Two metrics join the vocabulary:
 
-- `maintainer_approvals` — approvals from any actor holding the maintainer
+- `maintainer_approvals` - approvals from any actor holding the maintainer
   role.
-- `human_maintainer_approvals` — approvals from **human** maintainers only.
+- `human_maintainer_approvals` - approvals from **human** maintainers only.
 
 The default rule gains `human_maintainer_approvals >= 1`, so nothing becomes
 work on the author's book without the author agreeing to it.
@@ -223,7 +223,7 @@ work on the author's book without the author agreeing to it.
 The distinction is load-bearing rather than pedantic. Phase 7 lets an author
 grant maintainer role to their own agent tokens (so a locked book stays
 usable), which means a plain `maintainer_approvals` clause could be satisfied
-by an agent the author owns — reintroducing exactly the manufactured-consensus
+by an agent the author owns - reintroducing exactly the manufactured-consensus
 hole that the human-approval requirement exists to prevent. The default counts
 human maintainers.
 
@@ -236,8 +236,8 @@ creates a work item regardless of the tally (recorded as a decision with
 `rule_version: 0`, subject to the same one-work-item uniqueness). This phase
 surfaces it: a "Promote to work" action on any open suggestion, requiring a
 reason, shown alongside the current tally so the author sees what they are
-overriding. The inverse — rejecting a suggestion that did cross the threshold
-— is the existing reject override and is surfaced the same way.
+overriding. The inverse - rejecting a suggestion that did cross the threshold
+- is the existing reject override and is surfaced the same way.
 
 For a solo author the practical effect is that voting is optional: they
 promote what they want to work on, and the thresholds only start mattering
@@ -245,23 +245,23 @@ when other people arrive.
 
 **Guarded, with the consequence stated before the change is accepted:**
 
-- `slug` and `chapter_url` — changing either breaks existing links to
+- `slug` and `chapter_url` - changing either breaks existing links to
   published chapters. Require explicit confirmation naming what breaks.
 
 **Never editable from the browser:**
 
 - `id` (permanent identity), `repository.default_branch` and
   `content.chapters_glob` (deployment and layout invariants), and
-  `content.raw_html` — enabling raw HTML is a security decision that belongs
+  `content.raw_html` - enabling raw HTML is a security decision that belongs
   in a reviewed commit, not a toggle.
 
 **Amendment to Phase 3 §3.** Governance rules move from the `RULES_JSON`
 environment variable into `book.yml`, so they are versioned, diffable, and
-reviewable alongside the prose they govern — and therefore editable here. The
+reviewable alongside the prose they govern - and therefore editable here. The
 environment variable remains as a bootstrap default for a book that has not
 set them.
 
-### 3.7 `upgrade` — moving to a newer Authorbot (ADR-0021)
+### 3.7 `upgrade` - moving to a newer Authorbot (ADR-0021)
 
 `create-authorbot upgrade`, also exposed as `authorbot upgrade`, implementing
 ADR-0021 §3: resolve the current pin against the target release, run that
@@ -280,7 +280,7 @@ workflow both get it.
 Release tagging (ADR-0021 §1) starts here: this repository publishes semver
 tags, and generated book repositories pin to a tag rather than a raw commit.
 
-### 3.8 `agent` — invite an agent (optional)
+### 3.8 `agent` - invite an agent (optional)
 
 Mints a scoped agent token, printing it exactly once with a plain warning, and
 writes a ready-to-paste prompt for the user's coding agent that includes the
@@ -294,7 +294,7 @@ The wizard must not ask a user to copy a client secret out of a web page.
 1. Start a **loopback HTTP server on 127.0.0.1** with an unpredictable path
    and a random `state`; bind to localhost only.
 2. Open the browser to a page that POSTs a manifest to
-   `https://github.com/settings/apps/new?state=<state>` — name, homepage and
+   `https://github.com/settings/apps/new?state=<state>` - name, homepage and
    callback URLs, webhook URL and `webhook_secret`, requested permissions
    (`contents: write`, `metadata: read`), `push` event subscription, and
    `request_oauth_on_install`.
@@ -314,11 +314,11 @@ the repository, this replaces the separate OAuth App. Requirements:
 
 - The Phase 2 identity provider gains a **GitHub App user-to-server mode**
   alongside the existing OAuth App mode; both are supported and selected by
-  configuration. Existing OAuth App deployments keep working unchanged —
+  configuration. Existing OAuth App deployments keep working unchanged -
   this deployment model is already in production and must not break.
 - User-to-server tokens expire and refresh; the provider must handle that,
   or exchange them for an Authorbot session immediately and not rely on them
-  afterwards (preferred — sessions are already the Phase 2 mechanism).
+  afterwards (preferred - sessions are already the Phase 2 mechanism).
 
 ## 5. Failure handling
 
@@ -354,7 +354,7 @@ the repository, this replaces the separate OAuth App. Requirements:
 - `docs/getting-started.md` is restructured: the wizard becomes the primary
   path; the current manual instructions move to
   `docs/getting-started-manual.md` for people who want to understand or
-  automate each step. Neither may drift — a test asserts the wizard's stage
+  automate each step. Neither may drift - a test asserts the wizard's stage
   list and the manual guide's stage headings agree.
 - README leads with the one-liner.
 
@@ -366,7 +366,7 @@ the repository, this replaces the separate OAuth App. Requirements:
    frontmatter, YAML, or Markdown**.
 2. The end state is a working blank slate: the author signs in with GitHub,
    clicks **New chapter**, writes prose in a plain composer, saves, and the
-   chapter exists as a draft — committed, attributed, and validated — having
+   chapter exists as a draft - committed, attributed, and validated - having
    never seen a UUID or a block marker.
 3. The collaborate stage produces a deployed API that passes its own health
    checks, with the operator never having typed or seen a secret.
@@ -399,4 +399,4 @@ the repository, this replaces the separate OAuth App. Requirements:
 14. A generated book publishes with no clone or compile of this repository:
     author CI installs pinned npm packages and runs the binary. Releases
     publish with provenance.
-15. Workspace green; all Phase 0–5 suites, e2e, and regressions intact.
+15. Workspace green; all Phase 0-5 suites, e2e, and regressions intact.

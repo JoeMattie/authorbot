@@ -1,4 +1,4 @@
-/* Phase 7 — author-facing access control (`<authorbot-access>`).
+/* Phase 7 - author-facing access control (`<authorbot-access>`).
  *
  * Loaded only by /settings/, alongside authorbot-collab.css, whose base tokens
  * (.ab-btn, .ab-input, .ab-field, .ab-field-check, .ab-badge sizing, the
@@ -169,7 +169,7 @@
 }
 
 /* The mode in force is marked by a border and a "Current" badge as well as by
-   the checked radio — never by colour alone. */
+   the checked radio - never by colour alone. */
 .ab-policy-current {
   border-color: var(--link);
   background: var(--surface);

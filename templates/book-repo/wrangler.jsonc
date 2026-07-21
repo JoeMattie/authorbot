@@ -1,5 +1,5 @@
 // Cloudflare Worker configuration for this book (ADR-0020: GitHub for the
-// repository, Cloudflare for hosting — there is no second supported host).
+// repository, Cloudflare for hosting - there is no second supported host).
 //
 // As shipped this is a STATIC SITE ONLY: the Worker serves the files that
 // `authorbot build` writes to _site, and nothing else. That is stage 2 of
@@ -21,7 +21,7 @@
 // stale one quietly replaces your live book with an older version.
 //
 // TURNING ON COLLABORATION (stage 3 of docs/getting-started.md) upgrades this
-// same Worker in place — same name, same origin, same URL. Same-origin is not
+// same Worker in place - same name, same origin, same URL. Same-origin is not
 // a preference but the supported shape (ADR-0019): the API is served from
 // this Worker at /v1/*, so there is no CORS, no cookie relaxation, and no
 // second URL. Requests that match a built asset never invoke the API code, so
@@ -37,8 +37,8 @@
 //   "main": "node_modules/@authorbot/api/dist/worker.js",
 //   "compatibility_flags": ["nodejs_compat"],
 //   // @authorbot/database also re-exports a native SQLite adapter used by
-//   // the toolchain's own tests. The Worker never calls it — it uses the D1
-//   // binding — so it is aliased to a stub that throws, keeping a native
+//   // the toolchain's own tests. The Worker never calls it - it uses the D1
+//   // binding - so it is aliased to a stub that throws, keeping a native
 //   // module out of the bundle.
 //   "alias": {
 //     "better-sqlite3": "./node_modules/@authorbot/api/dist/stubs/better-sqlite3.js"

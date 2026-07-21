@@ -9,7 +9,7 @@ import { visit } from "unist-util-visit";
  *
  * `<!-- authorbot:original:start -->` … `<!-- authorbot:original:end -->`
  * pairs must be balanced, non-nested, and number at most `maxSections`
- * (default 1 — "exactly one balanced pair when the section is present";
+ * (default 1 - "exactly one balanced pair when the section is present";
  * zero pairs means the section is absent, which is valid).
  *
  * The contract defines delimiters as HTML comments, so a delimiter line only

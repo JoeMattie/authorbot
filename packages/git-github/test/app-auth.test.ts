@@ -2,7 +2,7 @@
  * Tests for the GitHub App auth layer (Phase 5 contract §2).
  *
  * The RSA key pair is generated with WebCrypto in `beforeAll` rather than
- * checked in: a committed private key — even a throwaway one — is the kind of
+ * checked in: a committed private key - even a throwaway one - is the kind of
  * fixture that gets copied into a real deployment, and generating it here also
  * proves the PEM round trip (export PKCS#8 → wrap → parse → import → sign →
  * verify against the matching public key) end to end, which a fixture cannot.
@@ -80,7 +80,7 @@ async function makeFake(options: Parameters<typeof createFakeGitHub>[0] = {}): P
 }
 
 describe("credential configuration", () => {
-  it("reports unconfigured when nothing is set — today's live behaviour", () => {
+  it("reports unconfigured when nothing is set - today's live behaviour", () => {
     const result = readGitHubAppCredentialResult({});
     expect(result.status).toBe("unconfigured");
     expect(readGitHubAppCredentials({})).toBeNull();
@@ -225,7 +225,7 @@ describe("installation tokens", () => {
     expect(auth.tokenCacheInfo().fresh).toBe(true);
   });
 
-  it("presents an app JWT — not an installation token — to the token endpoint", async () => {
+  it("presents an app JWT - not an installation token - to the token endpoint", async () => {
     // The fake enforces `requireAppJwt` by default; a non-JWT bearer 401s.
     const fake = await makeFake();
     const auth = new GitHubAppAuth(credentials(), {
@@ -324,7 +324,7 @@ describe("installation tokens", () => {
     );
 
     // A cached *rejected* promise would make every later call reuse a settled
-    // rejection — the same symptom, but unrecoverable and impossible to
+    // rejection - the same symptom, but unrecoverable and impossible to
     // instrument. Both calls must go through the import path afresh.
     await expect(auth.appJwt()).rejects.toMatchObject({ code: "invalid-private-key" });
     await expect(auth.appJwt()).rejects.toMatchObject({ code: "invalid-private-key" });
@@ -395,7 +395,7 @@ describe("authorizedFetch", () => {
     expect(fake.issuedTokenCount()).toBe(2);
   });
 
-  it("retries only once — a persistent 401 is returned, not looped", async () => {
+  it("retries only once - a persistent 401 is returned, not looped", async () => {
     let calls = 0;
     const fake = await makeFake();
     const auth = new GitHubAppAuth(credentials(), {
@@ -446,7 +446,7 @@ describe("authorizedFetch", () => {
       ...({ body: stream, duplex: "half" } as unknown as RequestInit),
     });
 
-    // Replaying a consumed stream would send an empty body — a wrong commit
+    // Replaying a consumed stream would send an empty body - a wrong commit
     // is worse than a surfaced 401.
     expect(response.status).toBe(401);
     expect(calls).toBe(1);
@@ -487,7 +487,7 @@ describe("secret hygiene", () => {
   });
 
   it("never lets a token reach a thrown error", async () => {
-    // The token endpoint echoes the minted token back in an error body — a
+    // The token endpoint echoes the minted token back in an error body - a
     // hostile proxy or a future GitHub change could do this.
     const auth = new GitHubAppAuth(credentials(), {
       now: clock(T0).now,

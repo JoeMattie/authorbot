@@ -16,7 +16,7 @@ describe("the maintenance loop is self-starting (contract §5)", () => {
   /**
    * The defect: the periodic alarm was armed ONLY by `ensureAlarm()` inside
    * the Durable Object's `fetch`, and `fetch` was reached from exactly two
-   * places — `onMutationCommitted` (MIRROR_MODE=durable only) and the verified
+   * places - `onMutationCommitted` (MIRROR_MODE=durable only) and the verified
    * GitHub push webhook. The live deployment runs `queue` with no GitHub App,
    * so the DO was never contacted, no alarm was ever set, and
    * `sweepExpiredLeases` never ran in production despite §5 requiring it. The
@@ -142,7 +142,7 @@ describe('gitIntegration "configured" means usable, not merely present', () => {
    * PKCS#1 key, an App ID pasted into the Installation ID slot, or any other
    * typo reported `configured`. The operator guide uses this value as the
    * pre-flight gate before flipping MIRROR_MODE to durable on a live
-   * deployment — the operator saw green and the failure then surfaced only as
+   * deployment - the operator saw green and the failure then surfaced only as
    * git_operations rows going to conflict inside the DO, where nothing logs
    * the reason.
    */
@@ -161,7 +161,7 @@ describe('gitIntegration "configured" means usable, not merely present', () => {
     ).toBe("configured");
   });
 
-  it("reports invalid for a PKCS#1 key — the single most likely setup mistake", () => {
+  it("reports invalid for a PKCS#1 key - the single most likely setup mistake", () => {
     expect(
       gitIntegrationStatus({
         GITHUB_APP_ID: "1",

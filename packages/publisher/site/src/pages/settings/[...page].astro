@@ -5,7 +5,7 @@
  * `/settings/` route for a collab build and nothing at all otherwise, so an
  * api-url-less build emits no page and stays byte-identically script-free.
  *
- * The page itself is public HTML with nothing sensitive in it — the settings
+ * The page itself is public HTML with nothing sensitive in it - the settings
  * document is fetched at runtime by the island, and the API refuses it to
  * anyone who is not a maintainer. `noindex` because a settings screen has no
  * business in search results.
@@ -32,7 +32,7 @@ const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
 const src = `${site.basePath}_astro/authorbot-collab.js`;
 /**
  * Phase 7's access-control surface ships as its own bundle (see `buildIslands`)
- * and is loaded HERE ONLY — a collaborator table, a token list, an audit view
+ * and is loaded HERE ONLY - a collaborator table, a token list, an audit view
  * and a moderation queue are maintainer-only and have no business in the
  * chapter-page budget every reader pays.
  */

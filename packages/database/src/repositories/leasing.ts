@@ -9,7 +9,7 @@
  *
  * Vocabulary (defined in migration 0004): a lease is ACTIVE while
  * `released_at IS NULL AND revoked_at IS NULL` (it occupies the work item's
- * one slot); it is LIVE — able to renew or back a submission — only while
+ * one slot); it is LIVE - able to renew or back a submission - only while
  * additionally `expires_at > now` at query time. Expiry is lazy: expired ⇔
  * `expires_at <= now`, enforced by every conditional UPDATE here and by the
  * sweep, never by trusting a countdown.
@@ -28,7 +28,7 @@ import type {
 import type { ListPage } from "./content.js";
 
 /**
- * Outcome of a lease claim. `lease_held` is a NORMAL outcome — the caller
+ * Outcome of a lease claim. `lease_held` is a NORMAL outcome - the caller
  * lost the benign race on the partial unique index and receives the lease
  * currently holding the slot (which may already be expired-but-unswept; the
  * claim command is expected to lazily expire it and retry in the same
@@ -97,14 +97,14 @@ export class LeasesRepository {
 
   /**
    * The lease currently occupying the work item's slot, if any. May be
-   * expired-but-unswept — callers deciding liveness must also compare
+   * expired-but-unswept - callers deciding liveness must also compare
    * `expiresAt` against their clock.
    */
   /**
    * Work items in this project that currently hold a live lease.
    *
    * Used by the projection rebuild, which restores work-item status from Git
-   * artifacts — and those artifacts never mention leases, because leases are
+   * artifacts - and those artifacts never mention leases, because leases are
    * operational-only (Phase 4 contract §6). Without this, every rebuild resets
    * a leased item to `ready` while its lease row survives.
    */
@@ -138,7 +138,7 @@ export class LeasesRepository {
    * `max_expires_at`. The new expiry is capped at `max_expires_at` in SQL
    * (design §12.3: extend by the renewal duration, never past the maximum
    * total). A renewal attempted when `expires_at` already equals
-   * `max_expires_at` affects 0 rows — the max-total-exceeded rejection.
+   * `max_expires_at` affects 0 rows - the max-total-exceeded rejection.
    * Renewing an expired/released/revoked lease likewise affects 0 rows.
    */
   renewStatement(id: string, newExpiresAt: string, now: string): SqlStatement {
@@ -165,7 +165,7 @@ export class LeasesRepository {
    * Renew as a NULL-ABORT compare-and-swap, for composing into the renew
    * command's batch. Identical guard to {@link renewStatement}, but instead
    * of quietly affecting 0 rows when the lease is no longer live it writes
-   * NULL into the NOT NULL `token_hash` column, aborting the WHOLE batch —
+   * NULL into the NOT NULL `token_hash` column, aborting the WHOLE batch -
    * the same cross-isolate backstop `work_items` status changes use.
    *
    * This is what keeps a renewal honest: without it a lease released,
@@ -193,7 +193,7 @@ export class LeasesRepository {
   }
 
   /**
-   * End the lease because its holder's submission was accepted — as a
+   * End the lease because its holder's submission was accepted - as a
    * NULL-ABORT compare-and-swap requiring the lease to still be LIVE
    * (`active AND expires_at > now`).
    *
@@ -219,7 +219,7 @@ export class LeasesRepository {
 
   /**
    * Release: conditional UPDATE ending an ACTIVE lease voluntarily (holder
-   * or maintainer, `POST .../lease/release`). Liveness is NOT required — a
+   * or maintainer, `POST .../lease/release`). Liveness is NOT required - a
    * holder may release an already-expired-but-unswept lease; either way the
    * slot frees. 0 rows ⇔ the lease was already ended or does not exist.
    */
@@ -263,7 +263,7 @@ export class LeasesRepository {
 
   /**
    * Expire whatever active lease holds a work item's slot, if it is expired
-   * at `now` — composed into the claim batch so "claim an item whose lease
+   * at `now` - composed into the claim batch so "claim an item whose lease
    * expired" frees the slot and inserts the new lease atomically (design
    * §12.2 step 1). A live lease is left untouched (the subsequent INSERT
    * then loses cleanly).
@@ -288,8 +288,8 @@ export class LeasesRepository {
    * The sweep query (contract §2: `sweepExpiredLeases(db, clock)` in the API
    * layer drives this): active leases whose `expires_at <= now`, oldest
    * expiry first, scanning only the partial index's active slice. The
-   * sweeper then calls `expire(id, now)` per lease — whose conditional
-   * UPDATE makes the sweep race-safe against lazy expiry — and emits
+   * sweeper then calls `expire(id, now)` per lease - whose conditional
+   * UPDATE makes the sweep race-safe against lazy expiry - and emits
    * `lease_expired` / returns the work item to `ready` for each 1-row
    * result.
    */
@@ -298,7 +298,7 @@ export class LeasesRepository {
    * must "release any lease they hold, returning the work item to `ready` so
    * their departure does not strand work for up to four hours").
    *
-   * "Live" here means neither released nor revoked — deliberately NOT filtered
+   * "Live" here means neither released nor revoked - deliberately NOT filtered
    * on expiry. An expired-but-unswept lease still occupies the partial unique
    * index that gates re-claiming, so leaving it behind would strand the work
    * item exactly as the contract says it must not.
@@ -400,7 +400,7 @@ export class SubmissionsRepository {
    * actor").
    *
    * `received` and `applying` are the in-flight states. `applied`,
-   * `conflicted`, and `rejected` are terminal and are left untouched — an
+   * `conflicted`, and `rejected` are terminal and are left untouched - an
    * applied submission is already part of the book's history, and the contract
    * is explicit that revocation must "leave their prior contributions intact".
    */

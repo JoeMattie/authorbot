@@ -60,7 +60,7 @@ export class SecretVault {
     return value;
   }
 
-  /** Names of secrets that have been set — the only thing the journal records. */
+  /** Names of secrets that have been set - the only thing the journal records. */
   names(): string[] {
     return [...this.#names].sort();
   }
@@ -108,7 +108,7 @@ export class SecretVault {
  * missed: `CLOUDFLARE_API_TOKEN` is read straight out of the environment, and
  * `NodeProcessRunner` spreads the whole environment into every child process.
  * A failing `wrangler deploy` that mentions its own token in the last ten lines
- * of stderr has those lines quoted into a `WizardError` and printed — verbatim,
+ * of stderr has those lines quoted into a `WizardError` and printed - verbatim,
  * because the vault was never told the value was a secret.
  *
  * The vault's guarantee only ever covered secrets it was told about, so the

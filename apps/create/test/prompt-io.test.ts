@@ -86,7 +86,7 @@ describe("TtyPrompter", () => {
 
   it("shows a confirm's hint, which carries the reason for the answer", async () => {
     // Moving to clack silently dropped this: `confirm` has no hint slot, so
-    // every explanatory line went with it — including the one telling an
+    // every explanatory line went with it - including the one telling an
     // author that a maintainer bearer token is something they do not have and
     // that "no" is the expected answer. The question survived; the part that
     // made it answerable did not.

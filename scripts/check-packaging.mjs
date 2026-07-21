@@ -52,7 +52,7 @@ function packFiles(dir) {
     maxBuffer: 32 * 1024 * 1024,
   });
   // `prepack` output (licence copy, migration staging) shares this stream, and
-  // npm's own notices can trail the payload — slicing from the first `[` to the
+  // npm's own notices can trail the payload - slicing from the first `[` to the
   // end of the stream therefore breaks whenever anything is printed AFTER the
   // JSON, which is exactly what a newer npm did in CI while this machine's npm
   // did not. Extract the first balanced array instead of assuming it is last.
@@ -66,7 +66,7 @@ for (const dir of PUBLISHABLE) {
   const pkg = JSON.parse(await readFile(join(ROOT, dir, "package.json"), "utf8"));
   const fail = (msg) => failures.push(`${pkg.name}: ${msg}`);
 
-  if (pkg.private) fail("marked private — it would never publish");
+  if (pkg.private) fail("marked private - it would never publish");
   if (pkg.publishConfig?.access !== "public") {
     fail("publishConfig.access must be \"public\" (scoped packages default to restricted)");
   }
@@ -93,14 +93,14 @@ for (const dir of PUBLISHABLE) {
     // A shape change in `npm pack --json` should say so, not surface as
     // "Cannot read properties of undefined" three frames deep.
     throw new Error(
-      `npm pack --json returned no file list for ${dir} — the output shape has ` +
+      `npm pack --json returned no file list for ${dir} - the output shape has ` +
         `probably changed. Check the pinned npm version in .github/workflows/release.yml. ` +
         `Received keys: ${Object.keys(packed ?? {}).join(", ") || "(none)"}`,
     );
   }
   const names = packed.files.map((f) => f.path);
 
-  if (!names.some((n) => n.startsWith("dist/"))) fail("tarball contains no dist/ — did `build` run?");
+  if (!names.some((n) => n.startsWith("dist/"))) fail("tarball contains no dist/ - did `build` run?");
   if (!names.includes("LICENSE")) fail("tarball contains no LICENSE");
   if (!names.includes("package.json")) fail("tarball contains no package.json");
 

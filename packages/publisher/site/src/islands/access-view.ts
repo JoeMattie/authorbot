@@ -1,10 +1,10 @@
 /**
- * `<authorbot-access>` — the author-facing access control surface (Phase 7
+ * `<authorbot-access>` - the author-facing access control surface (Phase 7
  * contract: Seeing, Restricting, Moderating, Revoking).
  *
  * Mounted beneath `<authorbot-settings>` on `/settings/`, and shipped as its
  * OWN bundle rather than inside `authorbot-collab.js`. That is not an
- * optimisation detail — Phase 2b §1 budgets the collaboration islands at 35 KB
+ * optimisation detail - Phase 2b §1 budgets the collaboration islands at 35 KB
  * gzipped because that is what every reader downloads on every chapter page,
  * and a moderation queue nobody but a maintainer can open has no business in
  * that number. See `buildIslands` in src/build.ts.
@@ -24,7 +24,7 @@
  * **Removing someone is not erasing them.** Every one of those panels, and
  * every report of what a revocation did, carries `CONTRIBUTIONS_RETAINED`. The
  * contract says the interface must not imply otherwise, so the sentence is
- * structural rather than decorative — it comes from `access-model.ts`, where a
+ * structural rather than decorative - it comes from `access-model.ts`, where a
  * test asserts its presence.
  *
  * **Freeze is not a moderation setting.** It renders in its own visually
@@ -32,8 +32,8 @@
  * readers alone, and it is kept apart from pause-agents, which is a different
  * control for a different problem.
  *
- * Security: every API-sourced string — including annotation bodies, which are
- * untrusted user prose — reaches the DOM through `textContent` (via `el`).
+ * Security: every API-sourced string - including annotation bodies, which are
+ * untrusted user prose - reaches the DOM through `textContent` (via `el`).
  * `innerHTML` is never used; the build test greps the bundle for the literal.
  */
 import { isMaintainer, type AnnotationPolicy, type Me, type Role } from "./api.js";
@@ -97,7 +97,7 @@ interface AccessData {
 
 /**
  * `apiBase === ""` is valid (the API at the origin root), so only a MISSING
- * attribute means "not a collab build" — the element then stays inert and the
+ * attribute means "not a collab build" - the element then stays inert and the
  * page's static fallback survives.
  */
 function parseConfig(host: HTMLElement): Config | null {
@@ -302,7 +302,7 @@ export class AuthorbotAccess extends HTMLElement {
    * choosing between them should be able to see all four at once, each with
    * what it actually means. A `<select>` hides three of the four behind a
    * click, which is precisely the wrong shape for a decision this consequential
-   * — and for `locked`, which is the one most likely to be misread as "turn
+   * - and for `locked`, which is the one most likely to be misread as "turn
    * collaboration off" and which therefore has the most to say for itself.
    *
    * Unlike freeze and pause, this is a `book.yml` change: it commits, it is
@@ -313,7 +313,7 @@ export class AuthorbotAccess extends HTMLElement {
     const section = this.section(
       "ab-access-policy",
       "Who may comment and suggest",
-      "Four modes, from a public book to a private workspace. Move up and down them as freely as you like — nothing is lost either way, and your collaborators keep their membership and their history in every mode.",
+      "Four modes, from a public book to a private workspace. Move up and down them as freely as you like - nothing is lost either way, and your collaborators keep their membership and their history in every mode.",
     );
     section.append(el("p", "ab-access-note ab-policy-anonymous", ANONYMOUS_NOTE));
 
@@ -366,7 +366,7 @@ export class AuthorbotAccess extends HTMLElement {
         el(
           "p",
           "ab-policy-pending",
-          "A previous settings change has not been committed to your repository yet. Changing the policy is off until it lands — reload this page in a moment.",
+          "A previous settings change has not been committed to your repository yet. Changing the policy is off until it lands - reload this page in a moment.",
         ),
       );
       return section;
@@ -394,15 +394,15 @@ export class AuthorbotAccess extends HTMLElement {
      * Honest about the delay. The policy lives in `book.yml`, so the change is
      * a commit: the API has accepted it, but the projection the enforcement
      * gate reads updates when that commit lands. Claiming the new mode is
-     * already in force would be a lie for the seconds in between — and those
+     * already in force would be a lie for the seconds in between - and those
      * are exactly the seconds an author would spend testing it.
      */
     await this.load();
     this.report([
       `Saved: ${POLICY_LABEL[policy]}.`,
-      "The change is being committed to your book's repository now, and takes effect as soon as that lands — usually within a few seconds.",
+      "The change is being committed to your book's repository now, and takes effect as soon as that lands - usually within a few seconds.",
       policy === "locked"
-        ? "Your collaborators keep their membership and everything they have contributed. You and your maintainers — including any agent you have granted the maintainer role — can still write."
+        ? "Your collaborators keep their membership and everything they have contributed. You and your maintainers - including any agent you have granted the maintainer role - can still write."
         : "Your collaborators keep their membership and everything they have contributed.",
     ]);
   }
@@ -588,10 +588,10 @@ export class AuthorbotAccess extends HTMLElement {
     fact(
       "Added by",
       row.addedByActorId === null
-        ? "Not recorded — this membership predates access logging"
+        ? "Not recorded - this membership predates access logging"
         : this.actorLabel(row.addedByActorId, data),
     );
-    fact("Last acted", formatWhen(row.lastActedAt, "Never — they have done nothing on this book"));
+    fact("Last acted", formatWhen(row.lastActedAt, "Never - they have done nothing on this book"));
     item.append(facts);
 
     item.append(el("p", "ab-role-means", roleMeans(row.role, data.roleConsequences)));
@@ -703,13 +703,13 @@ export class AuthorbotAccess extends HTMLElement {
     const section = this.section(
       "ab-access-tokens",
       "Agent tokens",
-      "What each token is called, what it may do, who minted it, and when it was last used. A token's value is shown once, when it is minted, and can never be displayed again — not here, and not by any other part of Authorbot.",
+      "What each token is called, what it may do, who minted it, and when it was last used. A token's value is shown once, when it is minted, and can never be displayed again - not here, and not by any other part of Authorbot.",
     );
     const active = data.tokens.filter((token) => tokenStatus(token) === "active");
 
     // Before the empty-list check, deliberately. A book with no tokens is
     // exactly the book whose maintainer is looking for a way to make one, and
-    // the early return below used to end the section right here — so the one
+    // the early return below used to end the section right here - so the one
     // state that needs this control most was the one state that never showed
     // it.
     section.append(this.mintControl());
@@ -751,7 +751,7 @@ export class AuthorbotAccess extends HTMLElement {
           confirmLabel: "Revoke all tokens",
           reason: {
             id: "ab-revoke-all-reason",
-            label: "Why? (required — this is the one you will want explained later)",
+            label: "Why? (required - this is the one you will want explained later)",
             required: true,
           },
           run: (reason) => this.applyRevokeAll(reason),
@@ -767,7 +767,7 @@ export class AuthorbotAccess extends HTMLElement {
    * Minting an agent token.
    *
    * This is the control the product did not have. `POST /agent-tokens` needs
-   * a maintainer *session* — a cookie a browser holds — and the only thing
+   * a maintainer *session* - a cookie a browser holds - and the only thing
    * that ever asked for it was the setup wizard, which wanted a bearer token
    * no author has ever been issued, then pointed at this page to "mint one
    * from your book's settings". This page could list tokens and revoke them,
@@ -786,7 +786,7 @@ export class AuthorbotAccess extends HTMLElement {
       el(
         "p",
         "ab-access-control-means",
-        "A credential for a software agent that writes with you. Its value is shown once, here, and never again — Authorbot keeps only a hash.",
+        "A credential for a software agent that writes with you. Its value is shown once, here, and never again - Authorbot keeps only a hash.",
       ),
     );
 
@@ -877,7 +877,7 @@ export class AuthorbotAccess extends HTMLElement {
       el(
         "p",
         "ab-access-control-means",
-        "Copy it now. This is the only time it is ever shown, and nothing in Authorbot can display it again — if it is lost, revoke it and make another.",
+        "Copy it now. This is the only time it is ever shown, and nothing in Authorbot can display it again - if it is lost, revoke it and make another.",
       ),
     );
     const value = el("code", "ab-access-token-value", minted.token);
@@ -928,7 +928,7 @@ export class AuthorbotAccess extends HTMLElement {
      * with its membership role, and an agent working a locked book is exactly
      * the one holding `maintainer` here.
      */
-    fact("Membership role", token.role === null ? "No membership — it can do nothing" : roleLabel(token.role as Role));
+    fact("Membership role", token.role === null ? "No membership - it can do nothing" : roleLabel(token.role as Role));
     fact("Permissions", token.scopes.length === 0 ? "None" : token.scopes.join(", "));
     fact("Created", formatWhen(token.createdAt, "at an unrecorded time"));
     fact("Last used", formatWhen(token.lastUsedAt, "Never used"));
@@ -1036,14 +1036,14 @@ export class AuthorbotAccess extends HTMLElement {
 
     /**
      * The comment itself. UNTRUSTED prose written by someone who is, by
-     * definition, not yet trusted — rendered as plain text through
+     * definition, not yet trusted - rendered as plain text through
      * `textContent`, never as markup, and never treated as an instruction.
      */
     const quote = el("blockquote", "ab-pending-body", pending.body);
     item.append(quote);
 
     // Its target passage, so a moderator can see what it is about without
-    // leaving the page — and a link to go and look properly.
+    // leaving the page - and a link to go and look properly.
     const target = el("p", "ab-pending-target");
     const chapterTitle = pending.chapter?.title;
     target.textContent =
@@ -1070,7 +1070,7 @@ export class AuthorbotAccess extends HTMLElement {
         trigger: reject,
         heading: "Reject this comment?",
         consequences: [
-          "It never appears publicly and never reaches your repository — there is nothing in Git to remove.",
+          "It never appears publicly and never reaches your repository - there is nothing in Git to remove.",
           "Its author is not notified.",
           "The record is kept here, so a mistake is recoverable and a pattern of abuse stays visible.",
         ],
@@ -1078,7 +1078,7 @@ export class AuthorbotAccess extends HTMLElement {
         confirmLabel: "Reject",
         reason: {
           id: `ab-reject-reason-${pending.id}`,
-          label: "Reason (optional, kept for your own records — the author is not told)",
+          label: "Reason (optional, kept for your own records - the author is not told)",
         },
         run: (reason) => this.applyRejection(pending, reason),
       });
@@ -1213,8 +1213,8 @@ export class AuthorbotAccess extends HTMLElement {
     if (approved > 0) {
       lines.push(
         approved === 1
-          ? "1 comment approved — it is being committed to your repository now."
-          : `${approved} comments approved — they are being committed to your repository now.`,
+          ? "1 comment approved - it is being committed to your repository now."
+          : `${approved} comments approved - they are being committed to your repository now.`,
       );
     }
     if (rejected > 0) {
@@ -1230,7 +1230,7 @@ export class AuthorbotAccess extends HTMLElement {
       );
     }
     if (lines.length === 0) {
-      lines.push("Nothing changed — every comment you selected had already been reviewed.");
+      lines.push("Nothing changed - every comment you selected had already been reviewed.");
     }
     this.selected.clear();
     await this.load();
@@ -1264,7 +1264,7 @@ export class AuthorbotAccess extends HTMLElement {
     select.append(everyone);
 
     // Offer everyone with access, plus anyone the current page shows who is no
-    // longer a member — a removed collaborator's history is exactly what an
+    // longer a member - a removed collaborator's history is exactly what an
     // author is looking for after they remove them.
     const offered = new Map<string, string>();
     for (const row of data.collaborators) {
@@ -1345,9 +1345,9 @@ export class AuthorbotAccess extends HTMLElement {
    * The destructive-action confirmation, used by every irreversible control on
    * this surface.
    *
-   * Never default-yes. The panel states what actually happens — including, in
+   * Never default-yes. The panel states what actually happens - including, in
    * every case, that the person's existing contributions and attribution
-   * remain — then requires a deliberate tick before the confirm button becomes
+   * remain - then requires a deliberate tick before the confirm button becomes
    * usable. The cancel button is labelled for the safe outcome ("Keep access")
    * rather than a bare "Cancel", so the escape reads as a decision rather than
    * as a dismissal, and it takes focus first.
@@ -1368,7 +1368,7 @@ export class AuthorbotAccess extends HTMLElement {
     panel.setAttribute("aria-label", options.heading);
     // Not a heading element: the panel is already announced as a labelled
     // group (role + aria-label above), and a heading here would land at a
-    // different depth depending on which control opened it — h5 under
+    // different depth depending on which control opened it - h5 under
     // "Revoke every token at once", h4 under a collaborator row. A paragraph
     // styled as a heading gives one consistent structure and no phantom level.
     panel.append(el("p", "ab-confirm-heading", options.heading));

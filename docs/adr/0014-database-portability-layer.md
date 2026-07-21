@@ -1,4 +1,4 @@
-# ADR 0014: Database portability layer — `SqlDatabase` with D1 and better-sqlite3 adapters
+# ADR 0014: Database portability layer - `SqlDatabase` with D1 and better-sqlite3 adapters
 
 ## Status
 
@@ -16,8 +16,8 @@ API is Workers-only, while ORMs would add a heavy dependency for what design
 ## Decision
 
 - Repositories in `packages/database` are written against a minimal
-  `SqlDatabase` interface — prepared statements plus `batch` for
-  transactional multi-statement writes — and nothing else
+  `SqlDatabase` interface - prepared statements plus `batch` for
+  transactional multi-statement writes - and nothing else
   (phase2-contract §2).
 - Two adapters implement it: **D1** (production, Workers runtime) and
   **better-sqlite3** (tests and local Node). Both execute the identical
@@ -38,7 +38,7 @@ API is Workers-only, while ORMs would add a heavy dependency for what design
 ## Consequences
 
 - The Phase 2 exit test (dev-login → suggestion → rebuild) runs entirely in
-  Node with better-sqlite3 and a temp Git work tree — no Workers runtime in
+  Node with better-sqlite3 and a temp Git work tree - no Workers runtime in
   the inner loop (phase2-contract §7.1).
 - Repository code is restricted to SQL both engines execute; features D1
   lacks (interactive transactions, savepoints) are off-limits even though

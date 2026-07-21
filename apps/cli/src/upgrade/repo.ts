@@ -11,7 +11,7 @@ import type { UpgradeFs } from "./ports.js";
 
 export const CLI_PACKAGE = "@authorbot/cli";
 
-/** A problem with the repository itself — always CLI exit code 2. */
+/** A problem with the repository itself - always CLI exit code 2. */
 export class UpgradeRepoError extends Error {
   constructor(message: string) {
     super(message);
@@ -95,7 +95,7 @@ export function rewritePin(packageJsonText: string, newSpec: string): string {
  * Strip `//` and block comments from JSONC, preserving string contents.
  *
  * wrangler.jsonc is documentation as much as configuration in a generated
- * book repository — the template's comments outnumber its settings — so a
+ * book repository - the template's comments outnumber its settings - so a
  * naive strip would corrupt any URL inside a string.
  */
 export function stripJsonComments(input: string): string {

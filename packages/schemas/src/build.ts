@@ -21,7 +21,7 @@ export const buildManifestChapterSchema = z.strictObject({
 export type BuildManifestChapter = z.infer<typeof buildManifestChapterSchema>;
 
 /**
- * Build manifest `authorbot-build.json` — `authorbot.build/v1` (Phase 1
+ * Build manifest `authorbot-build.json` - `authorbot.build/v1` (Phase 1
  * contract section 3). `commit` is null when the build ran outside a git
  * work tree; `chapters` lists every chapter included in the build.
  */

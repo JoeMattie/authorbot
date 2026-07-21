@@ -2,7 +2,7 @@
  * Phase 5 contract §6 + §7, design §17.3: the signed CI publication callback
  * and the integrated-versus-deployed view.
  *
- * The property under test is not "we can store a row" — it is that the API
+ * The property under test is not "we can store a row" - it is that the API
  * never *invents* publication state. Several tests below deliberately commit
  * and project work, then assert that nothing about deployment changed, because
  * the whole point of §17.3 is that a successful Git commit is not a deployment.
@@ -110,8 +110,8 @@ describe("POST /v1/publications (contract §6)", () => {
   });
 
   /**
-   * Regression: the HMAC used to cover the raw body ALONE. The delivery id —
-   * the sole replay-suppression key — travelled in an unsigned header, and
+   * Regression: the HMAC used to cover the raw body ALONE. The delivery id -
+   * the sole replay-suppression key - travelled in an unsigned header, and
    * nothing bound the request to a point in time. Anyone holding one validly
    * signed (body, signature) pair could resubmit it forever under fresh
    * delivery ids: the UNIQUE index never fires, and every replay reaches the

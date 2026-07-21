@@ -13,7 +13,7 @@ throughout Authorbot's documentation and generated CI workflows resolves to the
 toolchain those instructions were written for.
 
 Installing either package gives you the same `authorbot` command. If you are
-adding a dependency to a book repository, prefer `@authorbot/cli` — that is
+adding a dependency to a book repository, prefer `@authorbot/cli` - that is
 what the generated `package.json` pins.
 
 - [Source and issues](https://github.com/JoeMattie/authorbot)

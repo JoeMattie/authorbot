@@ -6,7 +6,7 @@
  *
  * There is no allow-list any more. The API is served from the same origin as
  * the site it collaborates with, so "allowed" means exactly one thing: the
- * API's own origin. CORS is gone entirely — see `ADR-0019` §1.
+ * API's own origin. CORS is gone entirely - see `ADR-0019` §1.
  */
 
 /** The origin of a Referer URL, or null when absent/unparseable. */
@@ -23,9 +23,9 @@ export function refererOrigin(referer: string | undefined): string | null {
 }
 
 /**
- * CSRF check (ADR-0019 §3 — the check STAYS after CORS is removed; same-origin
- * is not the same as no CSRF risk): the request's `Origin` header — or, when
- * absent, the `Referer`'s origin — must exactly match the API's own origin.
+ * CSRF check (ADR-0019 §3 - the check STAYS after CORS is removed; same-origin
+ * is not the same as no CSRF risk): the request's `Origin` header - or, when
+ * absent, the `Referer`'s origin - must exactly match the API's own origin.
  * Missing both headers fails closed (a browser always sends Origin on
  * cross-origin credentialed mutations; non-browser cookie clients must present
  * one explicitly).
@@ -35,7 +35,7 @@ export function csrfOriginAllowed(
   refererHeader: string | undefined,
   apiOrigin: string,
 ): boolean {
-  // When Origin is present it is authoritative — never fall back to Referer
+  // When Origin is present it is authoritative - never fall back to Referer
   // (an attacker-controlled page cannot forge Origin, but sends its own).
   const presented = originHeader ?? refererOrigin(refererHeader);
   if (presented === null || presented === undefined || presented === "null") {
@@ -46,7 +46,7 @@ export function csrfOriginAllowed(
 
 /**
  * Validate an OAuth `return_to` (ADR-0019 §4): an absolute http(s) URL within
- * the API's own origin — checked by BOTH the parser's view (`URL.origin`) and
+ * the API's own origin - checked by BOTH the parser's view (`URL.origin`) and
  * a literal exact-origin-prefix match on the raw string. The double check
  * defeats parser-normalization smuggling (backslashes, `user@host`, case
  * tricks) and `javascript:`/`data:` schemes alike.

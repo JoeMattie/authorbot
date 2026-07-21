@@ -106,7 +106,7 @@ describe("deriveSlug", () => {
     const titles = [
       "A",
       "9 Lives",
-      "The — Em Dash",
+      "The - Em Dash",
       "Ünïcödé Tïtlé",
       "tabs\tand\nnewlines",
       "a".repeat(300),
@@ -375,7 +375,7 @@ describe("the GitHub App name", () => {
   // GitHub caps this at 34 characters and slugifies it into the app's public
   // handle, which cannot be changed from the wizard and shows on every
   // authorization screen. `${title} (${slug})` produced
-  // `the-causal-causal-projector` — the same words twice, one truncated.
+  // `the-causal-causal-projector` - the same words twice, one truncated.
   it("is authorbot- plus the slug, and nothing else", () => {
     expect(gitHubAppName("The Causal Projector", "causal-projector")).toBe(
       "authorbot-causal-projector",
@@ -427,7 +427,7 @@ describe("destructive stages are never walked", () => {
 describe("the logo", () => {
   // Hand-padded ASCII art drifts. The first draft had the robot's panel
   // overhanging its own border by two columns, which is only visible to
-  // someone looking at it in a terminal — so the widths are asserted instead.
+  // someone looking at it in a terminal - so the widths are asserted instead.
   it("draws every row of the mark to the same width", () => {
     const lines = logoLines({ colour: false, unicode: true, width: 80 });
     const mark = lines.slice(1, 4).map((line) => [...line].length);

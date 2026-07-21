@@ -195,7 +195,7 @@ main.ab-enabled {
   cursor: pointer;
 }
 
-/* Touch targets ≥ 44px (contract §4) — every interactive control, not just
+/* Touch targets ≥ 44px (contract §4) - every interactive control, not just
    the block affordances: card/composer buttons, small reply buttons, form
    fields, and the kind radio rows. */
 @media (pointer: coarse) {
@@ -775,7 +775,7 @@ main.ab-enabled {
   }
 }
 
-/* ==== Phase 6 §3.5 — chapter composer ====================================== */
+/* ==== Phase 6 §3.5 - chapter composer ====================================== */
 /* The composer is a full-width authoring surface, not gutter chrome: it sits
    under the reading column and never changes that column's measure. */
 .ab-chapter-composer {
@@ -824,7 +824,7 @@ main.ab-enabled {
   margin-top: 0.7rem;
 }
 
-/* Publishing is a separate, secondary action — never the primary button, so
+/* Publishing is a separate, secondary action - never the primary button, so
    it cannot be hit by reflex while saving. */
 .ab-chapter-publish-actions {
   padding-top: 0.7rem;
@@ -931,7 +931,7 @@ main.ab-enabled {
   }
 }
 
-/* ==== Phase 6 §3.6 — book settings ======================================== */
+/* ==== Phase 6 §3.6 - book settings ======================================== */
 .ab-settings-body {
   display: block;
 }
@@ -1219,7 +1219,7 @@ main.ab-enabled {
   }
 }
 
-/* ==== Phase 6 §3.6 — maintainer overrides (promote / reject) ============== */
+/* ==== Phase 6 §3.6 - maintainer overrides (promote / reject) ============== */
 /* The override panel is deliberately set apart from the vote control above it:
    this is the surface that bypasses the project's rule, not another way to
    participate in it. */
@@ -1318,7 +1318,7 @@ main.ab-enabled {
   text-decoration: underline;
 }
 
-/* A button, because signing out is a state change and not a destination —
+/* A button, because signing out is a state change and not a destination -
    styled to sit beside the links rather than shout over them. */
 .ab-account-signout {
   background: none;

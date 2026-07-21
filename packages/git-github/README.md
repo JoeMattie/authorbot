@@ -2,7 +2,7 @@
 
 GitHub integration for Authorbot (Phase 5 contract). **Worker-compatible
 only**: WebCrypto instead of `node:crypto`, `fetch` instead of `node:http`.
-Nothing under `src/` may import a `node:` module — `test/worker-compat.test.ts`
+Nothing under `src/` may import a `node:` module - `test/worker-compat.test.ts`
 enforces it, including for `src/testing/`.
 
 Two entry points:
@@ -19,8 +19,8 @@ response, error message or artifact (design §19.5, §20.6).
 ## This step: the fake GitHub API
 
 `src/testing/` is the fake the reader and writer are built against. It is an
-in-process object with a `fetch`-shaped handler — no ports, no server, no
-filesystem, no timers — so it runs unchanged in a Worker and needs no network
+in-process object with a `fetch`-shaped handler - no ports, no server, no
+filesystem, no timers - so it runs unchanged in a Worker and needs no network
 in the default suite.
 
 ### Real git object hashing
@@ -106,24 +106,24 @@ Fidelity details that exist to catch client bugs:
 
 The fake never reads the filesystem. The caller assembles the content:
 
-- `seedFiles(map, opts)` / `createFakeGitHub({ files })` — a
+- `seedFiles(map, opts)` / `createFakeGitHub({ files })` - a
   `path -> string | Uint8Array` map. Use this for `examples/book-repo`: read
   the directory in your test, pass the map in.
-- `seedDirectory(tree, opts)` / `createFakeGitHub({ directory })` — a nested
+- `seedDirectory(tree, opts)` / `createFakeGitHub({ directory })` - a nested
   plain object, e.g. `{ chapters: { "001.md": "…" } }`.
-- `externalCommit(files, opts)` — an out-of-band push, as an external actor
+- `externalCommit(files, opts)` - an out-of-band push, as an external actor
   would make. Reconciliation tests use this directly.
 
 ### Fault injection
 
 Every fault is an explicit, typed, named option with a firing budget
-(`times`, default 1) — no magic branch names or sentinel paths. After the
+(`times`, default 1) - no magic branch names or sentinel paths. After the
 budget is spent the fake behaves correctly again, which is what makes bounded
 retry testable: the assertion is that the *next* attempt succeeds.
 
 | Fault | Effect |
 | --- | --- |
-| `movedHead` | After a successful `GET .../git/ref/heads/{branch}`, commits `files` onto that branch out of band. The client's subsequent non-force `PATCH` is a genuine non-fast-forward — a real race, not a synthesized status. |
+| `movedHead` | After a successful `GET .../git/ref/heads/{branch}`, commits `files` onto that branch out of band. The client's subsequent non-force `PATCH` is a genuine non-fast-forward - a real race, not a synthesized status. |
 | `truncatedTree` | `GET /git/trees` answers `truncated: true` with a clipped entry list (`keepEntries`). |
 | `unauthorized` | Repository requests answer `401 Bad credentials` even with a valid token, forcing a token refresh. Fires before token validation. |
 | `nonFastForward` | `PATCH /git/refs/heads/{branch}` answers `422 Update is not a fast forward` regardless of real ancestry. Optionally scoped with `branch`. Use it to drive the retry bound to exhaustion. |
@@ -145,10 +145,10 @@ because the fault's code path was never reached.
 
 ### Observation helpers
 
-- `fake.state` — the raw `FakeRepoState` for direct assertions
+- `fake.state` - the raw `FakeRepoState` for direct assertions
   (`getRef`, `getCommit`, `listTree`, `readFile`, `readFiles`, `history`).
-- `fake.fileAtHead(path, branch?)` — file text at the branch head, or `null`.
-- `fake.requests` — every request in arrival order (`sequence`, `method`,
+- `fake.fileAtHead(path, branch?)` - file text at the branch head, or `null`.
+- `fake.requests` - every request in arrival order (`sequence`, `method`,
   `pathname`, `search`, `at`), for call-count and concurrency assertions.
 - `fake.countRequests(method, pathnamePredicate)`.
 - `fake.issuedTokenCount()`, `fake.revokeAllTokens()`.

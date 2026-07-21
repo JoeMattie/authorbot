@@ -5,7 +5,7 @@ import type { FeedEvent } from "../site/src/islands/api.js";
 /**
  * Live event-feed client (Phase 3 contract §5): SSE with a poll fallback and
  * reconnect-refetch. Driven with a fake `EventSource`, a fake poll transport,
- * and an injected timer harness — no real network, no real clock.
+ * and an injected timer harness - no real network, no real clock.
  */
 
 class FakeEventSource implements EventSourceLike {
@@ -71,7 +71,7 @@ function factory() {
   return (url: string): FakeEventSource => new FakeEventSource(url);
 }
 
-describe("CollabEvents — SSE transport", () => {
+describe("CollabEvents - SSE transport", () => {
   it("delivers named stream events and tracks the cursor", () => {
     const received: FeedEvent[] = [];
     const t = timers();
@@ -163,7 +163,7 @@ describe("CollabEvents — SSE transport", () => {
   });
 });
 
-describe("CollabEvents — poll transport", () => {
+describe("CollabEvents - poll transport", () => {
   it("uses poll directly when no EventSource is available, advancing the cursor", async () => {
     const received: FeedEvent[] = [];
     const seen: number[] = [];

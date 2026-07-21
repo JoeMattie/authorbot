@@ -6,9 +6,9 @@ import { defineConfig } from "@playwright/test";
  * creates a temp git book repo from examples/book-repo, starts the Phase 2
  * Node dev API against it (dev auth, temp SQLite, LocalGitAdapter mirror),
  * builds the site with `--api-url /` + the dev-login flag, and serves it
- * statically from a server that also reverse-proxies `/v1/*` to the API — so
+ * statically from a server that also reverse-proxies `/v1/*` to the API - so
  * the whole run is same-origin, the only shape Authorbot supports (ADR-0019). Kept OUT of the default vitest
- * run — invoke with `pnpm --filter @authorbot/publisher test:e2e`.
+ * run - invoke with `pnpm --filter @authorbot/publisher test:e2e`.
  */
 export default defineConfig({
   testDir: "./test/e2e-ui",

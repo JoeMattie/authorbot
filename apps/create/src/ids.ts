@@ -4,7 +4,7 @@
  *
  * `crypto.randomUUID()` is deliberately not used: it produces a v4, whose
  * version nibble is 4 and which `authorbot validate` rejects. The layout
- * below is RFC 9562 §5.7 — 48 bits of Unix milliseconds, then the version
+ * below is RFC 9562 §5.7 - 48 bits of Unix milliseconds, then the version
  * nibble, then 74 bits of randomness split by the variant bits.
  *
  *   0                   1                   2                   3
@@ -56,7 +56,7 @@ export function uuidv7(clock: Clock, random: RandomSource): string {
 
 /**
  * URL-safe random token used for the manifest flow's unpredictable callback
- * path and its `state` (contract §4.1). Base64url of CSPRNG bytes — never a
+ * path and its `state` (contract §4.1). Base64url of CSPRNG bytes - never a
  * timestamp, counter, or `Math.random()`.
  */
 export function randomToken(random: RandomSource, byteLength = 32): string {

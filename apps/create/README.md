@@ -1,7 +1,7 @@
 # @authorbot/create
 
 Guided setup for an [Authorbot](https://github.com/JoeMattie/authorbot) book
-project — a Git-backed editorial control plane and collaboration protocol for
+project - a Git-backed editorial control plane and collaboration protocol for
 serial books.
 
 ```sh
@@ -9,7 +9,7 @@ npx @authorbot/create
 ```
 
 Answer three questions and you get a book repository that validates, a live
-reading site, and — if you want it — a collaboration API where you write
+reading site, and - if you want it - a collaboration API where you write
 chapters in your browser.
 
 > Authorbot manages authorship. It does not perform authorship.
@@ -22,7 +22,7 @@ after any of them:
 | Stage | What you get |
 |---|---|
 | `doctor` | checks Node, git, `gh`, `wrangler` and offers to log you in |
-| `book` | a book repository — title, address, licence, and the files Authorbot needs |
+| `book` | a book repository - title, address, licence, and the files Authorbot needs |
 | `publish` | a live reading site on Cloudflare, verified before it says so |
 | `collaborate` | sign-in, annotations, votes, and a work queue on the same address |
 | `agent` | a scoped token so a software agent can contribute |
@@ -35,7 +35,7 @@ frontmatter.
 
 ## What it asks of you
 
-A GitHub account, and for the collaboration stage a Cloudflare account — free
+A GitHub account, and for the collaboration stage a Cloudflare account - free
 tiers cover a book of this size. You bring your own accounts and your own
 repository; nothing is hosted for you, and there is no service to depend on.
 
@@ -46,7 +46,7 @@ repository; nothing is hosted for you, and there is no service to depend on.
   mean starting at step one.
 - **Secrets are never echoed, logged, or written to disk.** The GitHub App is
   created through GitHub's manifest flow, so its credentials go straight into
-  your Worker's secrets — you never see or type them.
+  your Worker's secrets - you never see or type them.
 - `--dry-run` prints the whole plan and changes nothing.
 - Everything it creates in your accounts is listed at the end, with how to
   remove it.

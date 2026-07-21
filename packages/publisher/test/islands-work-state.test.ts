@@ -230,7 +230,7 @@ describe("claim persistence (refresh survival)", () => {
     const dir = path.join(process.cwd(), "site/src/islands");
     const files = await readdir(dir);
     for (const file of files.filter((name) => name.endsWith(".ts"))) {
-      // Any *use* of it (property access / indexing) — prose in doc comments
+      // Any *use* of it (property access / indexing) - prose in doc comments
       // explaining why it is avoided is fine.
       expect(await readFile(path.join(dir, file), "utf8")).not.toMatch(/localStorage\s*[.[]/);
     }

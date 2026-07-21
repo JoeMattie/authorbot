@@ -101,7 +101,7 @@ describe("LocalGitAdapter.commitFiles", () => {
     // Regression: a create always writes into a brand-new directory; a crash
     // between writeFiles and commit leaves an untracked file that the default
     // `git status --porcelain` reports as its directory ("?? .authorbot/"),
-    // never as the exact path in the own set — which wedged every retry (and
+    // never as the exact path in the own set - which wedged every retry (and
     // every later commit) with a non-retryable dirty-tree error.
     await mkdir(join(repo.dir, ".authorbot/annotations/a1"), { recursive: true });
     await writeFile(
@@ -111,7 +111,7 @@ describe("LocalGitAdapter.commitFiles", () => {
     );
     const { commitSha } = await adapter.commitFiles(input(uuidv7(), { message: "resume" }));
     expect(commitSha).toBe(await git(repo.dir, "rev-parse", "HEAD"));
-    // and the tree is clean afterwards — nothing foreign was swallowed
+    // and the tree is clean afterwards - nothing foreign was swallowed
     expect(await git(repo.dir, "status", "--porcelain")).toBe("");
   });
 

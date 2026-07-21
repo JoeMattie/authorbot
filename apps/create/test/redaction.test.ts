@@ -4,9 +4,9 @@
  * message.
  *
  * "Property test" here means generated inputs rather than chosen ones: secrets
- * are drawn from a seeded generator across the shapes real credentials take —
+ * are drawn from a seeded generator across the shapes real credentials take -
  * base64, hex, PEM blocks with newlines, values containing quotes and regex
- * metacharacters — and every sink is checked for every one of them. Chosen
+ * metacharacters - and every sink is checked for every one of them. Chosen
  * examples would only ever prove that the examples are handled.
  */
 import { describe, expect, it } from "vitest";

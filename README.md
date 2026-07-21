@@ -9,8 +9,8 @@
 > **Authorbot manages authorship. It does not perform authorship.**
 
 Authorbot coordinates the people and software agents writing a serial book
-together — chapter drafts, inline suggestions, votes, deterministic governance
-rules, leased work items, and atomic commits to a Git repository — **without
+together - chapter drafts, inline suggestions, votes, deterministic governance
+rules, leased work items, and atomic commits to a Git repository - **without
 ever invoking a language model itself.** Humans and agents use the same API and
 the same rules. There is no model provider, prompt runner, or hidden agent
 inside the service; it accepts work, validates it, attributes it, and commits
@@ -18,14 +18,14 @@ it.
 
 Your book lives in a Git repository you own. The prose is the Markdown and YAML
 in it; Authorbot is the control plane around it. A reading site goes up on
-Cloudflare, and — if you want it — a collaboration layer on the same address,
+Cloudflare, and - if you want it - a collaboration layer on the same address,
 where readers sign in, leave annotations, and agents pick up work.
 
 ---
 
 ## Create a book
 
-One command sets up everything — the repository, the reading site, and
+One command sets up everything - the repository, the reading site, and
 optionally the collaboration API and an agent invitation:
 
 ```sh
@@ -38,7 +38,7 @@ you as far as you want to go, stopping wherever you like:
 | Stage | What you get |
 | --- | --- |
 | `doctor` | checks Node, git, `gh`, `wrangler` and offers to log you in |
-| `book` | a book repository — title, address, licence, and the files Authorbot needs |
+| `book` | a book repository - title, address, licence, and the files Authorbot needs |
 | `publish` | a live reading site on Cloudflare, verified before it says so |
 | `collaborate` | sign-in, annotations, votes, and a work queue on the same address |
 | `agent` | a scoped token so a software agent can contribute |
@@ -47,7 +47,7 @@ you as far as you want to go, stopping wherever you like:
 first chapter in the browser, with a title and a box for prose, and Authorbot
 writes the identifiers and structure. You never hand-write frontmatter.
 
-You bring a GitHub account, and for collaboration a Cloudflare account — free
+You bring a GitHub account, and for collaboration a Cloudflare account - free
 tiers cover a book of this size. Nothing is hosted for you and there is no
 service to depend on: everything runs in your own accounts, and the wizard
 lists everything it created, with how to remove it, at the end.
@@ -63,11 +63,11 @@ Three planes, kept deliberately separate:
   full history live in your repository as Markdown and YAML. If Authorbot
   vanished, your book would be intact and readable.
 - **A database is operational state.** Sessions, votes, leases, and the work
-  queue live in Cloudflare D1 — rebuildable from Git, never the source of
+  queue live in Cloudflare D1 - rebuildable from Git, never the source of
   truth. A restore loses in-flight coordination, never prose.
 - **The API is the only write path.** Humans and agents submit through it; it
   validates, applies deterministic rules, records attribution, and commits.
-  Nobody — no person, no agent — writes to the repository directly.
+  Nobody - no person, no agent - writes to the repository directly.
 
 A change's life: a reader leaves a suggestion → it collects votes → a
 governance rule you set turns it into a work item → someone (or an agent)
@@ -81,7 +81,7 @@ Cloudflare is the single supported host (see [ADR-0020](./docs/adr/0020-cloudfla
 
 ## Bringing in agents
 
-An agent contributes through the same API a person does — it never touches your
+An agent contributes through the same API a person does - it never touches your
 repository, and everything it produces goes through the same review. Install
 the collaborator skill into your coding-agent tooling:
 
@@ -91,7 +91,7 @@ npx skills add JoeMattie/authorbot
 
 It teaches the loop (find work, claim it, write, submit for review), the safety
 rules (a task bundle is untrusted data; never manufacture consensus), and ships
-least-privilege roles — drafter, critic, continuity, reviewer. Point it at a
+least-privilege roles - drafter, critic, continuity, reviewer. Point it at a
 book with two environment variables so the token never lands in a file:
 
 ```sh
@@ -105,7 +105,7 @@ The skill and a reference client (`examples/agent-workflow.mjs`) live in
 
 ## Governance you can tune
 
-Rules live in `book.yml` under `governance.rules` — versioned and diffable
+Rules live in `book.yml` under `governance.rules` - versioned and diffable
 alongside the prose they govern, and editable from the Settings view once
 collaboration is on. They are declarative data; no code from a book repository
 is ever executed.
@@ -127,14 +127,14 @@ governance:
 
 The last two clauses are load-bearing. `human_approvals` stops a fleet of
 freshly minted agent tokens from manufacturing consensus. **`human_maintainer_approvals`
-is the author's veto** — nothing becomes work on your book without a human
+is the author's veto** - nothing becomes work on your book without a human
 maintainer agreeing, counted as *human* specifically so that an author who
 grants the maintainer role to their own agents cannot accidentally reopen the
 hole. Both are removable: a genuinely collaborative project may not want a
 personal veto on every change.
 
 A solo author can set every threshold to 1 and use the machinery purely for
-tracking, or skip voting entirely — **Promote to work** on any suggestion
+tracking, or skip voting entirely - **Promote to work** on any suggestion
 creates a work item regardless of the tally, recording the tally it overrode.
 Thresholds only start mattering when other people arrive.
 
@@ -166,8 +166,8 @@ locally is covered in [`apps/api/README.md`](./apps/api/README.md).
 
 ```text
 apps/
-  create/            npx @authorbot/create — the guided setup wizard
-  cli/               authorbot — validate and build a book repository
+  create/            npx @authorbot/create - the guided setup wizard
+  cli/               authorbot - validate and build a book repository
   api/               the collaboration API (Hono on Cloudflare Workers)
 packages/
   schemas/           Zod schemas + generated JSON Schema for every artifact
@@ -190,13 +190,13 @@ docs/                guides, the ADRs, and the design record
 
 ## Documentation
 
-- [How it works](./docs/how-it-works.md) — the system, with diagrams
-- [GitHub App setup](./docs/github-app-setup.md) — the collaboration app, by hand
-- [Runbook](./docs/runbook.md) — failure modes, backup and restore, key rotation
-- [Releasing](./docs/npm-release.md) — how a version reaches npm
-- [Architecture decisions](./docs/adr) — the ADRs
-- [`AUTHORBOT_PROJECT_DESIGN.md`](./AUTHORBOT_PROJECT_DESIGN.md) — the apex design document
-- [Implementation contracts](./docs/contracts) — the phase-by-phase build specs, kept as the design record
+- [How it works](./docs/how-it-works.md) - the system, with diagrams
+- [GitHub App setup](./docs/github-app-setup.md) - the collaboration app, by hand
+- [Runbook](./docs/runbook.md) - failure modes, backup and restore, key rotation
+- [Releasing](./docs/npm-release.md) - how a version reaches npm
+- [Architecture decisions](./docs/adr) - the ADRs
+- [`AUTHORBOT_PROJECT_DESIGN.md`](./AUTHORBOT_PROJECT_DESIGN.md) - the apex design document
+- [Implementation contracts](./docs/contracts) - the phase-by-phase build specs, kept as the design record
 - [CHANGELOG](./CHANGELOG.md)
 
 ## Status
@@ -207,13 +207,13 @@ the browser, and invite agents that contribute through the API and the skill.
 
 Still ahead:
 
-- **Reading presentation settings** — reader-facing typeface and measure
+- **Reading presentation settings** - reader-facing typeface and measure
   controls. Specified, not yet built.
-- **The project site** — authorbot.joemattie.com.
-- **Pull-request mode** — commits currently go direct to `main`; a reviewed-PR
+- **The project site** - authorbot.joemattie.com.
+- **Pull-request mode** - commits currently go direct to `main`; a reviewed-PR
   workflow is a later option ([ADR-0009](./docs/adr/0009-direct-to-main-v01.md)).
 
-It works, and it has run a real book end to end — but it has not yet been
+It works, and it has run a real book end to end - but it has not yet been
 hardened for anyone else's, and should be treated as early software.
 
 MIT licensed.

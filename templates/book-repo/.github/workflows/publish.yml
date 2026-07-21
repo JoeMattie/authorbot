@@ -9,12 +9,12 @@
 # `@authorbot/cli` package and runs its binary. It does not check out the
 # Authorbot repository and does not build TypeScript. The version of the
 # toolchain that runs is the one written in this repository's package.json and
-# locked by package-lock.json — visible in your history, diffable in a pull
+# locked by package-lock.json - visible in your history, diffable in a pull
 # request, and revertable with `git revert` alongside whatever content it was
 # paired with. There is no AUTHORBOT_REF repository variable any more.
 #
 # ONE HOST, BY DESIGN (ADR-0020). GitHub holds the repository; Cloudflare
-# serves the site — and, later, the collaboration API from that same origin
+# serves the site - and, later, the collaboration API from that same origin
 # (ADR-0019). There is no GitHub Pages path: a static-only host can serve the
 # prose but never the annotations, votes, or work queue, so shipping both
 # produced two live URLs where one silently lacked every collaboration
@@ -23,7 +23,7 @@
 # One-time setup for your repository:
 #   1. Edit wrangler.jsonc: set `name` to the Worker name you want.
 #   2. Run `npm install` once locally and COMMIT package-lock.json. `npm ci`
-#      below refuses to run without it, and that is deliberate — an install
+#      below refuses to run without it, and that is deliberate - an install
 #      without a lockfile is an unpinned install.
 #   3. Create a Cloudflare API token with the "Edit Cloudflare Workers"
 #      template and store it as the CLOUDFLARE_API_TOKEN repository *secret*;
@@ -35,7 +35,7 @@
 #   5. Only once you have turned on collaboration (stage 3 of
 #      docs/getting-started.md), set the AUTHORBOT_D1_DATABASE repository
 #      variable to your D1 database name. That switches on the migration step
-#      below. Leave it unset for a static-only book — there is no database to
+#      below. Leave it unset for a static-only book - there is no database to
 #      migrate.
 
 name: publish
@@ -92,7 +92,7 @@ jobs:
       - name: Install the pinned Authorbot toolchain
         run: |
           if [ ! -f package-lock.json ]; then
-            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile — it is what pins your toolchain version."
+            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile - it is what pins your toolchain version."
             exit 1
           fi
           npm ci --no-audit --no-fund
@@ -103,7 +103,7 @@ jobs:
       # --base-url survives ADR-0020 for exactly one job: serving the book
       # under a base path (ADR-0019 §6). A book at the root of its own
       # hostname needs no prefix, so the flag is passed only when
-      # AUTHORBOT_BASE_URL is set — an empty --base-url is a usage error, and
+      # AUTHORBOT_BASE_URL is set - an empty --base-url is a usage error, and
       # a wrong one produces a site whose internal links and stylesheet 404.
       - name: Build the static site and build manifest
         env:
@@ -115,7 +115,7 @@ jobs:
             npx authorbot build . --out _site
           fi
 
-      # ADR-0021 §4 — MIGRATIONS RUN BEFORE THE DEPLOY, NOT AFTER.
+      # ADR-0021 §4 - MIGRATIONS RUN BEFORE THE DEPLOY, NOT AFTER.
       #
       # The Worker currently serving your readers keeps serving throughout the
       # deploy, so for the seconds between these two steps the OLD code is
@@ -127,8 +127,8 @@ jobs:
       #
       # That safety is conditional on migrations being EXPAND/CONTRACT: only
       # additive changes ship in a release that also changes the Worker.
-      # Removing a column or tightening a constraint takes two releases —
-      # expand in one, deploy, contract in the next — so no deployed version
+      # Removing a column or tightening a constraint takes two releases -
+      # expand in one, deploy, contract in the next - so no deployed version
       # ever meets a schema it was not written for. Authorbot's own migrations
       # follow this rule; if you write your own, it applies to you too.
       #
@@ -143,7 +143,7 @@ jobs:
       # the author had done anything wrong, about a deploy the wizard was in
       # the middle of doing for them anyway. Validation and the build above are
       # still worth running on that push, so only the two steps that actually
-      # talk to Cloudflare are skipped — and they say why rather than being
+      # talk to Cloudflare are skipped - and they say why rather than being
       # silently absent.
       - name: Check for Cloudflare credentials
         id: creds

@@ -14,7 +14,7 @@ export const timelineEventSchema = z.strictObject({
 export type TimelineEvent = z.infer<typeof timelineEventSchema>;
 
 /**
- * Timeline `story/timeline.yml` — `authorbot.timeline/v1`
+ * Timeline `story/timeline.yml` - `authorbot.timeline/v1`
  * (design section 8.6, contract section 4).
  */
 export const timelineSchema = z.strictObject({

@@ -1,11 +1,11 @@
 /**
- * Repository for `book_configs` — the projection of a project's `book.yml`
+ * Repository for `book_configs` - the projection of a project's `book.yml`
  * (Phase 6 contract §3.6, migration 0006).
  *
  * The table holds at most one row per project, so there is no list operation
  * and no pagination. Writes are exposed as `SqlStatement`s as well as awaited
  * helpers because a settings PATCH lands the config row, the git operation,
- * the outbox row, and the audit event in ONE `db.batch` — the same
+ * the outbox row, and the audit event in ONE `db.batch` - the same
  * one-commit-per-logical-mutation discipline every other write follows.
  */
 import type { SqlDatabase, SqlRow, SqlStatement } from "../sql.js";
@@ -64,7 +64,7 @@ export class BookConfigsRepository {
    *
    * Guarded on `git_operation_id` so a *later* settings write that has already
    * replaced this row is never retro-marked committed by the earlier
-   * operation's completion — the guard is the compare-and-swap, not a
+   * operation's completion - the guard is the compare-and-swap, not a
    * read-then-write.
    */
   markCommittedStatement(
@@ -91,7 +91,7 @@ export class BookConfigsRepository {
    * write that already replaced this row must not be deleted by its
    * predecessor's failure. Deleting rather than flagging keeps the status
    * vocabulary (and therefore migration 0006's CHECK constraint) untouched,
-   * and "no row" already has well-defined meaning everywhere it is read — the
+   * and "no row" already has well-defined meaning everywhere it is read - the
    * projection re-reads `book.yml` from Git, settings report the book as
    * unprojected, and governance falls back to the bootstrap rules.
    */

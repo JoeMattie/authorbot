@@ -1,13 +1,13 @@
 /**
  * Phase 7 routes: the author-facing access control surface (Phase 7 contract,
- * "Author-facing access control" — Seeing, Restricting, Moderating, Revoking).
+ * "Author-facing access control" - Seeing, Restricting, Moderating, Revoking).
  *
  * "Phase 2 built memberships, roles, and revocable agent tokens; Phase 6 added
  * a settings view. Neither gave an author a way to *see* who can touch their
  * book or to stop them."
  *
  * Every route here is maintainer-only except the rate-limit documentation, and
- * every action records an audit event — including the ones that are themselves
+ * every action records an audit event - including the ones that are themselves
  * about access, because "who locked this book, and when" is exactly the
  * question the audit view exists to answer.
  *
@@ -24,7 +24,7 @@
  * wants a contribution reverted uses the normal editorial path; access control
  * governs who may act next, not what already happened." Removing a
  * collaborator revokes their sessions, releases their leases, and rejects their
- * in-flight submissions — and leaves every annotation, vote, reply, and commit
+ * in-flight submissions - and leaves every annotation, vote, reply, and commit
  * trailer they ever produced exactly where it is.
  */
 import type { Context, Hono, MiddlewareHandler } from "hono";
@@ -121,7 +121,7 @@ export function actorRefOf(actor: { id: string; externalIdentity: string | null 
  * The revocation cascade (Phase 7 contract "Revoking").
  *
  * "Removing a collaborator or revoking a token [takes] effect on the *next
- * request* — not on session expiry. Specifically, revocation must: invalidate
+ * request* - not on session expiry. Specifically, revocation must: invalidate
  * that actor's sessions, not merely their membership; release any lease they
  * hold, returning the work item to `ready` …; reject in-flight submissions from
  * the revoked actor; leave their prior contributions intact."
@@ -151,7 +151,7 @@ export async function revocationCascadeStatements(input: {
   const { deps, repos, projectId, actorId, at } = input;
   const statements: SqlStatement[] = [];
 
-  // 1. Sessions. Not "their membership is gone so the next auth will fail" —
+  // 1. Sessions. Not "their membership is gone so the next auth will fail" -
   //    an agent token's actor has no session, and a human's cookie is a live
   //    credential that must stop working on the next request regardless of
   //    what the membership row now says.
@@ -244,23 +244,23 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
 
   /**
    * Guard for the maintainer control plane: project match, membership, scope,
-   * the agent pause, and rate limits — but NOT the freeze, because a freeze
+   * the agent pause, and rate limits - but NOT the freeze, because a freeze
    * that blocked its own reversal would be a one-way door.
    *
    * ## Why the scope argument exists (and why it is not `chapters:read`)
    *
    * Every route here also calls `requireMaintainer`, and for a human session
-   * the role IS the whole answer — a session's effective scopes are its role
+   * the role IS the whole answer - a session's effective scopes are its role
    * bundle, so role and scope say the same thing. For an AGENT TOKEN they do
    * not: effective scopes are `token ∩ role bundle` (Phase 2 §3), and asking
-   * for `chapters:read` — the weakest scope in the vocabulary, present in every
-   * bundle — made that intersection vacuous. Role alone then decided, and the
+   * for `chapters:read` - the weakest scope in the vocabulary, present in every
+   * bundle - made that intersection vacuous. Role alone then decided, and the
    * contract's deliberate grant of the maintainer role to an author's agent (so
    * a `locked` book stays annotatable) silently carried the entire control
    * plane with it: such a token could freeze the book, reopen the policy,
    * revoke every other credential, and delete the human author's membership.
    *
-   * So the *changing* routes name a genuinely maintainer-only scope —
+   * So the *changing* routes name a genuinely maintainer-only scope -
    * `members:manage` for the book's own controls and its people,
    * `tokens:manage` for credentials. A human maintainer holds both through
    * their role and notices nothing. An agent holds one only if its token was
@@ -347,7 +347,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
 
   /**
    * Agent tokens: "name, scopes, owning human, created and last-used times,
-   * expiry. Tokens are never re-displayable — only their metadata."
+   * expiry. Tokens are never re-displayable - only their metadata."
    *
    * `agentTokenJson` has never serialized `tokenHash`, and this route adds
    * nothing to it. There is no code path in the system that can return a token
@@ -372,13 +372,13 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
         ]);
         return {
           ...agentTokenJson(t),
-          /** The human who minted it — the "owning human" of the contract. */
+          /** The human who minted it - the "owning human" of the contract. */
           owner: owner === null ? null : actorJson(owner),
           /**
            * The membership role, which is half of the token's effective
            * authority (effective scopes = token.scopes ∩ role bundle). Shown
            * because reading the token's scopes alone would overstate what it
-           * can do — and because an agent working a `locked` book is exactly
+           * can do - and because an agent working a `locked` book is exactly
            * the one holding `maintainer` here.
            */
           role: membership?.revokedAt === null ? membership.role : null,
@@ -487,7 +487,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * A reason is REQUIRED to freeze and optional to unfreeze, which is not an
    * oversight: freezing is the act someone will need explained an hour later
    * (and it is the act that stops everyone else working), while unfreezing is
-   * self-explanatory — the emergency is over.
+   * self-explanatory - the emergency is over.
    */
   const freezeRoute = (frozen: boolean) => async (c: Context<AppEnv>) => {
     // `members:manage`, not `chapters:read`: the freeze is the book's stop
@@ -558,7 +558,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
            *
            * The event feed is served by `requireReadOrPublic`, which on a
            * deployment with `PUBLIC_ANNOTATIONS=true` answers a caller holding
-           * no credential at all — while `GET /access`, which carries the same
+           * no credential at all - while `GET /access`, which carries the same
            * reason, correctly 401s that caller. A freeze reason is incident
            * prose written by a maintainer in a hurry ("rotating the leaked
            * token tok_…"), so publishing it to the internet is a disclosure the
@@ -583,7 +583,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * operation had no way back: the content sat in `pending_git` and nothing
    * retried it. Availability failures no longer spend the retry budget at all
    * (the processor defers them instead), so reaching `failed` now means a
-   * bounded number of genuine attempts were made — and after the operator has
+   * bounded number of genuine attempts were made - and after the operator has
    * dealt with whatever caused it, there has to be a way to say "try again".
    *
    * Deliberately narrow: it only moves a `failed` operation back to `queued`
@@ -593,7 +593,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    *
    * COLLABORATION surface, not control: requeuing puts a payload back on the
    * path to a commit, and access-control.ts applies exactly this reasoning to
-   * moderation approval — "approval commits new content, which is the thing the
+   * moderation approval - "approval commits new content, which is the thing the
    * freeze exists to stop". A retry accepted during a freeze would have the
    * mirror committing while the author was still looking, which is precisely
    * what they pressed the stop button to prevent. The operation is not lost:
@@ -748,7 +748,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
   app.post("/v1/projects/:projectId/access/resume-agents", auth, idem, pauseRoute(false));
 
   // =========================================================================
-  // Restricting: roles (contract "Restricting" — "Change a role")
+  // Restricting: roles (contract "Restricting" - "Change a role")
   // =========================================================================
 
   /**
@@ -757,7 +757,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * Two guard rails, both about not locking the author out of their own book:
    * the last maintainer cannot be demoted, and a maintainer cannot demote
    * themselves while they are the only one. A book with no maintainer has no
-   * one who can mint a token, change a setting, or lift a freeze — and no path
+   * one who can mint a token, change a setting, or lift a freeze - and no path
    * back that does not involve a database console, which is the thing this
    * whole section exists to make unnecessary.
    *
@@ -805,13 +805,13 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
         if (remaining.total === 0) {
           return problem(c, "domain-rule-failed", {
             detail:
-              "this is the book's last maintainer. Promote someone else to maintainer first — a book with no maintainer cannot change its own settings, tokens, roles, or freeze.",
+              "this is the book's last maintainer. Promote someone else to maintainer first - a book with no maintainer cannot change its own settings, tokens, roles, or freeze.",
           });
         }
         if (remaining.human === 0 && (await isHumanActor(repos, targetActorId))) {
           return problem(c, "domain-rule-failed", {
             detail:
-              "this is the book's last human maintainer. Promote another person to maintainer first — the remaining maintainers are agents, and a book administered only by agents has no one who can revoke them.",
+              "this is the book's last human maintainer. Promote another person to maintainer first - the remaining maintainers are agents, and a book administered only by agents has no one who can revoke them.",
           });
         }
       }
@@ -900,7 +900,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
         if (remaining.human === 0 && (await isHumanActor(repos, targetActorId))) {
           return problem(c, "domain-rule-failed", {
             detail:
-              "this is the book's last human maintainer and cannot be removed. Promote another person to maintainer first — the remaining maintainers are agents, and a book administered only by agents has no one who can revoke them.",
+              "this is the book's last human maintainer and cannot be removed. Promote another person to maintainer first - the remaining maintainers are agents, and a book administered only by agents has no one who can revoke them.",
           });
         }
       }
@@ -965,7 +965,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    *
    * One statement revokes them all (see `revokeAllForProjectStatement`) so
    * there is no window in which the leaked token is the one not yet reached,
-   * and each token's holder gets the full revocation cascade — a leaked token
+   * and each token's holder gets the full revocation cascade - a leaked token
    * mid-submission must not get its edit committed after the alarm was raised.
    */
   app.post("/v1/projects/:projectId/agent-tokens/revoke-all", auth, idem, async (c) => {
@@ -1077,7 +1077,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
               ? null
               : { id: chapter.id, title: chapter.title, slug: chapter.slug, revision: chapter.revision },
           /**
-           * "the author's history with this book" — how many of their previous
+           * "the author's history with this book" - how many of their previous
            * submissions were approved and how many rejected. A moderator
            * looking at their tenth spam comment should be able to see that it
            * is the tenth.
@@ -1101,7 +1101,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * `annotations` (carrying the queue row's id forward, so the author's link
    * keeps working) and an ordinary `annotation.create` outbox row is enqueued.
    * From here it is indistinguishable from an annotation written under a
-   * permissive policy — same mirroring, same votes, same rules — which is
+   * permissive policy - same mirroring, same votes, same rules - which is
    * precisely the contract's "approval mirrors it to Git as a normal
    * annotation".
    *
@@ -1114,7 +1114,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * `POST .../annotations` enforces two things unconditionally (contract §4):
    * the submitted `chapterRevision` must match the projected revision, and a
    * non-chapter-scoped `target.blockId` must exist in that revision. A queued
-   * annotation satisfied both WHEN IT WAS WRITTEN — and then sat in the queue
+   * annotation satisfied both WHEN IT WAS WRITTEN - and then sat in the queue
    * while the chapter kept moving. Approving it without re-asking would commit
    * an annotation anchored at revision 4 into a book at revision 7, pointing at
    * a block id that may no longer exist: a permanent, mirrored record that the
@@ -1122,7 +1122,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * does not exempt it.
    *
    * A stale anchor is reported as its own outcome rather than a generic
-   * failure, because it is recoverable in a way "author unknown" is not — the
+   * failure, because it is recoverable in a way "author unknown" is not - the
    * author can re-anchor and resubmit, and in bulk the other 199 items must not
    * be held hostage to it.
    */
@@ -1312,7 +1312,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * record in the database (never in Git) so a mistake is recoverable and a
    * pattern of abuse is visible."
    *
-   * Nothing is written to Git and nothing is deleted — the row's status
+   * Nothing is written to Git and nothing is deleted - the row's status
    * changes, its reviewer and reason are recorded, and that is all. Because the
    * annotation never entered `annotations`, there was never anything in the
    * repository to leave a trace in, which is what makes exit criterion 10's
@@ -1487,7 +1487,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
 /**
  * A queued annotation as JSON. Shaped like `annotationJson` where the fields
  * coincide so a client can render one card for both, with `moderation` naming
- * the difference — that is the "badged as awaiting review" of the contract.
+ * the difference - that is the "badged as awaiting review" of the contract.
  */
 export function pendingAnnotationJson(p: PendingAnnotationRecord): Record<string, unknown> {
   return {
@@ -1526,7 +1526,7 @@ export function pendingAnnotationJson(p: PendingAnnotationRecord): Record<string
  * to be too weak a guard rail. An author's agent may legitimately hold the
  * maintainer role (that is how a `locked` book stays annotatable), and the
  * total-count check was happy to let the last human maintainer be demoted or
- * removed as long as such an agent remained — leaving a book administered
+ * removed as long as such an agent remained - leaving a book administered
  * exclusively by a machine, with the person who wrote it locked out and no way
  * back that does not involve a database console. That is the exact outcome
  * every other guard rail in this section exists to prevent, so it is checked
@@ -1558,7 +1558,7 @@ async function isHumanActor(repos: Repositories, actorId: string): Promise<boole
 /**
  * Who granted each membership, from the audit log's `member.add` events.
  *
- * Deliberately narrow. Only `member.add` counts — a later `member.role_change`
+ * Deliberately narrow. Only `member.add` counts - a later `member.role_change`
  * says who CHANGED the role, which is a different fact, and reporting it as
  * "added by" would be quietly wrong in exactly the case an author is vetting.
  *
@@ -1578,7 +1578,7 @@ async function addedByMap(
   });
   const map = new Map<string, string>();
   // Newest-first, so iterating forward and letting earlier entries win leaves
-  // the FIRST grant in place — the one that actually added them.
+  // the FIRST grant in place - the one that actually added them.
   for (const event of events) {
     if (event.targetId !== null && event.actorId !== null) {
       map.set(event.targetId, event.actorId);

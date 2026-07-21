@@ -1,6 +1,6 @@
 # How Authorbot works
 
-A map of the system for people who have to reason about it — not a spec. The
+A map of the system for people who have to reason about it - not a spec. The
 binding details live in `docs/contracts/phase*-contract.md`; this page is the mental
 model those contracts assume you already have.
 
@@ -21,7 +21,7 @@ three, each doing what it is good at.
 
 ```
    ┌──────────────────────────────────────────────────────────────────┐
-   │  CONTENT PLANE — Git (the book repository)                       │
+   │  CONTENT PLANE - Git (the book repository)                       │
    │                                                                  │
    │  chapters/*.md   story/**   .authorbot/{annotations,decisions,   │
    │                             work-items,attribution,releases}     │
@@ -34,7 +34,7 @@ three, each doing what it is good at.
        per accepted │                              ▼  the projection
        mutation     │
    ┌──────────────────────────────────────────────────────────────────┐
-   │  COORDINATION PLANE — the API + database (D1 / SQLite)           │
+   │  COORDINATION PLANE - the API + database (D1 / SQLite)           │
    │                                                                  │
    │  sessions · agent tokens · votes · leases · idempotency keys     │
    │  outbox · audit events · projections (a queryable mirror of Git) │
@@ -47,7 +47,7 @@ three, each doing what it is good at.
        content      ▼                              │  (islands only)
        changes
    ┌──────────────────────────────────────────────────────────────────┐
-   │  PRESENTATION PLANE — the published static site                  │
+   │  PRESENTATION PLANE - the published static site                  │
    │                                                                  │
    │  Plain HTML chapters, story views. No JavaScript required.       │
    │  Collaboration widgets appear only if an API URL is configured.  │
@@ -90,7 +90,7 @@ step in between.
      ▼
  ┌──────────────────────────────────────────────────────────────┐
  │ VOTES                       approve / reject / abstain       │
- │   one current vote per person — changing your mind updates   │
+ │   one current vote per person - changing your mind updates   │
  │   it, it does not stack                                      │
  └───┬──────────────────────────────────────────────────────────┘
      │  every vote re-runs the project's rule
@@ -107,7 +107,7 @@ step in between.
  ┌──────────────────────────────────────────────────────────────┐
  │ DECISION  (permanent, "sticky")                              │
  │   records the rule, its version, and the exact tally at the  │
- │   moment it passed. Later vote changes never delete it —     │
+ │   moment it passed. Later vote changes never delete it -     │
  │   support dropping is shown as `support_changed`, not        │
  │   rewritten history.                                         │
  └───┬──────────────────────────────────────────────────────────┘
@@ -125,7 +125,7 @@ step in between.
      ▼                          ▼        ▼
  ┌──────────────────────────────────────────────────────────────┐
  │ LEASE   30 minutes, renewable, max 4 hours                   │
- │   Not a UI hint — a server-enforced capability. A secret     │
+ │   Not a UI hint - a server-enforced capability. A secret     │
  │   token is issued ONCE; only its hash is stored. Two people  │
  │   claiming at the same instant: exactly one wins.            │
  │                                                              │
@@ -134,7 +134,7 @@ step in between.
  │   revision, the target span, the original annotation, the    │
  │   acceptance criteria. No scraping the UI.                   │
  └───┬──────────────────────────────────────────────────────────┘
-     │  writer works — in a browser, in an editor, in a model
+     │  writer works - in a browser, in an editor, in a model
      ▼
  ┌──────────────────────────────────────────────────────────────┐
  │ SUBMISSION                                                   │
@@ -161,7 +161,7 @@ step in between.
       │                                          untouched
       ▼
  ┌──────────────────────────────────────────────────────────────┐
- │ ONE COMMIT — everything that logically changed together      │
+ │ ONE COMMIT - everything that logically changed together      │
  │                                                              │
  │   chapters/012-the-clear-hour.md      prose + revision 4→5   │
  │   .authorbot/work-items/<id>.md       status: done           │
@@ -174,7 +174,7 @@ step in between.
      │
      ▼
  ┌──────────────────────────────────────────────────────────────┐
- │ PUBLISH — CI rebuilds the static site and deploys it         │
+ │ PUBLISH - CI rebuilds the static site and deploys it         │
  │   A revision is "published" only when a deploy actually      │
  │   succeeded, not when the commit landed.                     │
  └──────────────────────────────────────────────────────────────┘
@@ -192,7 +192,7 @@ Two properties are worth calling out because they are the whole point:
 ## 3. Who is allowed to do what
 
 Humans sign in with GitHub; agents use tokens minted by a maintainer. After
-authentication they are treated identically — the actor type is metadata, not
+authentication they are treated identically - the actor type is metadata, not
 a separate code path.
 
 ```
@@ -209,7 +209,7 @@ a separate code path.
 ```
 
 Agent tokens are stored only as hashes, expire, and are revocable. A leaked
-token cannot be recovered from the database — only replaced.
+token cannot be recovered from the database - only replaced.
 
 ---
 
@@ -239,7 +239,7 @@ outbox entry in a single database transaction; a coordinator drains that queue.
 ```
 
 If the process dies halfway, the outbox row is still there and the work
-resumes. If the branch moved, the coordinator retries against the new head —
+resumes. If the branch moved, the coordinator retries against the new head -
 bounded, and never with a force push.
 
 ---
@@ -274,6 +274,6 @@ bounded, and never with a force push.
 | Reading and writing a **remote** GitHub repo from the deployed service | Phase 5, in progress |
 
 Until Phase 5 lands, a deployed instance can authenticate people and serve
-reads, but it cannot see or write the book repository from a Worker — so
+reads, but it cannot see or write the book repository from a Worker - so
 annotation writes are not yet usable in production. Locally, and in tests, the
 full loop works end to end against a real Git repository.

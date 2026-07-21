@@ -103,7 +103,7 @@ describe("renderAnnotationArtifact", () => {
       blockId: BLOCK_ID,
       textPosition: { start: 0, end: 10 },
       textQuote: {
-        exact: 'she said: "no — really?" #not-a-comment',
+        exact: 'she said: "no - really?" #not-a-comment',
         prefix: "- list-looking ",
         suffix: ": trailing",
       },
@@ -113,7 +113,7 @@ describe("renderAnnotationArtifact", () => {
     expect(parsed.frontmatterError).toBeUndefined();
     const record = annotationSchema.parse(parsed.frontmatter);
     if (record.scope === "range") {
-      expect(record.target.textQuote.exact).toBe('she said: "no — really?" #not-a-comment');
+      expect(record.target.textQuote.exact).toBe('she said: "no - really?" #not-a-comment');
       expect(record.target.textQuote.prefix).toBe("- list-looking ");
       expect(record.target.textQuote.suffix).toBe(": trailing");
     }

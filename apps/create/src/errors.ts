@@ -20,7 +20,7 @@ export class WizardError extends Error {
 
 /**
  * Raised when `--non-interactive` hits something that would otherwise prompt
- * (contract §2.5: "fail loudly"). Naming the missing key is the whole point —
+ * (contract §2.5: "fail loudly"). Naming the missing key is the whole point -
  * a CI operator needs to know which line to add, not that "input was
  * required".
  */
@@ -37,7 +37,7 @@ export class NonInteractiveError extends WizardError {
   }
 }
 
-/** The author declined a confirmation. Not a fault — a decision. */
+/** The author declined a confirmation. Not a fault - a decision. */
 export class AbortedError extends WizardError {
   constructor(what: string) {
     super(`Stopped: ${what}`, "Nothing was changed. Run the same command again when ready.");
@@ -56,8 +56,8 @@ export class TimeoutError extends WizardError {
  * The last resort: renders anything that escaped every other handler.
  *
  * `runCli` handles failures from the stages, but several things run outside
- * that `try` — `Journal.open`, `printPlan`, `reportResources`, argument
- * parsing's rethrow — and an `uncaughtException` or `unhandledRejection` can
+ * that `try` - `Journal.open`, `printPlan`, `reportResources`, argument
+ * parsing's rethrow - and an `uncaughtException` or `unhandledRejection` can
  * arrive from a listener nobody is awaiting. With no handler at the top, all of
  * those reach Node itself and print a raw stack trace, which §5 forbids and
  * which can carry a secret that appeared as a call argument.
@@ -73,6 +73,6 @@ export function reportFatal(
   const summary = redact(error);
   out.error(`Problem: ${summary === "" ? "Setup stopped unexpectedly." : summary}`);
   out.error(
-    "What to do: run the same command again — everything already finished is skipped. If it keeps happening, please report it with the message above.",
+    "What to do: run the same command again - everything already finished is skipped. If it keeps happening, please report it with the message above.",
   );
 }

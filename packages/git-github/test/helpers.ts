@@ -1,7 +1,7 @@
 /**
  * Test-only client for the fake. It performs the design §14.2 blob → tree →
  * commit → ref sequence, so the fake's surface is exercised the way the real
- * writer will exercise it. This is deliberately *not* the production writer —
+ * writer will exercise it. This is deliberately *not* the production writer -
  * that lands separately against this same fake.
  */
 import { FAKE_GITHUB_ORIGIN, type FakeGitHub } from "../src/testing/index.js";
@@ -75,7 +75,7 @@ export interface CommitViaApiResult {
   message?: string;
 }
 
-/** The §14.2 sequence, without retry — retry belongs to the real writer. */
+/** The §14.2 sequence, without retry - retry belongs to the real writer. */
 export async function commitViaApi(
   fake: FakeGitHub,
   options: CommitViaApiOptions,

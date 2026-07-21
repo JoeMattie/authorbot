@@ -15,7 +15,7 @@ and would break the deterministic core principle (design §3.3, §11.1).
 
 - Rules are declarative data only (design §11.1): a `trigger`, an `all`/`any`
   condition tree of `{ metric, operator, value }` clauses, and a typed
-  `action` — never evaluated code.
+  `action` - never evaluated code.
 - The metric vocabulary is a small closed set (approvals, rejections,
   net/weighted score, distinct voters, human/agent approvals, role/trust-group
   approvals, proposal age, maintainer override).

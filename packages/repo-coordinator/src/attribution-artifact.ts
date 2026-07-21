@@ -13,7 +13,7 @@
  * commit as the chapter edit. The introducing commit is identified *by
  * convention* instead: it is the commit whose `Authorbot-Operation` /
  * `Authorbot-Work-Item` trailers (design §14.3) match the operation that
- * applied the entry's work item — recoverable at any time via
+ * applied the entry's work item - recoverable at any time via
  * `git log --grep`. Entries written by later tooling that already knows a
  * commit SHA (e.g. Phase 5 backfills or manual imports) may set `commit`
  * explicitly; both shapes are schema-valid and round-trip.
@@ -109,7 +109,7 @@ export interface AppendAttributionResult {
 /**
  * Append one entry to an attribution artifact, creating the file when
  * `existingContent` is null (first attributed revision of the chapter).
- * Existing entries are preserved in order; the new entry is appended last —
+ * Existing entries are preserved in order; the new entry is appended last -
  * entries therefore appear in apply order (ascending revision under the
  * one-writer-per-project outbox). Idempotent (module docs).
  *

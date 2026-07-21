@@ -1,5 +1,5 @@
 /**
- * `BookRepoWriter` — the Git write boundary (Phase 2 contract §5, design
+ * `BookRepoWriter` - the Git write boundary (Phase 2 contract §5, design
  * §14). One commit per logical mutation, structured trailers (design §14.3),
  * never force. Implementations: `LocalGitAdapter` (Node, tests/local dev)
  * and the Phase 5 `GitHubAdapter` stub.
@@ -48,7 +48,7 @@ export interface CommitFilesInput {
    * BEFORE the ref update. Persisting it here is what lets a later replay
    * pass it back as `attemptedCommitSha`; the window this closes is exactly
    * the one between "the commit object exists" and "we know whether the ref
-   * moved". Failures propagate — a SHA we could not record is a SHA a replay
+   * moved". Failures propagate - a SHA we could not record is a SHA a replay
    * cannot recognise, so committing anyway would recreate the defect.
    */
   onCommitCreated?(commitSha: string): Promise<void>;

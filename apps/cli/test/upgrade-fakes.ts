@@ -4,7 +4,7 @@
  * The command's contract with the outside world is the port set in
  * `src/upgrade/ports.ts`, so the tests implement that set and nothing else
  * escapes: no network, no git subprocess, no wrangler, no deploy. The real
- * filesystem is used deliberately — the interesting assertions are about what
+ * filesystem is used deliberately - the interesting assertions are about what
  * did and did not change on disk, and an in-memory shim would let a bug in
  * path handling pass.
  */
@@ -97,7 +97,7 @@ export async function makeBookRepo(options: MakeRepoOptions = {}): Promise<strin
   return repo;
 }
 
-/** Every file under `dir` with its contents — the basis of "changed nothing". */
+/** Every file under `dir` with its contents - the basis of "changed nothing". */
 export async function snapshot(dir: string): Promise<Map<string, string>> {
   const files = await nodeFs.listFiles(dir);
   const entries = new Map<string, string>();
@@ -353,7 +353,7 @@ export function breakingMigration(id = "9999-breaks-the-book"): BookRepoMigratio
   };
 }
 
-/** A migration that changes something every time it runs — a toolchain bug. */
+/** A migration that changes something every time it runs - a toolchain bug. */
 export function nonIdempotentMigration(id = "9998-not-idempotent"): BookRepoMigration {
   return {
     id,

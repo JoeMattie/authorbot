@@ -17,14 +17,14 @@ involve information that does not belong in a public repository.
   roles, and grants (design §26.1); authorization checks read only the
   database.
 - A **public-safe collaborator manifest** is exported to Git under
-  `.authorbot/` for transparency and attribution display — derived data,
+  `.authorbot/` for transparency and attribution display - derived data,
   never read back as authority.
 - Secrets, tokens, installation IDs, and private identity details never enter
   the repository (§8.2, §19).
 
 ## Consequences
 
-- Revoking a member or agent token is immediate — no Git round-trip and no
+- Revoking a member or agent token is immediate - no Git round-trip and no
   window where a committed file re-grants access.
 - The manifest can lag membership briefly (it flows through the outbox like
   other mirrored records, §7.3); consumers must treat it as informational.

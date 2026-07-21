@@ -21,10 +21,10 @@ export type AuthMode = "dev" | "github";
 /**
  * Mirror processing mode (Phase 2 contract §5, Phase 5 contract §5):
  *
- * - `inline` — drain in-process right after the command's batch (dev/tests).
- * - `queue` — record outbox rows and drain later, out of band. The deployed
+ * - `inline` - drain in-process right after the command's batch (dev/tests).
+ * - `queue` - record outbox rows and drain later, out of band. The deployed
  *   Worker runs this today.
- * - `durable` — hand the drain to the project's `ProjectCoordinator` Durable
+ * - `durable` - hand the drain to the project's `ProjectCoordinator` Durable
  *   Object after the batch commits (production, Phase 5).
  */
 export type MirrorMode = "inline" | "queue" | "durable";
@@ -83,7 +83,7 @@ export interface AppConfig {
    * `GET /v1/projects/{id}` as `gitIntegration`. Absent means the same as
    * `"unconfigured"`: no repository access, reads keep working, outbox rows
    * accumulate for a later drain. Only the *status* ever leaves this process
-   * — no credential value is stored here.
+   * - no credential value is stored here.
    */
   gitIntegration?: "configured" | "unconfigured" | "incomplete" | "invalid";
   /** SSE new-row poll interval (ms). Default 1000; tests shrink it. */
@@ -103,7 +103,7 @@ export interface AppConfig {
   sseMaxStreamsPerClient?: number;
   /**
    * HMAC key for CI publication callbacks (`POST /v1/publications`). Absent
-   * falls back to `webhookSecret` for compatibility — see publications.ts.
+   * falls back to `webhookSecret` for compatibility - see publications.ts.
    */
   publicationSecret?: string;
 }
@@ -120,7 +120,7 @@ export interface AppDeps {
    */
   reader?: BookRepoReader;
   /**
-   * Called after any mutation that enqueued an outbox row — the
+   * Called after any mutation that enqueued an outbox row - the
    * repo-coordinator processor is wired here later. Optional; a rejection is
    * swallowed (the operation stays observable via GET .../operations/{id}).
    */
@@ -128,7 +128,7 @@ export interface AppDeps {
   /**
    * Phase 5 contract §6: where a verified `push` webhook sends its request for
    * a projection refresh. The API never imports the `ProjectCoordinator`
-   * Durable Object — it asks through this seam, so the refresh happens
+   * Durable Object - it asks through this seam, so the refresh happens
    * somewhere serialized without the app depending on the coordinator module.
    *
    * Absent is a supported deployment: the webhook still marks the projection

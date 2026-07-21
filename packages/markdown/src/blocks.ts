@@ -99,7 +99,7 @@ export interface UnmarkedBlock {
 export interface BlockScanResult {
   /**
    * All syntactically parseable markers in document order, duplicates
-   * included — duplicate-id policy is the caller's concern.
+   * included - duplicate-id policy is the caller's concern.
    */
   markers: MarkerBlock[];
   /** Required top-level blocks with no marker (BLOCK_ID_MISSING candidates). */

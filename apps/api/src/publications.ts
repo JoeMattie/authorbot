@@ -6,7 +6,7 @@
  * deliberately no code path anywhere in the API that writes publication state
  * from its own knowledge. The only writer is `POST /v1/publications`, a signed
  * callback from CI, and the only thing the API asserts on its own behalf is
- * `projects.projected_commit` — the commit it integrated.
+ * `projects.projected_commit` - the commit it integrated.
  *
  * The gap between those two numbers is the product: `GET /v1/projects/{id}`
  * reports integrated and deployed side by side so "the public page shows the
@@ -16,7 +16,7 @@
  * ## Signature and replay
  *
  * The callback is unauthenticated in the session/token sense and authenticated
- * by HMAC-SHA256 with `PUBLICATION_SECRET`, compared in constant time — the
+ * by HMAC-SHA256 with `PUBLICATION_SECRET`, compared in constant time - the
  * same primitive and the same ordering as the GitHub webhook in app.ts (verify
  * before parsing, before touching the database, before allocating anything
  * keyed on request content).
@@ -25,8 +25,8 @@
  *
  * It used to be, and one key signing two protocols in two trust domains is a
  * key that grants each domain the other's authority. `WEBHOOK_SECRET` is
- * GitHub's — it is pasted into a GitHub App's webhook configuration.
- * `PUBLICATION_SECRET` is the book repository's CI — the documented wiring puts
+ * GitHub's - it is pasted into a GitHub App's webhook configuration.
+ * `PUBLICATION_SECRET` is the book repository's CI - the documented wiring puts
  * it in the repo's Actions secrets, where every workflow, and everyone who can
  * open a pull request that runs one, is within reach of it. Sharing them meant
  * whoever held the CI copy could forge `push` webhooks (driving projection
@@ -38,8 +38,8 @@
  * its publication reports the moment it upgrades.
  *
  * **The signed material is `<deliveryId>.<timestamp>.<rawBody>`, not the body
- * alone.** Signing only the body left the delivery id — the sole
- * replay-suppression key — outside the signature, and nothing bound the
+ * alone.** Signing only the body left the delivery id - the sole
+ * replay-suppression key - outside the signature, and nothing bound the
  * request to a point in time. Anyone who obtained one validly signed body (CI
  * logs echoing the curl invocation, a proxy log, a captured request) could
  * resubmit it forever under fresh delivery ids: the UNIQUE index never fires,
@@ -56,7 +56,7 @@
  * Replays within the window are still deduped on `X-Authorbot-Delivery` via a
  * UNIQUE index, insert first. A read-then-write check would let two concurrent
  * isolates both see "not seen yet"; losing the race in the database is the
- * only version that actually holds. A repeat delivery is a no-op — unlike the
+ * only version that actually holds. A repeat delivery is a no-op - unlike the
  * GitHub push handler, a *failed* publication delivery is not retried on the
  * same id, because a build status is a point-in-time report: if it mattered,
  * CI sends the next one.
@@ -103,7 +103,7 @@ export const PUBLICATION_MAX_SKEW_MS = 5 * 60 * 1000;
 
 /**
  * The bytes the HMAC covers: delivery id, timestamp and raw body, joined by
- * `.` — the separator is what stops a delivery id ending in digits from
+ * `.` - the separator is what stops a delivery id ending in digits from
  * being reinterpretable as part of the timestamp.
  */
 export function publicationSigningMaterial(
@@ -180,8 +180,8 @@ export function publicationJson(
 /**
  * The integrated-versus-deployed view (design §17.3, §20.3).
  *
- * `integratedCommit` is what Authorbot projected — its own honest high-water
- * mark — NOT the newest publication row: CI could be several commits behind,
+ * `integratedCommit` is what Authorbot projected - its own honest high-water
+ * mark - NOT the newest publication row: CI could be several commits behind,
  * and reporting its number as "integrated" would hide exactly the gap this
  * exists to show. `inSync` is false whenever anything is unknown, because
  * "we don't know" must never render as "up to date".
@@ -215,7 +215,7 @@ export function registerPublicationRoutes(ctx: PublicationRoutesContext): void {
 
   app.post("/v1/publications", async (c) => {
     // 1. Delivery id and timestamp are read FIRST because they are part of
-    //    the signed material — but nothing is trusted until step 2 verifies
+    //    the signed material - but nothing is trusted until step 2 verifies
     //    the MAC over all three.
     const rawBody = await c.req.text();
     const deliveryId = c.req.header(PUBLICATION_DELIVERY_HEADER);

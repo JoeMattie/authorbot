@@ -1,5 +1,5 @@
 /**
- * `OverrideControl` — the maintainer force-promote / reject surface on a
+ * `OverrideControl` - the maintainer force-promote / reject surface on a
  * suggestion (Phase 6 contract §3.6 "Force-promote", surfacing the Phase 3
  * overrides).
  *
@@ -10,15 +10,15 @@
  *
  * Contract invariants, all load-bearing:
  * - Offered only to a maintainer on an open suggestion. A non-maintainer sees
- *   nothing here at all — an override surface is not a thing to explain to
+ *   nothing here at all - an override surface is not a thing to explain to
  *   everyone, and it is never a disabled button.
  * - Each action requires a reason: activating it opens an inline labelled
  *   textarea with an explicit Confirm (named after the action) and Cancel.
  *   Nothing is ever pre-filled and nothing is ever submitted without one.
- * - The current tally is shown beside the actions — the aggregate summary plus
+ * - The current tally is shown beside the actions - the aggregate summary plus
  *   the role-aware maintainer / human-maintainer approvals added by the Phase 6
- *   amendment — so the maintainer cannot act without seeing the governance
- *   threshold they are bypassing. Counts the API did not supply render "—"
+ *   amendment - so the maintainer cannot act without seeing the governance
+ *   threshold they are bypassing. Counts the API did not supply render "-"
  *   rather than a confident zero.
  *
  * Security/accessibility: every string reaches the DOM via `textContent`
@@ -60,7 +60,7 @@ export interface OverrideControlDeps {
 export const MIN_REASON_LENGTH = 3;
 export const MAX_REASON_LENGTH = 2000;
 
-const EM_DASH = "—";
+const EM_DASH = "-";
 
 /**
  * Both overrides apply to an OPEN suggestion. A `pending_git` annotation is
@@ -180,8 +180,8 @@ export class OverrideControl {
     // here is the support it is overriding.
     this.tallyLine.textContent =
       this.action === null
-        ? `Overriding the project’s rule — this suggestion has ${summary}.`
-        : `${verb(this.action)} overrides the project’s rule — this suggestion has ${summary}.`;
+        ? `Overriding the project’s rule - this suggestion has ${summary}.`
+        : `${verb(this.action)} overrides the project’s rule - this suggestion has ${summary}.`;
     this.maintainerLine.textContent = `Maintainer approvals: ${countText(tally.maintainerApprovals)}`;
     this.humanMaintainerLine.textContent =
       `Human maintainer approvals: ${countText(tally.humanMaintainerApprovals)}`;
@@ -267,7 +267,7 @@ export class OverrideControl {
     const reason = this.reason.value.trim();
     if (reason.length < MIN_REASON_LENGTH) {
       this.showError(
-        `Give a reason of at least ${MIN_REASON_LENGTH} characters — it is recorded on the override.`,
+        `Give a reason of at least ${MIN_REASON_LENGTH} characters - it is recorded on the override.`,
       );
       this.reason.focus();
       return;

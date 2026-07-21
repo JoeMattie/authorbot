@@ -2,7 +2,7 @@
  * Pure logic and author-facing language behind `<authorbot-access>` (Phase 7
  * contract, "Author-facing access control").
  *
- * No DOM, no network — the part of access control that can be reasoned about,
+ * No DOM, no network - the part of access control that can be reasoned about,
  * and unit-tested, without a browser. Almost all of it is *wording*, and the
  * wording is the feature: this whole surface exists so an author can vet,
  * restrict and revoke without a database console, and a control they cannot
@@ -17,10 +17,10 @@
  * deployment predating Phase 7, not the source of truth.
  *
  * **Revocation is never described as erasure.** The contract is explicit:
- * "leave their prior contributions intact — attribution and history are
+ * "leave their prior contributions intact - attribution and history are
  * permanent records, not access grants. Removing someone is not erasing them,
  * and the interface must not imply otherwise." Every destructive confirmation
- * below therefore states both halves — what stops working, and what stays.
+ * below therefore states both halves - what stops working, and what stays.
  *
  * **`locked` is author-only, not off.** It is the mode an author is most
  * likely to misread as "turn collaboration off", so it gets the longest
@@ -57,27 +57,27 @@ export const POLICY_ORDER: readonly AnnotationPolicy[] = Object.freeze([
  * because the one-word version is the misreading the contract warns about.
  */
 export const POLICY_LABEL: Readonly<Record<AnnotationPolicy, string>> = Object.freeze({
-  open: "Open — anyone signed in may comment",
-  "approval-gated": "Approval-gated — anyone signed in may comment, you approve it first",
-  "collaborators-only": "Collaborators only — the people you have added",
-  locked: "Author only — just you and your maintainers",
+  open: "Open - anyone signed in may comment",
+  "approval-gated": "Approval-gated - anyone signed in may comment, you approve it first",
+  "collaborators-only": "Collaborators only - the people you have added",
+  locked: "Author only - just you and your maintainers",
 });
 
 /**
  * Fallback wording, used only when the API does not send its own. Kept in step
  * with `ANNOTATION_POLICY_MEANS` in apps/api/src/settings.ts by intent rather
  * than by import: the packages do not depend on each other, and a stale copy
- * shown *instead of* the server's would be worse than none — which is why the
+ * shown *instead of* the server's would be worse than none - which is why the
  * server's is preferred whenever it exists.
  */
 export const POLICY_MEANS_FALLBACK: Readonly<Record<AnnotationPolicy, string>> = Object.freeze({
-  open: "Any signed-in GitHub user may comment and suggest, and what they write appears immediately. They still cannot vote, claim work, or submit prose — those stay with your collaborators.",
+  open: "Any signed-in GitHub user may comment and suggest, and what they write appears immediately. They still cannot vote, claim work, or submit prose - those stay with your collaborators.",
   "approval-gated":
-    "Any signed-in GitHub user may comment and suggest, but nothing appears — or reaches your repository — until you approve it. Queued comments are visible to their author and to you, and nothing else.",
+    "Any signed-in GitHub user may comment and suggest, but nothing appears - or reaches your repository - until you approve it. Queued comments are visible to their author and to you, and nothing else.",
   "collaborators-only":
     "Only people you have added to the book may comment and suggest. This is the default.",
   locked:
-    "Only maintainers may write. The book stays fully yours to work in: you can annotate your own drafts and run your own agents against them, and an agent works here by holding a maintainer-role membership you granted it. Your existing collaborators keep their membership and everything they have already contributed — they simply cannot write until you reopen the policy.",
+    "Only maintainers may write. The book stays fully yours to work in: you can annotate your own drafts and run your own agents against them, and an agent works here by holding a maintainer-role membership you granted it. Your existing collaborators keep their membership and everything they have already contributed - they simply cannot write until you reopen the policy.",
 });
 
 /** The server's account of a mode, falling back to the shipped wording. */
@@ -150,13 +150,13 @@ export function roleLabel(role: Role): string {
  * readers alone (so nobody avoids it fearing the site goes dark).
  */
 export const FREEZE_MEANS =
-  "Stops every write to this book — from everyone, including you: no comments, suggestions, votes, claims, or submissions. Readers are unaffected and the published site keeps serving exactly as it does now. This is “something is wrong, stop everything while I look”, not a moderation setting.";
+  "Stops every write to this book - from everyone, including you: no comments, suggestions, votes, claims, or submissions. Readers are unaffected and the published site keeps serving exactly as it does now. This is “something is wrong, stop everything while I look”, not a moderation setting.";
 
 export const UNFREEZE_MEANS =
-  "Lifts the freeze. Writing resumes for everyone your annotation policy already allows — the policy itself is untouched by freezing.";
+  "Lifts the freeze. Writing resumes for everyone your annotation policy already allows - the policy itself is untouched by freezing.";
 
 /**
- * Pause agents — deliberately a separate control from freeze, described in
+ * Pause agents - deliberately a separate control from freeze, described in
  * terms of what it does NOT do, since that is the reason it exists.
  */
 export const PAUSE_AGENTS_MEANS =
@@ -165,7 +165,7 @@ export const PAUSE_AGENTS_MEANS =
 export const RESUME_AGENTS_MEANS = "Lets every agent token work again. Nothing was lost while paused.";
 
 // ---------------------------------------------------------------------------
-// Destructive actions — what actually happens
+// Destructive actions - what actually happens
 // ---------------------------------------------------------------------------
 
 /**
@@ -179,7 +179,7 @@ export const CONTRIBUTIONS_RETAINED =
 /** Consequence text for removing a person, named. */
 export function removalConsequence(name: string): string[] {
   return [
-    `${name} loses access to this book on their very next request — not when their session expires.`,
+    `${name} loses access to this book on their very next request - not when their session expires.`,
     "Any work item they had claimed is released and returns to the queue, so nothing sits stranded waiting for someone who has gone.",
     "Anything they had submitted but not yet applied is rejected.",
     "Any agent tokens they own are revoked with them.",
@@ -193,7 +193,7 @@ export function tokenRevocationConsequence(name: string): string[] {
     `The token “${name}” stops working on its very next request.`,
     "Any work item that agent had claimed is released and returns to the queue.",
     "Anything it had submitted but not yet applied is rejected.",
-    "The token value cannot be recovered or re-issued — mint a new one if the agent should keep working.",
+    "The token value cannot be recovered or re-issued - mint a new one if the agent should keep working.",
     CONTRIBUTIONS_RETAINED,
   ];
 }
@@ -225,7 +225,7 @@ export const CANCEL_LABEL = "Keep access";
 
 /**
  * Turn a removal response into sentences. The API reports exactly what it did;
- * echoing that back — rather than a generic "done" — is what lets an author
+ * echoing that back - rather than a generic "done" - is what lets an author
  * notice that removing someone released three work items they cared about.
  */
 export function describeRemoval(name: string, result: RemovalResult): string[] {
@@ -311,7 +311,7 @@ export function formatWhen(iso: string | null | undefined, absent: string): stri
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`;
 }
 
-/** Whether a token is revoked, expired, or live — in that precedence. */
+/** Whether a token is revoked, expired, or live - in that precedence. */
 export function tokenStatus(token: AgentTokenMeta): "revoked" | "expired" | "active" {
   if (token.revokedAt !== null) return "revoked";
   return token.expired ? "expired" : "active";
@@ -338,7 +338,7 @@ export function collaboratorName(row: Collaborator): string {
 }
 
 /**
- * "Approved 3, rejected 9, 1 still waiting" — the contract's "author's history
+ * "Approved 3, rejected 9, 1 still waiting" - the contract's "author's history
  * with this book". A moderator looking at their tenth spam comment should be
  * able to see that it is the tenth.
  */
@@ -363,7 +363,7 @@ export function authorHistorySentence(history: AuthorHistory | undefined): strin
 
 /**
  * Audit actions in plain language. Complete for everything this surface can
- * produce; anything else falls back to the raw action name, which is honest —
+ * produce; anything else falls back to the raw action name, which is honest -
  * an unrecognised action is better shown as an identifier than described
  * wrongly in a view whose whole job is answering "who did this".
  */
@@ -415,7 +415,7 @@ export function auditReason(event: AuditEvent): string | null {
   return typeof reason === "string" && reason.length > 0 ? reason : null;
 }
 
-/** One audit row as a sentence: "Avery froze the book — 2026-07-19 14:02 UTC". */
+/** One audit row as a sentence: "Avery froze the book - 2026-07-19 14:02 UTC". */
 export function describeAuditEvent(event: AuditEvent): string {
   return `${auditActorName(event)} ${auditActionText(event)}`;
 }
@@ -425,7 +425,7 @@ export function describeAuditEvent(event: AuditEvent): string {
  *
  * Built from what was actually returned rather than from the collaborator list,
  * because the answer to "who changed this" includes people who have since been
- * removed — and those are exactly the ones an author is vetting.
+ * removed - and those are exactly the ones an author is vetting.
  */
 export function auditActors(events: AuditEvent[]): { value: string; label: string }[] {
   const seen = new Map<string, string>();

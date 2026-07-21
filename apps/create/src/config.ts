@@ -5,7 +5,7 @@
  * `answers` map keyed by prompt id. Mirroring every prompt into a bespoke
  * typed field would create a second place for the prompt set to drift from,
  * whereas keying by prompt id means a prompt that exists is answerable and one
- * that does not is a loud "unknown key" — which is exactly the failure a CI
+ * that does not is a loud "unknown key" - which is exactly the failure a CI
  * operator wants.
  *
  * JSON and YAML are both accepted because a config file for a wizard that
@@ -105,7 +105,7 @@ export function parseConfig(text: string, source: string): WizardConfig {
 }
 
 /**
- * Prompt ids answered with `prompter.secret` — the ids whose value in a config
+ * Prompt ids answered with `prompter.secret` - the ids whose value in a config
  * file is a live credential rather than a preference.
  *
  * A `--config` file is allowed to carry these (that is the point of

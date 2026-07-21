@@ -14,7 +14,7 @@ guarantees drift.
 ## Decision
 
 - All artifact schemas are defined once in `@authorbot/schemas` as Zod v4
-  schemas (`import { z } from "zod"`) — the single source of truth
+  schemas (`import { z } from "zod"`) - the single source of truth
   (contract §1).
 - JSON Schemas are **generated** from Zod via `z.toJSONSchema` by a build
   step and written to `packages/schemas/json/`, checked in so consumers need

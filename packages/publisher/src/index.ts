@@ -1,5 +1,5 @@
 /**
- * @authorbot/publisher — read-only static-site publisher (Phase 1 contract
+ * @authorbot/publisher - read-only static-site publisher (Phase 1 contract
  * sections 1-4): Astro 5 invoked programmatically, sanitized Markdown
  * rendering from the mdast AST, story views, and the `authorbot.build/v1`
  * manifest.

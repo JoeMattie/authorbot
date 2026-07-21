@@ -1,7 +1,7 @@
 /**
- * Contract §5: progressive enhancement — with JavaScript disabled the
+ * Contract §5: progressive enhancement - with JavaScript disabled the
  * collab-enabled chapter page renders its prose with zero collaboration
- * chrome — and the Phase 1 regression, now conditional: an api-url-less
+ * chrome - and the Phase 1 regression, now conditional: an api-url-less
  * build ships zero <script> and no JS assets at all.
  */
 import { readdir, readFile } from "node:fs/promises";

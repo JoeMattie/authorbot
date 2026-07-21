@@ -1,6 +1,6 @@
 /**
  * Regression for contract §6 BOOK_REPO_PATH: the Node dev entry wires the
- * book repository (reader + inline mirror) from the environment — previously
+ * book repository (reader + inline mirror) from the environment - previously
  * the binding was listed in the contract but read by no code, so no
  * configured deployment could exercise book-repo content outside tests.
  */
@@ -51,7 +51,7 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
     ).rejects.toThrow(/DEV_LOGIN_ENABLED/);
   });
 
-  it("fails closed in github mode without OAuth config — never falls back to dev auth", async () => {
+  it("fails closed in github mode without OAuth config - never falls back to dev auth", async () => {
     await expect(
       createNodeDevApi({
         ...BASE_ENV,

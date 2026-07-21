@@ -10,7 +10,7 @@ Annotations and replies are canonical in Git but accepted as API commands
 (design §7.1, §7.3): the record must be durable the moment the API responds,
 yet the Git commit is slow, can conflict, and must be serialized per project.
 Design §20.1 prescribes a transactional outbox, and ADR 0008 assigns
-per-project serialization to a Durable Object — but Phase 2 has no Durable
+per-project serialization to a Durable Object - but Phase 2 has no Durable
 Object wiring, no GitHub App writes (Phase 5), and must remain fully testable
 in Node (phase2-contract §1, §7.1). Writing to Git synchronously inside the
 request would lose the record on commit failure; writing to Git "later" with
@@ -25,7 +25,7 @@ no transactional link would lose it silently.
 - **Processor** drains the outbox per project serially: renders the artifact
   files per Phase 0 contract §4 (`.authorbot/annotations/<id>/annotation.md`,
   `replies/<reply-id>.md`; withdraw edits frontmatter `status`), then commits
-  via `BookRepoWriter.commitFiles` — one commit per logical mutation with
+  via `BookRepoWriter.commitFiles` - one commit per logical mutation with
   design §14.3 trailers (`Authorbot-Actor`, `Authorbot-Annotation`,
   `Authorbot-Operation`).
 - `git_operations` rows track design §20.2 states (`queued → preparing →
@@ -58,5 +58,5 @@ no transactional link would lose it silently.
   from the repo (design §7.5).
 - Clients must treat mirroring mutations as asynchronous (`202` +
   `GET /v1/projects/{projectId}/operations/{operationId}`) even in dev,
-  where inline processing makes them effectively synchronous — the contract
+  where inline processing makes them effectively synchronous - the contract
   stays honest for Phase 5.

@@ -2,7 +2,7 @@
  * Slug derivation (Phase 6 contract §3.2: slug is "derived from the title,
  * editable, and explained as 'part of your URLs'").
  *
- * The target is Phase 0's `[a-z0-9][a-z0-9-]*` — no dots, no slashes, so a
+ * The target is Phase 0's `[a-z0-9][a-z0-9-]*` - no dots, no slashes, so a
  * slug can never escape a path segment.
  */
 
@@ -48,7 +48,7 @@ export const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
  */
 export function validateSlug(slug: string): string | null {
   if (slug.length === 0) {
-    return "A slug is required — it becomes part of your book's web address.";
+    return "A slug is required - it becomes part of your book's web address.";
   }
   if (slug.length > MAX_LENGTH) {
     return `That slug is ${String(slug.length)} characters; keep it to ${String(MAX_LENGTH)} or fewer.`;
@@ -65,7 +65,7 @@ export function validateSlug(slug: string): string | null {
  */
 export function validateWorkerName(name: string): string | null {
   if (name.length === 0) {
-    return "A name is required — it becomes part of your site's default address.";
+    return "A name is required - it becomes part of your site's default address.";
   }
   if (name.length > 63) {
     return "Cloudflare Worker names are at most 63 characters.";
@@ -110,7 +110,7 @@ export function validateRepo(repo: string): string | null {
 /**
  * The last line of defence for anything that becomes an argv *value*.
  *
- * The subprocess layer is already safe from shells — `spawn` with an argv array
+ * The subprocess layer is already safe from shells - `spawn` with an argv array
  * and `shell: false` (see `runtime/process.ts`). This guards the other half of
  * the problem, which quoting does nothing about: **the tool's own argument
  * parser**. `wrangler d1 migrations apply --config=/tmp/evil.jsonc` is not a

@@ -14,16 +14,16 @@
  * - **Overlap detection without the base source.** The projection stores no
  *   historical chapter sources, so "changed regions do not overlap" is
  *   decided conservatively by TWO conditions, both required against a moved
- *   base: the stored selector still resolves via §10.2 steps 1–4 with its
+ *   base: the stored selector still resolves via §10.2 steps 1-4 with its
  *   stored context intact, AND the resolution stays inside the declared
- *   block. Unique resolution alone is not a sufficient proxy — a concurrent
+ *   block. Unique resolution alone is not a sufficient proxy - a concurrent
  *   edit that deletes the target block lets step 4's chapter-wide search
  *   resurrect the quote elsewhere, which is a relocation onto text the
  *   submitter never saw rather than evidence of non-overlap. Crossing block
  *   boundaries against a moved base is therefore a conflict.
  *   `block_replacement` and `chapter_replacement`
  *   against a moved base are ALWAYS conflicts (their declared target is the
- *   whole block/chapter and intactness cannot be proven without the base) —
+ *   whole block/chapter and intactness cannot be proven without the base) -
  *   "never clobber" wins over cleverness.
  * - **Patch refusals on an unmoved base** (selector missing/ambiguous/not
  *   contiguous, invalid replacement, result validation failure) also take
@@ -127,7 +127,7 @@ export function createSubmissionApplier(options: CreateSubmissionApplierOptions)
         // does not establish the second conjunct: when the concurrent edit
         // DELETED the target block, §10.2 step 4 legitimately searches the
         // whole chapter and can land the stale replacement in a block the
-        // submitter never saw — overwriting the concurrent editor's own text.
+        // submitter never saw - overwriting the concurrent editor's own text.
         // Against a moved base we therefore require the resolution to stay
         // inside the declared block; crossing out of it is a conflict for a
         // human to merge, never a silent relocation.

@@ -1,6 +1,6 @@
 /**
  * Composer state machine (Phase 2b contract §2.2, §2.5): pure reducer so the
- * transitions — including the bounded operation polling — are unit tested
+ * transitions - including the bounded operation polling - are unit tested
  * without DOM or network.
  */
 import type { RangeSelector } from "./selection.js";

@@ -1,10 +1,10 @@
 /**
- * `<authorbot-new-chapter>` — the Phase 6 §3.5 "New chapter" button: a single
+ * `<authorbot-new-chapter>` - the Phase 6 §3.5 "New chapter" button: a single
  * link to the `/write/` page, "visible only to actors who may use it".
  *
  * That last clause is taken literally. When the API is unreachable, when the
  * viewer is signed out, or when their role cannot author chapters, this
- * element renders NOTHING — no greyed-out button, no teaser, no explanation of
+ * element renders NOTHING - no greyed-out button, no teaser, no explanation of
  * a door that is not theirs. The `/write/` page itself explains the role
  * requirement to anyone who reaches it directly.
  *

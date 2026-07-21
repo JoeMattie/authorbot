@@ -7,7 +7,7 @@ import { WORK_ITEM_TRANSITIONS, canTransitionWorkItem } from "./work-item-state.
  * Phase 3 gate lifted (Phase 4 contract sections 2, 4, 5). The graph itself
  * has been declared since Phase 3 (`WORK_ITEM_TRANSITIONS`); this module
  * adds the executable, trigger-labelled form. `transitionWorkItem` (the
- * Phase 3-gated function) is left untouched for compatibility — Phase 4
+ * Phase 3-gated function) is left untouched for compatibility - Phase 4
  * call sites use `transitionWorkItemPhase4` / `applyWorkItemTrigger`.
  */
 

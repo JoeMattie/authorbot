@@ -1,5 +1,5 @@
 /**
- * `@authorbot/git-github` — the GitHub integration for Authorbot (Phase 5
+ * `@authorbot/git-github` - the GitHub integration for Authorbot (Phase 5
  * contract). **Worker-compatible only**: WebCrypto instead of `node:crypto`,
  * `fetch` instead of `node:http`. Nothing in `src/` may import a `node:`
  * module; a test asserts it.

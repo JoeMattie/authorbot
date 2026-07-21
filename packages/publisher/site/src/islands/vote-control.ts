@@ -1,5 +1,5 @@
 /**
- * `VoteControl` — the approve/reject/abstain segmented control with a live
+ * `VoteControl` - the approve/reject/abstain segmented control with a live
  * aggregate tally and the "Queued as work item" badge (Phase 3 contract §6).
  * Framework-free; owns its own subtree and updates it in place so a live
  * tally refresh (SSE/poll) never rebuilds the card or steals keyboard focus.

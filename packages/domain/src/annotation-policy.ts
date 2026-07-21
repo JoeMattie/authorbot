@@ -1,5 +1,5 @@
 /**
- * Annotation policy (Phase 7 contract "Restricting") — who may write to a
+ * Annotation policy (Phase 7 contract "Restricting") - who may write to a
  * book, and whether what they write appears immediately.
  *
  * | Mode                | Who may write            | Appears                    |
@@ -43,7 +43,7 @@ export type AnnotationPolicy = (typeof ANNOTATION_POLICIES)[number];
  * The mode a book with no declared policy runs in: the Phase 2 behaviour,
  * unchanged. A deployment upgrading into Phase 7 must not find its book
  * suddenly writable by strangers, so the default is the restrictive end of the
- * progression that people were already on — not the permissive end, and not
+ * progression that people were already on - not the permissive end, and not
  * `locked` either, which would lock out the collaborators they already have.
  */
 export const DEFAULT_ANNOTATION_POLICY: AnnotationPolicy = "collaborators-only";
@@ -66,7 +66,7 @@ export type AnnotationPolicyDenialReason =
   | "locked"
   /**
    * Signed in and not a member, asking for something a non-member could never
-   * do (voting, claiming, submitting) even in an open book — those are member
+   * do (voting, claiming, submitting) even in an open book - those are member
    * capabilities, and `open` widens commenting, not the work queue.
    */
   | "member-capability";
@@ -74,14 +74,14 @@ export type AnnotationPolicyDenialReason =
 /**
  * The write capabilities the policy arbitrates.
  *
- * `annotate` is the one the policy table is actually about — commenting and
+ * `annotate` is the one the policy table is actually about - commenting and
  * suggesting. The other three are member capabilities that `open` and
  * `approval-gated` do NOT widen to strangers: a book that welcomes comments
  * from the internet is not thereby handing the internet its governance votes
  * or its work queue.
  *
  * `locked` restricts all four, because "existing collaborators keep their
- * membership and their history — they simply cannot write until the policy
+ * membership and their history - they simply cannot write until the policy
  * opens again", and a vote that manufactures a work item is unambiguously a
  * write.
  */
@@ -100,7 +100,7 @@ export interface AnnotationPolicyRequest {
  * Decide whether the policy admits this write.
  *
  * This answers the policy question ONLY. Scope checks, freeze, the agent pause,
- * and rate limits are separate gates applied alongside it — a request must
+ * and rate limits are separate gates applied alongside it - a request must
  * satisfy all of them, and each refuses with its own problem type so the caller
  * can tell "the book is locked" from "the book is frozen" from "you are going
  * too fast".
@@ -154,7 +154,7 @@ export function checkAnnotationPolicy(
     return ALLOWED;
   }
 
-  // collaborators-only — the Phase 2 behaviour, and the default.
+  // collaborators-only - the Phase 2 behaviour, and the default.
   if (isMember) {
     return ALLOWED;
   }

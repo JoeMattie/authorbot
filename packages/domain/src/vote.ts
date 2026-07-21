@@ -14,14 +14,14 @@ export const VOTE_VALUES = ["approve", "reject", "abstain"] as const;
 export const voteValueSchema = z.enum(VOTE_VALUES);
 export type VoteValue = z.infer<typeof voteValueSchema>;
 
-/** `PUT .../annotations/{annotationId}/vote` — route param + body merged. */
+/** `PUT .../annotations/{annotationId}/vote` - route param + body merged. */
 export const castVoteCommandSchema = z.strictObject({
   annotationId: uuidv7Schema,
   value: voteValueSchema,
 });
 export type CastVoteCommand = z.infer<typeof castVoteCommandSchema>;
 
-/** `DELETE .../annotations/{annotationId}/vote` — the command is the route param. */
+/** `DELETE .../annotations/{annotationId}/vote` - the command is the route param. */
 export const clearVoteCommandSchema = z.strictObject({
   annotationId: uuidv7Schema,
 });
@@ -31,8 +31,8 @@ export type VoteDenialReason = "not-a-suggestion";
 
 /**
  * Suggestion-only guard (contract section 2: votes on comments → 422). Votes
- * stay legal after `open` — sticky decisions require tracking vote changes on
- * `work_item_created` annotations (contract section 4) — so annotation status
+ * stay legal after `open` - sticky decisions require tracking vote changes on
+ * `work_item_created` annotations (contract section 4) - so annotation status
  * is deliberately not checked here; `votes:write` scope enforcement is the
  * API layer's (`requireScope`).
  */

@@ -3,7 +3,7 @@
  *
  * Drawn rather than fetched. Rendering the real logo would mean a terminal
  * image protocol (sixel, kitty, iTerm2) that most terminals do not have, or a
- * system binary like `timg` that most machines do not have — either way a
+ * system binary like `timg` that most machines do not have - either way a
  * `brew install` standing between an author and their book, to show them a
  * picture. Letterforms are what block characters are for, so the wordmark
  * survives the shrink to a terminal intact.
@@ -14,7 +14,7 @@
  * hand-padded ASCII art always has.
  */
 
-/** Orange for "Author", teal for "bot" — the logo's own split. */
+/** Orange for "Author", teal for "bot" - the logo's own split. */
 const ORANGE = "38;5;208";
 const TEAL = "38;5;37";
 const NAVY = "38;5;24";

@@ -1,5 +1,5 @@
 /**
- * @authorbot/markdown — Phase 0 markdown responsibilities (design section
+ * @authorbot/markdown - Phase 0 markdown responsibilities (design section
  * 6.2 subset, contract sections 3 and 5). No dependency on
  * `@authorbot/schemas`: everything here returns raw parsed data and findings;
  * schema validation and error-code mapping happen in the CLI.

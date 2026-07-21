@@ -1,8 +1,8 @@
 /**
- * `collaborate` — the API (Phase 6 contract §3.4 and §4).
+ * `collaborate` - the API (Phase 6 contract §3.4 and §4).
  *
  * This is the stage where an author gets sign-in, comments, votes, the work
- * queue, and — the thing that makes the whole wizard's promise true — the
+ * queue, and - the thing that makes the whole wizard's promise true - the
  * "New chapter" button.
  *
  * Two orderings in here are load-bearing rather than incidental:
@@ -46,7 +46,7 @@ import {
 const BROWSER_STEP_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
- * A journal-supplied name, or the fallback — never an unchecked value.
+ * A journal-supplied name, or the fallback - never an unchecked value.
  *
  * Every one of these ends up in an argv slot where the receiving tool would
  * read a leading `-` as the start of an option rather than as a name.
@@ -77,7 +77,7 @@ function usableName(
  * handle, which cannot be changed from the wizard and appears on every
  * authorization screen the book's readers see.
  *
- * It used to be `${title} (${slug})`, which GitHub then slugified — so "The
+ * It used to be `${title} (${slug})`, which GitHub then slugified - so "The
  * Causal Projector (causal-projector)" became the handle
  * `the-causal-causal-projector`: the same words twice, one of them truncated.
  * The title earns nothing here. The slug already identifies the book, is
@@ -90,7 +90,7 @@ export function gitHubAppName(_title: string, slug: string): string {
   if (slug.length <= room) {
     return `${PREFIX}${slug}`;
   }
-  // Slugs may be up to 64 characters, so this one still needs cutting — at a
+  // Slugs may be up to 64 characters, so this one still needs cutting - at a
   // hyphen, the slug's own word separator, rather than mid-word. Two books
   // whose slugs agree this far collide, and GitHub rejects a duplicate app
   // name outright, which is a better failure than a quietly confusing one.
@@ -198,7 +198,7 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
   };
 
   // The Worker treats its three GitHub App credentials as all-or-nothing, and
-  // reports `gitIntegration: "incomplete"` for a partial set — then does no Git
+  // reports `gitIntegration: "incomplete"` for a partial set - then does no Git
   // work while every read-only route keeps answering perfectly. That is exactly
   // how a dropped app id shipped: the wizard's health check asked /v1/me for a
   // 401, got one, and reported success over an integration that could not
@@ -214,7 +214,7 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
     if (value.trim() === "") {
       throw new WizardError(
         `The GitHub App's ${name} is missing, so the Worker would be deployed with an incomplete credential.`,
-        "Nothing was deployed. This is a bug in the wizard rather than something you did — please report it. Deleting the app at https://github.com/settings/apps and running `create-authorbot collaborate` again creates a fresh one.",
+        "Nothing was deployed. This is a bug in the wizard rather than something you did - please report it. Deleting the app at https://github.com/settings/apps and running `create-authorbot collaborate` again creates a fresh one.",
       );
     }
   }
@@ -340,11 +340,11 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
   ctx.reporter.blank();
   ctx.reporter.ok("Collaboration is on.");
   ctx.reporter.info(
-    `Go to ${siteUrl}, sign in with GitHub, and press New chapter. You get a plain title-and-prose box — Authorbot writes the frontmatter and the ids for you.`,
+    `Go to ${siteUrl}, sign in with GitHub, and press New chapter. You get a plain title-and-prose box - Authorbot writes the frontmatter and the ids for you.`,
   );
   // Not "commit and push these when you are ready". The projection reads
   // GitHub, so until this lands the deployment cannot see the book it is
-  // serving — and the settings page says exactly that, to an author with no
+  // serving - and the settings page says exactly that, to an author with no
   // reason to connect it to a line at the end of a long run.
   await commitGenerated(ctx, {
     files: ["book.yml", "wrangler.jsonc", "package.json", "package-lock.json"],
@@ -352,7 +352,7 @@ export const collaborateStage: Stage = async (ctx: WizardContext): Promise<Stage
     push: true,
     done: "Committed and pushed, so your site can read its own configuration.",
     failed:
-      "Could not commit the collaboration settings. Commit and push book.yml and wrangler.jsonc yourself — until then your site cannot read them.",
+      "Could not commit the collaboration settings. Commit and push book.yml and wrangler.jsonc yourself - until then your site cannot read them.",
   });
 
   return { continue: true, note: "collaboration enabled and verified" };
@@ -401,7 +401,7 @@ async function ensureDatabase(ctx: WizardContext, slug: string): Promise<Databas
   // The resume path gets the same check as the prompt, not a weaker one. This
   // name becomes a *positional* argument to `wrangler d1 migrations apply` and
   // `wrangler d1 execute`, where a value like `--config=/tmp/evil.jsonc` is
-  // read as a flag rather than a name — wrangler would load someone else's
+  // read as a flag rather than a name - wrangler would load someone else's
   // configuration and act on the author's live Cloudflare account. Validating
   // only what was typed left the far more likely path (a journal on disk)
   // unguarded.
@@ -523,8 +523,8 @@ interface AppCredentials {
   readonly clientId: string;
   readonly installationId: string;
   /**
-   * GitHub App id. Read from the manifest conversion, and — until this was
-   * fixed — used only to poll for the installation and then dropped, so the
+   * GitHub App id. Read from the manifest conversion, and - until this was
+   * fixed - used only to poll for the installation and then dropped, so the
    * Worker never received it and did no Git work at all.
    */
   readonly appId: string;
@@ -551,7 +551,7 @@ async function ensureGitHubApp(
 ): Promise<AppCredentials> {
   const already = ctx.journal.data.collaborate;
   if (already?.installationId !== undefined && ctx.journal.hasSecret("GITHUB_APP_PRIVATE_KEY")) {
-    // The credentials themselves are gone — they only ever lived in memory —
+    // The credentials themselves are gone - they only ever lived in memory -
     // but the client id is public and lives in wrangler.jsonc, so a resumed
     // run reads it back rather than creating a second app.
     const clientId = await readClientIdFromWrangler(ctx);
@@ -566,7 +566,7 @@ async function ensureGitHubApp(
   ctx.reporter.blank();
   ctx.reporter.step("Creating a GitHub App for your book");
   ctx.reporter.info(
-    "Your browser is about to open. GitHub will show you exactly what the app can do — read your repository's metadata, and write to its contents — and you approve it with one click. The credentials come straight back here and go straight into Cloudflare; they are never displayed or saved to a file.",
+    "Your browser is about to open. GitHub will show you exactly what the app can do - read your repository's metadata, and write to its contents - and you approve it with one click. The credentials come straight back here and go straight into Cloudflare; they are never displayed or saved to a file.",
   );
 
   if (ctx.actions.dryRun) {
@@ -587,7 +587,7 @@ async function ensureGitHubApp(
       name: options.appName,
       description: "The GitHub App that signs readers in and commits approved changes.",
       deleteWith:
-        "Delete it at https://github.com/settings/apps/<app>/advanced — the button is at the bottom.",
+        "Delete it at https://github.com/settings/apps/<app>/advanced - the button is at the bottom.",
     });
     return {
       clientId: "<created during the real run>",
@@ -632,7 +632,7 @@ async function ensureGitHubApp(
     description: "The GitHub App that signs readers in and commits approved changes.",
     // The app's own settings page, not the public listing: straight to the
     // page carrying the button, rather than three navigations away from it.
-    deleteWith: `Delete it at https://github.com/settings/apps/${conversion.slug}/advanced — the button is at the bottom.`,
+    deleteWith: `Delete it at https://github.com/settings/apps/${conversion.slug}/advanced - the button is at the bottom.`,
   });
 
   ctx.reporter.step("Storing the credentials in Cloudflare (they are never shown or saved)");
@@ -737,8 +737,8 @@ async function readClientIdFromWrangler(ctx: WizardContext): Promise<string | nu
  * Polls a URL until it answers with `want`, or the deadline passes.
  *
  * Returns the last response either way, so the caller reports what it actually
- * saw rather than a timeout. A request that throws — DNS not resolving here
- * yet, connection refused mid-rollout — counts as "not yet", not as an answer.
+ * saw rather than a timeout. A request that throws - DNS not resolving here
+ * yet, connection refused mid-rollout - counts as "not yet", not as an answer.
  */
 async function pollForStatus(
   ctx: WizardContext,
@@ -778,7 +778,7 @@ async function verifyHealth(
   // A Worker that was deployed seconds ago is not reachable everywhere yet, and
   // a hostname created minutes ago may still be cached locally as
   // non-existent. Both produce a confident failure about an API that is
-  // perfectly fine — and both have: this check reported "answered 404" on
+  // perfectly fine - and both have: this check reported "answered 404" on
   // three separate runs that passed on retry with no change to anything.
   //
   // So poll. The deadline is what decides, not the first answer.
@@ -808,7 +808,7 @@ async function verifyHealth(
       gitIntegration = undefined;
     }
     // Anything but "configured". The first version of this listed the bad
-    // values — "incomplete" and "unconfigured" — and missed "invalid", which
+    // values - "incomplete" and "unconfigured" - and missed "invalid", which
     // is the status a real book got: all three credentials present, and the
     // private key in a format the Worker cannot import. It passed the check
     // and collaboration was switched on over an integration that could not
@@ -838,7 +838,7 @@ async function verifyHealth(
   if (!location.includes("state=")) {
     throw new WizardError(
       "Signing in starts without the security token that protects the sign-in round trip.",
-      "The site was NOT switched over. Please report this — it indicates a mismatch between the wizard and the deployed API.",
+      "The site was NOT switched over. Please report this - it indicates a mismatch between the wizard and the deployed API.",
     );
   }
 
@@ -859,13 +859,13 @@ async function verifyHealth(
   );
   // §3.4 requires this check to *pass* before the stage declares success, so a
   // read-back that did not happen is a failure rather than a warning. Warning
-  // and carrying on set `publication.api_url` — the flag that puts sign-in and
-  // the New chapter button in front of readers — on the strength of a check
+  // and carrying on set `publication.api_url` - the flag that puts sign-in and
+  // the New chapter button in front of readers - on the strength of a check
   // that never ran.
   if (seeded === null || seeded.code !== 0) {
     throw new WizardError(
       "The API answered correctly, but the database could not be read back to confirm that your book is registered with you as its maintainer.",
-      "The site was NOT switched over, so your readers are unaffected. Check that wrangler is signed in (`npx wrangler whoami`), then run `create-authorbot collaborate` again — everything already done is skipped.",
+      "The site was NOT switched over, so your readers are unaffected. Check that wrangler is signed in (`npx wrangler whoami`), then run `create-authorbot collaborate` again - everything already done is skipped.",
     );
   }
   if (!hasMaintainerRow(seeded.stdout, projectSlug, `github:${login}`)) {
@@ -882,7 +882,7 @@ async function verifyHealth(
  *
  * The previous test was `text.includes(slug) && text.includes("github:" + login)`
  * over the whole result set, which two unrelated rows satisfy just as well as
- * one correct one — and on a shared database (or simply a second project) that
+ * one correct one - and on a shared database (or simply a second project) that
  * is not a hypothetical. The rows are parsed and matched field by field
  * instead. Parsing rather than adding a `WHERE` also keeps the author's GitHub
  * login out of the SQL string entirely.

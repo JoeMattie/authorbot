@@ -111,7 +111,7 @@ export interface AuthorbotApi {
   /** Rebuild the projection now (null when no reader is configured). */
   rebuild(correlationId?: string): Promise<RebuildResult | null>;
   /**
-   * Phase 5 §6: one reconciliation pass — classify the repository snapshot,
+   * Phase 5 §6: one reconciliation pass - classify the repository snapshot,
    * then diverge or project + re-anchor. The `ProjectCoordinator` Durable
    * Object calls this for its `refreshProjection()`; `rebuild()` is the thin
    * Phase 2-shaped wrapper over it.
@@ -129,7 +129,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   const clock: Clock = deps.clock ?? SYSTEM_CLOCK;
 
   // Boot-time rule validation (Phase 3 contract §3): invalid RULES_JSON
-  // throws here — never degrades to the default at runtime. Phase 6 §3.6
+  // throws here - never degrades to the default at runtime. Phase 6 §3.6
   // makes these the BOOTSTRAP layer: a book that declares `governance.rules`
   // in its own `book.yml` overrides them, resolved per request below.
   const bootstrapRules = parseRuleEntries(deps.config.rulesJson);
@@ -137,7 +137,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   /**
    * The rules in force for a project right now (Phase 6 §3.6). Resolved per
    * request rather than cached at boot, because "a rule edit takes effect on
-   * the next vote" is a requirement — a cache would make it take effect on the
+   * the next vote" is a requirement - a cache would make it take effect on the
    * next deploy instead. The read is one indexed primary-key lookup on a table
    * with one row per project, inside a command that is already writing.
    */
@@ -171,7 +171,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * Phase 5 §6: every projection write now goes through reconciliation, which
    * classifies the snapshot before applying it. `rebuild()` keeps its Phase 2
    * signature (boot, tests, the webhook) and returns null when the pass
-   * refused to project — no reader, no project, or a diverged repository.
+   * refused to project - no reader, no project, or a diverged repository.
    */
   const reconcile = async (
     options: Partial<ReconcileOptions> = {},
@@ -232,7 +232,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
   // No CORS middleware, by design (ADR-0019 §1): the API is same-origin with
   // the site it serves, so no `Access-Control-*` header is ever emitted and a
-  // cross-origin browser request fails at the browser — the correct outcome.
+  // cross-origin browser request fails at the browser - the correct outcome.
 
   app.onError((error, c) => {
     // Never echo internals (they may contain SQL values); the correlation id
@@ -352,7 +352,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
   const notifyMutation = async (projectId: string): Promise<void> => {
     // MIRROR_MODE=queue (Phase 2 contract §5): outbox rows are recorded but
-    // not drained here — a later drain (the coordinator alarm, or a manual
+    // not drained here - a later drain (the coordinator alarm, or a manual
     // `InlineMirror.drain`) picks them up. `inline` drains in-process;
     // `durable` (Phase 5 contract §5) asks the project's Durable Object to
     // drain now that the batch has committed. Both go through the same hook.
@@ -362,7 +362,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     try {
       await deps.onMutationCommitted(projectId);
     } catch {
-      // The mirror processor failing must not fail the 202 — the operation
+      // The mirror processor failing must not fail the 202 - the operation
       // remains observable via GET .../operations/{operationId}.
     }
   };
@@ -421,7 +421,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * switches a book's collaboration controls on, and it makes that check as an
    * anonymous stranger.
    *
-   * Without this, the only signal available was "does /v1/me refuse me?" — and
+   * Without this, the only signal available was "does /v1/me refuse me?" - and
    * a Worker with no usable GitHub App refuses anonymous callers exactly as
    * correctly as a healthy one. That is how a release shipped in which
    * collaboration was switched on over an integration that could not commit,
@@ -458,12 +458,12 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     }
     // `gitIntegration` (Phase 5 contract §2) makes the degraded state
     // visible: `unconfigured` is a deployment with no GitHub App, where
-    // reads work and mutations queue rather than commit. Status only — no
+    // reads work and mutations queue rather than commit. Status only - no
     // credential value is ever exposed.
     //
     // Phase 5 §6 adds the rest of the operator's picture: whether the
     // projection is behind the repository, whether the repository diverged,
-    // and — the design §17.3 point — whether what is DEPLOYED is what was
+    // and - the design §17.3 point - whether what is DEPLOYED is what was
     // integrated. Read the row fresh rather than using the cached one: all
     // three move without a request ever touching this handler.
     const project = (await repos.projects.getById(guard.project.id)) ?? guard.project;
@@ -498,8 +498,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   /**
-   * Divergence recovery (Phase 5 §6). Maintainer-only, audited, and — by
-   * default — resynchronizing: clearing the flag alone would leave the
+   * Divergence recovery (Phase 5 §6). Maintainer-only, audited, and - by
+   * default - resynchronizing: clearing the flag alone would leave the
    * projection and the repository still disagreeing, so the very next push
    * would diverge again. `resync` (default true) accepts the repository as
    * truth, re-projects it, and re-anchors, which is the only action that
@@ -604,7 +604,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
      * CONTROL surface (Phase 7): a freeze must not block this.
      *
      * access-control.ts is explicit that "stop everything while I look" is
-     * precisely the moment an author needs to revoke a token — and revoking the
+     * precisely the moment an author needs to revoke a token - and revoking the
      * leaked credential their agents were using is worth very little if they
      * cannot then mint the replacement those agents need to keep running. The
      * freeze already stops everything those credentials could DO; refusing to
@@ -678,7 +678,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       // Phase 7 contract "Seeing": collaborators are listed with "who added
       // them". Minting is the one place a membership is granted BY someone
       // rather than self-served, so it is the one place that fact exists to be
-      // recorded — and an agent appearing in the collaborator list with no
+      // recorded - and an agent appearing in the collaborator list with no
       // visible owner is exactly the thing an author is vetting for.
       repos.auditEvents.insertStatement({
         id: uuidv7(clock.now()),
@@ -703,7 +703,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         createdAt: timestamp,
       }),
     ];
-    // Atomic idempotency claim (stored body is redacted — never the token):
+    // Atomic idempotency claim (stored body is redacted - never the token):
     // a same-key retry can never mint a second actor/token pair.
     statements.push(...claimStatements(c, 201, responseBody));
     await deps.db.batch(statements);
@@ -715,7 +715,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     /**
      * CONTROL surface: access-control.ts names "revoke a token" as one of the
      * things a freeze must not refuse. Before this it was the only one that
-     * did — `agent-tokens/revoke-all` answered 200 under a freeze while
+     * did - `agent-tokens/revoke-all` answered 200 under a freeze while
      * revoking ONE token answered 423, so an author looking at a single leaked
      * credential could either burn every agent they had or nothing at all.
      */
@@ -733,12 +733,12 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     /**
      * Phase 7 contract "Revoking": revoking a token takes effect on the NEXT
      * REQUEST and must release the holder's lease, reject their in-flight
-     * submissions, and invalidate their sessions — while leaving everything
+     * submissions, and invalidate their sessions - while leaving everything
      * they already contributed in place.
      *
      * Before this phase the route flipped `revoked_at` and stopped. That did
      * stop the token authenticating, but it left any work item the agent held
-     * stranded `leased` until its lease timed out — up to four hours, which is
+     * stranded `leased` until its lease timed out - up to four hours, which is
      * the exact number the contract names as unacceptable.
      */
     const cascade = await revocationCascadeStatements({
@@ -805,7 +805,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   /**
    * A chapter's prose, marker-free, for the §3.5 composer.
    *
-   * "Editing an existing chapter uses the same composer" — but the revise half
+   * "Editing an existing chapter uses the same composer" - but the revise half
    * of `POST /v1/projects/{p}/chapter-submissions` requires a COMPLETE
    * replacement body plus the current `baseRevision`, and nothing in the API
    * let an editor read the current prose to populate that form. A revise had to
@@ -815,7 +815,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * returns the raw file including block markers.
    *
    * Editor/maintainer scoped like the write it feeds, and marker-stripped so
-   * the body a client sends back is the body a human edited — marker reuse for
+   * the body a client sends back is the body a human edited - marker reuse for
    * unchanged blocks is `applyChapterReplacement`'s job at drain time, not the
    * client's.
    */
@@ -861,7 +861,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       /**
        * Markdown as an author wrote it: no frontmatter, no marker syntax.
        * Trimmed of the blank lines the file format puts around the body, so
-       * what a composer loads is what a composer would have saved — leading
+       * what a composer loads is what a composer would have saved - leading
        * and trailing blank lines carry no meaning in Markdown, and leaving
        * them in would make an untouched round trip look like an edit.
        */
@@ -917,7 +917,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
      * for a reader who is neither the author nor a maintainer is that the row
      * was never fetched at all, so no future change to the serializer can leak
      * one. They are returned in a separate `pending` array rather than mixed
-     * into `items` for the same reason — a client that knows nothing about
+     * into `items` for the same reason - a client that knows nothing about
      * moderation cannot accidentally render an unapproved comment as an
      * approved one, and cursor paging over `items` stays a paging over real
      * annotations.
@@ -995,7 +995,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       if (command.scope !== "chapter") {
         // Contract §4 (unconditional): the blockId must exist in the
         // projected revision. Block ids are persisted on the chapter row by
-        // the rebuild, so this check works from the DB alone — including on
+        // the rebuild, so this check works from the DB alone - including on
         // reader-less instances sharing a DB a reader-ful instance rebuilt.
         if (!chapter.blockIds.includes(command.target.blockId)) {
           return problem(c, "unknown-block", {
@@ -1010,7 +1010,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       const timestamp = now();
 
       /**
-       * Phase 7 contract "Moderating" — the whole point of `approval-gated`.
+       * Phase 7 contract "Moderating" - the whole point of `approval-gated`.
        *
        * "Pending annotations are not mirrored to Git. They live in the
        * operational database until approved. Committing unreviewed submissions
@@ -1021,7 +1021,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
        * else: no `git_operations` row, no `outbox` row, no `annotations` row,
        * no `annotation_created` event. Everything that could carry the comment
        * toward a commit is simply not created, rather than created and
-       * suppressed — the difference matters, because a suppressed outbox row is
+       * suppressed - the difference matters, because a suppressed outbox row is
        * one bug away from being drained.
        *
        * The three properties exit criterion 10 asks for follow structurally
@@ -1155,7 +1155,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   );
 
   // Threaded replies list (contract §2.3/§5: "reply → reload → both persist
-  // (API-backed)") — the read complement of the POST below, same page
+  // (API-backed)") - the read complement of the POST below, same page
   // envelope as the annotations list. Anonymous read follows the same
   // public-annotations gate as the annotations list.
   app.get("/v1/projects/:projectId/annotations/:annotationId/replies", maybeAuth, async (c) => {
@@ -1181,7 +1181,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/replies", auth, idem, async (c) => {
     // `requireMembership` (Phase 7): a permissive annotation policy widens who
-    // may START a thread, not who may join one — see ProjectGuardOptions.
+    // may START a thread, not who may join one - see ProjectGuardOptions.
     const guard = await requireProjectScope(c, services, "annotations:write", {
       requireMembership: true,
     });
@@ -1336,7 +1336,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       outboxPayload: {
         type: "annotation.withdraw",
         annotationId: annotation.id,
-        // The withdrawing actor (author or maintainer) — credited in the
+        // The withdrawing actor (author or maintainer) - credited in the
         // commit's Authorbot-Actor trailer by the processor.
         actorId: a.actor.id,
         actorRef: a.actorRef,
@@ -1353,7 +1353,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     // NOTE (contract §5): the record status is NOT flipped here. The
     // processor's post-commit sync batch sets `withdrawn` atomically with the
     // commit; on a failed operation the record stays `open` (consistent with
-    // Git) and the withdraw can be retried — previously the premature flip
+    // Git) and the withdraw can be retried - previously the premature flip
     // left a 409-blocked `withdrawn` row that the next rebuild silently
     // reverted to `open`, losing the accepted withdrawal.
     await deps.db.batch([
@@ -1415,7 +1415,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         throw error;
       }
       // Duplicate delivery id. Successfully handled deliveries (processed /
-      // ignored / still in flight) are ignored (exit criterion 4) — but a
+      // ignored / still in flight) are ignored (exit criterion 4) - but a
       // delivery whose rebuild FAILED must be retryable via GitHub's
       // redelivery of the same id, otherwise the projection stays stale until
       // an unrelated future push.
@@ -1433,7 +1433,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     }
 
     // Contract §6: `push` ON THE DEFAULT BRANCH. A push to a feature branch
-    // must not mark the projection stale — the projection tracks the default
+    // must not mark the projection stale - the projection tracks the default
     // branch, so a topic-branch push would schedule a refresh that finds
     // nothing new and, worse, could clear a stale flag a real push set.
     //
@@ -1451,8 +1451,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     // Phase 5 §6: mark stale FIRST, then ask for a refresh.
     //
     // The flag is the durable record that a push is owed a projection; the
-    // refresh request is best-effort. Ordering them the other way — refresh,
-    // then flag — loses the push whenever the refresh fails, because nothing
+    // refresh request is best-effort. Ordering them the other way - refresh,
+    // then flag - loses the push whenever the refresh fails, because nothing
     // durable would remember it was ever needed. This runs even with no
     // reader configured (the deployed Worker's state today), so a deployment
     // that later gains repository access finds the backlog waiting rather
@@ -1479,7 +1479,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     // With a coordinator wired, the refresh belongs to it: doing it here as
     // well would run two concurrent projection writes for one push, exactly
     // the serialization the Durable Object exists to provide. Without one,
-    // this handler stays the refresher — which is what the deployment does
+    // this handler stays the refresher - which is what the deployment does
     // today, so absent-coordinator behaviour is unchanged.
     if (staleness.delegated) {
       await repos.webhookDeliveries.setStatus(rowId, "processed", now());
@@ -1528,7 +1528,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * Both halves are needed. Clearing the cookie alone leaves a live row that
    * still authenticates anyone holding a copy of the value; revoking alone
    * leaves the browser presenting a dead cookie on every request. Revoke
-   * first, then clear — a failure between the two leaves the session dead
+   * first, then clear - a failure between the two leaves the session dead
    * rather than merely forgotten, which is the safe way round.
    *
    * Always 204, whether or not a live session was found: the caller learns
@@ -1563,7 +1563,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     app.post("/v1/dev/login", async (c) => {
       // CSRF (ADR-0019 §3): this route sits before requireAuth (it mints the
       // session), so it applies the same Origin/Referer check the auth
-      // middleware applies to cookie-authenticated mutations — otherwise any
+      // middleware applies to cookie-authenticated mutations - otherwise any
       // web page could drive a login CSRF against a developer's local API and
       // destructively replace membership rows.
       const csrfOk = csrfOriginAllowed(
@@ -1624,7 +1624,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
           revokedAt: null,
         };
         // Dev convenience: re-login with a different role (or after a
-        // revocation) replaces the membership — the unique (project, actor)
+        // revocation) replaces the membership - the unique (project, actor)
         // index allows only one row per actor.
         if (membership !== null) {
           await deps.db
@@ -1677,7 +1677,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
     app.get("/v1/auth/github", async (c) => {
       // return_to (ADR-0019 §4): only URLs within the API's own origin may
-      // round-trip through the state cookie — never javascript:/data:
+      // round-trip through the state cookie - never javascript:/data:
       // schemes, never a foreign host (open redirect).
       const returnToRaw = c.req.query("return_to");
       let returnTo: string | null = null;
@@ -1903,7 +1903,7 @@ function pushRef(rawBody: string): string | null {
 
 /**
  * Best-effort head commit from a `push` payload, for the refresh request's
- * logs. Never trusted for correctness — the refresh always re-reads the ref —
+ * logs. Never trusted for correctness - the refresh always re-reads the ref -
  * so a malformed or unexpected payload just yields null.
  */
 function pushHeadCommit(rawBody: string): string | null {

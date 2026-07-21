@@ -15,7 +15,7 @@ Options:
                     and is recorded in authorbot-build.json
   --api-url <path>  collaboration API base PATH; enables the annotation
                     islands on chapter pages (Phase 2b). Root-relative only
-                    ("/" or a base path like "/my-book") — the API is
+                    ("/" or a base path like "/my-book") - the API is
                     same-origin with the site, so an absolute URL is
                     rejected (ADR-0019). Overrides publication.api_url in
                     book.yml. Without either, zero JavaScript is emitted.
@@ -36,7 +36,7 @@ function renderFindings(findings: Finding[], io: CliIo): void {
 }
 
 /**
- * `authorbot build` — thin wrapper around `@authorbot/publisher` with the
+ * `authorbot build` - thin wrapper around `@authorbot/publisher` with the
  * contract's validate-gate. Returns the process exit code.
  */
 export async function runBuild(args: string[], io: CliIo): Promise<number> {

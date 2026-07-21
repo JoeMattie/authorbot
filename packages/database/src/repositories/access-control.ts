@@ -4,7 +4,7 @@
  *
  * As everywhere else in this package, every mutating method has a
  * `...Statement` variant returning a bound `SqlStatement` so callers can
- * compose atomic multi-table writes with `db.batch([...])` — an approval must
+ * compose atomic multi-table writes with `db.batch([...])` - an approval must
  * land the annotation row, the git operation, the outbox row, the audit event,
  * and the queue row's transition together or not at all.
  */
@@ -30,7 +30,7 @@ export class ProjectAccessControlsRepository {
    * Set (or clear) the freeze.
    *
    * Written as an upsert touching only the freeze columns, so freezing a book
-   * whose agents are already paused does not silently resume them — the two
+   * whose agents are already paused does not silently resume them - the two
    * controls are orthogonal and must stay independently settable, including on
    * the first write when no row exists yet.
    */
@@ -309,7 +309,7 @@ export class RateLimitCountersRepository {
    * rows, and the limiter is not the place to start depending on one. The read
    * that follows the upsert can only ever over-report under concurrency (a
    * rival increment landing in between), which errs toward limiting rather than
-   * toward letting a fleet through — the safe direction for this control.
+   * toward letting a fleet through - the safe direction for this control.
    */
   async increment(input: {
     subject: string;

@@ -259,7 +259,7 @@ describe("chapter composer element (contract §3.5)", () => {
     );
     mount();
     await expect.poll(() => document.querySelector(".ab-chapter-form")).toBeTruthy();
-    // Present but not usable before a chapter exists — and saving never
+    // Present but not usable before a chapter exists - and saving never
     // published anything by itself.
     expect(publishBtn()).toBeTruthy();
     expect(publishBtn()?.hidden).toBe(true);
@@ -309,7 +309,7 @@ describe("chapter composer element (contract §3.5)", () => {
   /**
    * On a chapter page the composer is a SECOND island beside the annotation
    * island, which already renders the auth bar. Offering sign-in twice on one
-   * page is two controls for one job — confusing to a reader, and ambiguous to
+   * page is two controls for one job - confusing to a reader, and ambiguous to
    * anything selecting `.ab-devlogin` or `.ab-me`.
    */
   it("renders no auth chrome when it is not the page's own island", async () => {
@@ -398,7 +398,7 @@ describe("chapter composer, edit mode", () => {
     expect(errorText()).toContain("changed since you opened it");
   });
 
-  it("degrades honestly — and never opens an empty box — when the source is unreadable", async () => {
+  it("degrades honestly - and never opens an empty box - when the source is unreadable", async () => {
     stubFetch(
       editRoutes({
         [`${API}/v1/projects/${PROJECT}/chapters/${CHAPTER_ID}/source`]: {

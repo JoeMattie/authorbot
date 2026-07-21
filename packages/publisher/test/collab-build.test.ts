@@ -9,7 +9,7 @@ import type { BookConfig } from "@authorbot/schemas";
 
 /**
  * Phase 2b contract §1, §3, §5: a build WITHOUT an API base stays exactly as
- * today — zero JavaScript, no collaboration artifacts, byte-comparable pages —
+ * today - zero JavaScript, no collaboration artifacts, byte-comparable pages -
  * while a build WITH one emits, on chapter pages only, the CSP meta tag, the
  * island stylesheet link, the configured mount element, and the bundle
  * (≤ 35 KB gzipped).
@@ -84,8 +84,8 @@ describe("api-url-less build (script-free regression)", () => {
    * The CSP is NOT a collaboration artifact (design §19.4).
    *
    * It used to be emitted only by pages that loaded an island, which meant the
-   * two page types that inject author-supplied markup with `set:html` — the
-   * chapter page of an api-url-less build, and every character page — shipped
+   * two page types that inject author-supplied markup with `set:html` - the
+   * chapter page of an api-url-less build, and every character page - shipped
    * with no policy at all. Nothing exploitable reaches that HTML today, but the
    * book that legitimately enables `content.raw_html` is exactly the book where
    * these pages render markup the author did not hand-audit, and a static page
@@ -159,7 +159,7 @@ describe("api-url-less build (script-free regression)", () => {
         // §3.5 puts the "New chapter" entry point there deliberately: the case
         // the section exists for is "an author facing an empty book", and a
         // book with no chapters has no chapter pages to host the button. The
-        // invariant that still matters — and that the sibling test asserts —
+        // invariant that still matters - and that the sibling test asserts -
         // is that the api-url-less build stays byte-identically script-free;
         // a collab build was always allowed to differ by exactly the islands.
         // The CSP meta is stripped from BOTH sides now: prose pages emit it in
@@ -173,7 +173,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           // The header account strip: sign in, sign out, Settings, Work. An
           // island like any other, on every page that already loads the
-          // bundle — which is why the story pages, which do not, are still
+          // bundle - which is why the story pages, which do not, are still
           // byte-identical without stripping anything.
           .replace(/<authorbot-account[^>]*>\s*<\/authorbot-account>/, "")
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
@@ -200,7 +200,7 @@ describe("collab-enabled build", () => {
   it("puts the account strip on the index, where an empty book's author lands", async () => {
     // The hole this closes: a book with no chapters had no sign-in anywhere.
     // The only "Sign in with GitHub" lived in the collab island, which renders
-    // only on chapter pages — while the wizard signs off telling the author to
+    // only on chapter pages - while the wizard signs off telling the author to
     // sign in and press "New chapter".
     const page = await readFile(path.join(outCollab, "index.html"), "utf8");
     const mount = /<authorbot-account[^>]*>/.exec(page)?.[0] ?? "";
@@ -251,7 +251,7 @@ describe("collab-enabled build", () => {
 
   it("hydrates the home page with private authoring entry points (Phase 6 §3.5)", async () => {
     // §3.5 exists for "an author facing an empty book". Such a book has no
-    // chapter pages, so the authoring entry point cannot live only there — the
+    // chapter pages, so the authoring entry point cannot live only there - the
     // home page has to carry it or the blank slate is a dead end. What the
     // home page must NOT gain is the annotation island: there is no prose on
     // it to annotate.
@@ -336,7 +336,7 @@ describe("collab-enabled build", () => {
       const settings = await readFile(path.join(outCollab, "settings/index.html"), "utf8");
       expect(settings).toContain("<authorbot-access");
       // Asset hrefs follow the SITE's base path (unset here), not the API
-      // base — the two are independent halves of a deployment (ADR-0019 §6).
+      // base - the two are independent halves of a deployment (ADR-0019 §6).
       expect(settings).toContain('<script type="module" src="/_astro/authorbot-access.js">');
       expect(settings).toContain('<link rel="stylesheet" href="/_astro/authorbot-access.css">');
       // The mount still carries the API base the islands must call.
@@ -371,7 +371,7 @@ describe("collab-enabled build", () => {
       expect(js).not.toContain("innerHTML");
       const total = gzipSync(Buffer.from(js)).length + gzipSync(Buffer.from(css)).length;
       // Generous next to the reading bundle's 35 KB because this is one page
-      // loaded by one maintainer — but bounded, so it cannot grow unwatched.
+      // loaded by one maintainer - but bounded, so it cannot grow unwatched.
       expect(total).toBeLessThanOrEqual(20 * 1024);
     });
 
@@ -449,7 +449,7 @@ describe("resolveCollab", () => {
       expect(() => resolveCollab(book(undefined), { apiUrl })).toThrow(PublisherError);
       expect(() => resolveCollab(book(undefined), { apiUrl })).toThrow(/ADR-0019/);
     }
-    // The durable form is checked identically — a book.yml that predates
+    // The durable form is checked identically - a book.yml that predates
     // ADR-0019 fails the build rather than publishing a site whose every
     // collaboration call is blocked by the browser.
     expect(() => resolveCollab(book({ api_url: "https://api.example.com" }), {})).toThrow(
@@ -482,7 +482,7 @@ describe("resolveCollab", () => {
  * root of `_site` while every link pointed at `/my-book/…`. Cloudflare Workers
  * static assets resolve a request path directly against that tree
  * (`"assets": { "directory": "./_site" }`), so every one of those links 404'd
- * and only an unlinked root copy was reachable — the site published broken.
+ * and only an unlinked root copy was reachable - the site published broken.
  *
  * The property that matters is not "the output is nested" but "every emitted
  * link resolves to a file that exists", so that is what this asserts.

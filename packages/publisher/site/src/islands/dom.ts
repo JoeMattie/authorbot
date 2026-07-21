@@ -1,6 +1,6 @@
 /**
  * Tiny DOM helpers shared by the Phase 3 islands (vote control, work queue).
- * Every text path goes through `textContent` — `innerHTML` is never used, so
+ * Every text path goes through `textContent` - `innerHTML` is never used, so
  * the contract §3 plain-text / CSP guarantees hold (asserted by the build
  * test: the bundle must not contain "innerHTML").
  */

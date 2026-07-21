@@ -1,7 +1,7 @@
-# Phase 3 implementation contract — votes, rules, and work generation
+# Phase 3 implementation contract - votes, rules, and work generation
 
 Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§11, §13, §15.5, §23 Phase 3)
-and additive to the Phase 0–2b contracts. Exit criterion (design §23):
+and additive to the Phase 0-2b contracts. Exit criterion (design §23):
 concurrent qualifying votes create one and only one work item.
 
 ## 1. Scope
@@ -12,7 +12,7 @@ tracking and maintainer overrides; idempotent work-item generation with
 durable Git artifacts; work-queue read API; SSE event feed; island additions
 (vote controls, decision badges, a work-queue page).
 
-**Out (deferred):** claims/leases/submissions (Phase 4 — work items stop at
+**Out (deferred):** claims/leases/submissions (Phase 4 - work items stop at
 `ready`), weighted votes, arbitrary custom metrics, vote-event export beyond
 aggregates (§26.1: aggregate-only), notifications.
 
@@ -20,7 +20,7 @@ aggregates (§26.1: aggregate-only), notifications.
 
 - `PUT /v1/projects/{p}/annotations/{id}/vote` body `{ value:
   approve|reject|abstain }`; `DELETE` clears. Suggestions only (comments →
-  422). Requires `votes:write` — added to the **contributor** role bundle;
+  422). Requires `votes:write` - added to the **contributor** role bundle;
   agents vote only when their membership grants it (design §11.2).
 - Tables: `votes` (unique `(annotation_id, actor_id)`, upsert on change) and
   append-only `vote_events`. Aggregates are computed in SQL, never cached
@@ -34,7 +34,7 @@ aggregates (§26.1: aggregate-only), notifications.
 ## 3. Rule engine
 
 - `packages/rule-engine`: pure evaluation of the declarative shape in design
-  §11.1 / the `authorbot.instance/v1` schema — `when.all[]` of `{ metric,
+  §11.1 / the `authorbot.instance/v1` schema - `when.all[]` of `{ metric,
   operator: gte|lte|gt|lt|eq, value }` → `action { type: create_work_item,
   work_type }`. No user-supplied code, ever.
 - Rules come from config: `RULES_JSON` env (validated against the instance
@@ -44,7 +44,7 @@ aggregates (§26.1: aggregate-only), notifications.
 - Evaluation triggers on `vote_changed`, inside the same serialized command
   that recorded the vote.
 
-## 4. Decisions and work items (design §11.3–11.4, §13)
+## 4. Decisions and work items (design §11.3-11.4, §13)
 
 - Threshold crossing creates, **in one DB batch**: the decision row
   (rule + version, aggregate metrics snapshot, result), the work-item row
@@ -52,7 +52,7 @@ aggregates (§26.1: aggregate-only), notifications.
   annotation selector incl. quote), the annotation transition
   `open → work_item_created`, audit events, and outbox rows for both Git
   artifacts. Uniqueness on `(source_annotation_id, action_type,
-  rule_version)` makes concurrent crossings collapse to exactly one —
+  rule_version)` makes concurrent crossings collapse to exactly one -
   losers of the race treat unique-violation as already-done, not error.
 - **Sticky**: later vote changes never delete the decision or work item; if
   the aggregate stops satisfying the rule, the decision is marked
@@ -62,7 +62,7 @@ aggregates (§26.1: aggregate-only), notifications.
   item, reopen a rejected suggestion, force-create a work item bypassing the
   rule (same uniqueness key, `rule_version: 0`).
 - Git artifacts via the Phase 2 outbox: `.authorbot/decisions/<id>.yml`
-  (aggregate metrics only — no per-voter data, §26.1) and
+  (aggregate metrics only - no per-voter data, §26.1) and
   `.authorbot/work-items/<id>.md` per design §13: frontmatter per Phase 0
   contract §4, body sections Context (annotation body), Original text (the
   quoted target between `authorbot:original` delimiters), Requested change,
@@ -73,7 +73,7 @@ aggregates (§26.1: aggregate-only), notifications.
 
 ## 5. Events (design §15.5)
 
-- `GET /v1/projects/{p}/events` — SSE stream from a cursor-ordered
+- `GET /v1/projects/{p}/events` - SSE stream from a cursor-ordered
   `events` table (monotonic id): `annotation_created`, `vote_aggregate`,
   `decision_created`, `decision_support_changed`, `work_item_created`,
   `operation_completed`. `Last-Event-ID` (or `?after=`) resumes; 15s
@@ -98,7 +98,7 @@ aggregates (§26.1: aggregate-only), notifications.
 ## 7. Exit criteria
 
 1. **Concurrency hammer**: N parallel qualifying votes (and repeated rule
-   re-evaluations) yield exactly one decision and one work item — asserted
+   re-evaluations) yield exactly one decision and one work item - asserted
    at the DB and in Git (one decision artifact, one work-item artifact).
 2. Vote uniqueness: re-voting updates in place; `vote_events` appends; 
    tallies correct across actor types (human vs agent metric split).

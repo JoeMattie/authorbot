@@ -4,11 +4,11 @@ import { z } from "zod";
  * Lease-token FORMAT helpers only (Phase 4 contract section 2): parse and
  * shape-check, no crypto. Generating the 256-bit random secret, hashing it
  * (SHA-256), storing only the hash, and the constant-time compare are the
- * API layer's job — exactly the split used for agent tokens in `token.ts`.
+ * API layer's job - exactly the split used for agent tokens in `token.ts`.
  * Failure results carry a reason only and never echo any part of the value;
  * lease tokens are never logged.
  *
- * Format (resolved ambiguity — the contracts pin "opaque 256-bit token" but
+ * Format (resolved ambiguity - the contracts pin "opaque 256-bit token" but
  * no encoding): `authorbot_lease_` + 43 base64url chars, matching the agent
  * token secret encoding. The distinct prefix makes a leaked lease token
  * identifiable and unconfusable with an agent credential (an agent token is

@@ -1,7 +1,7 @@
 # Story graph (schema: authorbot.story-graph/v1).
 #
 # Method-neutral planning nodes: premise, arc, part, chapter, scene, beat,
-# custom. This template ships EMPTY — a blank book has nothing to outline yet,
+# custom. This template ships EMPTY - a blank book has nothing to outline yet,
 # and an outline referencing chapters that do not exist fails validation.
 #
 # Add nodes as the story takes shape, for example:
@@ -21,7 +21,7 @@
 #       status: draft
 #
 # `chapter_id` must match a real chapter's `id`, and `parent` must name a node
-# defined in this file — `authorbot validate` checks both.
+# defined in this file - `authorbot validate` checks both.
 #
 # A filled-in example lives in examples/book-repo/story/outline.yml.
 schema: authorbot.story-graph/v1

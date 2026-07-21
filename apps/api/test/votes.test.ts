@@ -1,5 +1,5 @@
 /**
- * Phase 3 contract §2–§4: vote endpoints, the serialized vote command
+ * Phase 3 contract §2-§4: vote endpoints, the serialized vote command
  * pipeline (record vote + event, tally, rule eval, one-batch decision/work
  * item creation), and sticky `support_changed` semantics.
  */
@@ -31,7 +31,7 @@ describe("vote endpoints and pipeline", () => {
   let author: string;
 
   beforeEach(async () => {
-    // No inline mirror by default here — the Phase 3 outbox renderers live in
+    // No inline mirror by default here - the Phase 3 outbox renderers live in
     // repo-coordinator; these tests assert DB + API state.
     h = await makeHarness();
     author = await devLogin(h, "author", "contributor");

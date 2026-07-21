@@ -35,14 +35,14 @@ export async function requireBookDirectory(ctx: WizardContext): Promise<void> {
     return;
   }
   // A dry run of the whole flow reaches `publish` with no book on disk,
-  // because `book` wrote nothing — that is the point of a dry run. The plan
+  // because `book` wrote nothing - that is the point of a dry run. The plan
   // must still cover every later stage (§2.4: "prints the full plan"), so the
   // precondition is satisfied by the book the same run has planned to create.
   if (ctx.actions.dryRun && ctx.journal.data.book?.slug !== undefined) {
     return;
   }
   throw new WizardError(
-    `There is no book in ${ctx.directory} — no book.yml was found.`,
+    `There is no book in ${ctx.directory} - no book.yml was found.`,
     "Run `create-authorbot book` first to create one, or re-run this from inside your book's directory (or pass its path).",
   );
 }
@@ -109,7 +109,7 @@ export async function readBookIdentity(ctx: WizardContext): Promise<BookFacts> {
  * Which GitHub repository this book actually lives in.
  *
  * **The remote is asked first, and it wins.** The journal used to outrank it,
- * which meant the true `origin` was never consulted at all — and `book.repo`
+ * which meant the true `origin` was never consulted at all - and `book.repo`
  * decides which repository receives the author's Cloudflare API token
  * (`gh secret set CLOUDFLARE_API_TOKEN --repo <repo>`). A `.authorbot-setup.json`
  * committed to a shared or forked book could therefore redirect that token to
@@ -131,13 +131,13 @@ export async function resolveRepo(ctx: WizardContext): Promise<string | null> {
     }
     // A dry run legitimately reaches here with nothing on disk: the `book`
     // stage planned the repository this same run, and later stages must be
-    // able to plan against it (§2.4 — the plan covers every stage).
+    // able to plan against it (§2.4 - the plan covers every stage).
     if (ctx.actions.dryRun) {
       return recorded;
     }
     // Otherwise the journal names a repository the repository itself does not
     // corroborate. Proceeding would mean acting on an unverifiable claim, so
-    // the claim is dropped and the caller sees "no repository" — which every
+    // the claim is dropped and the caller sees "no repository" - which every
     // caller already handles, and which changes nothing outside this machine.
     ctx.reporter.warn(
       `The setup journal says this book lives at ${recorded}, but no \`origin\` remote could be read from ${ctx.directory}, so that claim is being ignored.`,
@@ -156,7 +156,7 @@ export async function resolveRepo(ctx: WizardContext): Promise<string | null> {
     ctx.reporter.info(`The journal (.authorbot-setup.json) says: ${recorded}`);
     ctx.reporter.info(`Your \`origin\` remote says:              ${actual}`);
     ctx.reporter.info(
-      "Repository secrets, and the address collaboration commits to, follow whichever one is used — so this is worth a look. If you did not put that name in the journal yourself, the journal came from somewhere else and should not be trusted.",
+      "Repository secrets, and the address collaboration commits to, follow whichever one is used - so this is worth a look. If you did not put that name in the journal yourself, the journal came from somewhere else and should not be trusted.",
     );
     const proceed = await ctx.prompter.confirm({
       id: "book.repoConflict",
@@ -188,7 +188,7 @@ export async function resolveRepo(ctx: WizardContext): Promise<string | null> {
  * `siteUrl` decides where readers' GitHub sign-in codes are redirected
  * (`GITHUB_REDIRECT_URI`), where the app's webhooks are delivered, and where a
  * maintainer bearer token is sent when minting an agent credential. Like
- * `book.repo`, it is read from a file that lives in the book repository — so a
+ * `book.repo`, it is read from a file that lives in the book repository - so a
  * `.authorbot-setup.json` committed to a shared or forked book could name a
  * host the author has never seen, and the wizard would wire three secrets to
  * it. `parseJournal` can only check the value is a well-formed `https:` URL;
@@ -197,7 +197,7 @@ export async function resolveRepo(ctx: WizardContext): Promise<string | null> {
  * The corroboration available is the Worker name: a `workers.dev` address is
  * derived from a name this wizard chose, so `<workerName>.<subdomain>.workers.dev`
  * verifies itself. A custom domain cannot be derived from anything local, so it
- * is not silently trusted — it is shown, with what it controls spelled out, and
+ * is not silently trusted - it is shown, with what it controls spelled out, and
  * the author confirms. That mirrors `resolveRepo`: a claim the machine cannot
  * corroborate is a claim the author must look at.
  */
@@ -233,7 +233,7 @@ export async function resolveSiteUrl(
   ctx.reporter.warn("This book's address comes from its setup journal, and nothing local corroborates it.");
   ctx.reporter.info(`.authorbot-setup.json says your book is published at: ${recorded}`);
   ctx.reporter.info(
-    "That address will receive your readers' GitHub sign-in codes, this book's webhooks, and — if you mint an agent token — a maintainer credential.",
+    "That address will receive your readers' GitHub sign-in codes, this book's webhooks, and - if you mint an agent token - a maintainer credential.",
   );
   ctx.reporter.info(
     "If that is your own custom domain, this is expected. If you did not put it there yourself, stop and look at .authorbot-setup.json.",
@@ -310,8 +310,8 @@ export { stringifyYaml };
  *
  * Every stage that writes configuration has to do this, and until now each one
  * either did it privately or told the author to. `collaborate` did the latter
- * — "commit and push the changed book.yml and wrangler.jsonc when you are
- * ready" — which is a footnote at the end of a long run, and the consequence
+ * - "commit and push the changed book.yml and wrangler.jsonc when you are
+ * ready" - which is a footnote at the end of a long run, and the consequence
  * of missing it is that the API never projects the book and the settings page
  * reports that it cannot read its own configuration. The author is then
  * looking at a broken page with no reason to connect it to a line they
@@ -410,6 +410,6 @@ export async function commitGenerated(
     ctx.reporter.warn(
       `Committed, but the push failed: ${(push.stderr || push.stdout).trim().split("\n")[0] ?? "unknown error"}`,
     );
-    ctx.reporter.info("Run `git push` when you can — until then your site cannot read this change.");
+    ctx.reporter.info("Run `git push` when you can - until then your site cannot read this change.");
   }
 }

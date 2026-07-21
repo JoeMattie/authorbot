@@ -2,7 +2,7 @@
  * Local UUIDv7 check (contract section 2): lowercase, version nibble `7`,
  * RFC 4122 variant nibble (`8`, `9`, `a`, or `b`).
  *
- * Deliberately duplicated from `@authorbot/schemas` — this package must not
+ * Deliberately duplicated from `@authorbot/schemas` - this package must not
  * depend on the schemas package (schema validation happens in the CLI).
  */
 export const UUIDV7_REGEX =

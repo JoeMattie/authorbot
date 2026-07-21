@@ -4,7 +4,7 @@
  *
  * Creating a GitHub App does not install it. Until it is installed on the
  * repository the app can authenticate nobody and write nothing, so the wizard
- * polls rather than assuming — declaring success on app *creation* would leave
+ * polls rather than assuming - declaring success on app *creation* would leave
  * an author with a site whose sign-in button works and whose every write
  * silently fails.
  *
@@ -126,7 +126,7 @@ export async function waitForInstallation(
     if (response.status === 403 || response.status === 429) {
       throw new WizardError(
         "GitHub is rate-limiting this account, so the installation could not be confirmed.",
-        "Wait a few minutes, then run `create-authorbot collaborate` again — everything already done is skipped.",
+        "Wait a few minutes, then run `create-authorbot collaborate` again - everything already done is skipped.",
       );
     }
     // 404 is the expected "not installed yet" answer; anything else 5xx-ish is

@@ -1,5 +1,5 @@
 /**
- * `ProjectCoordinator` Durable Object — the Cloudflare wrapper around
+ * `ProjectCoordinator` Durable Object - the Cloudflare wrapper around
  * coordinator.ts (Phase 5 contract §5, design §6.2). One instance per project
  * id (`idFromName(projectId)`), so every Git-touching operation for a project
  * is serialized regardless of how many isolates are serving requests.
@@ -8,7 +8,7 @@
  *
  * 1. **Classic `fetch`/`alarm` Durable Object, not RPC.** The RPC style needs
  *    `extends DurableObject` from `cloudflare:workers`, a module that only
- *    resolves inside workerd — importing it would make this file unloadable
+ *    resolves inside workerd - importing it would make this file unloadable
  *    in the Node test suite and force the whole coordinator behind
  *    `@cloudflare/vitest-pool-workers`. The contract asks for deterministic
  *    default-suite tests, so the wire protocol is a handful of internal POST
@@ -60,7 +60,7 @@ export interface CoordinatorDoBindings extends CoordinatorBindings {
 
 /**
  * Internal origin for stub requests. Durable Object `fetch` requires an
- * absolute URL but never resolves it over the network — nothing leaves the
+ * absolute URL but never resolves it over the network - nothing leaves the
  * account.
  */
 export const COORDINATOR_ORIGIN = "https://coordinator.authorbot.internal";
@@ -99,7 +99,7 @@ export class ProjectCoordinatorDurableObject {
    * test seam: it lets the Node suite hand in an already-wrapped
    * better-sqlite3 database and a fake-GitHub reader/writer pair, so the
    * routing, alarm, and eviction-recovery paths are covered without workerd.
-   * It is never passed in production — the runtime supplies two arguments.
+   * It is never passed in production - the runtime supplies two arguments.
    */
   constructor(
     state: DurableObjectStateLike,
@@ -147,7 +147,7 @@ export class ProjectCoordinatorDurableObject {
     const coordinator = this.#coordinatorFor(projectId);
     // Remember which project this instance owns: `idFromName` is one-way, so
     // without this an alarm that fires after an eviction has no project to
-    // sweep leases for. Scheduling bookkeeping only — never operational state.
+    // sweep leases for. Scheduling bookkeeping only - never operational state.
     await this.#state.storage.put(PROJECT_ID_KEY, projectId);
     // Self-healing schedule: any traffic re-arms the periodic alarm, so a DO
     // that lost its alarm (reset, first ever request) starts sweeping again
@@ -221,7 +221,7 @@ export function coordinatorStub(
 
 /**
  * Ask a project's coordinator to run one action. Returns the parsed JSON body,
- * or throws — callers on the request path (`notifyMutation`) already treat a
+ * or throws - callers on the request path (`notifyMutation`) already treat a
  * mirror failure as non-fatal, since the operation stays observable through
  * `GET /v1/projects/{id}/operations/{operationId}`.
  */

@@ -4,8 +4,8 @@
  * virtual module whose source is `JSON.stringify(model)` (see build.ts and
  * the package README).
  *
- * Prose (`html` fields) is pre-rendered by `render.ts` from the mdast AST —
- * escaped, anchored, and sanitized — so the templates only ever inject it
+ * Prose (`html` fields) is pre-rendered by `render.ts` from the mdast AST -
+ * escaped, anchored, and sanitized - so the templates only ever inject it
  * with `set:html` inside a fixed layout.
  */
 

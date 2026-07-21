@@ -211,7 +211,7 @@ describe("annotation, reply, and withdraw commands", () => {
       expect(badParent.status).toBe(422);
     });
 
-    it("GET lists an annotation's replies (page envelope) — reply persistence is readable (§5)", async () => {
+    it("GET lists an annotation's replies (page envelope) - reply persistence is readable (§5)", async () => {
       const { annotationId } = await createAnnotation();
       const first = await h.app.request(
         `/v1/projects/${h.projectId}/annotations/${annotationId}/replies`,
@@ -344,7 +344,7 @@ describe("annotation, reply, and withdraw commands", () => {
       const { operationId } = (await res.json()) as { operationId: string };
 
       // Contract §5 regression: the record must NOT read `withdrawn` before
-      // the git operation commits — the processor's sync batch flips it.
+      // the git operation commits - the processor's sync batch flips it.
       const annotation = await h.repos.annotations.getById(annotationId);
       expect(annotation?.status).toBe("open");
       expect(annotation?.gitOperationId).toBe(operationId);

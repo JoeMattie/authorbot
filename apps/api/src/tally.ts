@@ -1,7 +1,7 @@
 /**
  * Vote-tally arithmetic for the serialized vote command (Phase 3 contract
  * §3): the SQL tally reflects the *committed* votes, but the rule must be
- * evaluated against the aggregate *after* this command's vote change — and
+ * evaluated against the aggregate *after* this command's vote change - and
  * the vote row, the decision, and everything else land in ONE `db.batch`
  * (contract §4), so the post-change tally is computed prospectively here
  * rather than re-queried mid-batch.
@@ -19,7 +19,7 @@ export type VoterActorType = "human" | "agent" | "system";
 
 /**
  * Who is voting, as far as the metrics care (Phase 6 contract §3.6). `role` is
- * the voter's *current* project role, read from the request's auth context —
+ * the voter's *current* project role, read from the request's auth context -
  * the same source the SQL tally's membership join reads, so the prospective
  * adjustment and the next SQL tally cannot disagree about who is a maintainer.
  */
@@ -106,7 +106,7 @@ export function tallyToMetrics(tally: VoteTally): Record<string, number> {
   };
 }
 
-/** Tally → API JSON (aggregate counts only — never per-voter data, §26.1). */
+/** Tally → API JSON (aggregate counts only - never per-voter data, §26.1). */
 export function tallyJson(tally: VoteTally): Record<string, number> {
   return {
     approvals: tally.approvals,

@@ -1,11 +1,11 @@
 /**
- * `<authorbot-chapter-composer>` — the Phase 6 §3.5 authoring surface: a plain
+ * `<authorbot-chapter-composer>` - the Phase 6 §3.5 authoring surface: a plain
  * title-and-prose composer that creates a chapter from nothing (the `/write/`
  * page) or revises an existing one (the chapter page).
  *
  * The author writes **Markdown only**: no frontmatter, no block markers, no
  * ids. The server generates the chapter id, the slug, the order and every
- * marker, so no UUID is ever rendered into this UI or typed into it — in edit
+ * marker, so no UUID is ever rendered into this UI or typed into it - in edit
  * mode the id arrives as a build-time `data-chapter-id` attribute the reader
  * never sees.
  *
@@ -20,7 +20,7 @@
  *
  * Security (§2b §3): every string reaches the DOM through `textContent`;
  * `innerHTML` is never used (the build test greps the bundle for it), and no
- * `setAttribute("style", …)` — dynamic style goes through the CSSOM.
+ * `setAttribute("style", …)` - dynamic style goes through the CSSOM.
  */
 import {
   CollabApi,
@@ -57,7 +57,7 @@ interface Config {
 }
 
 const HELP_TEXT =
-  "Write the chapter in plain Markdown — just the prose. No frontmatter, no ids, " +
+  "Write the chapter in plain Markdown - just the prose. No frontmatter, no ids, " +
   "no markers: Authorbot assigns all of that when it saves.";
 
 const DENIED_TEXT = "Writing chapters needs the editor or maintainer role.";
@@ -70,7 +70,7 @@ const STATE_CONFLICT_TEXT =
   "chapter, so the editor stays closed. Edit the file in the repository instead.";
 
 const STALE_TEXT =
-  "Still syncing. Your text was accepted — reload the page in a moment to see where it landed.";
+  "Still syncing. Your text was accepted - reload the page in a moment to see where it landed.";
 
 function parseConfig(host: HTMLElement): Config | null {
   const { apiBase, project } = host.dataset;
@@ -88,7 +88,7 @@ function parseConfig(host: HTMLElement): Config | null {
      * secondary mount on a chapter page. Only a standalone composer offers
      * sign-in: a chapter page already carries the collaboration island's auth
      * bar, and a second "Sign in" form beside it would be two ways to do one
-     * thing — ambiguous to a reader and, as it turns out, to a test locator.
+     * thing - ambiguous to a reader and, as it turns out, to a test locator.
      */
     standalone: host.dataset["standalone"] === "true",
     chapterId: chapterId === undefined || chapterId === "" ? null : chapterId,
@@ -211,7 +211,7 @@ export class AuthorbotChapterComposer extends HTMLElement {
   }
 
   /**
-   * Auth state, mirroring `collab-element.ts` exactly — including the
+   * Auth state, mirroring `collab-element.ts` exactly - including the
    * `.ab-devlogin` form's markup and class names, which the shared e2e helper
    * locates by selector.
    */
@@ -496,7 +496,7 @@ export class AuthorbotChapterComposer extends HTMLElement {
         type: "rejected",
         message:
           result.status === 409
-            ? "This chapter changed since you opened it — reload to get the current text."
+            ? "This chapter changed since you opened it - reload to get the current text."
             : `Save failed: ${result.message}`,
       });
       this.renderState();

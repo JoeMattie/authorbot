@@ -1,10 +1,10 @@
 /**
- * `authorbot upgrade` — ADR-0021 §3.
+ * `authorbot upgrade` - ADR-0021 §3.
  *
  *   1. resolve current pin → target release; show what changed
  *   2. run the target's book-repo migrations against a working copy
  *   3. validate BEFORE and AFTER; abort on any new error
- *   4. open a PULL REQUEST — never push to main
+ *   4. open a PULL REQUEST - never push to main
  *   5. apply pending D1 migrations
  *   6. redeploy, and verify health before declaring success
  *
@@ -13,7 +13,7 @@
  * **The author's repository is not touched until the result is known good.**
  * Migrations run against a copy in a temporary directory. Validation runs
  * before and after. Only if no *new* error appeared does anything get written
- * back, and even then it lands on a fresh branch and becomes a pull request —
+ * back, and even then it lands on a fresh branch and becomes a pull request -
  * never a push to the default branch. The undo button is `git revert`, which
  * is why the toolchain bump and the format migration are separate commits.
  *
@@ -21,7 +21,7 @@
  * we could not learn is a deploy whose health we cannot check, and that exits
  * non-zero saying so. A partial run prints what completed and what did not,
  * with the command that recovers. The failure mode this guards against is not
- * a crash — it is an author believing their book is upgraded when it is not.
+ * a crash - it is an author believing their book is upgraded when it is not.
  */
 
 import path from "node:path";
@@ -51,15 +51,15 @@ export const UPGRADE_USAGE = `Usage: authorbot upgrade [path] [options]
 
 Move a book repository to a newer release of the Authorbot toolchain
 (ADR-0021 §3). Migrations run against a working copy, validation runs before
-and after, and the result arrives as a PULL REQUEST — never a push to your
+and after, and the result arrives as a PULL REQUEST - never a push to your
 default branch.
 
 Options:
   --check           report whether an upgrade is available and whether it
                     would need a book-format migration; changes nothing.
                     Intended for a scheduled job: see the exit codes below
-  --dry-run         print the full plan — including what the migrations would
-                    change and whether the result validates — and change
+  --dry-run         print the full plan - including what the migrations would
+                    change and whether the result validates - and change
                     nothing
   --json            machine-readable output (with --check or --dry-run)
   --to <version>    upgrade to an exact release instead of the newest one in
@@ -73,8 +73,8 @@ Options:
                     does not do it for you
   --rollback <ver>  move the pin BACK to <ver>, as a pull request. This rolls
                     back the TOOLCHAIN only. Rolling back a book-format
-                    migration is a separate operation — reverting its commit
-                    — and this will tell you which one (ADR-0021 §5)
+                    migration is a separate operation - reverting its commit
+                    - and this will tell you which one (ADR-0021 §5)
   --url <url>       the deployed book's URL, used to verify health after a
                     redeploy. Without it, a deploy whose URL wrangler does
                     not report cannot be verified, and that is an error
@@ -155,12 +155,12 @@ export async function runUpgrade(
     }
     if (error instanceof MigrationApplyError) {
       // A migration threw. It ran against a throwaway copy, so the author's
-      // repository is untouched — say so, because "the upgrade crashed" and
+      // repository is untouched - say so, because "the upgrade crashed" and
       // "the upgrade damaged my book" are very different fears.
       io.err(`authorbot: ${error.message}`);
       io.err(
         "authorbot: this ran against a working copy; your repository was not modified. " +
-          "This is a bug in the migration — please report it.",
+          "This is a bug in the migration - please report it.",
       );
       return 2;
     }
@@ -327,7 +327,7 @@ interface WorkingCopyOutcome {
  * Steps 2 and 3: migrate a copy, validate before and after, and decide.
  *
  * The working copy is always removed, success or failure. Nothing in the
- * author's repository is written here — the caller does that, and only when
+ * author's repository is written here - the caller does that, and only when
  * `newErrors` is empty.
  */
 async function migrateWorkingCopy(
@@ -382,7 +382,7 @@ async function migrateWorkingCopy(
  * A "new" error is one whose code, path, and pointer did not appear before.
  * Message text is deliberately excluded: a message that gained a line number
  * is the same error, and treating it as new would abort upgrades for no
- * reason. This is ADR-0021 §2 in code — a book valid under the old version
+ * reason. This is ADR-0021 §2 in code - a book valid under the old version
  * must stay valid.
  */
 function findNewErrors(before: ValidationReport, after: ValidationReport): Finding[] {
@@ -428,7 +428,7 @@ async function runUpgradeFlow(
   }
 
   // Step 3 gate, plus the requirement that we have a clean tree to branch
-  // from — an upgrade must never sweep up unrelated work in progress.
+  // from - an upgrade must never sweep up unrelated work in progress.
   if (!(await deps.git.isClean(plan.repoPath))) {
     io.err(
       "authorbot: the working tree has uncommitted changes. " +
@@ -449,7 +449,7 @@ async function runUpgradeFlow(
     io.err(
       "A book that validates under your current release must keep validating (ADR-0021 §2), " +
         "so nothing was written to your repository and no branch was created. " +
-        "Please report this — it is a bug in the migration, not in your book.",
+        "Please report this - it is a bug in the migration, not in your book.",
     );
     return 1;
   }
@@ -470,9 +470,9 @@ async function runUpgradeFlow(
       path.join(plan.repoPath, "package.json"),
       rewritePin(plan.pinLocation.packageJsonText, newSpec),
     );
-    // The lockfile has to move with the pin. `npm ci` — which both generated
+    // The lockfile has to move with the pin. `npm ci` - which both generated
     // workflows run, and which exists to refuse a lockfile that disagrees with
-    // its manifest — otherwise fails on this pull request, so every upgrade
+    // its manifest - otherwise fails on this pull request, so every upgrade
     // opened one whose CI could not pass.
     const relocked = await deps.lockfile.relock(plan.repoPath);
     const pinPaths = relocked ? ["package.json", "package-lock.json"] : ["package.json"];
@@ -561,8 +561,8 @@ async function runDryRun(
   io: CliIo,
   deps: UpgradeDeps,
 ): Promise<number> {
-  // A dry run does the genuinely informative half of the work — migrate a
-  // throwaway copy and validate it — so that "no new errors" is a result
+  // A dry run does the genuinely informative half of the work - migrate a
+  // throwaway copy and validate it - so that "no new errors" is a result
   // rather than a hope. The author's repository is never opened for writing.
   const outcome = await migrateWorkingCopy(plan, deps, io);
   const base = options.base ?? (await readDefaultBranch(deps.fs, plan.repoPath));
@@ -612,7 +612,7 @@ async function runDryRun(
   );
   if (outcome.newErrors.length > 0) {
     renderFindings(outcome.newErrors, io);
-    io.err("authorbot: this upgrade WOULD BE REFUSED — the migration introduces new errors.");
+    io.err("authorbot: this upgrade WOULD BE REFUSED - the migration introduces new errors.");
     return 1;
   }
   io.out(`  4. open a pull request against ${base} with two commits (pin, then migrations)`);
@@ -638,11 +638,11 @@ function pullRequestBody(plan: UpgradePlan, outcome: WorkingCopyOutcome): string
     "",
     "### Commits",
     "",
-    `1. **Toolchain pin** — \`@authorbot/cli\` ${plan.pinLocation.pin.spec} → ${renderPin(plan.pinLocation.pin, plan.target)}.`,
+    `1. **Toolchain pin** - \`@authorbot/cli\` ${plan.pinLocation.pin.spec} → ${renderPin(plan.pinLocation.pin, plan.target)}.`,
   ];
   if (outcome.changed.length > 0) {
     lines.push(
-      `2. **Book-format migrations** — ${outcome.changed.length} file(s) rewritten.`,
+      `2. **Book-format migrations** - ${outcome.changed.length} file(s) rewritten.`,
       "",
       "These are separate commits on purpose: reverting the pin rolls back the",
       "toolchain, reverting the migration rolls back your file format, and those",
@@ -680,13 +680,13 @@ function pullRequestBody(plan: UpgradePlan, outcome: WorkingCopyOutcome): string
 
 function reportValidation(outcome: WorkingCopyOutcome, io: CliIo): void {
   io.out(
-    `authorbot: validated before and after — ${outcome.before.errors.length} error(s) before, ` +
+    `authorbot: validated before and after - ${outcome.before.errors.length} error(s) before, ` +
       `${outcome.after.errors.length} after, 0 new`,
   );
   if (outcome.after.warnings.length > outcome.before.warnings.length) {
     io.out(
       `authorbot: ${outcome.after.warnings.length - outcome.before.warnings.length} new warning(s) ` +
-        "(allowed within a major — see the pull request diff)",
+        "(allowed within a major - see the pull request diff)",
     );
   }
 }
@@ -724,7 +724,7 @@ function reportPartial(
   io.err(`authorbot: your default branch was not touched. The work sits on ${branch}.`);
   io.err(
     `authorbot: to discard it: git checkout ${originalBranch} && git branch -D ${branch}. ` +
-      "To keep going, fix the cause and re-run `authorbot upgrade` — it starts from a clean tree.",
+      "To keep going, fix the cause and re-run `authorbot upgrade` - it starts from a clean tree.",
   );
 }
 
@@ -757,7 +757,7 @@ async function runDeploySteps(
   // must be compatible with the code already running.
   const d1 = await readD1Binding(deps.fs, repoPath);
   if (d1 === undefined) {
-    io.out("authorbot: step 5 skipped — no d1_databases binding, so there is no database to migrate.");
+    io.out("authorbot: step 5 skipped - no d1_databases binding, so there is no database to migrate.");
   } else {
     try {
       const result = await deps.wrangler.applyD1Migrations(repoPath, d1.databaseName);
@@ -830,7 +830,7 @@ async function runDeploySteps(
  * Rolling back the *toolchain* is a pin change. Rolling back a *format
  * migration* is reverting its commit. They are different operations, and an
  * author who does the first without the second has a new toolchain
- * expectation against old files — the exact state validation exists to catch.
+ * expectation against old files - the exact state validation exists to catch.
  * So this command does the pin change, names every format migration that sits
  * between the two versions, and re-validates.
  */
@@ -868,7 +868,7 @@ async function runRollback(
     for (const { migration } of spanned) {
       io.out(`  ${migration.id} (${migration.from} -> ${migration.to}): ${migration.description}`);
     }
-    io.out("authorbot: rolling those back is a separate operation — revert their commit:");
+    io.out("authorbot: rolling those back is a separate operation - revert their commit:");
     io.out('  git log --oneline --grep "book-format migrations"');
     io.out("  git revert <that commit>");
     io.out("authorbot: (ADR-0021 §5. Reverting the pin alone leaves migrated files with an older toolchain.)");
@@ -936,7 +936,7 @@ async function runRollback(
     io.err(`authorbot: after the rollback the book has ${report.errors.length} validation error(s):`);
     renderFindings(report.errors, io);
     io.err(
-      "authorbot: this is what ADR-0021 §5 warns about — an older toolchain against migrated files. " +
+      "authorbot: this is what ADR-0021 §5 warns about - an older toolchain against migrated files. " +
         "Revert the book-format migration commit as well, then re-validate.",
     );
     return 1;
@@ -946,7 +946,7 @@ async function runRollback(
       `${report.warnings.length} warning(s).`,
   );
   io.out(
-    `authorbot: note — that check ran with the toolchain installed here (${current.raw}), not with ` +
+    `authorbot: note - that check ran with the toolchain installed here (${current.raw}), not with ` +
       `${plan.target.raw}. Once the pull request merges and ${plan.target.raw} is installed, run ` +
       "`authorbot validate .` again to confirm.",
   );

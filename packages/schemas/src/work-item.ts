@@ -32,7 +32,7 @@ export const workItemPrioritySchema = z.enum(WORK_ITEM_PRIORITIES);
 export type WorkItemPriority = z.infer<typeof workItemPrioritySchema>;
 
 /**
- * Work item frontmatter `.authorbot/work-items/<id>.md` —
+ * Work item frontmatter `.authorbot/work-items/<id>.md` -
  * `authorbot.work-item/v1` (design section 13, contract section 4).
  * Stable paths with status in frontmatter (contract ADR over design 8.1).
  * `source_annotation_id`, `chapter_id`, and `base_revision` are optional at

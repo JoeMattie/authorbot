@@ -4,7 +4,7 @@
  * The drift test matters more than it looks: the wizard embeds copies of the
  * template because the published package has no `templates/` directory
  * (ADR-0022). Embedded copies rot silently, so the suite asserts they are
- * byte-identical to the originals — an edit to either side without the other
+ * byte-identical to the originals - an edit to either side without the other
  * fails here rather than in an author's repository.
  */
 import { readFile } from "node:fs/promises";
@@ -245,7 +245,7 @@ describe("wrangler.jsonc", () => {
     // The Worker treats them as all-or-nothing: with any one missing it
     // reports gitIntegration "incomplete" and does no Git work at all. The app
     // id was read from the manifest conversion, used to poll for the
-    // installation, then dropped — so every book the wizard produced had
+    // installation, then dropped - so every book the wizard produced had
     // collaboration switched on over an integration that could not commit,
     // could not project, and could not read its own book.yml.
     const text = renderWrangler({
@@ -274,7 +274,7 @@ describe("wrangler.jsonc", () => {
     // One decision, two places. The book saying annotations are public while
     // the Worker was never told produced a site that rendered the whole
     // collaboration UI over an API that refused every anonymous read with a
-    // 401 — so a visitor saw no annotations and no sign-in link either,
+    // 401 - so a visitor saw no annotations and no sign-in link either,
     // because the island gives up when its first read fails.
     const base = {
       d1Name: "db",
@@ -341,7 +341,7 @@ describe("README", () => {
   });
 });
 
-/** Line comments only — which is all `renderWrangler` emits. */
+/** Line comments only - which is all `renderWrangler` emits. */
 function stripComments(text: string): string {
   return text
     .split("\n")

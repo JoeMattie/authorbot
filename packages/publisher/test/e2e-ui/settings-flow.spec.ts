@@ -4,7 +4,7 @@
  * breaks.
  *
  * Both tests restore what they changed. The e2e stack shares one book repo
- * across specs, and a settings commit is a real edit to `book.yml` — leaving
+ * across specs, and a settings commit is a real edit to `book.yml` - leaving
  * `chapter_url` rewritten would move every chapter for whatever runs next.
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -26,7 +26,7 @@ async function openSettings(page: Page, login: string): Promise<void> {
 /**
  * Save and wait for the commit to land. A settings write is queued through the
  * same outbox as any other mutation, and the API refuses a second change while
- * one is in flight — so the next test step has to wait for it, not race it.
+ * one is in flight - so the next test step has to wait for it, not race it.
  */
 async function saveAndSettle(page: Page): Promise<void> {
   await page.locator("button.ab-settings-save").click();
@@ -63,7 +63,7 @@ test("a guarded field states what it breaks before the change is accepted", asyn
   await expect(chapterUrlField).toHaveValue(ORIGINAL_CHAPTER_URL);
   await chapterUrlField.fill(NEW_CHAPTER_URL);
 
-  // The consequence is stated as soon as the field differs — before any save.
+  // The consequence is stated as soon as the field differs - before any save.
   // Each guarded field has its own, shown only once that field is modified, so
   // the visible one is precisely the field being changed.
   const consequence = page.locator("p.ab-guarded-consequence:not([hidden])");
@@ -133,7 +133,7 @@ test("governance reads in author-facing language, and never-editable fields are 
     expect(governanceText, "rules read as prose, not as rule syntax").not.toContain(identifier);
   }
   // The human-maintainer requirement is explained rather than merely rendered,
-  // and it is removable — the author's veto is theirs to keep or drop.
+  // and it is removable - the author's veto is theirs to keep or drop.
   await expect(page.locator("input.ab-require-human-maintainer")).toBeVisible();
 
   // §3.6 exit criterion: never-editable fields are ABSENT from the interface,

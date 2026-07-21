@@ -1,5 +1,5 @@
 /**
- * The Phase 7 half of the API client — the author-facing access control routes
+ * The Phase 7 half of the API client - the author-facing access control routes
  * (collaborators, agent tokens, audit, access state, freeze, pause, roles,
  * removal, revocation, moderation).
  *
@@ -9,13 +9,13 @@
  * class methods cannot be tree-shaken, so sixteen maintainer-only routes added
  * to it would be ~400 bytes gzipped of code no reader can ever call, paid on
  * every page view forever. Here, they are loaded by `/settings/` and nowhere
- * else — and the shared request plumbing (`projectUrl`, `get`, `post`,
+ * else - and the shared request plumbing (`projectUrl`, `get`, `post`,
  * `mutate`, `jsonResult`) is inherited rather than reimplemented, so there is
  * one CSRF/idempotency/problem-parsing path in the codebase, not two.
  *
  * Nothing here can return an agent token's value after the fact.
  * `agentTokens()` reads metadata, and no route re-displays a token once minted
- * — `mintAgentToken()` is the single moment its value exists to be shown.
+ * - `mintAgentToken()` is the single moment its value exists to be shown.
  */
 import {
   CollabApi,
@@ -39,7 +39,7 @@ export interface AccessActor {
  * One collaborator row (contract "Seeing": "who has access, their role, when
  * they joined, who added them, and when they last acted").
  *
- * `addedByActorId` and `lastActedAt` are genuinely nullable — a membership
+ * `addedByActorId` and `lastActedAt` are genuinely nullable - a membership
  * predating Phase 7 has no recorded granter, and someone who has never acted
  * has no last action. The view says so rather than inventing a value.
  */
@@ -77,7 +77,7 @@ export interface AgentTokenMeta {
   lastUsedAt: string | null;
   /** The human who minted it. */
   owner: AccessActor | null;
-  /** Membership role — half of the token's effective authority. */
+  /** Membership role - half of the token's effective authority. */
   role: string | null;
   expired: boolean;
 }
@@ -97,7 +97,7 @@ export interface AuditEvent {
   metadata: unknown;
 }
 
-/** `GET .../access` — the state the enforcement gate actually reads. */
+/** `GET .../access` - the state the enforcement gate actually reads. */
 export interface AccessStateDoc {
   annotationPolicy: AnnotationPolicy;
   requiresApproval: boolean;
@@ -123,7 +123,7 @@ export interface PendingAnnotation {
   chapterRevision: number;
   target: AnnotationTarget | null;
   authorActorId: string;
-  /** UNTRUSTED user prose — rendered through `textContent` only. */
+  /** UNTRUSTED user prose - rendered through `textContent` only. */
   body: string;
   moderation: {
     state: string;
@@ -143,7 +143,7 @@ export interface AccessChange extends AccessStateDoc {
   affectedTokens?: number;
 }
 
-/** The 200 body of a collaborator removal — what actually happened. */
+/** The 200 body of a collaborator removal - what actually happened. */
 export interface RemovalResult {
   actorId: string;
   removed: boolean;
@@ -185,7 +185,7 @@ export class AccessApi extends CollabApi {
     );
   }
 
-  /** Agent token metadata — never a token value; no route returns one. */
+  /** Agent token metadata - never a token value; no route returns one. */
   async agentTokens(): Promise<ApiResult<{ items: AgentTokenMeta[] }>> {
     return this.jsonResult<{ items: AgentTokenMeta[] }>(
       (async () => this.get(this.projectUrl("/agent-tokens")))(),
@@ -195,7 +195,7 @@ export class AccessApi extends CollabApi {
 
   /**
    * The readable activity view, newest first. `actor` accepts an actor id or an
-   * external identity (`github:avery`) — the API resolves either, because the
+   * external identity (`github:avery`) - the API resolves either, because the
    * id is what the database stores and the handle is what a person knows.
    */
   async audit(options: { actor?: string; limit?: number } = {}): Promise<
@@ -243,7 +243,7 @@ export class AccessApi extends CollabApi {
    * cannot be shown again.
    *
    * This is the route that had no way to reach it. Minting requires a
-   * maintainer *session*, which is a cookie a browser holds — and the only
+   * maintainer *session*, which is a cookie a browser holds - and the only
    * thing that ever asked for it was the setup wizard, which wanted a bearer
    * token no author has ever been issued. Everything needed was here; nothing
    * called it.
@@ -291,7 +291,7 @@ export class AccessApi extends CollabApi {
 
   /**
    * Remove a collaborator. Their sessions die, their leases return to the
-   * queue, their in-flight submissions are rejected — and every annotation,
+   * queue, their in-flight submissions are rejected - and every annotation,
    * vote and commit trailer they ever produced stays exactly where it is.
    */
   async removeCollaborator(actorId: string, reason?: string): Promise<ApiResult<RemovalResult>> {
@@ -317,7 +317,7 @@ export class AccessApi extends CollabApi {
         this.projectUrl(`/agent-tokens/${encodeURIComponent(tokenId)}`),
       );
     } catch {
-      return { ok: false, status: 0, message: "network error — is the API reachable?" };
+      return { ok: false, status: 0, message: "network error - is the API reachable?" };
     }
     if (response.status === 204 || response.ok) {
       return { ok: true, value: null };
@@ -347,7 +347,7 @@ export class AccessApi extends CollabApi {
     );
   }
 
-  /** Approve one queued annotation — the moment it becomes durable (202). */
+  /** Approve one queued annotation - the moment it becomes durable (202). */
   async approvePending(pendingId: string): Promise<ApiResult<{ pendingId: string; operationId: string }>> {
     return this.jsonResult<{ pendingId: string; operationId: string }>(
       this.post(this.projectUrl(`/moderation/${encodeURIComponent(pendingId)}/approve`), {}),

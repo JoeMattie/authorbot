@@ -101,8 +101,8 @@ interface RenderState {
    * first child can share a start position (a list and its first list item),
    * and the listItem hoist re-reads a child's anchor, so without consumption
    * one marker could stamp the same id on two elements (invalid HTML and an
-   * ambiguous annotation target). The first node to claim a key — always the
-   * outermost, since rendering is depth-first from the parent — owns it.
+   * ambiguous annotation target). The first node to claim a key - always the
+   * outermost, since rendering is depth-first from the parent - owns it.
    */
   anchors: Map<string, string>;
   definitions: ReadonlyMap<string, Definition>;

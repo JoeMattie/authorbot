@@ -1,7 +1,7 @@
 # Changelog
 
 What changed in each release, and why it mattered. Written for the person
-deciding whether to upgrade, not for the person who wrote the commit — so a
+deciding whether to upgrade, not for the person who wrote the commit - so a
 release that fixed something serious says what was broken and what it did to
 you, rather than naming the function that changed.
 
@@ -12,8 +12,8 @@ always the same commit.
 ## 0.1.25
 
 - **The collaborator skill.** `npx skills add JoeMattie/authorbot` installs a
-  skill that teaches an agent to contribute to an Authorbot book — the loop,
-  the safety rules, per-role guidance, and the full API reference — into Claude
+  skill that teaches an agent to contribute to an Authorbot book - the loop,
+  the safety rules, per-role guidance, and the full API reference - into Claude
   Code and any other supported agent tooling. Also installable as a Claude Code
   plugin (`/plugin marketplace add JoeMattie/authorbot`). The `agent` stage now
   points at it.
@@ -21,7 +21,7 @@ always the same commit.
 ## 0.1.24
 
 - **`collaborate` commits and pushes what it writes.** It used to ask you to do
-  it "when you are ready" — and until that push lands, the API cannot project
+  it "when you are ready" - and until that push lands, the API cannot project
   your book, so the settings page reports that it cannot read its own
   configuration, with nothing connecting the two.
 - **The agent stage stopped asking for a maintainer bearer token.** No author
@@ -29,7 +29,7 @@ always the same commit.
   credential from elsewhere. `AUTHORBOT_API_TOKEN` still works for that case,
   and everyone else is sent to the button on the settings page.
 - Declining an optional step no longer tells you to run that step "to
-  continue", which made every optional thing look unfinished — `upgrade` most
+  continue", which made every optional thing look unfinished - `upgrade` most
   of all, on a book far too new to need it.
 
 ## 0.1.23
@@ -44,7 +44,7 @@ always the same commit.
 - **You can create an agent token from your book's settings.** Until now
   nothing in Authorbot could make one: the API needs a maintainer session,
   which only a browser holds, and the settings page could list and revoke
-  tokens but not create them — while the setup wizard asked for a bearer token
+  tokens but not create them - while the setup wizard asked for a bearer token
   no author has ever been issued. The control sits under Agent tokens, shows
   the value once, and defaults to the narrowest scopes an agent needs to read
   chapters, claim work, and submit a draft.
@@ -53,7 +53,7 @@ always the same commit.
 
 - **Installing the GitHub App no longer lands you on a 404.** GitHub was asked
   to run its OAuth flow during installation, which redirected to a callback
-  that cannot exist yet — the Worker's config needs the installation id that
+  that cannot exist yet - the Worker's config needs the installation id that
   installing is in the middle of producing. It now returns you to your book's
   own site.
 - **The agent stage stopped asking for a credential nobody has.** It wanted "a
@@ -68,8 +68,8 @@ always the same commit.
 - **The GitHub App key was stored in a format the Worker cannot read.** GitHub's
   manifest hands back a PKCS#1 key; WebCrypto, which is all a Cloudflare Worker
   has, can only import PKCS#8. So every book reported its integration as
-  `invalid` and did no Git work at all — chapters could not be saved, the
-  projection never ran, settings could not read `book.yml` — with all three
+  `invalid` and did no Git work at all - chapters could not be saved, the
+  projection never ran, settings could not read `book.yml` - with all three
   credentials present and correct. **Books set up before this release need
   their GitHub App deleted and `collaborate` run again**, because the key was
   stored once and cannot be re-read.
@@ -81,7 +81,7 @@ always the same commit.
 
 ## 0.1.19
 
-- Spinners with an elapsed timer on the steps that take minutes — installing
+- Spinners with an elapsed timer on the steps that take minutes - installing
   the toolchain, waiting for a site to answer, checking the API. Silence for
   four minutes reads as a hang.
 - The mark is centred on the terminal's true width.
@@ -99,7 +99,7 @@ always the same commit.
 - **`npm install` failed for everyone who started the documented way.** npx
   exports its own configuration as `npm_config_*`, the wizard's `npm install`
   inherited it, and resolved against npx's cache directory instead of your
-  book — so the install failed and you were left without a
+  book - so the install failed and you were left without a
   `package-lock.json`, which both generated workflows refuse to run without. It
   worked fine for anyone running the built binary directly, which is why it
   looked like a problem with the machine.
@@ -113,10 +113,10 @@ always the same commit.
 - **`unpublish` and `teardown`.** `npx @authorbot/create unpublish` removes the
   Worker, the database and the GitHub App, leaving your repository and its
   history alone so `publish` can put the site back. `teardown` also deletes the
-  remote repository, then tells you what to type to remove the local copy — it
+  remote repository, then tells you what to type to remove the local copy - it
   never deletes files on your own disk.
 - **The wizard is drawn rather than printed**: boxed stage headings, an arrow
-  for steps, and check/triangle/cross for outcomes — each degrading to plain
+  for steps, and check/triangle/cross for outcomes - each degrading to plain
   ASCII under `NO_COLOR`, in a pipe, or on a dumb terminal.
 - **A changelog**, here and inside every published package.
 
@@ -124,7 +124,7 @@ always the same commit.
 
 - **The wizard can tell whether your book can actually save anything.** It used
   to finish by checking that the API refused an anonymous caller, which a
-  completely unusable deployment does just as correctly as a healthy one — see
+  completely unusable deployment does just as correctly as a healthy one - see
   0.1.14. New `GET /v1/health` reports whether the GitHub App is usable, and
   `collaborate` refuses to switch a book's collaboration controls on when the
   answer is no.
@@ -134,14 +134,14 @@ always the same commit.
 - **Collaboration never worked on any book this wizard created.** The Worker
   needs three GitHub App credentials and received two: the app id was read,
   used to poll for the installation, and then dropped. With one missing it does
-  no Git work at all — so chapters could not be saved, the projection never
+  no Git work at all - so chapters could not be saved, the projection never
   ran, and settings could not read the book's own `book.yml`, while every
   read-only page answered perfectly. If you set up a book before this release,
   re-run `create-authorbot collaborate`.
 - **You can sign out.** There was no way to. Two routes created a session and
   none ended one, so a reader on a shared machine stayed signed in until the
   cookie expired.
-- **An account strip in the site header** — sign in, sign out, and the way into
+- **An account strip in the site header** - sign in, sign out, and the way into
   Settings and the work queue. Previously a book with no chapters had no
   sign-in anywhere, and `/settings/` and `/work/` were linked from nowhere.
 - The API health check polls instead of judging on its first answer, which was
@@ -157,7 +157,7 @@ always the same commit.
 
 - **A book with collaboration on showed no sign-in and no annotations.**
   `book.yml` said annotations were public; the Worker was never told, so the
-  API refused every anonymous read — and the site gives up and renders nothing
+  API refused every anonymous read - and the site gives up and renders nothing
   when its first read fails, removing the very control that would have fixed
   it.
 
@@ -194,7 +194,7 @@ always the same commit.
 ## 0.1.7
 
 - **A successful deploy was reported as a failure** when the local resolver
-  still had the new hostname cached as non-existent — which the wizard's own
+  still had the new hostname cached as non-existent - which the wizard's own
   domain check made near-certain.
 - Every "run this to carry on" hint named `create-authorbot`, a binary `npx`
   never installs.
@@ -212,7 +212,7 @@ always the same commit.
 ## 0.1.5
 
 - Pointing the wizard at a directory that did not exist yet failed with a bare
-  ENOENT — including for the `directory: ./my-book` its own example config
+  ENOENT - including for the `directory: ./my-book` its own example config
   prints.
 - The pinned GitHub Actions moved off a deprecated line.
 

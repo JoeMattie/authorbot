@@ -5,14 +5,14 @@
  *
  * Durability invariants (contract §5):
  *
- * - Operational rows — status `pending_git` (accepted commands not yet in
- *   Git) and `orphaned` (accepted content whose chapter left the repo) — are
+ * - Operational rows - status `pending_git` (accepted commands not yet in
+ *   Git) and `orphaned` (accepted content whose chapter left the repo) - are
  *   NEVER deleted. They are preserved *in place*: the batch deletes only rows
  *   this rebuild observed as repo-owned and stale, so a mutation accepted
  *   concurrently (between the snapshot read and the batch) can never be wiped
  *   (previously a delete-all + reinsert-from-snapshot lost such rows).
  * - A `pending_git` annotation whose chapter is no longer in the repository
- *   is flipped to `orphaned` (Phase 0 status vocabulary) instead of deleted —
+ *   is flipped to `orphaned` (Phase 0 status vocabulary) instead of deleted -
  *   the body exists only in that row. Its git operation and outbox row are
  *   cancelled (`failed`) in the same batch so the drain does not commit an
  *   artifact for a vanished chapter; pending replies to an orphaned
@@ -115,7 +115,7 @@ export interface RebuildOptions {
   /**
    * Snapshot the caller already read (Phase 5 §6). Reconciliation classifies
    * a snapshot before deciding whether to project it, so passing it back in
-   * avoids a second repository read AND — more importantly — guarantees the
+   * avoids a second repository read AND - more importantly - guarantees the
    * bytes that were classified are the bytes that get projected. Re-reading
    * would open a window in which a push between the two reads is projected
    * without ever being checked for divergence.
@@ -144,7 +144,7 @@ export async function rebuildProjection(
 
   // Observe the existing projection (ids + statuses only). Rows created
   // AFTER this read are always operational (`pending_git`) and are only ever
-  // touched by status-scoped statements below — never deleted.
+  // touched by status-scoped statements below - never deleted.
   const existingAnnotations: SqlRow[] = await db
     .prepare(`SELECT id, status, chapter_id FROM annotations WHERE project_id = ?`)
     .bind(project.id)
@@ -283,7 +283,7 @@ export async function rebuildProjection(
     annotationCount += 1;
   }
 
-  // Orphan pending annotations whose chapter is gone — a pure SQL statement
+  // Orphan pending annotations whose chapter is gone - a pure SQL statement
   // inside the batch, so rows accepted during the snapshot window are
   // handled too (no check-then-act on a stale list).
   statements.push(
@@ -366,7 +366,7 @@ export async function rebuildProjection(
   // A work-item artifact ALWAYS says `ready`: leases are operational-only and
   // deliberately never written to Git (Phase 4 contract §6). So restoring
   // `status` verbatim silently resets every currently-leased item to `ready`
-  // — on any rebuild, including the push webhook fired by Authorbot's own
+  // - on any rebuild, including the push webhook fired by Authorbot's own
   // commits. The lease row survives, leaving the item advertised as available
   // and yet unclaimable (the partial unique index refuses the second lease),
   // which reads as a queue that lies rather than as a bug.

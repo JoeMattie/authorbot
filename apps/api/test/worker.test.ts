@@ -1,7 +1,7 @@
 /**
  * Regression tests for two deployment-safety findings:
  *
- * 1. The committed wrangler.jsonc must never default AUTH_MODE=dev — that
+ * 1. The committed wrangler.jsonc must never default AUTH_MODE=dev - that
  *    would ship the unauthenticated maintainer-granting /v1/dev/login on any
  *    `wrangler deploy`. Dev auth additionally requires the independent
  *    DEV_LOGIN_ENABLED=true flag (defense in depth).

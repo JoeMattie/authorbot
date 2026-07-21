@@ -20,7 +20,7 @@ export const ENV = {
   apiUrl: "AB_E2E_API_URL",
   plainDir: "AB_E2E_PLAIN_DIR",
   repoDir: "AB_E2E_REPO_DIR",
-  /** The served build directory — the Phase 4 flow rebuilds it in place. */
+  /** The served build directory - the Phase 4 flow rebuilds it in place. */
   siteDir: "AB_E2E_SITE_DIR",
   /**
    * The second, base-path deployment (ADR-0019 §6): its own origin, its own
@@ -42,7 +42,7 @@ export const BASE_PATH = "/my-book";
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (value === undefined || value === "") {
-    throw new Error(`${name} is not set — did global-setup run?`);
+    throw new Error(`${name} is not set - did global-setup run?`);
   }
   return value;
 }
@@ -77,21 +77,21 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
- * Serve `root` (set lazily via the returned setter, so the server can start —
- * and its origin be known — before the site is built) on an ephemeral port,
+ * Serve `root` (set lazily via the returned setter, so the server can start -
+ * and its origin be known - before the site is built) on an ephemeral port,
  * **and reverse-proxy `/v1/*` to the collaboration API** (set lazily the same
  * way).
  *
  * The proxy is what makes this e2e model the only deployment shape Authorbot
  * supports (ADR-0019): site and API on ONE origin. Previously the site and the
- * API were served from two ports and paired with `ALLOWED_ORIGINS` — a
+ * API were served from two ports and paired with `ALLOWED_ORIGINS` - a
  * configuration that no longer exists. Cloudflare serves both planes from one
  * Worker; this node:http proxy is the local stand-in for that.
  *
  * Responses are piped rather than buffered, so the `/v1/projects/{p}/events`
  * SSE stream stays a stream, and the original `Host` header is forwarded so
- * the API's own origin — the one its CSRF and `return_to` checks compare
- * against — is the site's origin.
+ * the API's own origin - the one its CSRF and `return_to` checks compare
+ * against - is the site's origin.
  */
 export async function startStaticServer(
   options: {
@@ -291,7 +291,7 @@ export async function loginCookie(login: string, role = "contributor"): Promise<
 
 /**
  * Create an annotation directly against the API (dev login + cookie + CSRF
- * Origin header) — for tests that need existing data without driving the UI.
+ * Origin header) - for tests that need existing data without driving the UI.
  * Returns the created annotation id and the chapter coordinates it used.
  */
 export async function seedAnnotationViaApi(options: {
@@ -388,7 +388,7 @@ export async function chapterFacts(chapterSlug = "baseline"): Promise<{
 
 /**
  * Seed a **range**-scoped suggestion over `exact` inside the chapter's first
- * block — the shape that votes into a `revise_range` work item, which is the
+ * block - the shape that votes into a `revise_range` work item, which is the
  * work-item type both the human (Playwright) and agent (script) paths must
  * complete end to end (contract §7 / §27.5).
  */
@@ -455,7 +455,7 @@ export async function seedRangeSuggestion(options: {
  *
  * So the third approver is the book's human maintainer. Without them the
  * numbers are met and nothing becomes work, which is the whole point of the
- * amendment — an author's book does not acquire work items without the author
+ * amendment - an author's book does not acquire work items without the author
  * agreeing to it.
  */
 export async function voteToThreshold(annotationId: string, prefix: string): Promise<void> {
@@ -509,7 +509,7 @@ export async function chapterFileText(fileName: string): Promise<string> {
 }
 
 /**
- * Rebuild the served site from the (now committed) book repo — the publish
+ * Rebuild the served site from the (now committed) book repo - the publish
  * step a real deployment runs after Authorbot commits an accepted edit.
  */
 export async function rebuildSite(): Promise<void> {
@@ -533,7 +533,7 @@ export async function rebuildSite(): Promise<void> {
 
 /**
  * Poll the annotation read until its git operation lands and it becomes
- * `open` — a freshly seeded annotation is `pending_git` and cannot be voted
+ * `open` - a freshly seeded annotation is `pending_git` and cannot be voted
  * on until the inline mirror commits it.
  */
 export async function waitForAnnotationOpen(annotationId: string, cookie: string): Promise<void> {

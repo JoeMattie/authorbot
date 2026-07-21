@@ -3,7 +3,7 @@
  *
  * These run against a **real** loopback server on 127.0.0.1 with a fake
  * browser that fetches the start page, reads the manifest out of the form, and
- * calls the declared `redirect_url` — exactly as a browser would. That is what
+ * calls the declared `redirect_url` - exactly as a browser would. That is what
  * makes the assertions about the unpredictable path, the `state` round trip,
  * and the redirect wiring mean something: they are observed from outside,
  * rather than read back out of the implementation.
@@ -41,7 +41,7 @@ const OPTIONS: ManifestFlowOptions = {
 };
 
 /**
- * Wraps the real factory so a test can assert the server was closed — the
+ * Wraps the real factory so a test can assert the server was closed - the
  * contract requires shutdown on *every* exit path, and "we wrote a finally"
  * is not the same claim as "the listener is gone".
  */
@@ -105,7 +105,7 @@ describe("the manifest itself", () => {
   it("does not run OAuth during installation", () => {
     // Not a capability switch: sign-in works either way, because the client
     // credentials are what authenticate readers. This only decides whether
-    // GitHub runs OAuth *while installing* — which sent the author to
+    // GitHub runs OAuth *while installing* - which sent the author to
     // /v1/auth/github/callback at the one moment it could not exist, since the
     // Worker config needs the installation id that installing produces.
     expect(manifest["request_oauth_on_install"]).toBe(false);
@@ -283,7 +283,7 @@ describe("convertManifestCode", () => {
     const client = new FakeHttpClient().route(/conversions/, () => ({
       status: 201,
       headers: {},
-      // Everything present except `id` — the body still carries real secrets.
+      // Everything present except `id` - the body still carries real secrets.
       body: JSON.stringify({
         slug: "s",
         html_url: "https://github.test/apps/s",

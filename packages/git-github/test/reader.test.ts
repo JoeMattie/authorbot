@@ -2,8 +2,8 @@
  * Tests for `GitHubBookRepoReader` (Phase 5 contract §3).
  *
  * Everything runs against the in-process fake GitHub, seeded from the real
- * `examples/book-repo` on disk — the same fixture the CLI validates and the
- * local reader projects — so "snapshot fidelity" means fidelity to content
+ * `examples/book-repo` on disk - the same fixture the CLI validates and the
+ * local reader projects - so "snapshot fidelity" means fidelity to content
  * that has to satisfy `@authorbot/schemas` for other suites too, not to a
  * fixture invented to fit this reader.
  */
@@ -218,7 +218,7 @@ describe("path containment", () => {
 
     await expect(reader.readTextFile(path)).resolves.toBeNull();
 
-    // Refused BEFORE any request — the guard cannot be probed for existence
+    // Refused BEFORE any request - the guard cannot be probed for existence
     // or timing, and a traversal never reaches GitHub.
     expect(fake.requests.length).toBe(before);
   });
@@ -572,7 +572,7 @@ describe("BookRepoReader compatibility", () => {
   it("satisfies the Phase 2 interface structurally", async () => {
     const fake = await seededFake();
     // If the shape ever drifts from apps/api's `BookRepoReader`, this stops
-    // compiling — which is the whole point of rebuildProjection working
+    // compiling - which is the whole point of rebuildProjection working
     // unchanged over GitHub.
     const reader: BookRepoReader = readerFor(fake);
 

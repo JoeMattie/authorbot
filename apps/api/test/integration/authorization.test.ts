@@ -1,7 +1,7 @@
 /**
  * Authorization matrix (contract §7.2): every implemented endpoint ×
  * {anonymous, reader, contributor, maintainer, agent-with-scope,
- * agent-without-scope, revoked token, expired token} — enforced and audited —
+ * agent-without-scope, revoked token, expired token} - enforced and audited -
  * against the real integration stack (git clone + better-sqlite3).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

@@ -89,7 +89,7 @@ describe("projection rebuild", () => {
     // Regression: an accepted-but-uncommitted annotation whose chapter was
     // removed by a push used to be silently deleted by the rebuild; its
     // outbox row then failed with "annotation not found". The body exists
-    // only in that row — it must be preserved with status `orphaned`
+    // only in that row - it must be preserved with status `orphaned`
     // (Phase 0 vocabulary) and its git operation/outbox row cancelled.
     const cookie = await devLogin(h, "author", "contributor");
     const res = await h.app.request(
@@ -127,7 +127,7 @@ describe("projection rebuild", () => {
 
   it("preserves a pending row accepted DURING the rebuild window (no TOCTOU wipe)", async () => {
     // Regression: the rebuild used to snapshot pending rows, then delete ALL
-    // rows and reinsert the snapshot — a mutation accepted between those two
+    // rows and reinsert the snapshot - a mutation accepted between those two
     // points was wiped. Simulate the race by accepting an annotation inside
     // the reader's snapshot read (i.e. after the rebuild started).
     const cookie = await devLogin(h, "racer", "contributor");
@@ -275,7 +275,7 @@ describe("LocalFsBookRepoReader path containment (BookRepoReader contract)", () 
     const reader = new LocalFsBookRepoReader(repo);
     expect(await reader.readTextFile("inside.txt")).toBe("inside");
     // `join(repo, "../book-secrets/creds.env")` normalizes to the sibling,
-    // which passes a bare `startsWith(repoPath)` test — it must not pass here.
+    // which passes a bare `startsWith(repoPath)` test - it must not pass here.
     expect(await reader.readTextFile("../book-secrets/creds.env")).toBeNull();
     expect(await reader.readTextFile("../../etc/passwd")).toBeNull();
     expect(await reader.readTextFile("chapters/../../book-secrets/creds.env")).toBeNull();

@@ -2,7 +2,7 @@
 #
 # Runs on pull requests and pushes that touch book content or collaboration
 # records and fails on any validation error. Annotation traffic runs
-# validation only — it never rebuilds the book (design §7.4); publication is
+# validation only - it never rebuilds the book (design §7.4); publication is
 # publish.yml's job.
 #
 # What validation covers:
@@ -16,7 +16,7 @@
 #
 # After validating, the site is built to a throwaway directory (design
 # §17.1: the validation workflow also builds the site) so a change that
-# validates but cannot build — or would emit colliding routes — fails here,
+# validates but cannot build - or would emit colliding routes - fails here,
 # on the pull request, instead of on main after merge. Nothing is deployed;
 # link and accessibility checks over real output run in the Authorbot
 # toolchain's own e2e suite.
@@ -28,7 +28,7 @@
 # published `@authorbot/cli` package from package-lock.json and runs its
 # binary. Because both workflows install from that same lockfile, the
 # toolchain that validates a pull request is by construction the toolchain
-# that will publish it — they cannot drift, and there is no AUTHORBOT_REF
+# that will publish it - they cannot drift, and there is no AUTHORBOT_REF
 # repository variable to keep in sync any more.
 #
 # If the book is served under a base path, the AUTHORBOT_BASE_URL repository
@@ -76,7 +76,7 @@ jobs:
       - name: Install the pinned Authorbot toolchain
         run: |
           if [ ! -f package-lock.json ]; then
-            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile — it is what pins your toolchain version."
+            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile - it is what pins your toolchain version."
             exit 1
           fi
           npm ci --no-audit --no-fund

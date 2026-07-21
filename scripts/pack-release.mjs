@@ -10,8 +10,8 @@
  *
  * The exact-version rewrite is deliberate rather than incidental. Internal
  * packages carry no compatibility promise (ADR-0022), so `@authorbot/cli` at
- * 1.5.0 should pull `@authorbot/schemas` at exactly 1.5.0 — the set that was
- * built and tested together — not whatever a caret range happens to resolve.
+ * 1.5.0 should pull `@authorbot/schemas` at exactly 1.5.0 - the set that was
+ * built and tested together - not whatever a caret range happens to resolve.
  *
  *   node scripts/pack-release.mjs --out DIR    pack, print paths
  *   node scripts/pack-release.mjs --list --out DIR

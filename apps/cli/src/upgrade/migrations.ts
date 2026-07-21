@@ -56,7 +56,7 @@ import { compareVersions, mustParseVersion, type SemVer } from "./semver.js";
  *
  * It is deliberately narrower than `node:fs`. A migration cannot escape the
  * repository, cannot reach the network, and cannot see `.git`, so the worst a
- * buggy migration can do is produce a bad diff — which validation then
+ * buggy migration can do is produce a bad diff - which validation then
  * catches before it becomes a commit.
  */
 export interface MigrationRepo {
@@ -80,7 +80,7 @@ export interface BookRepoMigration {
   readonly description: string;
   /**
    * Transform the repository in place. Returns the repo-relative paths that
-   * were changed — empty when there was nothing to do, which is what a
+   * were changed - empty when there was nothing to do, which is what a
    * second application must always return.
    */
   apply(repo: MigrationRepo): Promise<string[]>;

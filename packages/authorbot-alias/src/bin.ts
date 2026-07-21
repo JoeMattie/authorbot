@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * `authorbot` — the unscoped name, forwarding to `@authorbot/cli`.
+ * `authorbot` - the unscoped name, forwarding to `@authorbot/cli`.
  *
  * WHY THIS PACKAGE EXISTS. Everything user-facing says `npx authorbot
  * validate .`: the generated CI workflows, the wizard's error messages, the
  * documentation. Inside a book that instruction resolves to
  * `node_modules/.bin/authorbot`, which `@authorbot/cli` provides, so it has
- * always worked there. Outside one — or before `npm install` has run — npx
+ * always worked there. Outside one - or before `npm install` has run - npx
  * asks the registry for the bare name instead, and for a long time that was an
  * unmaintained 0.0.2 bearing no relation to the toolchain being documented.
  *

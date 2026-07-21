@@ -1,7 +1,7 @@
 /**
- * Phase 7 exit criterion 4, failure half — **degrade honestly.**
+ * Phase 7 exit criterion 4, failure half - **degrade honestly.**
  *
- * The contract's phrasing is "Failures must degrade honestly — reads keep
+ * The contract's phrasing is "Failures must degrade honestly - reads keep
  * working, writes refuse clearly." That is a stronger claim than "returns a
  * 5xx", and it is asserted here as three separate properties for every
  * injected failure:
@@ -14,7 +14,7 @@
  *    whose operation is observably NOT committed. What is forbidden is a `2xx`
  *    that implies durability the system did not achieve.
  * 3. **The repository is untouched.** Asserted against the fake's actual
- *    commit graph — branch head and tree — not against a status code. A test
+ *    commit graph - branch head and tree - not against a status code. A test
  *    that only checks the response would pass on a system that returned an
  *    error *after* writing a half-commit.
  *
@@ -96,7 +96,7 @@ async function operationState(
  *
  * The thrown error is the one `GitHubBookRepoWriter` itself constructs when a
  * `fetch` is REJECTED (connection reset, TLS failure, cancelled request):
- * `kind: "git-failure"`, `retryable: true`. That classification matters — the
+ * `kind: "git-failure"`, `retryable: true`. That classification matters - the
  * processor retries only `isGitWriteError(error) && error.retryable`, so
  * throwing a bare `Error` here would model a *different* failure (terminal,
  * never retried) and the recovery assertions below would be testing fiction.
@@ -219,8 +219,8 @@ describe("failure injection: a coordinator outbox backlog", () => {
 
   it("a backlog delays governance on the backlogged annotation, and says so instead of failing strangely", async () => {
     // The honest boundary of "a backlog is only a delay". Intake keeps
-    // working — a reader can still reply and a contributor can still annotate
-    // — but an annotation that has not reached Git yet cannot be VOTED on,
+    // working - a reader can still reply and a contributor can still annotate
+    // - but an annotation that has not reached Git yet cannot be VOTED on,
     // because a vote is a governance act on a durable record. The refusal is
     // a typed 409 naming the status, not a 500 and not a silently dropped
     // ballot. Operators need to know this: a stuck coordinator quietly stalls
@@ -236,7 +236,7 @@ describe("failure injection: a coordinator outbox backlog", () => {
       expect(created.status).toBe(202);
       const { annotationId } = (await created.json()) as { annotationId: string };
 
-      // Replies to a queued annotation ARE accepted — the conversation keeps
+      // Replies to a queued annotation ARE accepted - the conversation keeps
       // moving even while the mirror is behind.
       const replied = await app.app.request(
         `/v1/projects/${app.projectId}/annotations/${annotationId}/replies`,
@@ -311,7 +311,7 @@ describe("failure injection: GitHub rate limiting", () => {
       expect(drained.committed).toBe(0);
       expect(drained.failed).toBe(1);
 
-      // Nothing was committed and the branch did not move — the refusal is
+      // Nothing was committed and the branch did not move - the refusal is
       // asserted on the commit graph, not on a return value.
       expect(app.fake.state.getRef(BRANCH)).toBe(headBefore);
 
@@ -319,7 +319,7 @@ describe("failure injection: GitHub rate limiting", () => {
       // `queued`, NOT `failed`: a rate limit is GitHub being unavailable, not
       // anything wrong with this write, so the coordinator hands it to a later
       // drain instead of spending the commit budget on an outage. That is what
-      // "does not lose the row" means — the row is still there to retry.
+      // "does not lose the row" means - the row is still there to retry.
       const op = await operationState(app, cookie, operationId);
       expect(op.state).toBe("queued");
       expect(op.error).toContain("rate limit");
@@ -334,7 +334,7 @@ describe("failure injection: GitHub rate limiting", () => {
 
       // The annotation's CONTENT is not lost. It stays in the operational
       // database as `pending_git`, which is the state the rebuild is
-      // documented to preserve — an operator can retry rather than ask the
+      // documented to preserve - an operator can retry rather than ask the
       // author to retype it.
       const annotation = await app.repos.annotations.getById(annotationId);
       expect(annotation?.status).toBe("pending_git");
@@ -398,8 +398,8 @@ describe("failure injection: GitHub rate limiting", () => {
 describe("failure injection: GitHub is unreachable", () => {
   it("reads keep serving the last projection, writes queue, and the backlog lands intact when GitHub returns", async () => {
     // A flaky/unreachable GitHub that recovers inside the retry budget. Note
-    // that the budget is consumed WITHIN one drain — the processor loops
-    // `conflict → queued` internally — so "two failed attempts then success"
+    // that the budget is consumed WITHIN one drain - the processor loops
+    // `conflict → queued` internally - so "two failed attempts then success"
     // is expressed as a failure count, not as a number of drain calls.
     let failuresLeft = 2;
     const app = await makeGitHubIntegrationApp({
@@ -437,14 +437,14 @@ describe("failure injection: GitHub is unreachable", () => {
       expect(COMMITTED_STATES).not.toContain(midOutage.state);
       expect(midOutage.commitSha).toBeNull();
 
-      // The whole read surface is unaffected — the projection is local.
+      // The whole read surface is unaffected - the projection is local.
       await assertReadsStillWork(app, cookie);
 
       // ---- successive drains absorb the outage, then the write lands -------
       // One attempt per drain, by design: an availability failure defers to
       // the next pass rather than burning the commit budget in a tight loop.
-      // So the recovery is modelled the way production experiences it — the
-      // coordinator's alarm firing again — not as one drain retrying inline.
+      // So the recovery is modelled the way production experiences it - the
+      // coordinator's alarm firing again - not as one drain retrying inline.
       for (let pass = 0; pass < 5 && failuresLeft > 0; pass += 1) {
         await app.coordinator.drainOutbox();
       }
@@ -466,8 +466,8 @@ describe("failure injection: GitHub is unreachable", () => {
   it("a sustained outage eventually gives up and says so, rather than deferring in silence", async () => {
     // An availability failure defers instead of spending the commit budget, so
     // a transient outage cannot strand a write. But deferral must still END:
-    // an operation parked in `queued` forever is invisible — neither committed
-    // nor failed — so nobody is ever told the write did not land. `maxDeferralMs`
+    // an operation parked in `queued` forever is invisible - neither committed
+    // nor failed - so nobody is ever told the write did not land. `maxDeferralMs`
     // is the deadline, set to zero here because the production default is an
     // hour and no test should wait for it.
     const app = await makeGitHubIntegrationApp({
@@ -558,7 +558,7 @@ describe("failure injection: the operational database fails mid-command", () => 
         .prepare(`SELECT COUNT(*) AS n FROM annotations`)
         .all();
 
-      // Fail exactly the next `batch()` — the atomic write every command
+      // Fail exactly the next `batch()` - the atomic write every command
       // funnels through (Phase 2 contract §5: record + audit event + outbox
       // row in ONE batch).
       const realBatch = app.db.batch.bind(app.db);
@@ -578,7 +578,7 @@ describe("failure injection: the operational database fails mid-command", () => 
         }),
       );
 
-      // A clear refusal — never a 202 for a write that did not happen.
+      // A clear refusal - never a 202 for a write that did not happen.
       expect(response.status).toBe(500);
       const body = await problemBody(response);
       expect(body.code).toBe("internal");
@@ -601,7 +601,7 @@ describe("failure injection: the operational database fails mid-command", () => 
       // Reads never went near the failing write path.
       await assertReadsStillWork(app, cookie);
 
-      // The next identical request succeeds — the failure left no poison.
+      // The next identical request succeeds - the failure left no poison.
       const retry = await app.app.request(
         `/v1/projects/${app.projectId}/chapters/${CHAPTER_1.id}/annotations`,
         jsonRequest("POST", rangeSuggestionPayload({ body: "Should not survive." }), {
@@ -645,7 +645,7 @@ describe("failure injection: the operational database fails mid-command", () => 
       // The operation is left mid-flight: `committing`, with the sha of the
       // commit that really did land on record, and the outbox row still
       // `processing`. Emphatically NOT a terminal success state, so nothing
-      // downstream can mistake it for finished work — which is the whole
+      // downstream can mistake it for finished work - which is the whole
       // hazard of "the commit reached GitHub but the bookkeeping did not".
       const op = await operationState(app, cookie, operationId);
       expect(COMMITTED_STATES).not.toContain(op.state);
@@ -739,8 +739,8 @@ describe("failure injection: a submission arrives against a stale projection", (
       const projected = await app.repos.chapters.getById(CHAPTER_1.id);
       expect(projected?.revision).toBe(bundle.document.revision + 1);
 
-      // A work-item artifact always says `ready` — leases are operational-only
-      // and never written to Git — so a naive rebuild would reset this item to
+      // A work-item artifact always says `ready` - leases are operational-only
+      // and never written to Git - so a naive rebuild would reset this item to
       // `ready` while its lease row lived on, advertising work that cannot be
       // claimed. The projection keeps the operational status instead.
       expect((await app.repos.workItems.getById(workItemId))?.status).toBe("leased");
@@ -782,13 +782,13 @@ describe("failure injection: a submission arrives against a stale projection", (
       // Accepted, not refused at the door. The lease is valid and names this
       // work item; §4 checks the base against the LEASE'S BUNDLE, and §5 owns
       // what happens when the chapter has since moved. (This previously
-      // returned 409 "state-conflict" whose detail said `ready` — it was
+      // returned 409 "state-conflict" whose detail said `ready` - it was
       // refusing because the rebuild had clobbered the item's status, not
       // because anything was semantically wrong.)
       expect(submitted.status).toBe(202);
       const accepted = (await submitted.json()) as { operationId: string };
 
-      // Whatever §5 decides — a clean rebase or an explicit conflict — the one
+      // Whatever §5 decides - a clean rebase or an explicit conflict - the one
       // thing it may never do is overwrite the outside editor's work.
       const outcome = await operationState(app, editor, accepted.operationId);
       expect(["committed", "conflict", "failed"]).toContain(outcome.state);
@@ -882,7 +882,7 @@ describe("failure injection: a submission arrives against a stale projection", (
       // No prose was written.
       expect(app.fake.state.getRef(BRANCH)).toBe(headBefore);
 
-      // Reads keep working — including the diverged chapter itself, served
+      // Reads keep working - including the diverged chapter itself, served
       // from the last coherent projection.
       await assertReadsStillWork(app, editor);
 

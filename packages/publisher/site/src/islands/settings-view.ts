@@ -1,8 +1,8 @@
 /**
- * `<authorbot-settings>` — the maintainer-only Settings view (Phase 6 §3.6).
+ * `<authorbot-settings>` - the maintainer-only Settings view (Phase 6 §3.6).
  *
  * "A Settings view, visible only to maintainers, editing the same `book.yml`
- * that lives in Git — through the same outbox, coordinator, validation, and
+ * that lives in Git - through the same outbox, coordinator, validation, and
  * attribution path as any other write." So this island is a form over
  * `GET/PATCH .../settings` and nothing more: no local configuration store, no
  * optimistic state. After every successful save it re-reads the document, so
@@ -13,14 +13,14 @@
  *
  * **Never-editable fields are ABSENT, not disabled.** `id`,
  * `repository.default_branch`, `content.chapters_glob`, `content.raw_html` and
- * `publication.api_url` get no control of any kind — not a greyed one, not a
+ * `publication.api_url` get no control of any kind - not a greyed one, not a
  * tooltip. A disabled input still says "this is a setting, and you are not
  * allowed to have it", which invites a workaround. The API ships
  * `readOnly.reasons` so the boundary can be *explained*; that is rendered as a
  * collapsed prose list containing no form controls and no values.
  *
  * **Governance is translated, not printed.** `human_maintainer_approvals >= 1`
- * is rendered as the sentence it means, with the reason it exists — see
+ * is rendered as the sentence it means, with the reason it exists - see
  * `settings-model.ts`, where that language lives so it can be tested without a
  * browser.
  *
@@ -28,13 +28,13 @@
  * consequence text comes from the API (`guarded[field].consequence`) and is
  * shown the moment the field is edited; the confirmation step then shows what
  * the API says breaks, and the maintainer must actively tick and press it. The
- * confirmation is never pre-ticked and never sent automatically — a
+ * confirmation is never pre-ticked and never sent automatically - a
  * confirmation the client can give on the maintainer's behalf is not a
  * confirmation.
  *
  * Security: every API-sourced string reaches the DOM through `textContent`
- * (via `el`/`srOnly`). `innerHTML` is never used — the build test greps the
- * bundle for that literal — and inline styles are never set via
+ * (via `el`/`srOnly`). `innerHTML` is never used - the build test greps the
+ * bundle for that literal - and inline styles are never set via
  * `setAttribute("style", …)`, so the contract §3 CSP holds.
  */
 import { CollabApi, isMaintainer, type Me, type SettingsDocument, type SettingsPatch } from "./api.js";
@@ -66,7 +66,7 @@ interface Config {
 
 /**
  * `apiBase === ""` is valid (the API mounted at the site origin's root), so
- * only a MISSING attribute means "not a collab build" — in which case the
+ * only a MISSING attribute means "not a collab build" - in which case the
  * element stays inert and the page's static fallback survives.
  */
 function parseConfig(host: HTMLElement): Config | null {
@@ -158,7 +158,7 @@ export class AuthorbotSettings extends HTMLElement {
         el(
           "p",
           "ab-settings-denied",
-          "Book settings are maintainer-only. They change book.yml in this book's repository — the same file the site is built from — so only someone who can commit to the book can edit them here. Ask a maintainer if something needs changing.",
+          "Book settings are maintainer-only. They change book.yml in this book's repository - the same file the site is built from - so only someone who can commit to the book can edit them here. Ask a maintainer if something needs changing.",
         ),
       );
       return;
@@ -316,7 +316,7 @@ export class AuthorbotSettings extends HTMLElement {
         el(
           "p",
           "ab-settings-pending",
-          "A previous settings change has not been committed to Git yet. Saving is off until it lands — reload this page in a moment.",
+          "A previous settings change has not been committed to Git yet. Saving is off until it lands - reload this page in a moment.",
         ),
       );
     } else {
@@ -415,7 +415,7 @@ export class AuthorbotSettings extends HTMLElement {
     const summary = el("p", "ab-license-summary");
     const paintSummary = (): void => {
       const text = licenseSummary(license.input.value.trim() === "" ? null : license.input.value);
-      // An unrecognised identifier gets NO summary — never an invented one.
+      // An unrecognised identifier gets NO summary - never an invented one.
       summary.textContent = text ?? "";
       summary.hidden = text === null;
     };
@@ -432,8 +432,8 @@ export class AuthorbotSettings extends HTMLElement {
   }
 
   /**
-   * The three display flags. Each is genuinely tri-state in the API — true,
-   * false, or null meaning "not set, use the default" — so it is a select and
+   * The three display flags. Each is genuinely tri-state in the API - true,
+   * false, or null meaning "not set, use the default" - so it is a select and
    * not a checkbox: a checkbox would quietly rewrite "not set" as "off" the
    * first time the form was saved, which is a change the author never made.
    */
@@ -635,7 +635,7 @@ export class AuthorbotSettings extends HTMLElement {
     slugConsequence.hidden = true;
     slugField.input.addEventListener("input", () => {
       edited.slug = slugField.input.value;
-      // Stated as soon as the field is modified — before the change is
+      // Stated as soon as the field is modified - before the change is
       // accepted, not after it has been attempted.
       slugConsequence.hidden = edited.slug === original.slug;
     });
@@ -701,7 +701,7 @@ export class AuthorbotSettings extends HTMLElement {
     const patch = buildPatch(this.original, this.edited);
     if (patchIsEmpty(patch)) {
       // No commit for a form nobody changed.
-      this.status.textContent = "Nothing to save — these are the settings already stored.";
+      this.status.textContent = "Nothing to save - these are the settings already stored.";
       return;
     }
     await this.send(patch, null);
@@ -723,7 +723,7 @@ export class AuthorbotSettings extends HTMLElement {
     this.confirmWrap.textContent = "";
     this.status.textContent =
       result.value.status === "unchanged"
-        ? "Nothing changed — these settings were already stored."
+        ? "Nothing changed - these settings were already stored."
         : "Saved. Your change is being committed to this book's repository now.";
     // Round-trip: show what was actually stored, not what was typed.
     await this.load(true);
@@ -769,7 +769,7 @@ export class AuthorbotSettings extends HTMLElement {
 
     this.confirmWrap.textContent = "";
     this.confirmWrap.hidden = false;
-    this.confirmWrap.append(el("h3", "ab-confirm-heading", "Not saved yet — please confirm"));
+    this.confirmWrap.append(el("h3", "ab-confirm-heading", "Not saved yet - please confirm"));
     for (const field of fields) {
       if (typeof field.breaks === "string" && field.breaks.length > 0) {
         this.confirmWrap.append(el("p", "ab-confirm-breaks", field.breaks));

@@ -328,7 +328,7 @@ async function checkWorkItems(
       continue;
     }
     // Per-type reference requirements (schema keeps these fields optional for
-    // write_chapter/planning; the validator enforces them per type — see
+    // write_chapter/planning; the validator enforces them per type - see
     // packages/schemas/src/work-item.ts). A revise_* item without a chapter
     // and base revision has no target document (design section 9.1/13); range
     // and block revisions also need their source annotation.

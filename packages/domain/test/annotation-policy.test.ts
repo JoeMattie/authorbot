@@ -38,7 +38,7 @@ describe("annotation policy vocabulary", () => {
 
   it("defaults to the Phase 2 behaviour, not to either extreme", () => {
     // A deployment upgrading into Phase 7 must not find its book suddenly
-    // writable by strangers — nor its existing collaborators locked out.
+    // writable by strangers - nor its existing collaborators locked out.
     expect(DEFAULT_ANNOTATION_POLICY).toBe("collaborators-only");
   });
 
@@ -57,7 +57,7 @@ describe("annotation policy vocabulary", () => {
 });
 
 describe("anonymous writing (contract: unavailable in EVERY mode)", () => {
-  it("is refused in every mode, for every capability — `open` included", () => {
+  it("is refused in every mode, for every capability - `open` included", () => {
     for (const policy of ANNOTATION_POLICIES) {
       for (const capability of CAPABILITIES) {
         const decision = checkAnnotationPolicy({
@@ -86,7 +86,7 @@ describe("anonymous writing (contract: unavailable in EVERY mode)", () => {
   });
 });
 
-describe("locked — author-only, NOT off", () => {
+describe("locked - author-only, NOT off", () => {
   it("admits maintainers on every capability, by session or by token", () => {
     // "The book remains fully usable by its maintainers: annotating their own
     // drafts … and running their own agents against their own ideas."
@@ -128,16 +128,16 @@ describe("locked — author-only, NOT off", () => {
     }
   });
 
-  it("refuses a token whose membership is merely editor — the grant is the point", () => {
+  it("refuses a token whose membership is merely editor - the grant is the point", () => {
     // An author's agent works under `locked` by holding a MAINTAINER
-    // membership, deliberately granted. An ordinary editor-role agent — which
-    // is what minting produces by default — does not get in.
+    // membership, deliberately granted. An ordinary editor-role agent - which
+    // is what minting produces by default - does not get in.
     expect(allow("locked", "token", "editor", "annotate")).toBe(false);
     expect(allow("locked", "token", "maintainer", "annotate")).toBe(true);
   });
 });
 
-describe("collaborators-only — the default", () => {
+describe("collaborators-only - the default", () => {
   it("admits every member role on every capability", () => {
     for (const role of ROLES) {
       for (const capability of CAPABILITIES) {
@@ -158,14 +158,14 @@ describe("collaborators-only — the default", () => {
   });
 });
 
-describe("open and approval-gated — widened, but only where the contract says", () => {
+describe("open and approval-gated - widened, but only where the contract says", () => {
   for (const policy of ["open", "approval-gated"] as const) {
     it(`${policy}: admits a signed-in non-member to annotate`, () => {
       expect(allow(policy, "session", null, "annotate")).toBe(true);
     });
 
     it(`${policy}: does NOT hand a non-member the collaborator capabilities`, () => {
-      // "any signed-in GitHub user may comment/suggest" — a book that welcomes
+      // "any signed-in GitHub user may comment/suggest" - a book that welcomes
       // comments from the internet is not thereby handing the internet its
       // governance votes or its work queue.
       for (const capability of ["vote", "claim", "submit"] as const) {
@@ -209,7 +209,7 @@ describe("open and approval-gated — widened, but only where the contract says"
 describe("the progression is monotonic in who it admits", () => {
   it("never refuses a maintainer in any mode", () => {
     // The author must never be locked out of their own book by their own
-    // policy — that is the difference between a restriction and a footgun.
+    // policy - that is the difference between a restriction and a footgun.
     for (const policy of ANNOTATION_POLICIES) {
       for (const capability of CAPABILITIES) {
         expect(allow(policy, "session", "maintainer", capability), policy).toBe(true);

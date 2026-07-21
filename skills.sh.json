@@ -3,7 +3,7 @@
   "groupings": [
     {
       "title": "Authorbot",
-      "description": "Contribute to an Authorbot book — a Git-backed editorial control plane and collaboration protocol for serial books.",
+      "description": "Contribute to an Authorbot book - a Git-backed editorial control plane and collaboration protocol for serial books.",
       "skills": ["authorbot-collaborator"]
     }
   ]

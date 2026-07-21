@@ -1,6 +1,6 @@
 /**
- * Node dev entry (Phase 2 contract §6, `BOOK_REPO_PATH`): runs the full app —
- * including book-repository access — outside Cloudflare. This is the wiring
+ * Node dev entry (Phase 2 contract §6, `BOOK_REPO_PATH`): runs the full app -
+ * including book-repository access - outside Cloudflare. This is the wiring
  * `wrangler dev` cannot provide (the Worker has no repo reader/writer until
  * Phase 5, so under wrangler the chapters projection is empty and pushes are
  * recorded `ignored`): here `BOOK_REPO_PATH` points at a local git work tree
@@ -9,13 +9,13 @@
  * (`LocalGitAdapter`) after every accepted mutation.
  *
  * Environment (contract §6 names):
- *   BOOK_REPO_PATH      required — absolute path to a git work tree
- *   AUTH_MODE           required — "dev" (plus DEV_LOGIN_ENABLED=true) or "github"
+ *   BOOK_REPO_PATH      required - absolute path to a git work tree
+ *   AUTH_MODE           required - "dev" (plus DEV_LOGIN_ENABLED=true) or "github"
  *   SESSION_SECRET, WEBHOOK_SECRET, PROJECT_SLUG, PROJECT_REPO,
  *   INITIAL_MAINTAINER  required (as in wrangler)
- *   SQLITE_PATH         optional — defaults to ":memory:" (throwaway dev DB)
- *   MIRROR_MODE         optional — "inline" (default here) or "queue"
- *   PORT                optional — default 8788
+ *   SQLITE_PATH         optional - defaults to ":memory:" (throwaway dev DB)
+ *   MIRROR_MODE         optional - "inline" (default here) or "queue"
+ *   PORT                optional - default 8788
  *
  * Start: `pnpm --filter @authorbot/api dev:node` (after a build), e.g.
  *   BOOK_REPO_PATH=$PWD/examples/book-repo AUTH_MODE=dev DEV_LOGIN_ENABLED=true \
@@ -69,7 +69,7 @@ export async function createNodeDevApi(env: NodeJS.ProcessEnv = process.env): Pr
   await applyMigrations(db, env["MIGRATIONS_DIR"] ?? MIGRATIONS_DIR);
 
   // Same fail-closed selection as the Worker entry (worker.ts): github mode
-  // without OAuth config throws — it must never fall back to dev auth.
+  // without OAuth config throws - it must never fall back to dev auth.
   const identityProvider: IdentityProvider = identityProviderFor(config);
 
   const mirror =
@@ -86,7 +86,7 @@ export async function createNodeDevApi(env: NodeJS.ProcessEnv = process.env): Pr
   await api.bootstrap();
 
   // Eager lease expiration (Phase 4 contract §2): `sweepExpiredLeases` on a
-  // timer — the dev-server stand-in for the Phase 5 Durable Object alarm.
+  // timer - the dev-server stand-in for the Phase 5 Durable Object alarm.
   // Lazy per-command enforcement runs regardless; the sweep frees leases
   // nobody touches. LEASE_SWEEP_MS=0 disables (tests drive sweeps directly).
   const sweepMs = env["LEASE_SWEEP_MS"] === undefined

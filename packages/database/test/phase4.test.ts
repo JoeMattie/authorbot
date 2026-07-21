@@ -6,7 +6,7 @@
  *
  * Timestamp vocabulary (all RFC 3339 UTC, fixed-width, so lexicographic
  * order is chronological): a lease is LIVE at `now` iff it is active
- * (released_at/revoked_at NULL) AND `expires_at > now` — expired means
+ * (released_at/revoked_at NULL) AND `expires_at > now` - expired means
  * `expires_at <= now`, the same boundary as human_sessions.
  */
 import { describe, expect, it } from "vitest";
@@ -53,7 +53,7 @@ function makeLease(
     projectId: seeded.project.id,
     workItemId,
     actorId: seeded.actor.id,
-    tokenHash: `sha256-hash-${uuidv7()}`, // hash only — never a plaintext token
+    tokenHash: `sha256-hash-${uuidv7()}`, // hash only - never a plaintext token
     issuedAt: NOW,
     expiresAt: EXPIRES,
     maxExpiresAt: MAX_EXPIRES,
@@ -97,7 +97,7 @@ function makeSubmission(
   };
 }
 
-describe("lease claim — one active lease per work item (contract §2)", () => {
+describe("lease claim - one active lease per work item (contract §2)", () => {
   it("claims a free work item and reads it back as the active lease", async () => {
     const s = await seedWithWorkItem();
     const lease = makeLease(s, s.workItem.id);
@@ -118,7 +118,7 @@ describe("lease claim — one active lease per work item (contract §2)", () => 
       const held = results.filter((r) => r.status === "lease_held");
       expect(claimed).toHaveLength(1);
       expect(held).toHaveLength(1);
-      // The loser learns the winner — never a token, only the stored record.
+      // The loser learns the winner - never a token, only the stored record.
       expect(held[0]).toMatchObject({ holder: { id: a.id } });
       const active = await s.repos.leases.getActiveByWorkItem(s.workItem.id);
       expect(active?.id).toBe(a.id);
@@ -172,7 +172,7 @@ describe("lease claim — one active lease per work item (contract §2)", () => 
 
   it("a losing claim batch aborts atomically: the work item stays ready", async () => {
     const s = await seedWithWorkItem();
-    const holder = makeLease(s, s.workItem.id); // live — expireForWorkItem is a no-op
+    const holder = makeLease(s, s.workItem.id); // live - expireForWorkItem is a no-op
     await s.repos.leases.claim(holder);
 
     const loser = makeLease(s, s.workItem.id);
@@ -193,7 +193,7 @@ describe("lease claim — one active lease per work item (contract §2)", () => 
   });
 });
 
-describe("lease renew — conditional UPDATE (contract §2)", () => {
+describe("lease renew - conditional UPDATE (contract §2)", () => {
   async function claimed(overrides?: Partial<LeaseRecord>) {
     const s = await seedWithWorkItem();
     const lease = makeLease(s, s.workItem.id, overrides);
@@ -245,7 +245,7 @@ describe("lease renew — conditional UPDATE (contract §2)", () => {
   });
 });
 
-describe("lease release and expire — conditional UPDATEs (contract §2)", () => {
+describe("lease release and expire - conditional UPDATEs (contract §2)", () => {
   it("release ends an active lease once: 1 then 0", async () => {
     const s = await seedWithWorkItem();
     const lease = makeLease(s, s.workItem.id);
@@ -292,7 +292,7 @@ describe("lease release and expire — conditional UPDATEs (contract §2)", () =
   });
 });
 
-describe("sweep query — correctness across the expiry boundary (contract §2)", () => {
+describe("sweep query - correctness across the expiry boundary (contract §2)", () => {
   it("lists exactly the active leases with expires_at <= now, oldest first", async () => {
     const s = await seedBasics();
     const items = [0, 1, 2, 3, 4].map(() => makeWorkItem(s));
@@ -338,7 +338,7 @@ describe("sweep query — correctness across the expiry boundary (contract §2)"
   });
 });
 
-describe("submissions — lifecycle (contract §4)", () => {
+describe("submissions - lifecycle (contract §4)", () => {
   async function seedWithSubmission() {
     const s = await seedWithWorkItem();
     const lease = makeLease(s, s.workItem.id);

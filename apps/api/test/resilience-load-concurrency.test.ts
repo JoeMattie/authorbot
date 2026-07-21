@@ -1,5 +1,5 @@
 /**
- * Phase 7 exit criterion 4, load half — **sustained fleet-shaped traffic
+ * Phase 7 exit criterion 4, load half - **sustained fleet-shaped traffic
  * against one project.**
  *
  * The contract asks for "sustained concurrent claims and submissions" and for
@@ -12,7 +12,7 @@
  *    lease.
  * 2. **No clobbered chapter revision.** Concurrent submissions against the
  *    same chapter must produce a revision sequence with no gaps, no repeats,
- *    and no lost prose — every applied revision appears exactly once in the
+ *    and no lost prose - every applied revision appears exactly once in the
  *    attribution artifact, and each applied edit is still in the file.
  * 3. **No duplicated work item.** Votes crossing the governance threshold
  *    simultaneously must create one work item and one `create_work_item`
@@ -23,7 +23,7 @@
  * The API serializes claims per project *in process*. A single `Hono` instance
  * would therefore make a "concurrent claim" test prove only that the
  * serializer works. The deployed shape is several Worker isolates over one D1,
- * where that serializer offers nothing — so the races below are driven through
+ * where that serializer offers nothing - so the races below are driven through
  * MULTIPLE `createApi` instances sharing one database, which is the shape that
  * actually exercises the compare-and-swap and the unique index.
  *
@@ -109,7 +109,7 @@ function suggestionOn(block: (typeof BLOCKS)[number], revision: number, body: st
 }
 
 /**
- * A second (third, fourth…) API instance over the SAME database — the test's
+ * A second (third, fourth…) API instance over the SAME database - the test's
  * stand-in for another Worker isolate. Deliberately does not call
  * `bootstrap()`: the project row already exists, and re-seeding would be a
  * test-only path the deployment never takes.
@@ -317,7 +317,7 @@ describe("load: sustained concurrent claims", () => {
 // ===========================================================================
 
 describe("load: sustained concurrent submissions against one chapter", () => {
-  it("every applied submission gets its own revision — no gap, no repeat, no lost prose", async () => {
+  it("every applied submission gets its own revision - no gap, no repeat, no lost prose", async () => {
     const app = await makeGitHubIntegrationApp();
     try {
       // Five work items on five DIFFERENT blocks of the same chapter, each
@@ -370,7 +370,7 @@ describe("load: sustained concurrent submissions against one chapter", () => {
         });
       }
 
-      // All five bundles share one base — this is a genuine five-way race.
+      // All five bundles share one base - this is a genuine five-way race.
       expect(new Set(claims.map((claim) => claim.baseContentHash)).size).toBe(1);
       const baseRevision = claims[0]!.baseRevision;
 
@@ -427,7 +427,7 @@ describe("load: sustained concurrent submissions against one chapter", () => {
         ).toBe(1);
       }
 
-      // The projection and the repository agree on the revision — the
+      // The projection and the repository agree on the revision - the
       // projection never records a revision the file does not carry.
       const source = (await app.git.reader.readTextFile?.(CHAPTER_1.path)) as string;
       expect(source).toMatch(new RegExp(`^revision: ${finalRevision}$`, "m"));
@@ -444,7 +444,7 @@ describe("load: sustained concurrent submissions against one chapter", () => {
         expect(source).toContain(`authorbot:block id="${block.id}"`);
       }
 
-      // Each commit on the chain has exactly one parent — a linear history,
+      // Each commit on the chain has exactly one parent - a linear history,
       // never a lost or forked commit.
       let sha: string | null = app.fake.state.getRef(BRANCH);
       let walked = 0;

@@ -2,7 +2,7 @@
  * Constants every GitHub caller in this package shares.
  *
  * They live in their own module rather than in `index.ts` so that `app-auth`,
- * `reader` and `writer` can import them without importing the barrel — a
+ * `reader` and `writer` can import them without importing the barrel - a
  * barrel import from a module the barrel re-exports is a cycle, and under
  * `verbatimModuleSyntax` the value exports make it a real one at runtime.
  */

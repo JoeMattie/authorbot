@@ -6,7 +6,7 @@ import { normalizeBlockText } from "./normalize.js";
 import { parseChapterMarkdown } from "./parse.js";
 
 /**
- * Selector resolution per design §10.2 steps 1–4 ONLY (Phase 4 contract:
+ * Selector resolution per design §10.2 steps 1-4 ONLY (Phase 4 contract:
  * fuzzy step 5 is deferred; never guess):
  *
  * 1. Match the stable blockId.
@@ -20,7 +20,7 @@ import { parseChapterMarkdown } from "./parse.js";
  *
  * - Stored context (prefix/suffix) is VERIFICATION, not merely a
  *   disambiguator among several exact matches. Whenever a selector carries
- *   context, every acceptance path checks it — the stored position in step 2
+ *   context, every acceptance path checks it - the stored position in step 2
  *   included, and single candidates included. A lone occurrence whose
  *   surroundings contradict the stored context is not the declared target; it
  *   is a different sentence that happens to share a quote, and design §10.2
@@ -197,7 +197,7 @@ function pickCandidate(
   return filtered.length === 0 ? { kind: "zero" } : { kind: "ambiguous" };
 }
 
-/** Resolve a stored range selector against a chapter source (§10.2 1–4). */
+/** Resolve a stored range selector against a chapter source (§10.2 1-4). */
 export function resolveTarget(source: string, target: RangeTarget): ResolveResult {
   const exact = target.textQuote.exact.normalize("NFC");
   if (exact.length === 0) {

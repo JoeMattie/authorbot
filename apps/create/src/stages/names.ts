@@ -40,7 +40,7 @@ export const STAGE_SUMMARIES: Record<StageName, string> = {
 };
 
 /**
- * Stages that destroy things, and so are never walked by any flow — only ever
+ * Stages that destroy things, and so are never walked by any flow - only ever
  * run because someone typed their name. Keeping them in `STAGE_NAMES` is what
  * makes `create-authorbot teardown` resolve at all; keeping them out of every
  * flow is what stops a bare `create-authorbot` from walking into one.

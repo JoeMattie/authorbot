@@ -1,6 +1,6 @@
-# Phase 7 implementation contract — hardening
+# Phase 7 implementation contract - hardening
 
-Additive to Phase 0–6 contracts. This is design document §23 Phase 6,
+Additive to Phase 0-6 contracts. This is design document §23 Phase 6,
 renumbered when guided onboarding took that slot. It precedes Phase 8 (the
 collaborator skill) deliberately: the service should survive a fleet before
 one is invited.
@@ -15,10 +15,10 @@ one is invited.
 
 - **Rate limits** per actor and per token on every mutation, with
   `429` + `Retry-After` and documented ceilings. Voting, claiming, and
-  submission endpoints first — they are the ones a fleet hits hardest.
+  submission endpoints first - they are the ones a fleet hits hardest.
 - ~~**Restore drill**, executed as an automated test.~~ *(Descoped; restore is
   documented in the runbook but not automated.)*
-- **Security review** of the whole surface, with the Phase 0–6 review lenses
+- **Security review** of the whole surface, with the Phase 0-6 review lenses
   applied to the system rather than to a single phase: auth, tokens, CSRF,
   webhooks, injection, path handling, and the agent-facing untrusted-content
   boundary.
@@ -26,7 +26,7 @@ one is invited.
   against the design's §16.6 list, including a screen-reader pass.
 - ~~**Load and failure testing** under sustained fleet-shaped traffic.~~
   *(Descoped.)*
-- **Author-facing access control** (§ below) — the settings an author needs to
+- **Author-facing access control** (§ below) - the settings an author needs to
   vet, restrict, and revoke the people and agents working on their book.
 - **Operator documentation**: runbook for the failure modes above, backup and
   restore, key rotation (session, webhook, GitHub App), and how to read the
@@ -48,7 +48,7 @@ recorded as an audit event.
 - **Collaborators**: who has access, their role, when they joined, who added
   them, and when they last acted.
 - **Agent tokens**: name, scopes, owning human, created and last-used times,
-  expiry. Tokens are never re-displayable — only their metadata.
+  expiry. Tokens are never re-displayable - only their metadata.
 - **Recent activity**: a readable view of the audit log filtered by actor, so
   "who changed this and when" is answerable without a runbook. Vetting is
   guesswork without it, which is why it belongs here rather than in Phase 9.
@@ -58,7 +58,7 @@ recorded as an audit event.
 - **Change a role** (reader / contributor / editor / maintainer), with the
   scope consequences stated in plain language rather than as scope names.
 
-- **Annotation policy** — who may comment and suggest, and whether it appears
+- **Annotation policy** - who may comment and suggest, and whether it appears
   immediately:
 
   | Mode | Who may write | Appears |
@@ -74,7 +74,7 @@ recorded as an audit event.
   **`locked` is author-only, not off.** The book remains fully usable by its
   maintainers: annotating their own drafts, thinking out loud in the margins,
   and running their own agents against their own ideas. Existing collaborators
-  keep their membership and their history — they simply cannot write until the
+  keep their membership and their history - they simply cannot write until the
   policy opens again. A solo author who never leaves `locked` is using the
   system as intended, not a degraded version of it.
 
@@ -86,7 +86,7 @@ recorded as an audit event.
   Design §19.7 defers it until moderation, spam controls, privacy, and a
   deletion policy all exist; this phase supplies the first, not the rest.
 
-- **Freeze the book** — a separate emergency control, orthogonal to the policy
+- **Freeze the book** - a separate emergency control, orthogonal to the policy
   above: no writes at all, from anyone, including maintainers, across
   annotations, votes, claims, and submissions. **Reads are unaffected** and
   the published site keeps serving. This is "something is wrong, stop
@@ -109,7 +109,7 @@ non-obvious requirement:
   durable; that is the whole point of gating.
 - A pending annotation is visible to its author (badged as awaiting review)
   and to maintainers. It is invisible to everyone else, accrues **no votes**,
-  and cannot trigger a governance rule — an unapproved suggestion must not be
+  and cannot trigger a governance rule - an unapproved suggestion must not be
   able to manufacture work.
 - The queue shows the comment, its target passage, the author's history with
   this book, and approve / reject actions. Rejection takes an optional reason,
@@ -123,12 +123,12 @@ non-obvious requirement:
 ### Revoking
 
 - **Remove a collaborator** or **revoke a token**, taking effect on the *next
-  request* — not on session expiry. Specifically, revocation must:
+  request* - not on session expiry. Specifically, revocation must:
   - invalidate that actor's sessions, not merely their membership;
   - release any lease they hold, returning the work item to `ready` so their
     departure does not strand work for up to four hours;
   - reject in-flight submissions from the revoked actor;
-  - leave their prior contributions intact — attribution and history are
+  - leave their prior contributions intact - attribution and history are
     permanent records, not access grants. Removing someone is not erasing
     them, and the interface must not imply otherwise.
 - **Revoke all agent tokens** in one action, for a suspected leak.
@@ -143,7 +143,7 @@ already happened.
 2. ~~Restore drill passes as an automated test.~~ *(Descoped.)*
 3. Security and accessibility reviews complete with findings fixed or
    explicitly accepted in writing. (Security: reviewed and fixed. Accessibility:
-   reviewed, findings recorded and ACCEPTED in docs/accessibility-findings.md —
+   reviewed, findings recorded and ACCEPTED in docs/accessibility-findings.md -
    deferred until the tool works end-to-end for its first real book, and to be
    revisited before it is recommended to anyone else.)
 4. ~~Load tests hold under sustained fleet-shaped traffic.~~ *(Descoped.)*
@@ -154,13 +154,13 @@ already happened.
    collaborator or token.
 7. Revocation is effective on the next request, releases held leases, rejects
    the revoked actor's in-flight submissions, invalidates their sessions, and
-   preserves their existing attribution — each asserted by test.
+   preserves their existing attribution - each asserted by test.
 8. Freeze refuses every write path (including maintainer writes) while reads
    and the published site are provably unaffected.
 9. Each annotation policy is enforced server-side, not merely reflected in the
    interface: `collaborators-only` rejects non-members and `open` still refuses
-   anonymous writes, while `locked` still admits maintainers — including an
-   author's agent tokens holding the maintainer role — so a solo author can
+   anonymous writes, while `locked` still admits maintainers - including an
+   author's agent tokens holding the maintainer role - so a solo author can
    annotate and run agents against a closed book.
 10. Under `approval-gated`: a pending annotation reaches no Git commit, is
     invisible to other readers, accrues no votes, and cannot trigger a rule;

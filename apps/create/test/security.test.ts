@@ -74,7 +74,7 @@ function plantJournal(harness: Harness, data: Record<string, unknown>): void {
 }
 
 // ---------------------------------------------------------------------------
-// ERROR 1 — the journal is a security input, so it is validated
+// ERROR 1 - the journal is a security input, so it is validated
 // ---------------------------------------------------------------------------
 
 describe("the journal is validated on load, not cast through", () => {
@@ -102,7 +102,7 @@ describe("the journal is validated on load, not cast through", () => {
     ["a file: URL", "file:///etc/passwd"],
     ["credentials in the authority", "https://user:pw@evil.example.com"],
     ["not a URL at all", "not a url"],
-  ])("drops a siteUrl with %s — it becomes an OAuth callback host", (_label, siteUrl) => {
+  ])("drops a siteUrl with %s - it becomes an OAuth callback host", (_label, siteUrl) => {
     const parsed = parseJournal(
       JSON.stringify({ ...emptyJournal(NOW), publish: { siteUrl } }),
       NOW,
@@ -167,7 +167,7 @@ describe("the repository outranks the journal about where the book lives", () =>
    * The attack in one test: a book repository that ships its own
    * `.authorbot-setup.json` naming someone else's repository. The author
    * clones it and runs `create-authorbot publish`, which would otherwise send
-   * their Cloudflare API token to `attacker/collector` — the journal used to
+   * their Cloudflare API token to `attacker/collector` - the journal used to
    * outrank `git remote get-url origin`, so the true origin was never even
    * consulted.
    */
@@ -200,7 +200,7 @@ describe("the repository outranks the journal about where the book lives", () =>
     const prompt = harness.prompter.asked.find((entry) => entry.id === "book.repoConflict");
     expect(prompt, "the conflict must be raised, not resolved silently").toBeDefined();
     expect(prompt?.destructive).toBe(true);
-    // Declining is a decision, not a fault — and nothing was changed.
+    // Declining is a decision, not a fault - and nothing was changed.
     expect(code).toBe(0);
     const said = harness.out.all().replace(/\s+/g, " ");
     expect(said).toContain("attacker/collector");
@@ -237,7 +237,7 @@ describe("the repository outranks the journal about where the book lives", () =>
 });
 
 // ---------------------------------------------------------------------------
-// ERROR 2 — values destined for argv are names, never flags
+// ERROR 2 - values destined for argv are names, never flags
 // ---------------------------------------------------------------------------
 
 describe("a journal value can never become a command-line flag", () => {
@@ -326,7 +326,7 @@ describe("a journal value can never become a command-line flag", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ERROR 3 — the one value that is meant to be read
+// ERROR 3 - the one value that is meant to be read
 // ---------------------------------------------------------------------------
 
 describe("the minted agent token is actually shown", () => {
@@ -407,7 +407,7 @@ describe("the minted agent token is actually shown", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WARN 4 — env-sourced credentials are registered too
+// WARN 4 - env-sourced credentials are registered too
 // ---------------------------------------------------------------------------
 
 describe("credentials that arrive through the environment", () => {
@@ -448,7 +448,7 @@ describe("credentials that arrive through the environment", () => {
       stdout: "",
       // Exactly the shape that leaked: an *unrecognised* failure, whose last
       // ten stderr lines are quoted verbatim into a WizardError the reporter
-      // then prints — with the tool having echoed its own credential.
+      // then prints - with the tool having echoed its own credential.
       stderr: `Upload step failed while publishing\nrequest used CLOUDFLARE_API_TOKEN=${token}\n`,
     });
     const harness = makeHarness({
@@ -470,7 +470,7 @@ describe("credentials that arrive through the environment", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WARN 5 — the maintainer check is a gate, and it is exact
+// WARN 5 - the maintainer check is a gate, and it is exact
 // ---------------------------------------------------------------------------
 
 describe("the seeded-maintainer health check", () => {
@@ -570,7 +570,7 @@ describe("the seeded-maintainer health check", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WARN 6 — no output path outside the vault, and nothing escapes to Node
+// WARN 6 - no output path outside the vault, and nothing escapes to Node
 // ---------------------------------------------------------------------------
 
 describe("every output path goes through the vault", () => {
@@ -585,7 +585,7 @@ describe("every output path goes through the vault", () => {
       vault,
     });
 
-    // `secret()` writes its preamble and then refuses, without needing a TTY —
+    // `secret()` writes its preamble and then refuses, without needing a TTY -
     // which makes it the one prompt whose output is reachable in a test.
     await expect(
       prompter.secret({ id: "x", message: `paste ${secret}`, hint: `it is ${secret}` }),
@@ -620,7 +620,7 @@ describe("every output path goes through the vault", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WARN 7 — a dry run asks for nothing
+// WARN 7 - a dry run asks for nothing
 // ---------------------------------------------------------------------------
 
 describe("--dry-run", () => {
@@ -647,7 +647,7 @@ describe("--dry-run", () => {
 });
 
 // ---------------------------------------------------------------------------
-// WARN 8 — constant-time state, and config file permissions
+// WARN 8 - constant-time state, and config file permissions
 // ---------------------------------------------------------------------------
 
 describe("manifest flow state comparison", () => {
@@ -713,7 +713,7 @@ answers:
 describe("the book's address is corroborated, not taken on trust", () => {
   /**
    * The sibling of the repository attack. `parseJournal` can only prove
-   * `siteUrl` is a well-formed https URL — `https://evil.example` passes that
+   * `siteUrl` is a well-formed https URL - `https://evil.example` passes that
    * perfectly. It becomes the GitHub App's callback and webhook target and
    * receives a maintainer bearer token when an agent credential is minted, so
    * a value nothing local corroborates must be looked at by a human.

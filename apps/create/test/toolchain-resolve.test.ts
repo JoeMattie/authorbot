@@ -1,10 +1,10 @@
 /**
- * How `resolveTool` decides what to run — and, more importantly, when it
+ * How `resolveTool` decides what to run - and, more importantly, when it
  * decides it cannot run anything.
  *
  * The npx tier used to be returned unconditionally whenever `npx` itself was
  * on PATH. `npx --no-install <tool>` then exited non-zero because the package
- * was not cached, and the caller — comparing exit codes — reported a perfectly
+ * was not cached, and the caller - comparing exit codes - reported a perfectly
  * valid book as having failed validation, with a message inviting the author
  * to file a bug against their own files. Resolution has to distinguish "the
  * tool is absent" from "the tool ran and objected", so that is what these
@@ -46,7 +46,7 @@ describe("resolveTool", () => {
 
   it("does not offer npx when npx cannot actually run the tool", async () => {
     // npx is installed, but `--no-install` refuses because the package is not
-    // cached — precisely the situation in a freshly scaffolded book.
+    // cached - precisely the situation in a freshly scaffolded book.
     const runner = new FakeProcessRunner(["npx"]);
     runner.on(["npx", "--no-install", "authorbot", "--help"], {
       code: 1,

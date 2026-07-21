@@ -51,7 +51,7 @@ export interface ScaffoldFile {
 
 /**
  * YAML-quotes a scalar. Titles are author input and may contain colons,
- * quotes, or leading `#` — all of which change the meaning of an unquoted
+ * quotes, or leading `#` - all of which change the meaning of an unquoted
  * YAML scalar. Double quotes with escaping is the one form that is safe for
  * every string.
  */
@@ -62,7 +62,7 @@ function yamlString(value: string): string {
 export function renderBookYml(identity: BookIdentity): string {
   return `# Authorbot book configuration (schema: authorbot.book/v1).
 #
-# \`id\` is this book's permanent identity — a lowercase UUIDv7, generated once
+# \`id\` is this book's permanent identity - a lowercase UUIDv7, generated once
 # when the book was created. Never change it; records elsewhere refer to it.
 #
 # Title, language, license, and the publication display options below are all
@@ -263,7 +263,7 @@ function purposeOf(relative: string): string {
  *
  * `authorbot validate` is still run afterwards and is the authority
  * (contract §3.2: "does not proceed until it passes"). This earlier check
- * exists so a bad *title* — the one field that is arbitrary author input —
+ * exists so a bad *title* - the one field that is arbitrary author input -
  * produces a pointed message about the title rather than a validation report
  * about a file the author never wrote.
  */

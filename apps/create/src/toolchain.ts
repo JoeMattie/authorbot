@@ -3,14 +3,14 @@
  *
  * ADR-0022 moved the toolchain pin into the book's own `package.json`, so the
  * `authorbot` and `wrangler` a book should run are the ones inside its
- * `node_modules` — not whatever happens to be installed globally. Resolution
+ * `node_modules` - not whatever happens to be installed globally. Resolution
  * order is therefore:
  *
- *   1. `<book>/node_modules/.bin/<tool>` — the pinned version, exactly what CI
+ *   1. `<book>/node_modules/.bin/<tool>` - the pinned version, exactly what CI
  *      will run.
- *   2. the tool on PATH — a global install, used with a note that it may not
+ *   2. the tool on PATH - a global install, used with a note that it may not
  *      match the pin.
- *   3. `npx --no-install <tool>` — last resort; `--no-install` because
+ *   3. `npx --no-install <tool>` - last resort; `--no-install` because
  *      silently downloading an unpinned package mid-setup is precisely the
  *      unpinned install the pin exists to prevent.
  */
@@ -48,7 +48,7 @@ export async function resolveTool(
  * Whether `npx --no-install <tool>` would actually run something.
  *
  * `--no-install` succeeds only when the package is already in npx's cache.
- * When it is not, npx exits non-zero with a registry error — and a caller
+ * When it is not, npx exits non-zero with a registry error - and a caller
  * comparing exit codes cannot tell that apart from the tool running and
  * reporting a genuine problem. That is exactly how a book that validates
  * cleanly was reported as failing validation: `authorbot` was merely absent,
@@ -62,7 +62,7 @@ export async function resolveTool(
  * `--version` does not qualify: `authorbot` has no such command and exits
  * non-zero, which would report a perfectly usable toolchain as missing. If a
  * future tool disagrees about `--help` too, the cost is that same conservative
- * answer — a warning that it is not installed, never a false claim about the
+ * answer - a warning that it is not installed, never a false claim about the
  * author's book, which is the direction this whole function exists to protect.
  */
 async function npxCanRun(ctx: WizardContext, tool: string): Promise<boolean> {
@@ -85,7 +85,7 @@ export interface RunToolOptions {
 
 /**
  * Runs a toolchain command. Returns null when the tool cannot be found at all,
- * which callers turn into an explanation rather than a crash — a missing
+ * which callers turn into an explanation rather than a crash - a missing
  * `wrangler` before the book's `npm install` has run is an ordinary situation,
  * not an error.
  */

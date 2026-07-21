@@ -2,11 +2,11 @@
 
 This is the operator's guide to giving an Authorbot deployment read and write
 access to its book repository. Everything here is done in a browser and a
-terminal — you do not need to read or change any source code.
+terminal - you do not need to read or change any source code.
 
 **What it buys you.** Until the App is configured, the API runs *degraded but
 correct*: people can log in, read the book, and file annotations, and those
-annotations are recorded durably — but nothing is ever committed to the book
+annotations are recorded durably - but nothing is ever committed to the book
 repository, and the chapter projection cannot be rebuilt from GitHub. Once the
 App is installed and the three variables below are set, edits become real
 commits and the projection tracks the repository.
@@ -30,7 +30,7 @@ Collect these four facts about your deployment:
 | Default branch | `main` | The branch Authorbot commits to |
 | Webhook secret | *(a long random string)* | The `WEBHOOK_SECRET` already set on your Worker |
 
-If you do not know your webhook secret, generate a new one now — you will set
+If you do not know your webhook secret, generate a new one now - you will set
 it on both GitHub and the Worker in step 3, so they only have to match each
 other:
 
@@ -40,36 +40,36 @@ openssl rand -hex 32
 
 > **The live deployment is same-origin.** The reading site and the API are
 > served by one Cloudflare Worker (`causal-projector`), so the API base URL is
-> the same host as the book — there is no separate `api.` subdomain, and the
+> the same host as the book - there is no separate `api.` subdomain, and the
 > webhook URL below is on the same domain your readers use.
 
 ---
 
-## Step 1 — Create the GitHub App
+## Step 1 - Create the GitHub App
 
 1. Go to **https://github.com/settings/apps** and click **New GitHub App**.
    (For an App owned by an organization instead of your personal account, use
-   `https://github.com/organizations/YOUR-ORG/settings/apps` — the rest of this
+   `https://github.com/organizations/YOUR-ORG/settings/apps` - the rest of this
    guide is identical.)
 
 2. Fill in:
 
-   - **GitHub App name** — anything unique, e.g. `authorbot-causal-projector`.
+   - **GitHub App name** - anything unique, e.g. `authorbot-causal-projector`.
      This is cosmetic; nothing in the configuration refers to it.
-   - **Homepage URL** — your API base URL is fine.
+   - **Homepage URL** - your API base URL is fine.
 
-3. **Webhook** — leave **Active** checked, and set:
+3. **Webhook** - leave **Active** checked, and set:
 
    - **Webhook URL**: your API base URL followed by `/v1/webhooks/github`, e.g.
      `https://causal-projector.joemattie.com/v1/webhooks/github`
    - **Webhook secret**: the webhook secret from the table above.
 
    The webhook is how Authorbot learns that somebody edited the book directly
-   in GitHub. It is the only thing that triggers a projection refresh — the
+   in GitHub. It is the only thing that triggers a projection refresh - the
    periodic alarm refreshes only when a webhook has marked the projection
-   stale — so without it an edit made directly on GitHub is never picked up.
+   stale - so without it an edit made directly on GitHub is never picked up.
 
-4. **Repository permissions** — set exactly these two, and leave every other
+4. **Repository permissions** - set exactly these two, and leave every other
    permission at **No access**:
 
    | Permission | Access | Why |
@@ -81,29 +81,29 @@ openssl rand -hex 32
    in this phase, and a token that cannot do a thing cannot be misused to do
    it.
 
-5. **Subscribe to events** — check **Push**, and nothing else.
+5. **Subscribe to events** - check **Push**, and nothing else.
 
-6. **Where can this GitHub App be installed?** — **Only on this account** is
+6. **Where can this GitHub App be installed?** - **Only on this account** is
    correct unless you are deliberately sharing the App.
 
 7. Click **Create GitHub App**.
 
 ---
 
-## Step 2 — Collect the three credentials
+## Step 2 - Collect the three credentials
 
 You are now on the App's settings page. You need three values.
 
 ### `GITHUB_APP_ID`
 
-At the top of the App's **General** page, under **About**, is **App ID** — a
+At the top of the App's **General** page, under **About**, is **App ID** - a
 short number like `1234567`. That is `GITHUB_APP_ID`.
 
 ### `GITHUB_APP_PRIVATE_KEY`
 
 On the same **General** page, scroll to **Private keys** and click **Generate
 a private key**. Your browser downloads a `.pem` file. **This is the only copy
-— GitHub will not show it again.**
+- GitHub will not show it again.**
 
 GitHub's download is in PKCS#1 format, which begins:
 
@@ -134,7 +134,7 @@ WebCrypto cannot import a PKCS#1 key, so the deployment will report
 > **Handling the key.** It is a credential equivalent to write access to your
 > book. Do not commit it, do not paste it into a chat or an issue, and delete
 > the local files once step 3 is done. If it ever leaks, return to **Private
-> keys**, generate a new one, and delete the old — the old key stops working
+> keys**, generate a new one, and delete the old - the old key stops working
 > immediately.
 
 ### `GITHUB_INSTALLATION_ID`
@@ -163,20 +163,20 @@ to the App, and read the number off the URL.
 
 ---
 
-## Step 3 — Set the values on the Worker
+## Step 3 - Set the values on the Worker
 
 > **Edit YOUR deployment's config, not `apps/api/wrangler.jsonc`.**
 > `apps/api/wrangler.jsonc` is the repository's development/reference config.
 > It declares `name: "authorbot-api"`, has no `assets` binding, and
 > deliberately omits `AUTH_MODE`, `GITHUB_CLIENT_ID` and
 > `GITHUB_REDIRECT_URI`. A real deployment is the **combined** config
-> described in `docs/getting-started.md` §3b — the one that owns
+> described in `docs/getting-started.md` §3b - the one that owns
 > `assets: { "directory": "./_site" }`, `AUTH_MODE: "github"` and the OAuth
 > vars, and whose `name` is your live Worker (`causal-projector` for this
 > deployment). Deploying `apps/api/wrangler.jsonc` would either create a
 > *second* Worker bound to the same production D1 that 500s on every request
-> (`AUTH_MODE must be "dev" or "github"`), or — if you pointed it at the live
-> Worker — replace the live vars set wholesale, wiping the static site and the
+> (`AUTH_MODE must be "dev" or "github"`), or - if you pointed it at the live
+> Worker - replace the live vars set wholesale, wiping the static site and the
 > auth/OAuth configuration. `wrangler deploy` replaces plain-text `vars`
 > entirely; secrets survive, vars do not.
 >
@@ -186,7 +186,7 @@ to the App, and read the number off the URL.
 Two of the three values are non-secret identifiers, and one is a secret.
 
 ```bash
-# Secret — prompts for the value, or pipe the file in as shown below.
+# Secret - prompts for the value, or pipe the file in as shown below.
 wrangler secret put GITHUB_APP_PRIVATE_KEY --name YOUR-WORKER < authorbot-key-pkcs8.pem
 
 # Also set the webhook secret if you generated a new one in "Before you start".
@@ -203,7 +203,7 @@ and the book repository's CI reporting a finished deployment to
 `POST /v1/publications`. They live in **different trust domains**.
 `WEBHOOK_SECRET` is pasted into the GitHub App's webhook configuration;
 `PUBLICATION_SECRET` goes into the book repository's **Actions secrets**, where
-every workflow — and anyone who can get a workflow to run — is within reach of
+every workflow - and anyone who can get a workflow to run - is within reach of
 it.
 
 While the two were one value, whoever held the CI copy could forge `push`
@@ -214,7 +214,7 @@ domain.
 If `PUBLICATION_SECRET` is unset the API falls back to `WEBHOOK_SECRET`, so an
 existing deployment keeps reporting while you rotate. To rotate: set
 `PUBLICATION_SECRET` on the Worker, put the same value in the book repo's
-Actions secrets, confirm a deployment reports, and you are done — the GitHub
+Actions secrets, confirm a deployment reports, and you are done - the GitHub
 webhook secret never has to change.
 
 The two ids are ordinary variables. Add them to the `vars` block of **your
@@ -222,7 +222,7 @@ deployment's** wrangler config:
 
 ```jsonc
   "vars": {
-    // ...existing entries — keep AUTH_MODE, the OAuth vars and everything
+    // ...existing entries - keep AUTH_MODE, the OAuth vars and everything
     // else that is already there; a deploy replaces this whole block ...
     "GITHUB_APP_ID": "1234567",
     "GITHUB_INSTALLATION_ID": "87654321"
@@ -240,7 +240,7 @@ you want commits on.
 > book to a different default branch, change it in the database as well.
 
 While you are in this file, make sure the coordinator's maintenance cron is
-present — it is what arms the periodic alarm that sweeps expired leases and
+present - it is what arms the periodic alarm that sweeps expired leases and
 drains any backlog on a deployment that receives no webhooks yet:
 
 ```jsonc
@@ -257,7 +257,7 @@ rm your-app-name.*.private-key.pem authorbot-key-pkcs8.pem
 
 ---
 
-## Step 4 — Apply database migrations, then deploy
+## Step 4 - Apply database migrations, then deploy
 
 **Order matters.** Apply migrations *before* deploying the new Worker code:
 the project endpoint reads a table that the migration creates, so a Worker
@@ -273,7 +273,7 @@ Deploy from the directory holding *your* combined config (see the box in step
 
 ---
 
-## Step 5 — Turn on committing
+## Step 5 - Turn on committing
 
 Configuration alone does not change behaviour: the deployment keeps queueing
 mutations until you switch the mirror mode. This is deliberate, so you can
@@ -286,13 +286,13 @@ curl -s https://causal-projector.joemattie.com/v1/projects/YOUR-PROJECT-ID \
   -H "Cookie: <your session cookie>" | jq .gitIntegration
 ```
 
-- `"configured"` — all three values are present and structurally valid: two
+- `"configured"` - all three values are present and structurally valid: two
   numeric ids and a PKCS#8 PEM. Continue.
-- `"invalid"` — all three are present but at least one cannot work. The usual
+- `"invalid"` - all three are present but at least one cannot work. The usual
   causes are a private key still in PKCS#1 form (see step 2) or the App ID
   pasted where the Installation ID belongs (see step 2). Fix and redeploy.
-- `"incomplete"` — one or two of the three are set. Recheck step 3.
-- `"unconfigured"` — none are set. The deploy did not pick up your changes.
+- `"incomplete"` - one or two of the three are set. Recheck step 3.
+- `"unconfigured"` - none are set. The deploy did not pick up your changes.
 
 This check is structural, not a live credential test: it proves the values are
 shaped correctly, not that GitHub accepts them. Step 6 is what proves that.
@@ -310,26 +310,26 @@ wrangler deploy --name YOUR-WORKER
 
 Queued mutations drain on the next coordinator alarm (every
 `COORDINATOR_ALARM_SECONDS`, 60 by default), which the maintenance cron from
-step 3 keeps armed — so a backlog accumulated while you were setting this up
+step 3 keeps armed - so a backlog accumulated while you were setting this up
 commits on its own, and you do not need to replay anything. Without that cron
 entry, nothing drains until the next mutation arrives.
 
 ---
 
-## Step 6 — Verify
+## Step 6 - Verify
 
 1. **A write becomes a commit.** File an annotation through the site, wait a
    few seconds, and look at the book repository's commit history. You should
    see a commit authored by *Authorbot* touching
    `.authorbot/annotations/<id>/annotation.md`, with trailers naming the
    operation, the annotation, and the human actor. The Git author is always
-   the service — the human is credited in the commit trailers and in the
+   the service - the human is credited in the commit trailers and in the
    `.authorbot/attribution/` records, not in the Git identity.
 
 2. **A push is noticed.** Edit a chapter directly on GitHub and commit. Within
    a few seconds the site should reflect the change. In the App's **Advanced**
    tab, **Recent Deliveries** shows the `push` event and the response
-   Authorbot returned — a `401` there means the webhook secret on GitHub and
+   Authorbot returned - a `401` there means the webhook secret on GitHub and
    `WEBHOOK_SECRET` on the Worker do not match.
 
 ---
@@ -344,19 +344,19 @@ values) that `GITHUB_APP_PRIVATE_KEY` is present.
 **`gitIntegration` is `"incomplete"`.**
 Exactly one or two of `GITHUB_APP_ID`, `GITHUB_INSTALLATION_ID`,
 `GITHUB_APP_PRIVATE_KEY` are set. Usually a `wrangler secret put` that was
-never deployed, or a `vars` edit made in the wrong config file — see the box
+never deployed, or a `vars` edit made in the wrong config file - see the box
 in step 3.
 
 **`gitIntegration` is `"invalid"`.**
 All three are present but one is malformed. In order of likelihood: the
-private key is still PKCS#1 (`BEGIN RSA PRIVATE KEY` — see step 2); the App ID
+private key is still PKCS#1 (`BEGIN RSA PRIVATE KEY` - see step 2); the App ID
 and the Installation ID were swapped; a value picked up stray characters when
 it was pasted. Both ids must be digits only.
 
 **Secrets or vars landed on the wrong Worker.**
 A bare `wrangler secret put` or `wrangler deploy` acts on whatever config is
 in the current directory, and may offer to create a *new* Worker. Always pass
-`--name YOUR-WORKER`, and never deploy `apps/api/wrangler.jsonc` — see the box
+`--name YOUR-WORKER`, and never deploy `apps/api/wrangler.jsonc` - see the box
 in step 3.
 
 **Nothing commits, but `gitIntegration` says `"configured"`.**
@@ -369,13 +369,13 @@ repository, or the repository was never added to the installation. Go to
 **https://github.com/settings/installations** → **Configure**, confirm the
 book repository is selected, and re-check the App's permissions. Note that
 changing an App's permissions after installation requires *accepting* the new
-permissions on the installation — GitHub emails the owner a request, and the
+permissions on the installation - GitHub emails the owner a request, and the
 old permissions apply until it is accepted.
 
 **Commits fail on a protected branch.**
 Authorbot commits directly to the default branch and never force-pushes. A
 branch protection rule requiring pull requests or status checks will block it.
-Either exempt the App from the rule, or relax the rule — pull-request mode is
+Either exempt the App from the rule, or relax the rule - pull-request mode is
 a later phase.
 
 **The webhook shows `401` in Recent Deliveries.**
@@ -383,7 +383,7 @@ The secrets do not match. Set the same string in both places: the App's
 **Webhook secret** field and `wrangler secret put WEBHOOK_SECRET`.
 
 **The project reports a divergence and refuses edits.**
-Authorbot found the repository in a state it cannot reconcile — usually a
+Authorbot found the repository in a state it cannot reconcile - usually a
 chapter's `revision` moved backwards, or block ids that annotations point at
 have vanished. Reads keep working; only prose writes are refused. Fix the
 repository, then have a maintainer clear the flag:
@@ -411,7 +411,7 @@ accepting the repository's current state.
 | `GITHUB_INSTALLATION_ID` | var | for Git integration | The numeric id of the App's installation on the book repo |
 | `GITHUB_APP_PRIVATE_KEY` | **secret** | for Git integration | PKCS#8 PEM private key |
 | `WEBHOOK_SECRET` | **secret** | yes | Shared with GitHub's webhook config. Verifies `push` webhooks and nothing else |
-| `PUBLICATION_SECRET` | **secret** | recommended | Shared with the book repository's CI. Verifies `POST /v1/publications` deployment reports. Falls back to `WEBHOOK_SECRET` when unset — see below |
+| `PUBLICATION_SECRET` | **secret** | recommended | Shared with the book repository's CI. Verifies `POST /v1/publications` deployment reports. Falls back to `WEBHOOK_SECRET` when unset - see below |
 | `PROJECT_REPO` | var | yes | `owner/name` of the book repository |
 | `DEFAULT_BRANCH` | var | no (default `main`) | Branch Authorbot reads and commits to |
 | `MIRROR_MODE` | var | no (default `queue`) | `durable` to commit through the coordinator |
@@ -423,7 +423,7 @@ accepting the repository's current state.
   for an installation token. Tokens are cached in memory only, for less than
   an hour, and refreshed automatically.
 - **No installation token or private key is ever logged, stored in the
-  database, or returned in any API response** — including error messages.
+  database, or returned in any API response** - including error messages.
 - Every ref update is sent with `force: false`. Authorbot cannot force-push,
   and a conflicting concurrent push produces a retry or a reported conflict,
   never an overwrite.

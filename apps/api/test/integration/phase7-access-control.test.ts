@@ -4,7 +4,7 @@
  * The unit suite (test/access-control.test.ts) proves the database side: a
  * queued annotation writes no `annotations` row and no outbox row. That is
  * necessary but not sufficient, because the claim the contract actually makes
- * is about the repository — "committing unreviewed submissions to the permanent
+ * is about the repository - "committing unreviewed submissions to the permanent
  * record would put spam in the book's history forever, where removing it means
  * rewriting history". Only a real work tree, a real `git log`, and a real drain
  * can show that nothing reached it.
@@ -66,7 +66,7 @@ describe("Phase 7 access control (integration, against a real repository)", () =
     });
   }
 
-  /** A signed-in identity with no membership — a stranger on a public book. */
+  /** A signed-in identity with no membership - a stranger on a public book. */
   async function signedInStranger(login: string): Promise<string> {
     const cookie = await devLogin(app, login, "contributor");
     const actor = await app.repos.actors.getByExternalIdentity(`github:${login}`);
@@ -121,7 +121,7 @@ describe("Phase 7 access control (integration, against a real repository)", () =
     expect(approve.status).toBe(202);
     await app.mirror.drain(app.projectId);
 
-    // A commit landed, and the artifact is at the ordinary Phase 0 §4 path —
+    // A commit landed, and the artifact is at the ordinary Phase 0 §4 path -
     // "approval mirrors it to Git as a normal annotation", with no marker
     // anywhere saying it came through moderation.
     expect(await headCommit()).not.toBe(before);
@@ -196,7 +196,7 @@ describe("Phase 7 access control (integration, against a real repository)", () =
   });
 
   // =========================================================================
-  // Exit criterion 8 — freeze, against the repository
+  // Exit criterion 8 - freeze, against the repository
   // =========================================================================
 
   it("a freeze stops every commit while reads and the published tree keep serving", async () => {
@@ -228,7 +228,7 @@ describe("Phase 7 access control (integration, against a real repository)", () =
     }
     await app.mirror.drain(app.projectId);
 
-    // Not one commit while frozen — including from the maintainer who froze it.
+    // Not one commit while frozen - including from the maintainer who froze it.
     expect(await headCommit()).toBe(frozenHead);
 
     // Reads are provably unaffected: the earlier contribution still serves,
@@ -260,7 +260,7 @@ describe("Phase 7 access control (integration, against a real repository)", () =
   });
 
   // =========================================================================
-  // Exit criterion 7 — revocation preserves what is already committed
+  // Exit criterion 7 - revocation preserves what is already committed
   // =========================================================================
 
   it("revoking an agent leaves its committed contributions and their attribution in Git", async () => {

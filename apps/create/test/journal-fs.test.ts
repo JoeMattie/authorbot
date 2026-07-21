@@ -2,7 +2,7 @@
  * The journal against a real filesystem.
  *
  * `.authorbot-setup.json` lives inside the book directory, but the first write
- * happens when the wizard marks a stage started — which is before the stage
+ * happens when the wizard marks a stage started - which is before the stage
  * that creates that directory. Pointing the wizard at a path that did not
  * exist yet therefore died with a bare ENOENT naming the wizard's own
  * bookkeeping file, and `--example-config` suggested exactly such a path
@@ -44,7 +44,7 @@ async function journalIn(directory: string): Promise<Journal> {
 
 describe("Journal.save", () => {
   it("creates the book directory rather than failing on ENOENT", async () => {
-    // Never created — the wizard is pointed at where the book *will* live.
+    // Never created - the wizard is pointed at where the book *will* live.
     const directory = path.join(root, "the-causal-projector");
 
     const journal = await journalIn(directory);
@@ -89,7 +89,7 @@ describe("Journal.save", () => {
     });
     await journal.markStage("book", "started", NOW);
 
-    // A dry run promises to change nothing — including not conjuring the
+    // A dry run promises to change nothing - including not conjuring the
     // directory it was only ever asked to describe.
     await expect(stat(directory)).rejects.toThrow();
   });

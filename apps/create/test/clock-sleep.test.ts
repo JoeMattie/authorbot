@@ -2,8 +2,8 @@
  * `SystemClock.sleep` against a real Node process.
  *
  * The timer used to be `unref()`d, which means it does not hold the event loop
- * open. Whenever a sleep was the only thing pending — precisely the case while
- * polling a freshly deployed site, prompts finished and no fetch in flight —
+ * open. Whenever a sleep was the only thing pending - precisely the case while
+ * polling a freshly deployed site, prompts finished and no fetch in flight -
  * Node ran out of work and exited mid-await. The wizard disappeared after
  * "Waiting for <url> to answer", leaving the author with a deploy that had in
  * fact happened and no word either way.

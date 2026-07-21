@@ -25,7 +25,7 @@ export const SESSION_SECRET = "test-session-secret";
 
 /**
  * `Hono#request` builds requests against http://localhost, so this is the
- * API's own origin — cookie-authed mutations send it to satisfy the Phase 2b
+ * API's own origin - cookie-authed mutations send it to satisfy the Phase 2b
  * CSRF origin check (contract 2b §3).
  */
 export const API_ORIGIN = "http://localhost";
@@ -242,7 +242,7 @@ export function jsonRequest(
 
 /**
  * Create a suggestion annotation via the API and force it to `open` (skipping
- * the async git mirror), returning its id — the starting point for vote and
+ * the async git mirror), returning its id - the starting point for vote and
  * override tests.
  */
 export async function createOpenSuggestion(

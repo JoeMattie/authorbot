@@ -4,7 +4,7 @@
  * duplicate drains commit once."
  *
  * The suite drives the coordinator directly over better-sqlite3 and the
- * in-process fake GitHub — no workerd, no network, no timers — because the
+ * in-process fake GitHub - no workerd, no network, no timers - because the
  * properties under test (a commit happening exactly once, commits forming a
  * single parent chain) need deterministic interleaving, and a workerd pool
  * would make them flaky without making them stronger. The Durable Object
@@ -148,8 +148,8 @@ async function createAnnotation(harness: TestHarness, cookie: string): Promise<s
 }
 
 /**
- * The DO's `DB` binding is never read in these tests — the database arrives
- * through the override seam — so a throwing stand-in proves that.
+ * The DO's `DB` binding is never read in these tests - the database arrives
+ * through the override seam - so a throwing stand-in proves that.
  */
 const UNUSED_D1 = new Proxy(
   {},
@@ -212,7 +212,7 @@ describe("coordinator: outbox drain", () => {
     const commitsAfterSecond = await commitChain(fake);
 
     expect(first.committed).toBe(1);
-    // The second drain finds nothing to claim — the outbox row is `done`.
+    // The second drain finds nothing to claim - the outbox row is `done`.
     expect(second.drained).toBe(0);
     expect(commitsAfterSecond).toEqual(commitsAfterFirst);
   });
@@ -222,7 +222,7 @@ describe("coordinator: outbox drain", () => {
     // Outcome-level assertions cannot see it: the writer retries on 422, so
     // two racing drains still end up with two commits on one chain. This
     // instruments the writer instead and asserts the observed peak
-    // concurrency is 1 — a drain that overlaps fails here even though its
+    // concurrency is 1 - a drain that overlaps fails here even though its
     // commits would look fine.
     let inFlight = 0;
     let peak = 0;

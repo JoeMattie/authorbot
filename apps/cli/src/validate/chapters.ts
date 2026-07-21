@@ -125,7 +125,7 @@ export async function loadChapters(
           chapterRouteUnsafeReason(book.chapterUrl, "sample") === null
         ) {
           // Pattern-level problems are reported once against book.yml; this
-          // catches routes that only THIS slug makes unusable — e.g.
+          // catches routes that only THIS slug makes unusable - e.g.
           // chapter_url "/{slug}/" with a chapter slugged "story", which the
           // build would otherwise silently shadow with a static page.
           const routeReason = chapterRouteUnsafeReason(book.chapterUrl, fm.slug);

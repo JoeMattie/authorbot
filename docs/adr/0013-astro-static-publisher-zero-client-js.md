@@ -9,7 +9,7 @@ Accepted (2026-07-19)
 Phase 1 delivers a read-only public reading site (design §23 Phase 1,
 `docs/contracts/phase1-contract.md`). Design §1.1 selects "Static Astro output, with
 small interactive islands for collaboration features"; design §16.1 requires
-reading pages that are fully usable without JavaScript — "the prose is the
+reading pages that are fully usable without JavaScript - "the prose is the
 product". The publisher must render untrusted book content safely
 (phase1-contract §4) and be invocable from both the CLI and CI
 (phase1-contract §1, §5), without coupling book repositories to a frontend

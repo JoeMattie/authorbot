@@ -15,7 +15,7 @@ import {
   type SubmissionType,
 } from "../src/index.js";
 
-// Synthetic fixtures only — never real credentials.
+// Synthetic fixtures only - never real credentials.
 const FAKE_LEASE_TOKEN = `${LEASE_TOKEN_PREFIX}${"Zx9-_".repeat(8)}Zx9`;
 const UUID_A = "0190f301-7045-7b2d-9d91-95b3c8228b54";
 const UUID_B = "0190f305-1111-7b2d-9d91-95b3c8228b54";

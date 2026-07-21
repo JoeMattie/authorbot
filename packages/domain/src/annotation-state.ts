@@ -10,7 +10,7 @@ export type { AnnotationStatus };
  * section 4). `open` fans out; `rejected -> open` is the Phase 3 maintainer
  * reopen override (Phase 3 contract section 4); every other status is
  * terminal. The reanchor flow (`needs_reanchor -> open`) is intentionally not
- * legal yet — adding transitions later is additive.
+ * legal yet - adding transitions later is additive.
  */
 export const ANNOTATION_TRANSITIONS: Readonly<
   Record<AnnotationStatus, readonly AnnotationStatus[]>

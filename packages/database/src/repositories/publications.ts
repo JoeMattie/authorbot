@@ -1,15 +1,15 @@
 /**
  * Publication tracking repositories (Phase 5 contract §6, design §17.3).
  *
- * The governing rule from §17.3 — "do not mark a revision published merely
- * because its Git commit succeeded" — is enforced structurally: nothing in
+ * The governing rule from §17.3 - "do not mark a revision published merely
+ * because its Git commit succeeded" - is enforced structurally: nothing in
  * this file has a way to *derive* publication state. Every row is written from
  * a signed CI callback and nothing else, so a commit that never reached the
  * publisher can never look deployed.
  *
  * Every mutating method has a `...Statement` variant returning a bound
  * `SqlStatement` so callers can compose atomic multi-table writes with
- * `db.batch([...])` (Phase 2 contract §5 command flow) — the publication
+ * `db.batch([...])` (Phase 2 contract §5 command flow) - the publication
  * upsert and its delivery-ledger row must land together or not at all.
  */
 import type { SqlDatabase, SqlRow, SqlStatement } from "../sql.js";
@@ -23,7 +23,7 @@ import type {
 /**
  * Fields a single CI callback may advance. Absent (`undefined`) means "this
  * callback said nothing about that field", which is NOT the same as `null`
- * ("CI explicitly reports no value") — a `build_status: building` callback
+ * ("CI explicitly reports no value") - a `build_status: building` callback
  * must not erase the `public_url` a previous deploy reported. The upsert below
  * distinguishes the two with COALESCE over an explicit "keep" sentinel.
  */
@@ -121,8 +121,8 @@ export class PublicationsRepository {
    * Ordered by `updated_at`, not `created_at`: "latest" means the build CI
    * most recently said something about, and a long-running build for an older
    * commit can outlive a newer row. `id` is only a tiebreak and is NOT a
-   * reliable one — UUIDv7 orders to millisecond resolution and the low bits
-   * are random — so two callbacks inside the same millisecond are genuinely
+   * reliable one - UUIDv7 orders to millisecond resolution and the low bits
+   * are random - so two callbacks inside the same millisecond are genuinely
    * unordered. That is acceptable here (it can only affect which of two
    * near-simultaneous *build statuses* is shown) and is precisely why the
    * deployed-commit question has its own query below rather than reading

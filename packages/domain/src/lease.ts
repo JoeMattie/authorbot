@@ -36,7 +36,7 @@ const ISO_DURATION_REGEX =
 
 /**
  * Parse the ISO-8601 duration subset the contracts use (`PT30M`, `PT4H`,
- * `P1D`, combinations with integer designators; no years/months/weeks —
+ * `P1D`, combinations with integer designators; no years/months/weeks -
  * calendar units are ambiguous in milliseconds). Used to validate `LEASE_*`
  * env overrides at boot (Phase 4 contract section 2).
  */
@@ -136,7 +136,7 @@ export type LeaseInactiveReason = "expired" | "released" | "revoked";
  * Whether a lease still backs commands at `now`. Check order follows the
  * contract section 4 verification order ("not expired / not released"):
  * expired first, then released, then revoked. Used by renew, release, and
- * submission checks alike — an expired, released, or revoked lease can do
+ * submission checks alike - an expired, released, or revoked lease can do
  * nothing further (contract section 2: renewing an expired lease is a 409).
  */
 export function checkLeaseActive(
@@ -182,7 +182,7 @@ export type ClaimCheckResult =
  * "none" is unambiguous). That combination is what an interrupted expiry or a
  * bare administrative revocation leaves behind, and treating it as
  * `lease-held` made such items permanently unclaimable, unreleasable, and
- * unsweepable — recoverable only by direct database surgery. Claiming
+ * unsweepable - recoverable only by direct database surgery. Claiming
  * self-heals it instead: `priorLeaseExpired` sends the caller down the
  * expire-then-claim path, whose compare-and-swap starts from `leased`.
  */
@@ -217,7 +217,7 @@ export type RenewCheckResult =
  * renews; the new expiry is the current `expires_at` plus the renewal
  * duration ("extends by"), clamped to `max_expires_at`. When the lease
  * already sits at its max-total cap so no extension is possible, the renewal
- * is rejected with `max-total-exceeded` rather than succeeding as a no-op —
+ * is rejected with `max-total-exceeded` rather than succeeding as a no-op -
  * a partially clamped extension is still allowed. Verifying the presented
  * token against the stored hash happens before this in the API layer.
  */

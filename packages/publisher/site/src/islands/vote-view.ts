@@ -1,6 +1,6 @@
 /**
  * Pure presentation helpers for the Phase 3 vote control and decision badge
- * (contract §6). No DOM, no network — the arithmetic and copy are unit tested
+ * (contract §6). No DOM, no network - the arithmetic and copy are unit tested
  * in isolation, and both the suggestion cards and the `/work/` queue reuse
  * them.
  */
@@ -51,7 +51,7 @@ export function labelFor(value: VoteValue): string {
 }
 
 /**
- * A one-line, screen-reader-friendly summary of the aggregate tally — used
+ * A one-line, screen-reader-friendly summary of the aggregate tally - used
  * for the control's `aria-label`/announcements and the `/work/` support
  * column. Aggregate only (§26.1: never per-voter).
  */
@@ -90,7 +90,7 @@ export interface Badge {
 /**
  * The "Queued as work item" badge for a suggestion (contract §6). Present only
  * once a `create_work_item` decision exists; `support_changed` is surfaced
- * honestly rather than hidden — the work item is still queued, but the vote
+ * honestly rather than hidden - the work item is still queued, but the vote
  * aggregate has since fallen back below the rule.
  */
 export function decisionBadge(decision: DecisionSummary | null | undefined): Badge | null {

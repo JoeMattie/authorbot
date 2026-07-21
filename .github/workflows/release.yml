@@ -28,7 +28,7 @@
 # it configured. So the first release of each package must be published from
 # a laptop, or from here using a granular access token in the NPM_TOKEN
 # secret. Once every package exists and has this repository and workflow
-# registered as its trusted publisher, delete NPM_TOKEN — the step below
+# registered as its trusted publisher, delete NPM_TOKEN - the step below
 # prefers OIDC and only falls back to the token when it is present.
 # docs/npm-release.md walks through it.
 
@@ -49,7 +49,7 @@ permissions:
 jobs:
   release:
     # A fork that pushes a tag must never be able to publish, even though the
-    # registry credentials would not be available to it — this fails fast and
+    # registry credentials would not be available to it - this fails fast and
     # visibly rather than at the last step with a confusing auth error.
     if: github.repository == 'JoeMattie/authorbot'
     runs-on: ubuntu-latest
@@ -66,8 +66,8 @@ jobs:
       # SHA corresponded to when it was pinned; it is a label, not the pin.
       #
       # They were bumped off the v4 line together because the runner had begun
-      # forcing their Node 20 entrypoints onto Node 24 — a deprecation that
-      # ends in a hard failure — and because setup-node wrote `always-auth`
+      # forcing their Node 20 entrypoints onto Node 24 - a deprecation that
+      # ends in a hard failure - and because setup-node wrote `always-auth`
       # into .npmrc, which the npm upgraded below no longer recognises and
       # warned about on every release. The current line stopped emitting it.
       - name: Check out the tagged commit

@@ -1,5 +1,5 @@
 /**
- * `<authorbot-work-queue>` — the `/work/` island. Phase 3 shipped the
+ * `<authorbot-work-queue>` - the `/work/` island. Phase 3 shipped the
  * read-only queue of **ready** work items; Phase 4 (contract §7) adds the
  * claim-and-edit flow on top: a Claim button for actors holding `work:claim`,
  * the §15.3 task bundle rendered as an edit view (`work-claim.ts`), a live
@@ -124,7 +124,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
   /**
    * Whether this tab already holds a live claim. Read from storage (not just
    * panel visibility) so it stays correct across a refresh, and treated as
-   * inactive once the lease has expired — the server has already returned
+   * inactive once the lease has expired - the server has already returned
    * that item to the queue.
    */
   private hasActiveClaim(): boolean {
@@ -253,14 +253,14 @@ export class AuthorbotWorkQueue extends HTMLElement {
 
   /**
    * The claim affordance (contract §7): a real button for actors with
-   * `work:claim`, an honest hint otherwise — never a disabled mystery.
+   * `work:claim`, an honest hint otherwise - never a disabled mystery.
    */
   private buildClaimAction(item: WorkItem): HTMLElement {
     const wrap = el("div", "ab-work-actions");
     // One claim at a time per tab. Stored claims are keyed per PROJECT, and
     // the lease token comes back exactly once, so claiming a second item
     // overwrote the first token irrecoverably and replaced the in-progress
-    // draft with no warning — leaving the first item stuck `leased` until it
+    // draft with no warning - leaving the first item stuck `leased` until it
     // expired, with no way to renew, release, or submit it from this UI.
     // Refusing the second claim is the honest fix; the panel is the one place
     // a claim lives (contract §7 draft preservation).
@@ -306,7 +306,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
   private async claim(item: WorkItem, error: HTMLElement): Promise<void> {
     const result = await this.api.claim(item.id);
     if (!result.ok) {
-      // 409 `lease-held` carries the holder's display name only — no token,
+      // 409 `lease-held` carries the holder's display name only - no token,
       // no actor id (contract §2).
       const holder = result.problem?.["holder"];
       error.textContent =
@@ -323,7 +323,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
     // between claiming and submitting must not strand the lease.
     saveClaim(sessionStorageOrNull(), this.cfg.project, claim);
     const bundle = result.value;
-    this.announce(`Claimed. ${typeLabel(bundle.workItem.type)} — your lease is running.`);
+    this.announce(`Claimed. ${typeLabel(bundle.workItem.type)} - your lease is running.`);
     this.openPanel(claim, false);
     await this.reload();
   }

@@ -1,13 +1,13 @@
 /**
- * `unpublish` and `teardown` — taking it all back down again.
+ * `unpublish` and `teardown` - taking it all back down again.
  *
  * The wizard has always ended by listing what it created and how to remove it,
  * which is honest but leaves the author to run five commands in the right
  * order across two providers and one browser page. These stages do it.
  *
  * - **`unpublish`** removes everything outside GitHub's repository: the
- *   Cloudflare Worker, the D1 database, and the GitHub App. The repository —
- *   the book itself, its whole history — is untouched. This is the one to
+ *   Cloudflare Worker, the D1 database, and the GitHub App. The repository -
+ *   the book itself, its whole history - is untouched. This is the one to
  *   reach for when the hosting is wrong and the writing is not.
  * - **`teardown`** does all of that and then deletes the remote repository,
  *   finishing with what to type to remove the local copy. It never deletes
@@ -15,7 +15,7 @@
  *
  * THE LOCAL DIRECTORY IS NEVER TOUCHED. `rm -rf` on a directory the wizard
  * derived from a flag, run by a tool the author invoked to clean up their
- * *hosting*, is the one mistake here that cannot be undone with a re-run —
+ * *hosting*, is the one mistake here that cannot be undone with a re-run -
  * their drafts may be the only copy. It is printed, not executed.
  *
  * COMMANDS ARE REBUILT, NOT REPLAYED. The journal records a `deleteWith`
@@ -51,7 +51,7 @@ interface Removal {
  * Turns a recorded resource into something safe to run.
  *
  * Returns null for a resource whose name does not match the shape its provider
- * uses — a journal that has been edited, or carried in from elsewhere, does not
+ * uses - a journal that has been edited, or carried in from elsewhere, does not
  * get to choose an argument here.
  */
 function removalFor(resource: CreatedResource): Removal | null {
@@ -77,12 +77,12 @@ function removalFor(resource: CreatedResource): Removal | null {
       // a browser and only a browser can remove it.
       // Straight to the page with the button on it. "Open the apps list, find
       // yours, then Advanced" is three navigations to reach a link we can
-      // simply give them — and the app's name is its slug, because the wizard
+      // simply give them - and the app's name is its slug, because the wizard
       // names it `authorbot-<slug>` precisely so GitHub does not reshape it.
       return {
         resource,
         command: null,
-        manual: `https://github.com/settings/apps/${name}/advanced — the Delete GitHub App button is at the bottom.`,
+        manual: `https://github.com/settings/apps/${name}/advanced - the Delete GitHub App button is at the bottom.`,
       };
     default:
       // An agent token is a row in the book's own database, which the D1
@@ -97,7 +97,7 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
   ctx.reporter.heading(wantRepo ? "Taking the whole book down" : "Taking the site down");
   ctx.reporter.explain(
     wantRepo
-      ? "This deletes everything this wizard created for your book, including the GitHub repository and its entire history. Your local files are never touched — you will be told how to remove them yourself."
+      ? "This deletes everything this wizard created for your book, including the GitHub repository and its entire history. Your local files are never touched - you will be told how to remove them yourself."
       : "This deletes the reading site and the collaboration database, and removes the GitHub App. Your repository and everything in it is left exactly as it is, so the book itself survives.",
   );
 
@@ -122,11 +122,11 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
     const resource = resources[index] as CreatedResource;
     if (removal === null) {
       ctx.reporter.warn(
-        `${resource.name} (${resource.kind}) — the setup journal records a name this wizard will not pass to a command. Remove it yourself: ${resource.deleteWith}`,
+        `${resource.name} (${resource.kind}) - the setup journal records a name this wizard will not pass to a command. Remove it yourself: ${resource.deleteWith}`,
       );
       continue;
     }
-    ctx.reporter.info(`  ${resource.name} — ${resource.description}`);
+    ctx.reporter.info(`  ${resource.name} - ${resource.description}`);
   }
 
   if (wantRepo) {
@@ -159,7 +159,7 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
     }
     const { resource, command } = removal;
     if (command === null) {
-      leftBehind.push(`${resource.name} — ${removal.manual ?? resource.deleteWith}`);
+      leftBehind.push(`${resource.name} - ${removal.manual ?? resource.deleteWith}`);
       continue;
     }
 
@@ -182,7 +182,7 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
       await ctx.journal.forgetResource(resource.kind, resource.name, nowIso(ctx));
       ctx.reporter.ok(alreadyGone ? `${resource.name} was already gone.` : `${resource.name} deleted.`);
     } else {
-      leftBehind.push(`${resource.name} — ${resource.deleteWith}`);
+      leftBehind.push(`${resource.name} - ${resource.deleteWith}`);
       ctx.reporter.warn(
         `Could not delete ${resource.name}: ${(result.stderr || result.stdout).trim().split("\n")[0] ?? "unknown error"}`,
       );
@@ -202,7 +202,7 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
   }
 
   // The Cloudflare API token is not on the resource list, because the wizard
-  // never created it — the author made it in the dashboard and pasted it in.
+  // never created it - the author made it in the dashboard and pasted it in.
   // That is exactly why it needs saying: it is a live credential with rights
   // over every Worker in the account, it outlives everything this just
   // deleted, and nothing else is ever going to mention it again.
@@ -218,7 +218,7 @@ async function run(ctx: WizardContext, mode: "unpublish" | "teardown"): Promise<
   if (wantRepo) {
     ctx.reporter.blank();
     ctx.reporter.info(
-      "Your local copy is untouched — this wizard does not delete files on your own disk. When you are sure you want it gone:",
+      "Your local copy is untouched - this wizard does not delete files on your own disk. When you are sure you want it gone:",
     );
     ctx.reporter.literal(`rm -rf ${ctx.directory}`);
   } else {

@@ -1,5 +1,5 @@
 /**
- * `upgrade` — moving to a newer Authorbot (Phase 6 contract §3.7, ADR-0021).
+ * `upgrade` - moving to a newer Authorbot (Phase 6 contract §3.7, ADR-0021).
  *
  * This stage **delegates**. `authorbot upgrade` is the implementation: it
  * resolves the pin against the target release, runs that release's book-repo
@@ -7,7 +7,7 @@
  * pushing, applies pending D1 migrations, redeploys, and verifies health.
  *
  * Reimplementing any of that here would produce two upgraders that must agree
- * forever — and the one inside the CLI is the one an author's scheduled
+ * forever - and the one inside the CLI is the one an author's scheduled
  * `--check` job runs. So this stage's whole job is to find the CLI, forward
  * the flags, and degrade with a clear message when it is not there.
  */
@@ -76,7 +76,7 @@ export const upgradeStage: Stage = async (ctx: WizardContext): Promise<StageOutc
   // runs whichever `authorbot` the author has installed, which may be a
   // different version than this package. The exit codes are a documented wire
   // contract between the two, not a shared constant. An UNRECOGNISED non-zero
-  // code is therefore treated as a failure, never as good news — reporting
+  // code is therefore treated as a failure, never as good news - reporting
   // "an upgrade is available" when the check actually broke would be a
   // fabricated success.
   const CHECK_AVAILABLE = 10;
@@ -97,12 +97,12 @@ export const upgradeStage: Stage = async (ctx: WizardContext): Promise<StageOutc
     if (/unknown command|not a command|unrecognized/i.test(output)) {
       throw new WizardError(
         "The installed Authorbot toolchain is too old to understand `authorbot upgrade`.",
-        "Update it by hand once — `npm install --save-dev @authorbot/cli@latest` in your book directory — and every upgrade after that can use this command.",
+        "Update it by hand once - `npm install --save-dev @authorbot/cli@latest` in your book directory - and every upgrade after that can use this command.",
       );
     }
     throw new WizardError(
       `The upgrade did not finish (exit ${String(result.code)}).`,
-      `Run \`npx authorbot ${args.join(" ")}\` in ${ctx.directory} to see the full output. Nothing was pushed — upgrades arrive as a pull request you review.`,
+      `Run \`npx authorbot ${args.join(" ")}\` in ${ctx.directory} to see the full output. Nothing was pushed - upgrades arrive as a pull request you review.`,
     );
   }
 

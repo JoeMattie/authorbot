@@ -42,7 +42,7 @@ export function apiRoleScopes(role: Role): readonly ApiScope[] {
  * (Phase 2 contract §3), over the extended vocabulary. Agents vote only when
  * their token names `votes:write` AND their membership role grants it
  * (design §11.2: "agents cannot vote unless their project membership grants
- * it" — agent memberships are pinned to `editor`, whose bundle includes it).
+ * it" - agent memberships are pinned to `editor`, whose bundle includes it).
  */
 export function apiEffectiveScopes(
   tokenScopes: readonly string[],

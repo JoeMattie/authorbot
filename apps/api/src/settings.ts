@@ -2,7 +2,7 @@
  * Book settings and in-book governance (Phase 6 contract §3.6).
  *
  * "A Settings view, visible only to maintainers, editing the same `book.yml`
- * that lives in Git — through the same outbox, coordinator, validation, and
+ * that lives in Git - through the same outbox, coordinator, validation, and
  * attribution path as any other write. Settings changes are commits: diffable,
  * revertable, audited. There is no second configuration store."
  *
@@ -14,17 +14,17 @@
  *
  * ## The three field classes
  *
- * **Editable** — title, language, license, the three `publication.show_*`
+ * **Editable** - title, language, license, the three `publication.show_*`
  * flags, and `governance.rules`. Ordinary edits.
  *
- * **Guarded** — `slug` and `publication.chapter_url`. Both are inputs to every
+ * **Guarded** - `slug` and `publication.chapter_url`. Both are inputs to every
  * published chapter URL, so changing either breaks links people have already
  * shared. The API refuses them unless the request names the field in
  * `confirm`, and the refusal *states what breaks* rather than just saying no:
  * the confirmation is worth having only if the maintainer learns something from
  * being asked.
  *
- * **Never editable** — `id`, `repository.default_branch`, `content.*`, and
+ * **Never editable** - `id`, `repository.default_branch`, `content.*`, and
  * `publication.api_url`. These are rejected with a problem that explains *why*
  * for each field individually, because "forbidden" alone would read as a bug.
  * `content.raw_html` is the important one: enabling raw HTML in a book that
@@ -79,13 +79,13 @@ import type { ProjectSerializer } from "./serializer.js";
  * most likely to misread as "turn collaboration off".
  */
 export const ANNOTATION_POLICY_MEANS: Readonly<Record<string, string>> = Object.freeze({
-  open: "Any signed-in GitHub user may comment and suggest, and what they write appears immediately. They still cannot vote, claim work, or submit prose — those stay with your collaborators.",
+  open: "Any signed-in GitHub user may comment and suggest, and what they write appears immediately. They still cannot vote, claim work, or submit prose - those stay with your collaborators.",
   "approval-gated":
-    "Any signed-in GitHub user may comment and suggest, but nothing appears — or reaches your repository — until you approve it. Queued comments are visible to their author and to you, and nothing else.",
+    "Any signed-in GitHub user may comment and suggest, but nothing appears - or reaches your repository - until you approve it. Queued comments are visible to their author and to you, and nothing else.",
   "collaborators-only":
     "Only people you have added to the book may comment and suggest. This is the default.",
   locked:
-    "Only maintainers may write. The book stays fully yours to work in: you can annotate your own drafts and run your own agents against them, and an agent works here by holding a maintainer-role membership you granted it. Your existing collaborators keep their membership and everything they have already contributed — they simply cannot write until you reopen the policy.",
+    "Only maintainers may write. The book stays fully yours to work in: you can annotate your own drafts and run your own agents against them, and an agent works here by holding a maintainer-role membership you granted it. Your existing collaborators keep their membership and everything they have already contributed - they simply cannot write until you reopen the policy.",
 });
 
 /** Outbox kind this module emits (the repo-coordinator processor renders it). */
@@ -107,7 +107,7 @@ export const EDITABLE_FIELDS = [
    * Phase 7 contract "Restricting". An ordinary editable field, not a guarded
    * one: moving up and down the progression is something "an author may do
    * freely", and unlike `slug` it breaks no link anyone has shared. The one
-   * consequence worth stating — that `locked` does not lock the author out —
+   * consequence worth stating - that `locked` does not lock the author out -
    * is carried by `ANNOTATION_POLICY_MEANS` in the GET response rather than by
    * a confirmation prompt.
    */
@@ -120,7 +120,7 @@ export const EDITABLE_FIELDS = [
  * the maintainer must be told *before* the change is accepted.
  */
 export const GUARDED_FIELDS: Readonly<Record<string, string>> = Object.freeze({
-  slug: "The slug appears in every published chapter URL. Changing it breaks every existing link to this book — bookmarks, citations, and links shared by readers will 404 until they are updated.",
+  slug: "The slug appears in every published chapter URL. Changing it breaks every existing link to this book - bookmarks, citations, and links shared by readers will 404 until they are updated.",
   "publication.chapter_url":
     "chapter_url is the URL template for published chapters. Changing it moves every chapter to a new address, breaking every existing link to a chapter, including any a reader has cited.",
 });
@@ -136,7 +136,7 @@ export const IMMUTABLE_FIELDS: Readonly<Record<string, string>> = Object.freeze(
   "repository.default_branch":
     "The default branch is a deployment invariant: the coordinator commits to it and the projection reads from it. Changing it from the API would point the writer at one branch while the reader still watches another.",
   "content.chapters_glob":
-    "The chapters glob is a repository layout invariant. Changing it re-scopes which files are chapters, which is a repository reorganisation — it belongs in a commit alongside the file moves it implies.",
+    "The chapters glob is a repository layout invariant. Changing it re-scopes which files are chapters, which is a repository reorganisation - it belongs in a commit alongside the file moves it implies.",
   "content.raw_html":
     "Enabling raw HTML is a security decision, not a display preference: it widens this site's XSS surface to whatever any contributor can get into a chapter. It belongs in a reviewed commit, where a second person sees it, rather than behind a toggle that a stolen session could flip.",
   "publication.api_url":
@@ -150,7 +150,7 @@ export const IMMUTABLE_FIELDS: Readonly<Record<string, string>> = Object.freeze(
 /**
  * A rule as a maintainer supplies it. Deliberately WITHOUT `version`: the
  * server assigns it (see the module doc), and silently ignoring a client's
- * version would be worse than refusing it — a client that thought it was
+ * version would be worse than refusing it - a client that thought it was
  * pinning a version would be wrong without being told.
  */
 const ruleInputSchema = z.strictObject({
@@ -194,7 +194,7 @@ const settingsPatchSchema = z.strictObject({
       /**
        * REPLACES the rule map wholesale rather than merging it. Merge
        * semantics would make a rule impossible to delete, and §3.6 requires
-       * the default human-maintainer clause to be removable — "an author
+       * the default human-maintainer clause to be removable - "an author
        * running a genuinely collaborative project may not want a personal veto
        * on every change, and that is their call to make."
        */
@@ -229,7 +229,7 @@ export interface SettingsContext {
   /**
    * Write guard: the same, but requiring `members:manage`.
    *
-   * Settings is a control-plane surface — it is where `annotation_policy` is
+   * Settings is a control-plane surface - it is where `annotation_policy` is
    * set, so a credential that can PATCH here can reopen a `locked` book. For a
    * human session this changes nothing (the maintainer bundle contains
    * `members:manage`). For an agent token it is the difference between "role
@@ -283,7 +283,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
    * A book with no projected `book.yml` is not an error state to paper over: it
    * means this deployment has never successfully read the repository (no Git
    * credentials, or the first projection has not run). Settings cannot be
-   * edited from nothing — a PATCH is a read-modify-write, and inventing a
+   * edited from nothing - a PATCH is a read-modify-write, and inventing a
    * `book.yml` here would fabricate an `id` for a book that already has one.
    */
   const loadConfig = async (
@@ -370,7 +370,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
       },
       governance: {
         /**
-         * Where the effective rules come from — `book` once the book declares
+         * Where the effective rules come from - `book` once the book declares
          * its own, otherwise the deployment's bootstrap default. The Settings
          * view says so plainly: an author editing a rule they have not yet
          * adopted is about to *adopt* it, not modify it.
@@ -382,7 +382,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
       },
       /**
        * Values the API will never change, each with the reason. Present so the
-       * view can explain the boundary if asked — NOT as form fields. Exit
+       * view can explain the boundary if asked - NOT as form fields. Exit
        * criterion 10 requires never-editable fields to be absent from the
        * interface; they are absent from `settings`, which is what the form
        * binds to.
@@ -415,7 +415,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
 
     // Immutable fields are checked against the RAW body, before schema
     // parsing. The schema is strict, so an immutable key would otherwise be
-    // rejected as "unrecognized key" — technically correct and completely
+    // rejected as "unrecognized key" - technically correct and completely
     // unhelpful. A maintainer who tried to turn on raw HTML deserves to be
     // told why they cannot, not that they made a typo.
     const immutable = findImmutablePaths(body);
@@ -455,12 +455,12 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
     return ctx.serialize(guard.project.id, async () => {
       // A PATCH is a read-modify-write of the `book_configs` projection, and a
       // diverged project is by definition one whose projection we know we
-      // mis-model — so the document we would re-commit is one we know to be
+      // mis-model - so the document we would re-commit is one we know to be
       // wrong. Phase 5's gate belongs here for the same reason it is applied
       // to submissions: this route rewrites a file the author also edits in
       // Git. Re-read the project inside the serializer rather than trusting
       // the guard's row, which `getProject` caches for the isolate's lifetime
-      // — divergence is set by a webhook reconciliation that can land between
+      // - divergence is set by a webhook reconciliation that can land between
       // the auth check and the command.
       const currentProject = await repos.projects.getById(guard.project.id);
       if (currentProject !== null) {
@@ -524,7 +524,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
 
       // Final gate: the merged document must be a valid book.yml. The patch
       // schema already constrains each field, but only the whole-document
-      // schema can catch a combination it does not like — and this is the
+      // schema can catch a combination it does not like - and this is the
       // document that is about to be committed.
       const validated = bookConfigSchema.safeParse(next.config);
       if (!validated.success) {
@@ -556,7 +556,7 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
           /**
            * The last committed config, restored if this operation
            * dead-letters. Otherwise a failed settings commit strands the row
-           * in `pending_git` forever — unwritable through the route, un-
+           * in `pending_git` forever - unwritable through the route, un-
            * re-projectable from Git, and still enforcing its governance rules.
            */
           previousConfig: current,
@@ -697,7 +697,7 @@ function sameRuleSemantics(
  * Merge a patch into a config, assigning rule versions.
  *
  * Returns the new config plus the version decision for each rule, which the
- * audit event records — "which rules changed version, and from what" is the
+ * audit event records - "which rules changed version, and from what" is the
  * question someone reading `git log` after a governance dispute will ask.
  */
 export function applyPatch(
@@ -710,7 +710,7 @@ export function applyPatch(
    * across deletion and re-addition, and the effective rule set cannot say so:
    * `governance.rules` replaces the map wholesale, so a deleted name simply
    * vanishes from it and a later re-add saw `previous === undefined` and
-   * restarted at 1 — colliding with decision rows written by a materially
+   * restarted at 1 - colliding with decision rows written by a materially
    * different rule under the same identity.
    */
   historicalVersions: ReadonlyMap<string, number> = new Map(),
@@ -735,7 +735,7 @@ export function applyPatch(
       if (value === null) delete publication[key];
       else publication[key] = value;
     }
-    // An emptied section is removed rather than left as `publication: {}` —
+    // An emptied section is removed rather than left as `publication: {}` -
     // the diff a maintainer reviews should not contain an empty mapping.
     if (Object.keys(publication).length === 0) delete next.publication;
     else next.publication = publication as BookConfig["publication"];
@@ -746,7 +746,7 @@ export function applyPatch(
     if (policy === null) {
       // Explicitly cleared: the book falls back to `collaborators-only`, and
       // the empty section is removed rather than committed as
-      // `collaboration: {}` — the diff a maintainer reviews should not contain
+      // `collaboration: {}` - the diff a maintainer reviews should not contain
       // an empty mapping.
       delete (next as Record<string, unknown>)["collaboration"];
     } else if (policy !== undefined) {
@@ -761,7 +761,7 @@ export function applyPatch(
     for (const [name, input] of Object.entries(patch.governance.rules)) {
       const previous = byName.get(name);
       const unchanged = previous !== undefined && sameRuleSemantics(previous, input);
-      // A rule that did not change keeps its version — a PATCH touching only
+      // A rule that did not change keeps its version - a PATCH touching only
       // the title must not churn governance. Anything else advances past BOTH
       // the effective rule and every version this name has ever burned on a
       // decision, so a re-added or renamed rule can never reuse an identity
@@ -788,7 +788,7 @@ export function applyPatch(
  * Dotted paths whose value differs between two configs, restricted to the
  * paths this API can change. Computed from the documents rather than from the
  * patch so a field set to the value it already had is correctly reported as
- * unchanged — that is what makes a guarded field's confirmation requirement
+ * unchanged - that is what makes a guarded field's confirmation requirement
  * fire only on a real change.
  */
 export function changedPaths(before: BookConfig, after: BookConfig): string[] {

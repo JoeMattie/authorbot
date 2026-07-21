@@ -1,5 +1,5 @@
 /**
- * `GitHubBookRepoWriter` against the deterministic fake GitHub — the §14.2
+ * `GitHubBookRepoWriter` against the deterministic fake GitHub - the §14.2
  * sequence, its retry bound, and the property that matters most: a conflict
  * never clobbers the other writer's work. Every no-clobber assertion is made
  * **by content** at the branch head, not by status code, because a status
@@ -37,7 +37,7 @@ interface Harness {
   writer: GitHubBookRepoWriter;
   /** Installation tokens minted through the writer's token seam. */
   minted: () => number;
-  /** The `PATCH .../git/refs/heads/*` payloads — where `force` would hide. */
+  /** The `PATCH .../git/refs/heads/*` payloads - where `force` would hide. */
   refUpdates: () => readonly SentRequest[];
 }
 
@@ -68,7 +68,7 @@ async function harness(options: {
     return cached;
   };
   // Record what the writer actually puts on the wire. The fake's own request
-  // log has no bodies, and `force: true` lives in a body — so without this a
+  // log has no bodies, and `force: true` lives in a body - so without this a
   // forced update would slip past every status-based assertion.
   const sent: SentRequest[] = [];
   const fetchImpl = async (input: Request | string, init?: RequestInit): Promise<Response> => {
@@ -121,7 +121,7 @@ const BUMPED = "---\nid: c1\nrevision: 2\n---\n\nBaseline prose, revised.\n";
 
 // --------------------------------------------------------------- happy path
 
-describe("commitFiles — the §14.2 sequence", () => {
+describe("commitFiles - the §14.2 sequence", () => {
   it("lands the file, the message and the §14.3 trailers in one commit", async () => {
     const { fake, writer } = await harness();
     const before = fake.state.getRef("main");
@@ -196,7 +196,7 @@ describe("base_tree", () => {
     const { fake, writer } = await harness();
     const result = await writer.commitFiles(commitInput());
 
-    // The untouched files must still *resolve* at the new head — the failure
+    // The untouched files must still *resolve* at the new head - the failure
     // mode `base_tree` guards against is a commit that quietly deletes the
     // rest of the book.
     expect(fake.state.readFile(result.commitSha, "chapters/002-null-results.md")).toBe(
@@ -294,7 +294,7 @@ describe("retry exhaustion", () => {
     expect(isGitWriteError(failure)).toBe(true);
     expect(failure.retryable).toBe(true);
 
-    // NO CLOBBER — asserted by content, not by status. And no force was even
+    // NO CLOBBER - asserted by content, not by status. And no force was even
     // attempted: every ref update on the wire carried `force: false`.
     expect(refUpdates()).toHaveLength(3);
     for (const update of refUpdates()) {
@@ -358,7 +358,7 @@ describe("expectedHeadOverride", () => {
     expect(error).toBeInstanceOf(GitHubWriteError);
     expect((error as GitHubWriteError).kind).toBe("non-fast-forward");
     // Retryable so the operation requeues and re-resolves against the real
-    // head — the Phase 4 processor depends on exactly that.
+    // head - the Phase 4 processor depends on exactly that.
     expect((error as GitHubWriteError).retryable).toBe(true);
 
     // The stale plan is NOT replayed onto the newer head: nothing was
@@ -494,7 +494,7 @@ describe("rate limiting and transport failures", () => {
   it("refreshes the installation token once on a 401 and completes", async () => {
     const { fake, writer, minted } = await harness();
     // The fake answers the next repository request with 401 even though the
-    // token is valid — contract §2's "refreshed on 401".
+    // token is valid - contract §2's "refreshed on 401".
     fake.injectFault("unauthorized", { times: 1 });
 
     const result = await writer.commitFiles(commitInput());
@@ -582,7 +582,7 @@ describe("readFile", () => {
 
   it("round-trips non-ASCII content through base64", async () => {
     const { writer } = await harness();
-    const content = "---\nid: c1\nrevision: 2\n---\n\nEm—dash, naïve, 日本語, 🌍.\n";
+    const content = "---\nid: c1\nrevision: 2\n---\n\nEm-dash, naïve, 日本語, 🌍.\n";
     await writer.commitFiles(commitInput({ files: [{ path: "chapters/001-baseline.md", content }] }));
     expect(await writer.readFile("main", "chapters/001-baseline.md")).toBe(content);
   });

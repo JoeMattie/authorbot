@@ -7,14 +7,14 @@
  * This is deliberately different from `helpers.ts` (the Phase 2 harness),
  * which wires a `LocalGitAdapter` over a real git work tree. Nothing here
  * touches git, the filesystem (beyond reading the example fixture once), or
- * the network — the whole book repository lives in `FakeRepoState`, hashed
+ * the network - the whole book repository lives in `FakeRepoState`, hashed
  * with real git object hashing, so the SHAs are the SHAs git would compute.
  *
  * `mirrorMode: "durable"` is the production value: `notifyMutation` calls
  * `onMutationCommitted`, which here is the coordinator's `drainOutbox()`.
  * That is the same call the Durable Object makes in `worker.ts`, so these
  * tests exercise the deployed path rather than a test-only shortcut. The
- * only substitution is the transport — this harness calls the coordinator
+ * only substitution is the transport - this harness calls the coordinator
  * in-process instead of through `callCoordinator`'s internal POST route,
  * which `coordinator.test.ts` covers separately.
  */
@@ -111,7 +111,7 @@ export interface GitHubIntegrationApp {
   fake: FakeGitHub;
   /**
    * Every ref update the fake *received*, in order. The contract's "never a
-   * force update" is asserted against these — what went over the wire —
+   * force update" is asserted against these - what went over the wire -
    * rather than against the writer's intent.
    */
   refUpdates: RefUpdateObservation[];
@@ -135,12 +135,12 @@ export interface MakeGitHubAppOptions {
    */
   maxDeferralMs?: number;
   /**
-   * Wrap the writer before the coordinator gets it — used by the
+   * Wrap the writer before the coordinator gets it - used by the
    * serialization test to observe overlapping commits.
    */
   wrapWriter?: (writer: BookRepoWriter) => BookRepoWriter;
   /**
-   * Wrap the reader before the coordinator gets it — used by the
+   * Wrap the reader before the coordinator gets it - used by the
    * serialization and re-anchor regression tests to observe read ordering
    * and to prove which source bytes a re-anchor used.
    */
@@ -148,7 +148,7 @@ export interface MakeGitHubAppOptions {
   /**
    * Record mutations without draining. The production `onMutationCommitted`
    * is a fire-and-forget call to the Durable Object whose failure is
-   * swallowed, so a row genuinely can sit `pending` until the alarm — which
+   * swallowed, so a row genuinely can sit `pending` until the alarm - which
    * is the window the divergence regression test needs to reproduce.
    */
   deferDrain?: boolean | (() => boolean);
@@ -240,7 +240,7 @@ export async function makeGitHubIntegrationApp(
     ...options.config,
   };
 
-  // The coordinator needs the project id, which `bootstrap()` produces — so
+  // The coordinator needs the project id, which `bootstrap()` produces - so
   // it is created lazily and the hook closes over the holder.
   let coordinator: ProjectCoordinator | null = null;
   const mutations: string[] = [];
@@ -265,7 +265,7 @@ export async function makeGitHubIntegrationApp(
 
   const api = createApi(deps);
   const { project } = await (async () => {
-    // Seed first, build the coordinator, then rebuild — so the very first
+    // Seed first, build the coordinator, then rebuild - so the very first
     // rebuild already runs through the coordinator's reconcile path.
     const seeded = await api.bootstrap();
     return seeded;

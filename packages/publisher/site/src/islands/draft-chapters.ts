@@ -1,5 +1,5 @@
 /**
- * `<authorbot-draft-chapters>` — the maintainer's private view of unpublished
+ * `<authorbot-draft-chapters>` - the maintainer's private view of unpublished
  * chapters on the book home page.
  *
  * Drafts must not be part of the static site: hiding static HTML after load
@@ -78,7 +78,7 @@ export class AuthorbotDraftChapters extends HTMLElement {
     const note = el(
       "p",
       "ab-drafts-note",
-      "Private workspace — only maintainers can see these unpublished chapters.",
+      "Private workspace - only maintainers can see these unpublished chapters.",
     );
     const list = el("ol", "ab-draft-list");
     drafts.forEach((chapter, index) => list.append(this.draftItem(chapter, index)));

@@ -4,12 +4,12 @@
  *
  * ## The shape of the threat
  *
- * "Voting, claiming, and submission endpoints first — they are the ones a fleet
+ * "Voting, claiming, and submission endpoints first - they are the ones a fleet
  * hits hardest." A fleet is not a browser: it retries on a tight loop, it runs
  * N copies, and its failure mode is a thousand identical requests a second
  * rather than one user clicking twice. The ceilings below are therefore set to
  * a generous multiple of what a well-behaved agent needs and a small fraction
- * of what a runaway produces — the goal is to blunt a loop, not to meter usage.
+ * of what a runaway produces - the goal is to blunt a loop, not to meter usage.
  *
  * ## Per actor AND per token
  *
@@ -17,7 +17,7 @@
  * limit bounds what one identity can do however many credentials it holds; the
  * TOKEN limit bounds one credential, so a single leaked or looping token cannot
  * consume its owner's entire allowance and starve their other agents. A request
- * must pass both. Human sessions have only the actor limit — a person holds one
+ * must pass both. Human sessions have only the actor limit - a person holds one
  * session per browser and the session id is not a durable identity worth
  * counting separately.
  *
@@ -25,7 +25,7 @@
  *
  * Exit criterion: limits "do not fire on reads". The limiter is invoked from
  * `requireProjectScope` only for unsafe methods, so a GET neither consumes
- * quota nor can be refused by this module — which is also what keeps a frozen
+ * quota nor can be refused by this module - which is also what keeps a frozen
  * or rate-limited book readable, the property the whole phase is organised
  * around.
  *
@@ -35,15 +35,15 @@
  * bucket: a log needs a row per request, which is the thing being prevented,
  * and a bucket needs a read-modify-write of a float. A counter row per minute
  * is one upsert, survives an isolate restart, and is shared across isolates
- * because it lives in the database rather than in memory — which matters, since
+ * because it lives in the database rather than in memory - which matters, since
  * Workers scale by running more isolates and an in-memory limiter would divide
  * the ceiling by however many happened to be warm.
  *
  * The known cost of a fixed window is the boundary burst: a caller can spend
  * its whole allowance at the end of one window and again at the start of the
- * next. For a control whose job is to stop a runaway loop — which will exhaust
+ * next. For a control whose job is to stop a runaway loop - which will exhaust
  * a window in its first second and then be refused for the remaining fifty-nine
- * — that is an acceptable trade for the operational simplicity.
+ * - that is an acceptable trade for the operational simplicity.
  */
 import type { Context } from "hono";
 import type { Repositories } from "@authorbot/database";
@@ -52,7 +52,7 @@ import { problem } from "./problems.js";
 
 /**
  * The documented ceilings (exit criterion 1: "documented rate limits enforced
- * and tested"). This table IS the documentation — the runbook and the OpenAPI
+ * and tested"). This table IS the documentation - the runbook and the OpenAPI
  * description both quote it, and `GET /v1/projects/{id}/rate-limits` serves it
  * so an agent author can read the ceilings they are writing against rather than
  * discovering them through 429s.
@@ -96,7 +96,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   },
   /**
    * Claiming is a contended write on a partial unique index. A fleet racing for
-   * the same work item is EXPECTED — that is what Phase 4's claim race is — so
+   * the same work item is EXPECTED - that is what Phase 4's claim race is - so
    * the ceiling has to leave room for honest contention while still stopping a
    * client that retries a 409 in a tight loop.
    */
@@ -109,7 +109,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   },
   /**
    * Submissions are the most expensive mutation in the system: each one queues
-   * a patch, a rebase check, and a commit. The ceiling is correspondingly low —
+   * a patch, a rebase check, and a commit. The ceiling is correspondingly low -
    * an agent that legitimately needs more than this per minute is not editing
    * prose, it is looping.
    */
@@ -124,7 +124,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
    * Annotations and replies are the surface a permissive policy opens to
    * strangers, so this ceiling is also the spam control the contract's
    * "moderation, spam controls, privacy, and a deletion policy" list names
-   * second — Phase 7 supplies the first, and this is a down payment on the
+   * second - Phase 7 supplies the first, and this is a down payment on the
    * second.
    */
   annotation: {
@@ -136,7 +136,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   },
   /**
    * The maintainer control plane: settings, freeze, pause, role changes,
-   * revocations, moderation. Human-paced by nature, but limited anyway — a
+   * revocations, moderation. Human-paced by nature, but limited anyway - a
    * stolen maintainer session should not be able to enumerate and revoke a
    * thousand things before anyone notices.
    */
@@ -208,9 +208,9 @@ export interface RateLimitDeps {
  * token's as well.
  *
  * BOTH subjects are incremented before either is judged. Short-circuiting on
- * the first failure would make the two counters drift apart under load — an
+ * the first failure would make the two counters drift apart under load - an
  * actor limited on Monday would carry an artificially low token count into
- * Tuesday — and the arithmetic that the endpoint reports back to clients would
+ * Tuesday - and the arithmetic that the endpoint reports back to clients would
  * stop describing anything real.
  */
 export async function consumeRateLimit(
@@ -237,7 +237,7 @@ export async function consumeRateLimit(
    * An agent also spends its OWNER's allowance.
    *
    * The module's own guarantee above is that "the ACTOR limit bounds what one
-   * identity can do however many credentials it holds" — and minting is what
+   * identity can do however many credentials it holds" - and minting is what
    * broke it: every token gets a brand-new agent actor of its own, so ten
    * tokens are ten actors, ten separate `actor:` counters, and ten times the
    * ceiling. A fleet then scales linearly with token count, which is exactly
@@ -245,7 +245,7 @@ export async function consumeRateLimit(
    *
    * Charging the owning human as well restores the guarantee at the level the
    * guarantee was always about: the person. Their agents share one allowance
-   * between them, and their own session shares it too — which is the honest
+   * between them, and their own session shares it too - which is the honest
    * reading of "one identity, however many credentials it holds".
    */
   const ownerActorId = auth.kind === "token" ? auth.actor.ownerActorId : null;
@@ -303,7 +303,7 @@ export async function consumeRateLimit(
  * The 429 (contract: "`429` + `Retry-After`").
  *
  * `Retry-After` is the seconds remaining in the current window, which is
- * exactly when the caller's next request can succeed — a well-behaved agent
+ * exactly when the caller's next request can succeed - a well-behaved agent
  * that honours it stops hammering immediately, which is the entire point of
  * sending it rather than a bare 429.
  */

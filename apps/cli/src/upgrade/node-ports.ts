@@ -3,8 +3,8 @@
  * the npm registry over HTTPS.
  *
  * This is the only file in the upgrade command that touches the outside
- * world. Nothing here is imported by the default test suite — the tests drive
- * `runUpgrade` through fakes — so `pnpm test` never opens a socket, never
+ * world. Nothing here is imported by the default test suite - the tests drive
+ * `runUpgrade` through fakes - so `pnpm test` never opens a socket, never
  * shells out to git, and never deploys anything.
  */
 
@@ -118,7 +118,7 @@ export const nodeLockfile: LockfilePort = {
     // `--package-lock-only` rewrites the lockfile from package.json without
     // touching node_modules: this runs inside a temporary working copy, and
     // installing there would be minutes of work thrown away. It still needs
-    // the registry to resolve the new versions, so it can fail offline —
+    // the registry to resolve the new versions, so it can fail offline -
     // hence the boolean rather than a throw. An upgrade that is otherwise
     // good should not be abandoned because a lockfile could not be refreshed;
     // it should say so.

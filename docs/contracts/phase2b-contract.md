@@ -1,6 +1,6 @@
-# Phase 2b implementation contract — inline annotation UI
+# Phase 2b implementation contract - inline annotation UI
 
-Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§5.1, §16.1–16.3, §16.6, §22.1)
+Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§5.1, §16.1-16.3, §16.6, §22.1)
 and additive to the Phase 0/1/2 contracts. Scope: the collaboration islands on
 published chapter pages, backed by the Phase 2 API. Votes and the work queue
 UI are Phase 3.
@@ -14,7 +14,7 @@ UI are Phase 3.
   dependencies.
 - `authorbot build` gains `--api-url <url>` (and `publication.api_url` in
   `book.yml` as the durable form; the flag overrides). Without either, the
-  site builds exactly as today — **zero JS, byte-comparable output**.
+  site builds exactly as today - **zero JS, byte-comparable output**.
 - Progressive enhancement is a hard rule (§16.1/§27.11): with JS disabled or
   the API unreachable, chapter pages remain fully readable with no
   collaboration chrome and no errors.
@@ -30,7 +30,7 @@ UI are Phase 3.
    offers the same for the whole block. Range annotations capture
    `{ blockId, textPosition, textQuote(exact, prefix≤32, suffix≤32) }`
    computed against the block's **normalized text** (NFC, collapsed
-   whitespace — mirror `@authorbot/markdown` normalization; ship the tiny
+   whitespace - mirror `@authorbot/markdown` normalization; ship the tiny
    normalizer as shared code in the islands, with unit tests proving parity
    on the package's own normalization fixtures).
 3. **Reply**: threaded replies on a card. **Withdraw**: author-only affordance.
@@ -54,7 +54,7 @@ UI are Phase 3.
 - **Client rendering of bodies is plain text**: escaped, newline-preserving,
   no client-side Markdown rendering in 2b. (Server-side sanitized rendering
   can come later; this forecloses the XSS surface now.)
-- **CORS**: the API gains explicit CORS support — `ALLOWED_ORIGINS` config
+- **CORS**: the API gains explicit CORS support - `ALLOWED_ORIGINS` config
   (exact origins, no wildcard), `Access-Control-Allow-Credentials: true`,
   preflight handling. Same-origin deployment (site + API on one host) is the
   documented recommendation; cross-origin is supported for the GH-Pages case.
@@ -87,7 +87,7 @@ are unchanged when the gutter is present.
   reader sees public annotations read-only; JS-disabled page renders prose
   with zero collaboration chrome; keyboard-only annotation creation.
 - Regression: an api-url-less build remains script-free (e2e asserts zero
-  `<script>` — same assertion Phase 1 introduced, now conditional).
+  `<script>` - same assertion Phase 1 introduced, now conditional).
 
 ## 6. Exit criteria
 

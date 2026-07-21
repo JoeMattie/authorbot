@@ -1,4 +1,4 @@
-# Phase 1 implementation contract — read-only publisher
+# Phase 1 implementation contract - read-only publisher
 
 Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` (§16.1, §17.2, §23 Phase 1, §24
 Epic B) and additive to `docs/phase0-contract.md`. Where the design offers a
@@ -45,7 +45,7 @@ choice, this contract selects one.
 
 New schema `authorbot.build/v1` in `@authorbot/schemas`:
 `{ schema, commit: string|null, built_at, publisher_version, base_url?,
-chapters: [{ id, slug, revision, title, status }] }` — design §17.2.
+chapters: [{ id, slug, revision, title, status }] }` - design §17.2.
 
 ## 4. Rendering safety
 

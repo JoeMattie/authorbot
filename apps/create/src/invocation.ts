@@ -3,7 +3,7 @@
  *
  * `npx` unpacks into a cache directory and puts nothing on PATH, so every
  * resume hint reading `create-authorbot publish` was a command not found for
- * anyone who followed the documented `npx @authorbot/create` — and those hints
+ * anyone who followed the documented `npx @authorbot/create` - and those hints
  * appear precisely when something has already failed, which is the worst
  * moment to hand someone an instruction that does not work.
  *

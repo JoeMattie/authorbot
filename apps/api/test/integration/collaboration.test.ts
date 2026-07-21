@@ -88,7 +88,7 @@ describe("Phase 3 collaboration pipeline (integration)", () => {
 
     // Git: exactly one NEW decision artifact and one NEW work-item artifact
     // for this crossing (the example repo ships one pre-existing fixture of
-    // each — the crossing must add exactly one, not duplicate on the race).
+    // each - the crossing must add exactly one, not duplicate on the race).
     const decisionsDir = join(repo.workTreePath, ".authorbot", "decisions");
     const workItemsDir = join(repo.workTreePath, ".authorbot", "work-items");
     expect(existsSync(join(decisionsDir, `${decisionId}.yml`))).toBe(true);
@@ -116,7 +116,7 @@ describe("Phase 3 collaboration pipeline (integration)", () => {
   // N>=8 parallel qualifying votes by distinct actors (incl. an agent token)
   // plus concurrent re-evaluations against ONE suggestion must collapse to
   // exactly one decision row, one work-item row, one decision artifact and one
-  // work-item artifact in the Git work tree — counted as both FILES and
+  // work-item artifact in the Git work tree - counted as both FILES and
   // COMMITS. Repeated across independent suggestions to shake races.
   it("N>=8 distinct concurrent voters + re-evaluations → one decision, one work item (files AND commits), x5", async () => {
     // 8 distinct human contributors, plus a maintainer added below...
@@ -129,7 +129,7 @@ describe("Phase 3 collaboration pipeline (integration)", () => {
     // would have nothing to race for.
     humanCookies.push(await devLogin(app, "iris", "maintainer"));
     // ...plus one agent token (agent membership is pinned to editor, whose
-    // bundle grants votes:write) — the 9th, non-human qualifying voter.
+    // bundle grants votes:write) - the 9th, non-human qualifying voter.
     const maintainer = await devLogin(app, "quill", "maintainer");
     const { token: agentToken } = await mintToken(app, maintainer, [
       "annotations:read",

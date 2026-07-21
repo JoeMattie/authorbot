@@ -1,7 +1,7 @@
 /**
  * Phase 6 contract §3.5, end to end: a maintainer signs in, clicks "New
  * chapter", writes a title and prose, saves a draft, publishes it, and the
- * chapter appears on the site — **never having seen a UUID or a block
+ * chapter appears on the site - **never having seen a UUID or a block
  * marker**.
  *
  * That last clause is the point of the section, so it is asserted rather than
@@ -47,14 +47,14 @@ test("a maintainer writes a new chapter, reviews the draft from home, and publis
   page,
   browser,
 }) => {
-  // Sign in on a chapter page — the "New chapter" button is an affordance for
+  // Sign in on a chapter page - the "New chapter" button is an affordance for
   // actors who may use it, not a login prompt, so it renders nothing until the
   // API says who this is.
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "author-e2e", "maintainer");
 
   // From the home page: the entry point is visible now that the viewer may
-  // author. (A book with no chapters at all has only this page — which is why
+  // author. (A book with no chapters at all has only this page - which is why
   // the button lives here.)
   await page.goto(`${siteUrl()}/`);
   const newChapter = page.locator("a.ab-new-chapter");
@@ -85,7 +85,7 @@ test("a maintainer writes a new chapter, reviews the draft from home, and publis
   }).toPass({ timeout: 30_000 });
 
   // A draft is not on the site yet: publishing is what puts it there. Checked
-  // in a second tab so the composer keeps the chapter it just made — the
+  // in a second tab so the composer keeps the chapter it just made - the
   // author never has to carry an id from one page to another.
   const reader = await page.context().newPage();
   await rebuildSite();
@@ -109,7 +109,7 @@ test("a maintainer writes a new chapter, reviews the draft from home, and publis
   await expect(visitor.locator("authorbot-draft-chapters")).toBeEmpty();
   await visitorContext.close();
 
-  // Publish — the separate, explicit action, offered to a maintainer once the
+  // Publish - the separate, explicit action, offered to a maintainer once the
   // chapter exists.
   const publish = page.locator("button.ab-chapter-publish");
   await expect(publish).toBeVisible();
@@ -120,7 +120,7 @@ test("a maintainer writes a new chapter, reviews the draft from home, and publis
   await reader.close();
 
   // Republish the site, as a real deployment does after Authorbot commits, and
-  // the chapter is simply there — reachable from the index, prose intact, with
+  // the chapter is simply there - reachable from the index, prose intact, with
   // no marker syntax leaking into the reading surface.
   await rebuildSite();
   await page.goto(`${siteUrl()}/`);

@@ -6,7 +6,7 @@ Accepted (2026-07-19)
 
 ## Context
 
-One accepted literary mutation touches several files at once — chapter,
+One accepted literary mutation touches several files at once - chapter,
 annotation state, decision, work-item state, attribution, release metadata
 (design §14.2). A series of one-file Contents API calls would leave the
 repository observably inconsistent mid-mutation. Long-lived personal access

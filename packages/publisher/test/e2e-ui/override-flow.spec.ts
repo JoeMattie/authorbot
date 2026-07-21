@@ -4,7 +4,7 @@
  * a tally the UI showed them first.
  *
  * The tally assertion is the substance. The override's whole justification is
- * that the maintainer sees what they are overriding — for a solo author "the
+ * that the maintainer sees what they are overriding - for a solo author "the
  * thresholds only start mattering when other people arrive", which is only
  * safe if bypassing them is deliberate and visible rather than a quiet button.
  */
@@ -22,7 +22,7 @@ const SUGGESTION = "E2E override: this sentence could carry the drift more plain
 const REASON = "Promoting this myself: it is my book and the fix is obviously right.";
 
 test("a maintainer promotes a suggestion to work against a visible tally", async ({ page }) => {
-  // A suggestion with ONE approval — well short of the default rule (three
+  // A suggestion with ONE approval - well short of the default rule (three
   // approvals, net ≥ 2, a human, and a human maintainer).
   const seeded = await seedRangeSuggestion({
     login: "override-author",
@@ -50,7 +50,7 @@ test("a maintainer promotes a suggestion to work against a visible tally", async
     override.locator('.ab-override-role[data-count="human-maintainer-approvals"]'),
   ).toContainText("0");
 
-  // Promoting requires a reason — an empty one is refused client-side, so the
+  // Promoting requires a reason - an empty one is refused client-side, so the
   // override cannot be a single careless click.
   await override.locator('.ab-override-btn[data-override="promote"]').click();
   const form = override.locator(".ab-override-form");

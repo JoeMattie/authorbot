@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `create-authorbot`. The npx entry point (Phase 6 contract §1) — deliberately
+ * `create-authorbot`. The npx entry point (Phase 6 contract §1) - deliberately
  * `npx`, never `curl | bash`: the toolchain already requires Node, so piping a
  * remote script into a shell would buy nothing and cost the ability to audit
  * what runs.
@@ -86,7 +86,7 @@ try {
   // Once a readline interface has attached to a TTY stdin, closing it does not
   // reliably release the underlying handle, so Node finishes every last piece
   // of work and then sits in the event loop forever with nothing to do. The
-  // author sees the whole run complete, "ok Done.", and no prompt back —
+  // author sees the whole run complete, "ok Done.", and no prompt back -
   // indistinguishable from a hang, and only Ctrl-C ends it.
   //
   // The mirror of the timer that was `unref()`d and let the process exit too
@@ -97,7 +97,7 @@ try {
   // Three steps, because the earlier one-liner was not enough and the hang
   // came back the moment a prompt library owned the terminal: raw mode has to
   // be released or the shell inherits a terminal with no echo, the stream has
-  // to stop flowing, and `unref` is the one that actually lets Node exit —
+  // to stop flowing, and `unref` is the one that actually lets Node exit -
   // pausing a referenced handle still counts as work outstanding.
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
@@ -108,7 +108,7 @@ try {
 
 // Exit explicitly.
 //
-// `@clack/prompts` does not hand the event loop back after a prompt — its own
+// `@clack/prompts` does not hand the event loop back after a prompt - its own
 // examples call `process.exit()` after a cancellation, and an isolated clack
 // prompt with none of this wizard's code around it hangs exactly the same way.
 // So a run that has printed everything it has to say, including the summary of

@@ -38,7 +38,7 @@ export function parseVersion(input: string): SemVer | undefined {
   };
 }
 
-/** Parse or throw — for callers that already know the string is a version. */
+/** Parse or throw - for callers that already know the string is a version. */
 export function mustParseVersion(input: string): SemVer {
   const parsed = parseVersion(input);
   if (parsed === undefined) {
@@ -133,7 +133,7 @@ export interface Pin {
  *
  * Only the two shapes ADR-0021 §1 sanctions are understood: an exact tag
  * (the default and the recommendation) and a caret/tilde channel that tracks
- * compatible releases. Anything else — a URL, a git ref, `*`, a range union —
+ * compatible releases. Anything else - a URL, a git ref, `*`, a range union -
  * is rejected rather than guessed at, because guessing wrong here means
  * upgrading a book to a release its author did not choose.
  */

@@ -1,5 +1,5 @@
 /**
- * `LocalGitAdapter` — Node-only `BookRepoWriter` that spawns `git` against a
+ * `LocalGitAdapter` - Node-only `BookRepoWriter` that spawns `git` against a
  * work-tree path (Phase 2 contract §5: tests and local dev; production Git
  * writes move to the GitHub adapter in Phase 5).
  *
@@ -94,7 +94,7 @@ export class LocalGitAdapter implements BookRepoWriter {
   /**
    * Read one committed file at the branch head (`git show <branch>:<path>`),
    * or `null` when the path does not exist there. The branch itself must
-   * exist — an unknown branch is a `git-failure`, never a silent `null`
+   * exist - an unknown branch is a `git-failure`, never a silent `null`
    * (a null misread would let an attribution append clobber history).
    */
   async readFile(branch: string, filePath: string): Promise<string | null> {
@@ -149,13 +149,13 @@ export class LocalGitAdapter implements BookRepoWriter {
   /**
    * Refuse to commit over foreign uncommitted changes. Leftover writes of
    * exactly this mutation's files (a crash between write and commit) are
-   * tolerated — they are about to be overwritten and staged anyway.
+   * tolerated - they are about to be overwritten and staged anyway.
    */
   private async assertCleanApartFrom(ownPaths: readonly string[]): Promise<void> {
     const own = new Set(ownPaths);
     // --untracked-files=all: the default untracked mode collapses untracked
     // files to their highest untracked directory ("?? .authorbot/annotations/"),
-    // which can never match the exact file paths in `own` — a crash between
+    // which can never match the exact file paths in `own` - a crash between
     // writeFiles and commit for a create (always a brand-new directory) would
     // otherwise wedge every subsequent commit with dirty-tree.
     const status = await this.mustGit(["status", "--porcelain", "--untracked-files=all"]);
@@ -164,7 +164,7 @@ export class LocalGitAdapter implements BookRepoWriter {
       if (line === "") continue;
       const entry = line.slice(3);
       // Renames appear as "old -> new"; quoted paths contain specials we do
-      // not attempt to unquote — treat both conservatively as foreign.
+      // not attempt to unquote - treat both conservatively as foreign.
       const candidate = entry.includes(" -> ") || entry.startsWith('"') ? null : entry;
       if (candidate === null || !own.has(candidate)) {
         foreign.push(entry);

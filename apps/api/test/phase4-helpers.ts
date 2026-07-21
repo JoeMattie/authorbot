@@ -30,7 +30,7 @@ export const BLOCK_2_TEXT = "Nobody in Hollow Creek spoke of it.";
 
 export const CHAPTER_PATH = "chapters/001-baseline.md";
 
-/** The fixture chapter at revision 3 — parseable, marker-valid, schema-valid. */
+/** The fixture chapter at revision 3 - parseable, marker-valid, schema-valid. */
 export const CHAPTER_SOURCE = `---
 schema: authorbot.chapter/v1
 id: ${CHAPTER_ID}
@@ -138,7 +138,7 @@ export async function makePhase4Harness(options: {
 }
 
 /**
- * Insert a `ready` work item (plus its open source annotation) directly —
+ * Insert a `ready` work item (plus its open source annotation) directly -
  * the Phase 3 creation path is covered by its own suites; Phase 4 tests
  * start from the queue state the contract's §2 assumes.
  */

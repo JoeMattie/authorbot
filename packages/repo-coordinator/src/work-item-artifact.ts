@@ -2,7 +2,7 @@
  * Byte-stable rendering and parsing of work-item artifacts
  * `.authorbot/work-items/<id>.md` (`authorbot.work-item/v1`, Phase 0 contract
  * §4; design §13; Phase 3 contract §4). Stable path, status in frontmatter
- * (Phase 0 §4 ADR) — a status change is a re-render in which only the
+ * (Phase 0 §4 ADR) - a status change is a re-render in which only the
  * frontmatter `status` line differs.
  *
  * Body sections per design §13 / Phase 3 contract §4, in fixed order:
@@ -10,7 +10,7 @@
  * `authorbot:original` delimiters), Requested change, Acceptance criteria,
  * Submission contract (naming the base revision).
  *
- * ## Phase 4 additions (contract §5–§6)
+ * ## Phase 4 additions (contract §5-§6)
  *
  * - **Completion metadata**: an applied work item re-renders with frontmatter
  *   `status: completed` and an appended `## Completion` section (submission
@@ -18,7 +18,7 @@
  *   stay byte-intact; the canonical `authorbot.work-item/v1` frontmatter is
  *   strict, so completion metadata lives in the body, not the frontmatter.
  * - **Conflict artifacts**: a `resolve_conflict` work item (design §12.6)
- *   carries BOTH texts between distinct delimiter pairs — the *current*
+ *   carries BOTH texts between distinct delimiter pairs - the *current*
  *   chapter text between the standard `authorbot:original` delimiters (it is
  *   the text the resolver revises; `base_revision` names the current
  *   revision), and the *submitted* change between
@@ -34,10 +34,10 @@
  * Free text (Context, Original text, Requested change) may itself contain
  * lines that look like the `authorbot:original` delimiters, like a section
  * heading, or like a Markdown code fence (` ``` ` / `~~~`). To keep parsing
- * exact — and to keep a quoted code fence from swallowing a delimiter line so
- * the Phase 0 delimiter validator no longer sees it as an HTML comment — the
+ * exact - and to keep a quoted code fence from swallowing a delimiter line so
+ * the Phase 0 delimiter validator no longer sees it as an HTML comment - the
  * renderer escapes any free-text line MATCHING `/^\s*<!--\s*authorbot:original:/`
- * (the same whitespace tolerance the validator's own regex has — see
+ * (the same whitespace tolerance the validator's own regex has - see
  * `DANGEROUS_LINE`), opening/closing a fenced code block, or exactly equal to
  * one of the five section headings, by prefixing it with the escape marker
  * `<!-- authorbot:original:escape -->`. The parser strips exactly one escape
@@ -97,12 +97,12 @@ export const SUBMITTED_TEXT_END = "<!-- authorbot:original:submitted:end -->";
  * one was reachable from an annotation body: a comment containing a delimiter
  * line with a single leading space passed the markdown safety scan, was emitted
  * verbatim into `## Context`, and the committed artifact then failed
- * `checkWorkItemDelimiters` with `WORK_ITEM_DELIMITER_INVALID` — permanently,
+ * `checkWorkItemDelimiters` with `WORK_ITEM_DELIMITER_INVALID` - permanently,
  * because the write path does not run that check and the bad bytes land first.
  *
  * The predicate is deliberately WIDER than the validator (no `(start|end)`, no
- * end anchor): over-escaping a line that was never dangerous is invisible —
- * `unescapeWorkItemText` restores it byte for byte — while under-escaping one
+ * end anchor): over-escaping a line that was never dangerous is invisible -
+ * `unescapeWorkItemText` restores it byte for byte - while under-escaping one
  * breaks the repository. When the two cannot be identical, the escaper is the
  * one that should err.
  */
@@ -111,7 +111,7 @@ const DANGEROUS_LINE = /^\s*<!--\s*authorbot:original:/;
  * A free-text line that could open or close a Markdown fenced code block. Such
  * a line, left bare, would make the delimiter validator (which only counts a
  * delimiter line Markdown parses as an HTML comment node) treat the
- * `authorbot:original` delimiters as swallowed code — a validator-only failure
+ * `authorbot:original` delimiters as swallowed code - a validator-only failure
  * on artifacts that quote code fences. Escaping it (an HTML-comment prefix)
  * keeps it inert while round-tripping exactly.
  */
@@ -132,7 +132,7 @@ export const COMPLETION_HEADING = "## Completion";
 /**
  * Every heading the renderer anchors on, and therefore escapes in free text.
  * (Adding `## Completion` in Phase 4 changes rendered bytes only for free
- * text containing exactly that line — previously never emitted.)
+ * text containing exactly that line - previously never emitted.)
  */
 const ESCAPED_HEADINGS: readonly string[] = [...WORK_ITEM_SECTION_HEADINGS, COMPLETION_HEADING];
 
@@ -207,7 +207,7 @@ export interface WorkItemArtifactInput {
   context: string;
   /**
    * The exact original text of the quoted target (empty when the target
-   * carries no quote — block/chapter scope). Preserved byte-exactly between
+   * carries no quote - block/chapter scope). Preserved byte-exactly between
    * the `authorbot:original` delimiters (CRLF normalized to LF).
    */
   originalText: string;
@@ -229,7 +229,7 @@ export interface WorkItemArtifactInput {
   completion?: WorkItemCompletion;
 }
 
-/** `## Completion` section fields — all single-line values. */
+/** `## Completion` section fields - all single-line values. */
 export interface WorkItemCompletion {
   /** Submission UUIDv7 that produced the applied edit. */
   submissionId: string;
@@ -353,7 +353,7 @@ export interface WorkItemArtifactSections {
 }
 
 export interface ParsedWorkItemArtifact {
-  /** Validated frontmatter — statuses intact for projection rebuild. */
+  /** Validated frontmatter - statuses intact for projection rebuild. */
   record: WorkItem;
   sections: WorkItemArtifactSections;
 }

@@ -105,7 +105,7 @@ describe("applyRangeReplacement", () => {
 
   it("handles NFC unicode offsets in code units", () => {
     const src = doc([[ID_A, "Café opens 😀 today."]]);
-    // Normalized: "Café opens 😀 today." — 😀 is two code units.
+    // Normalized: "Café opens 😀 today." - 😀 is two code units.
     const result = applyRangeReplacement(src, quoteTarget(ID_A, "😀"), "later");
     expect(result.source).toContain("Café opens later today.");
   });

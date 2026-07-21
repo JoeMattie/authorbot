@@ -2,7 +2,7 @@ import { z } from "zod";
 import { nodeIdOf } from "./primitives.js";
 
 /**
- * Character frontmatter `story/characters/*.md` — `authorbot.character/v1`
+ * Character frontmatter `story/characters/*.md` - `authorbot.character/v1`
  * (contract section 4).
  */
 export const characterSchema = z.strictObject({

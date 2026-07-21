@@ -1,5 +1,5 @@
 /**
- * Phase 7 exit criterion 2 — **the restore drill, as a test rather than a
+ * Phase 7 exit criterion 2 - **the restore drill, as a test rather than a
  * paragraph.**
  *
  * The contract says: "destroy a database, rebuild the projection from Git,
@@ -10,7 +10,7 @@
  *
  * Everything Authorbot knows lives in exactly two places: a Git repository
  * (durable, replicated, the record of the book) and an operational database
- * (D1 — a *projection* plus a small amount of genuinely operational state).
+ * (D1 - a *projection* plus a small amount of genuinely operational state).
  * Phase 2 contract §5 and design §7.5 make the first the source of truth and
  * the second rebuildable from it.
  *
@@ -28,7 +28,7 @@
  * a bug; so would a token.** A restored lease would let a vanished agent hold
  * work nobody can reclaim; a restored session or agent token would mean a
  * credential outliving the database that was supposed to be its only home.
- * The drill therefore asserts their absence *deliberately* — and asserts they
+ * The drill therefore asserts their absence *deliberately* - and asserts they
  * were PRESENT before the destruction, so the absence cannot pass vacuously.
  *
  * Absence is asserted twice for each: structurally (the table is empty) and
@@ -134,7 +134,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       // =====================================================================
 
       // (a) A suggestion that becomes work, is claimed, submitted, and applied
-      //     — so the repository carries a chapter revision bump, a decision, a
+      //     - so the repository carries a chapter revision bump, a decision, a
       //     completed work item, an accepted annotation, and an attribution
       //     entry that Authorbot itself wrote.
       const { annotationId: appliedAnnotationId, workItemId: appliedWorkItemId } =
@@ -175,7 +175,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       );
       expect(submitted.status).toBe(202);
 
-      // (b) A comment with a reply — the durable conversation, not just the
+      // (b) A comment with a reply - the durable conversation, not just the
       //     governance trail.
       const commenter = await devLogin(before, "drill-commenter", "contributor");
       const comment = await before.app.request(
@@ -192,7 +192,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       const replier = await devLogin(before, "drill-replier", "contributor");
       const reply = await before.app.request(
         `/v1/projects/${before.projectId}/annotations/${commentId}/replies`,
-        jsonRequest("POST", { body: "Agreed — the cadence lands now." }, { Cookie: replier }),
+        jsonRequest("POST", { body: "Agreed - the cadence lands now." }, { Cookie: replier }),
       );
       expect(reply.status).toBe(202);
       const { replyId } = (await reply.json()) as { replyId: string };
@@ -313,7 +313,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       };
 
       // =====================================================================
-      // 3. WHAT RETURNS — everything whose durable record is the prose or
+      // 3. WHAT RETURNS - everything whose durable record is the prose or
       //    `.authorbot/`.
       // =====================================================================
 
@@ -341,7 +341,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       // --- replies --------------------------------------------------------
       const restoredReply = await after.repos.replies.getById(replyId);
       expect(restoredReply).not.toBeNull();
-      expect(restoredReply?.body).toBe("Agreed — the cadence lands now.");
+      expect(restoredReply?.body).toBe("Agreed - the cadence lands now.");
       expect(restoredReply?.annotationId).toBe(commentId);
 
       // --- attribution of authorship --------------------------------------
@@ -396,7 +396,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       );
 
       // =====================================================================
-      // 4. WHAT DOES NOT RETURN — by design, asserted as deliberate.
+      // 4. WHAT DOES NOT RETURN - by design, asserted as deliberate.
       // =====================================================================
 
       // --- human sessions --------------------------------------------------
@@ -430,12 +430,12 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       expect(emptyAtRestore.leases).toBe(0);
       // The work item that was LEASED comes back `ready`: its artifact records
       // the queue state, and a claim is operational. That is the correct
-      // outcome — nobody is holding it, so nobody may block it.
+      // outcome - nobody is holding it, so nobody may block it.
       const restoredLeased = await after.repos.workItems.getById(leasedWorkItemId);
       expect(restoredLeased?.status).toBe("ready");
       // Behavioural: a different actor can claim it immediately. A surviving
       // lease would have made this 409 `lease-held` on a lease whose holder no
-      // longer exists — work stranded for up to its full maximum duration.
+      // longer exists - work stranded for up to its full maximum duration.
       const freshHolder = await devLogin(after, "drill-successor", "editor");
       const reclaim = await after.app.request(
         `/v1/projects/${after.projectId}/work-items/${leasedWorkItemId}/claim`,
@@ -453,7 +453,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
       // by design (Phase 4 contract §6 retention), so an in-flight edit that
       // had not yet been applied to a chapter is genuinely LOST by a restore.
       // The drill records that as a deliberate property rather than hiding it
-      // — see docs/runbook.md, "What a restore does not bring back".
+      // - see docs/runbook.md, "What a restore does not bring back".
       expect(emptyAtRestore.submissions).toBe(0);
       expect(emptyAtRestore.outbox).toBe(0);
       expect(emptyAtRestore.gitOperations).toBe(0);
@@ -471,7 +471,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
 
   it("is idempotent: restoring twice from the same tree yields the same projection", async () => {
     // A drill you can only run once is a drill you will not run. The restore
-    // procedure must be safe to repeat — an operator who is unsure whether the
+    // procedure must be safe to repeat - an operator who is unsure whether the
     // first attempt worked must be able to simply do it again.
     const origin = await makeGitHubIntegrationApp();
     let first: GitHubIntegrationApp | null = null;
@@ -525,7 +525,7 @@ describe("Phase 7 exit criterion 2: the restore drill", () => {
     // retries safe, not to deduplicate across a database's lifetime. An
     // operator replaying a client request after a restore must get a real
     // execution rather than a cached 202 for a git operation that no longer
-    // exists — the cached response would name an operationId with no row
+    // exists - the cached response would name an operationId with no row
     // behind it.
     const origin = await makeGitHubIntegrationApp();
     let restored: GitHubIntegrationApp | null = null;

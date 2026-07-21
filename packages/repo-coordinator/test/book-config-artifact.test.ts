@@ -131,7 +131,7 @@ describe("renderBookConfigArtifact", () => {
 
 /**
  * Regression: a settings PATCH is a read-modify-write of the `book_configs`
- * projection, and that projection can be arbitrarily stale — it freezes while
+ * projection, and that projection can be arbitrarily stale - it freezes while
  * a project is diverged, and `projectBookConfig` keeps the previous row on an
  * `invalid` outcome. Rendering the whole file from that copy reverted anything
  * the author had committed directly to Git, including the three fields §3.6

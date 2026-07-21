@@ -5,7 +5,7 @@
  * The wizard cannot read the templates directory at runtime: `@authorbot/create`
  * publishes only `dist/` (ADR-0022), so the files it scaffolds must be compiled
  * into it. This script is the one-way copy, and `test/template-drift.test.ts`
- * is the guard that the copy is current — the test fails if the template
+ * is the guard that the copy is current - the test fails if the template
  * changes without this script being re-run.
  *
  * Usage: node apps/create/scripts/sync-templates.mjs
@@ -54,7 +54,7 @@ async function main() {
  * Files the scaffold copies out of \`templates/book-repo\` unchanged.
  *
  * They are embedded rather than read from disk because \`@authorbot/create\`
- * ships as an npm package containing only \`dist/\` (ADR-0022) — the templates
+ * ships as an npm package containing only \`dist/\` (ADR-0022) - the templates
  * directory is not published, so a runtime read would work in this repository
  * and fail for every real user.
  *

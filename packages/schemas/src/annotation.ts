@@ -73,7 +73,7 @@ const annotationBaseFields = {
 } as const;
 
 /**
- * Annotation frontmatter `.authorbot/annotations/<id>/annotation.md` —
+ * Annotation frontmatter `.authorbot/annotations/<id>/annotation.md` -
  * `authorbot.annotation/v1` (contract section 4). `target` is required for
  * `range` and `block` scopes and forbidden for `chapter` scope.
  */
@@ -96,7 +96,7 @@ export const annotationSchema = z.discriminatedUnion("scope", [
 export type Annotation = z.infer<typeof annotationSchema>;
 
 /**
- * Reply frontmatter `.authorbot/annotations/<id>/replies/<reply-id>.md` —
+ * Reply frontmatter `.authorbot/annotations/<id>/replies/<reply-id>.md` -
  * `authorbot.reply/v1`. The contract pins only the schema ID; fields follow
  * the Reply entity of design section 9.1 (ID, annotation ID, optional parent
  * reply, author, timestamps). The reply body is the Markdown content itself.

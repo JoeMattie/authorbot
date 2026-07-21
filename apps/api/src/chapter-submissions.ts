@@ -1,12 +1,12 @@
 /**
- * Phase 6 contract §3.5 — the direct authoring path (design §15.2
+ * Phase 6 contract §3.5 - the direct authoring path (design §15.2
  * `chapter-submissions`).
  *
- * Phases 2b–4 gave a reader ways to *react* to prose that already exists:
+ * Phases 2b-4 gave a reader ways to *react* to prose that already exists:
  * annotate it, vote on the annotation, claim the resulting work item, submit a
  * patch. None of that helps the author of an empty book, and routing a book's
  * own author through annotation → vote → work item to write chapter one would
- * be absurd — there is nobody to vote. These two routes are the missing edge:
+ * be absurd - there is nobody to vote. These two routes are the missing edge:
  * an editor or maintainer writes prose and the server does the rest.
  *
  * **What the server generates, so an author never types it:** the chapter's
@@ -20,7 +20,7 @@
  * `submissions:write` PLUS the editor-or-maintainer role, project divergence
  * (a prose write against a repository we know we mis-model is the clobber the
  * gate exists to refuse), the base-revision check that Phase 4 submissions
- * use — stale is 409, never a silent overwrite — and the Phase 0 rules over a
+ * use - stale is 409, never a silent overwrite - and the Phase 0 rules over a
  * *provisional rendering* of the chapter: frontmatter schema, marker health,
  * no raw HTML, allowed URL schemes. Rendering the author's body into a real
  * chapter file to validate it is what makes "validated exactly as any other
@@ -29,7 +29,7 @@
  *
  * **What is deliberately NOT decided here:** the final slug, `order`, marker
  * ids, and the committed bytes. Those depend on the branch head and are
- * composed at drain time by `chapter-composer.ts` — see its module docs for
+ * composed at drain time by `chapter-composer.ts` - see its module docs for
  * why. This route reserves the chapter id and records the intent.
  *
  * **Publication is a separate action.** `publish`/`unpublish` are maintainer
@@ -101,7 +101,7 @@ const titleField = z.string().trim().min(1, "title must not be empty").max(300);
  * Create: `{ title, body, slug?, summary? }`. Revise: `{ chapterId,
  * baseRevision, title?, body?, summary? }`. The discriminator is
  * `chapterId`'s presence, which is what an author-facing composer naturally
- * sends — a "New chapter" form has no chapter to name yet.
+ * sends - a "New chapter" form has no chapter to name yet.
  */
 const createChapterSchema = z.strictObject({
   title: titleField,
@@ -129,7 +129,7 @@ export function registerChapterSubmissionRoutes(ctx: ChapterSubmissionsContext):
 
   /**
    * Contract §3.5: `submissions:write` PLUS the editor-or-maintainer role.
-   * The scope alone would very nearly do — its bundle starts at editor — but
+   * The scope alone would very nearly do - its bundle starts at editor - but
    * "very nearly" is not an authorization rule, and a future bundle change
    * must not silently open the authoring path to contributors.
    */
@@ -210,7 +210,7 @@ export function registerChapterSubmissionRoutes(ctx: ChapterSubmissionsContext):
     return serialize(guard.project.id, async () => {
       // Phase 5 §6 / design §14.5: a diverged repository blocks PROSE writes,
       // and a chapter is the most prose there is. Re-read inside the
-      // serializer rather than trusting the guard's cached row — divergence is
+      // serializer rather than trusting the guard's cached row - divergence is
       // set by a webhook reconciliation that can land between the auth check
       // and the command.
       const currentProject = await repos.projects.getById(guard.project.id);

@@ -5,11 +5,11 @@
  * repository in-process, right after its 202 batch lands.
  *
  * Phase 4: the processor is created with the API's `SubmissionApplier`
- * (submission-applier.ts — the §12.6 patch/rebase/conflict decision table),
+ * (submission-applier.ts - the §12.6 patch/rebase/conflict decision table),
  * and every drain is followed by the post-drain hook (reanchor.ts): §10.3
  * re-anchoring of the applied chapter's other annotations and the conflict
  * problem/event recording. The writer must support `readFile`
- * (`LocalGitAdapter` does) — the applier and the attribution append read the
+ * (`LocalGitAdapter` does) - the applier and the attribution append read the
  * branch head through it.
  *
  * Node-only (the default `LocalGitAdapter` spawns `git`), so this module is
@@ -19,8 +19,8 @@
  * `MIRROR_MODE=durable` (Phase 5 contract §5) gets the same drain through
  * coordinator.ts with a `GitHubBookRepoWriter` instead.
  *
- * The drain itself — processor + Phase 4 post-drain hook, serialized per
- * project — lives in the Worker-safe drain.ts and is shared with the Durable
+ * The drain itself - processor + Phase 4 post-drain hook, serialized per
+ * project - lives in the Worker-safe drain.ts and is shared with the Durable
  * Object, so inline and durable modes cannot diverge.
  */
 import type { SqlDatabase } from "@authorbot/database";
@@ -49,8 +49,8 @@ export interface InlineMirror {
   onMutationCommitted(projectId: string): Promise<void>;
   /**
    * Drain the project's outbox now and return the outcomes (used by tests
-   * and by manual drains in `MIRROR_MODE=queue`). Serialized with — and
-   * identical to — the drains triggered through `onMutationCommitted`.
+   * and by manual drains in `MIRROR_MODE=queue`). Serialized with - and
+   * identical to - the drains triggered through `onMutationCommitted`.
    */
   drain(projectId: string): Promise<DrainResult>;
   writer: BookRepoWriter;

@@ -255,7 +255,7 @@ export class OutboxRepository {
    * the same batch as the git-operation reset and its audit row.
    *
    * Unlike `markPending`, this accepts a `failed` row: requeueing a failed
-   * operation is precisely what it is for. `done` is excluded — a landed
+   * operation is precisely what it is for. `done` is excluded - a landed
    * commit must never be replayed.
    */
   markPendingStatement(id: string): SqlStatement {
@@ -469,7 +469,7 @@ export class AuditEventsRepository {
    *
    * `actorId` and `action` are optional filters, applied with the
    * `? IS NULL OR column = ?` idiom so one prepared statement serves every
-   * combination — the alternative, concatenating a WHERE clause, is how string
+   * combination - the alternative, concatenating a WHERE clause, is how string
    * interpolation gets into SQL.
    */
   async listRecent(

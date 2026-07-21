@@ -124,7 +124,7 @@ export async function checkStoryGraph(
 
   // Parent cycles: every parent can resolve while no chain ever reaches a
   // root, leaving the cycle's nodes (and everything below them) reachable
-  // from no root — the outline page would silently lose them at build time.
+  // from no root - the outline page would silently lose them at build time.
   const parentOf = new Map<string, string>();
   for (const node of nodes) {
     if (isRecord(node) && typeof node.id === "string" && typeof node.parent === "string") {

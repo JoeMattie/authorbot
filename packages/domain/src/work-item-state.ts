@@ -7,7 +7,7 @@ export type { WorkItemStatus };
 /**
  * Work-item state machine (design section 9.5). The full transition graph is
  * declared so Phase 4 is additive data, but Phase 3 stops at `ready` (Phase 3
- * contract section 1: claims/leases/submissions are out of scope) — the only
+ * contract section 1: claims/leases/submissions are out of scope) - the only
  * transition that may actually execute is `ready -> cancelled` (maintainer
  * cancel). Every other graph edge is phase-gated: legal in the design, denied
  * at runtime with `phase-not-enabled` until Phase 4 lifts the gate.

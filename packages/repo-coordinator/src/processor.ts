@@ -69,14 +69,14 @@ export const OUTBOX_KINDS = [
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
 
 /**
- * Artifact actor reference credited when no acting actor is supplied — rule
+ * Artifact actor reference credited when no acting actor is supplied - rule
  * crossings are performed by the rule engine itself (design §13).
  */
 export const SYSTEM_RULE_ENGINE_REF = "system:rule-engine";
 
 /**
  * Artifact actor reference recorded as `created_by` of `resolve_conflict`
- * work items — the apply pipeline itself creates them (design §12.6).
+ * work items - the apply pipeline itself creates them (design §12.6).
  */
 export const SYSTEM_APPLY_REF = "system:authorbot";
 
@@ -101,7 +101,7 @@ export interface BookConfigUpdatePayload {
    * dead-letters. Without it a failed settings commit strands the row in
    * `pending_git` forever: PATCH 409s on it, `projectBookConfig` defers to it,
    * and `resolveRuleEntries` keeps *enforcing* governance from a `book.yml`
-   * that Git does not contain — the "second configuration store" §3.6 forbids.
+   * that Git does not contain - the "second configuration store" §3.6 forbids.
    */
   previousConfig?: unknown;
   /** `source_commit` of {@link previousConfig}, restored alongside it. */
@@ -132,14 +132,14 @@ export interface AnnotationWithdrawPayload {
  * Payload for `decision.create` (Phase 3 contract §4) and `decision.update`
  * outbox rows.
  *
- * `decision.create` renders the decision YAML and — when the decision row
- * carries a `workItemId` — the linked work-item Markdown **in the same
+ * `decision.create` renders the decision YAML and - when the decision row
+ * carries a `workItemId` - the linked work-item Markdown **in the same
  * commit** (one crossing = one logical mutation = one commit). This covers
  * rule crossings, force-creates, and work-item cancellations (whose override
  * decision also references the work item, re-rendering it with its new
  * status).
  *
- * `decision.update` re-renders the decision YAML alone — the
+ * `decision.update` re-renders the decision YAML alone - the
  * `support_changed` mark/clear path (design §11.3); no new decision row
  * exists, so only the `result` line of the artifact changes.
  *
@@ -150,7 +150,7 @@ export interface AnnotationWithdrawPayload {
  *   the maintainer for force-creates. Rows that re-render a force-created
  *   work item must pass the *original* creator here so re-renders stay
  *   byte-identical outside the `status` line (`work_items` has no
- *   `created_by` column — flagged to the database owner).
+ *   `created_by` column - flagged to the database owner).
  */
 export interface DecisionCreatePayload {
   decisionId: string;
@@ -178,7 +178,7 @@ export interface WorkItemUpdatePayload {
 }
 
 /**
- * Payload for `submission.apply` outbox rows (Phase 4 contract §5) —
+ * Payload for `submission.apply` outbox rows (Phase 4 contract §5) -
  * written by the submit command in the same batch that transitions the
  * work item `leased → submitted → applying`.
  *
@@ -213,12 +213,12 @@ export interface SubmissionApplyContext {
 /**
  * Result of one apply attempt (design §12.6):
  *
- * - `applied` — the submission maps cleanly onto the current chapter (equal
- *   base revision, or a deterministic §10.2 steps 1–4 rebase with no
+ * - `applied` - the submission maps cleanly onto the current chapter (equal
+ *   base revision, or a deterministic §10.2 steps 1-4 rebase with no
  *   overlap). `patchedSource` is the full chapter file with the new body but
  *   the frontmatter still at the prior revision; the processor performs the
  *   revision bump + author credit and stages the atomic multi-file commit.
- * - `conflict` — ambiguous/overlapping/absent target: the newer chapter is
+ * - `conflict` - ambiguous/overlapping/absent target: the newer chapter is
  *   NEVER overwritten. The processor renders the both-texts
  *   `resolve_conflict` artifact, re-renders the original item as `conflict`,
  *   and inserts the conflict work-item row in the finalize batch.
@@ -239,7 +239,7 @@ export type SubmissionApplyOutcome =
       result: "conflict";
       /** Deterministic, human-readable reason (artifact + event). */
       reason: string;
-      /** Current text at the target — the conflict artifact's Original text. */
+      /** Current text at the target - the conflict artifact's Original text. */
       currentText: string;
       /** Chapter revision the conflict was detected against. */
       currentRevision: number;
@@ -256,7 +256,7 @@ export interface SubmissionApplier {
 export type ChapterWriteAction = "create" | "revise" | "publish" | "unpublish";
 
 /**
- * Payload for `chapter.write` outbox rows — the direct authoring path
+ * Payload for `chapter.write` outbox rows - the direct authoring path
  * (Phase 6 contract §3.5, design §15.2 `chapter-submissions`).
  *
  * The row carries the author's *intent*, never rendered bytes: the chapter
@@ -361,7 +361,7 @@ export interface CreateProcessorOptions {
    *
    * Rows of a paused kind are neither claimed nor failed: they stay `pending`
    * so the backlog resumes by itself when the pause lifts. The coordinator
-   * uses it to stop `submission.apply` while the project is `diverged` — a
+   * uses it to stop `submission.apply` while the project is `diverged` - a
    * submission accepted moments before a webhook reconciliation marked the
    * project diverged would otherwise still commit prose to a repository
    * Authorbot knows it mis-models, because the divergence guard sat only at
@@ -425,7 +425,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     }
 
     // Claim and process pending rows in insertion order. A paused kind is
-    // skipped rather than claimed — and the loop CONTINUES past it, so a
+    // skipped rather than claimed - and the loop CONTINUES past it, so a
     // paused prose row does not stall the annotation and work-item rows
     // queued behind it.
     const skipped = new Set<string>();
@@ -452,7 +452,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         // A deferral hands the row back to a LATER drain, so this one must
         // stop considering it. `deferOperation` returns it to `pending`, and
         // without this the very next `nextPending` call hands back the same
-        // row — an unbounded spin at 100% CPU, because deferral deliberately
+        // row - an unbounded spin at 100% CPU, because deferral deliberately
         // does not spend the attempt budget that bounds every other retry.
         // In production that would peg the coordinator's Durable Object
         // against a GitHub outage instead of yielding until its next alarm.
@@ -525,7 +525,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           // A SHA left on the row while the operation is still `committing` is
           // an ATTEMPT, not a landing: `committed`/`verified` are the states
           // that mean the ref moved. Handing it back lets the writer settle
-          // "did my commit land?" by ancestry — an answer that holds however
+          // "did my commit land?" by ancestry - an answer that holds however
           // many commits a third party pushed between the crash and this
           // replay, unlike the bounded trailer scan.
           const attemptedCommitSha = op.commitSha ?? undefined;
@@ -556,7 +556,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
                 op = await persistTransition(op, "conflict", t.next.attempts, error.message);
                 continue; // the `conflict` case decides retry vs exhaustion
               }
-              // Anything else retryable is GitHub being unavailable — a 5xx or
+              // Anything else retryable is GitHub being unavailable - a 5xx or
               // a rate limit. Retrying inside this drain spends all three
               // attempts within milliseconds against a service that is simply
               // down, so an outage lasting longer than one drain pass used to
@@ -568,7 +568,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
               // back to `queued` WITHOUT consuming the commit budget and the
               // outbox row returns to `pending`, leaving the next drain (the
               // coordinator alarm) to try again. Deferral is deliberately
-              // unbounded — the write is durable and should land when GitHub
+              // unbounded - the write is durable and should land when GitHub
               // comes back, and a persistent backlog is visible through queue
               // depth and the operation's recorded error.
               return deferOperation(row, op, error.message);
@@ -600,13 +600,13 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
 
   /**
    * Mark the operation `failed` (if a legal transition remains) and the
-   * outbox row failed — releasing whatever the row had left in flight.
+   * outbox row failed - releasing whatever the row had left in flight.
    *
    * A `submission.apply` row holds a work item hostage: the submit command
    * moved it to `applying` AND released its lease in one batch, so a
    * terminal failure here previously left the item unclaimable (not
    * `ready`), unreleasable (no active lease), un-resubmittable (not
-   * `leased`), and uncancellable (`applying` has no cancel edge) — dead,
+   * `leased`), and uncancellable (`applying` has no cancel edge) - dead,
    * with no event telling any client. The failure paths are ordinary
    * (a writer without `readFile`, an actor with no external identity,
    * retries exhausted on contention), so the row must hand the item back.
@@ -629,7 +629,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   ): Promise<DrainRowOutcome> {
     // Deferral is generous but not infinite. Past the deadline the outage has
     // stopped being transient, and a write parked in `queued` forever tells
-    // nobody anything — failing it makes the loss visible and leaves the
+    // nobody anything - failing it makes the loss visible and leaves the
     // operator a requeue once GitHub is healthy again.
     const age = Date.parse(now()) - Date.parse(op.createdAt);
     // `>=`, not `>`: with a frozen clock (tests) or a zero deadline, an
@@ -679,15 +679,15 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
    * Statements returning a failed `book_config.update` row's `book_configs`
    * entry to the last config that actually reached Git.
    *
-   * Every other pending-state owner has a release path — `submission.apply`
+   * Every other pending-state owner has a release path - `submission.apply`
    * via {@link releaseFailedApplyStatements}, pending annotations and replies
-   * via the rebuild sweep — and `book_config` was the one that did not. A
+   * via the rebuild sweep - and `book_config` was the one that did not. A
    * settings commit fails for ordinary reasons (an actor with no external
    * identity, a revoked token, contention), and the row it left behind was
    * terminal: `projectBookConfig` defers to `pending_git` so Git could never
    * re-assert itself, the settings PATCH route 409s on the same status so the
-   * maintainer could not correct it, and `resolveRuleEntries` kept serving —
-   * and *enforcing* — governance rules from a document no commit contains.
+   * maintainer could not correct it, and `resolveRuleEntries` kept serving -
+   * and *enforcing* - governance rules from a document no commit contains.
    *
    * Guarded on `git_operation_id` so a later PATCH that already replaced this
    * row is never reverted by its predecessor's failure.
@@ -718,7 +718,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     // honest state: the projection re-reads `book.yml` from Git on its next
     // pass, settings reads report the book as unprojected rather than serving
     // a document no commit contains, and governance falls back to the
-    // deployment's bootstrap rules — the *stricter* direction, so a failed
+    // deployment's bootstrap rules - the *stricter* direction, so a failed
     // commit can never leave a weakened rule in force.
     if (payload.previousConfig === undefined || payload.previousConfig === null) {
       return [repos.bookConfigs.deletePendingStatement(row.projectId, row.gitOperationId)];
@@ -828,7 +828,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     /**
      * Head SHA this plan's contents were computed against. When set, the
      * commit is refused with a retryable `non-fast-forward` if the branch has
-     * moved — the guard that stops a replayed plan from clobbering newer
+     * moved - the guard that stops a replayed plan from clobbering newer
      * work. Takes precedence over the operation row's `expected_head`.
      */
     expectedHead?: string;
@@ -918,7 +918,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
      * payload rather than re-read from `book_configs` at commit time: the row
      * describes one specific revision of `book.yml`, and re-reading would let
      * a later PATCH's config be committed under an earlier operation's
-     * message and trailers — two edits collapsing into one commit and losing
+     * message and trailers - two edits collapsing into one commit and losing
      * the audit trail the contract requires each of them to leave.
      */
     if (kind === "book_config.update") {
@@ -929,7 +929,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       // the `book_configs` projection, which can be arbitrarily stale (frozen
       // while the project is diverged, or kept on an `invalid` projection
       // outcome), so rendering the whole file from it silently reverted direct
-      // Git edits — including `content.raw_html`, which §3.6 declares belongs
+      // Git edits - including `content.raw_html`, which §3.6 declares belongs
       // in a reviewed commit. It also preserves the author's comments.
       //
       // The head is resolved and pinned the same way `chapter.write` pins
@@ -937,7 +937,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       // exact bytes, so a commit landing between this read and the ref update
       // must fail the precondition and recompute rather than replay onto a
       // head it never saw. Pinning the *projection's* `source_commit` instead
-      // would be wrong — it is arbitrarily old, and every unrelated commit to
+      // would be wrong - it is arbitrarily old, and every unrelated commit to
       // the branch would dead-letter the settings write.
       const resolvedHead = (await writer.resolveHead?.(branch)) ?? null;
       const head = await mustReadFile(branch, BOOK_CONFIG_PATH);
@@ -1004,9 +1004,9 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
    *
    * - applied: chapter file (revision bumped, author credited), work item
    *   `completed` + Completion metadata, annotation `accepted`, attribution
-   *   append — ONE commit with the §14.3 trailer set; or
+   *   append - ONE commit with the §14.3 trailer set; or
    * - conflict: original work item re-rendered `conflict` + the both-texts
-   *   `resolve_conflict` artifact — the chapter is never touched.
+   *   `resolve_conflict` artifact - the chapter is never touched.
    */
   async function buildSubmissionApplyPlan(
     row: OutboxRecord,
@@ -1025,7 +1025,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     let resolved = readResolved(row);
     if (resolved === null || resolved.attempt !== op.attempts) {
       // New attempt (or first): resolve against the current head. A reused
-      // outcome (same attempt) means a crash between persist and finalize —
+      // outcome (same attempt) means a crash between persist and finalize -
       // the commit, if it landed, matched exactly this outcome.
       if (applier === undefined) {
         throw new Error(
@@ -1081,14 +1081,14 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         // Commit ONLY at the head this outcome was computed against. Without
         // the pin, a crash-recovery replay (same attempt, so the outcome is
         // reused rather than re-resolved) committed a chapter built from a
-        // stale head verbatim over whatever the branch had advanced to —
+        // stale head verbatim over whatever the branch had advanced to -
         // byte-clobbering a newer revision and stamping a revision number
         // behind it, which then poisons every later base-hash comparison.
         // With it, the writer refuses with a retryable `non-fast-forward`,
         // the operation requeues, and the next attempt re-resolves against
         // the real head. A commit that already landed is still returned by
         // the `Authorbot-Operation` trailer dedup, which runs before this
-        // check — so the ordinary crash-after-commit replay still finalizes.
+        // check - so the ordinary crash-after-commit replay still finalizes.
         ...(resolved.resolvedHead === undefined ? {} : { expectedHead: resolved.resolvedHead }),
         files: [
           { path: outcome.chapterPath, content: outcome.content },
@@ -1125,10 +1125,10 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
    * CURRENT branch head; the outcome is persisted onto the payload before the
    * commit and pinned to the head it was computed against, so a crash-recovery
    * replay finalizes exactly what was committed and never lays a stale
-   * chapter over a newer one — the same discipline `submission.apply` uses.
+   * chapter over a newer one - the same discipline `submission.apply` uses.
    *
    * Two files, one commit: the chapter itself and its attribution append
-   * (design §14.2 — "an accepted edit updates all related artifacts in one
+   * (design §14.2 - "an accepted edit updates all related artifacts in one
    * commit"). Nothing else: a direct authoring write has no annotation, no
    * work item, and no decision behind it.
    */
@@ -1685,7 +1685,7 @@ function parseDecisionPayload(row: OutboxRecord): DecisionCreatePayload {
  * The persisted apply outcome (`payload.resolved` of a `submission.apply`
  * outbox row): everything needed to rebuild the exact commit plan and the
  * finalize batch without re-invoking the applier. `attempt` binds the
- * outcome to one git-operation attempt — a retry (new attempt) re-resolves,
+ * outcome to one git-operation attempt - a retry (new attempt) re-resolves,
  * a crash-recovery replay (same attempt) reuses.
  */
 interface ResolvedApply {

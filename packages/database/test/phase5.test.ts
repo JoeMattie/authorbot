@@ -120,7 +120,7 @@ describe("migration 0005 project columns", () => {
     expect(row?.status).toBe("active");
     expect(row?.divergedAt).toBeNull();
 
-    // Second clear is a no-op — two maintainers racing produce one clearing.
+    // Second clear is a no-op - two maintainers racing produce one clearing.
     const again = await repos.projects
       .clearDivergenceStatement({ projectId: project.id, reason: { state: "cleared" }, at: NOW })
       .run();

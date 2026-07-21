@@ -1,5 +1,5 @@
 /**
- * `<authorbot-collab>` — the collaboration island root (Phase 2b contract
+ * `<authorbot-collab>` - the collaboration island root (Phase 2b contract
  * §1-§2, §4). Framework-free custom element: reads its configuration from
  * data attributes stamped at build time, talks to the Phase 2 API with
  * credentialed fetch, and renders the annotation gutter (desktop) / bottom
@@ -64,7 +64,7 @@ interface FocusRestore {
 
 const DESKTOP_QUERY = "(min-width: 960px)";
 const CARD_GAP = 12;
-const REFRESH_HINT = "Still syncing — refresh the page to see the final state.";
+const REFRESH_HINT = "Still syncing - refresh the page to see the final state.";
 const STALE_PAGE_HINT =
   "This chapter has changed since this page was published; " +
   "annotating is disabled until the site is republished.";
@@ -475,7 +475,7 @@ export class AuthorbotCollab extends HTMLElement {
     // A fresh crossing changes the annotation's server-side status; reconcile
     // authoritative state so the card reflects it even if the feed is down.
     if (!hadDecision && annotation.decision != null) {
-      this.announce("Threshold reached — queued as a work item.");
+      this.announce("Threshold reached - queued as a work item.");
       this.scheduleRefetch();
     }
   }
@@ -485,7 +485,7 @@ export class AuthorbotCollab extends HTMLElement {
   /**
    * Run a force-promote / reject. Resolves to the message the control should
    * show in its alert node, or `null` on success. A 403/409 problem detail is
-   * surfaced VERBATIM — "a work item already exists for this suggestion" says
+   * surfaced VERBATIM - "a work item already exists for this suggestion" says
    * exactly what happened, and inventing copy for it would be a lie.
    */
   private async runOverride(
@@ -508,7 +508,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.overrideDrafts.delete(annotationId);
     this.announce(
       action === "promote"
-        ? "Promoted to work — a work item was created."
+        ? "Promoted to work - a work item was created."
         : "Suggestion rejected.",
     );
     this.scheduleRefetch();
@@ -550,7 +550,7 @@ export class AuthorbotCollab extends HTMLElement {
       typeof payload["annotationId"] === "string" ? payload["annotationId"] : null;
     switch (event.type) {
       case "vote_aggregate": {
-        // Live tally update in place — never a re-render, so a voter's keyboard
+        // Live tally update in place - never a re-render, so a voter's keyboard
         // focus on the segmented control is preserved (contract §6).
         if (annotationId === null) {
           break;
@@ -561,7 +561,7 @@ export class AuthorbotCollab extends HTMLElement {
           annotation.votes = votes as NonNullable<Annotation["votes"]>;
           this.voteControls.get(annotationId)?.update(annotation);
           // The override panel shows the tally being overridden, so it tracks
-          // the same in-place update — never a re-render that would steal
+          // the same in-place update - never a re-render that would steal
           // focus from a half-typed reason.
           this.overrideControls.get(annotationId)?.update(annotation);
         }
@@ -603,7 +603,7 @@ export class AuthorbotCollab extends HTMLElement {
       return "Your role is read-only here.";
     }
     if (status === 0) {
-      return "Network error — is the API reachable?";
+      return "Network error - is the API reachable?";
     }
     return message;
   }
@@ -698,7 +698,7 @@ export class AuthorbotCollab extends HTMLElement {
       }
       // Only `failed` is terminal: `conflict` is the domain's bounded-retry
       // state (conflict → queued, git-operation-state.ts) and the processor
-      // may still commit — treat it like queued/preparing/committing (§2.5
+      // may still commit - treat it like queued/preparing/committing (§2.5
       // status honesty: keep showing "syncing" until the operation settles).
       if (operation !== null && operation.state === "failed") {
         settle("failed", operation.error ?? "the change could not be committed");

@@ -168,7 +168,7 @@ const RUNS = 120;
  * Property tests loop `RUNS` generated documents through parse → patch →
  * re-parse, so they are legitimately far slower than a unit test. Vitest's 5s
  * default is sized for the latter, and these were passing locally at ~4.9s
- * while timing out on a slower CI runner — green on the machine that wrote
+ * while timing out on a slower CI runner - green on the machine that wrote
  * them, red on the machine that gates the release.
  *
  * The generous ceiling keeps that from recurring without weakening the test:
@@ -203,7 +203,7 @@ describe("property: range replacement", () => {
       }
 
       // Generated selectors must resolve exactly or be honestly ambiguous
-      // (repeated phrases with identical context) — never missing.
+      // (repeated phrases with identical context) - never missing.
       const resolvedKind = resolveTarget(source, target).kind;
       expect(resolvedKind === "exact" || resolvedKind === "ambiguous", `seed ${seed}`).toBe(true);
 
@@ -213,7 +213,7 @@ describe("property: range replacement", () => {
         result = applyRangeReplacement(source, target, replacement);
       } catch (error) {
         if (error instanceof PatchError) {
-          // Conservative refusals only — never a wrong edit.
+          // Conservative refusals only - never a wrong edit.
           expect(
             ["not_contiguous", "target_ambiguous", "validation_failed"],
             `seed ${seed}: unexpected code ${error.code}`,

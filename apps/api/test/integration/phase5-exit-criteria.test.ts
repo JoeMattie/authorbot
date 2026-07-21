@@ -1,12 +1,12 @@
 /**
- * Phase 5 contract §8 — the exit criteria, end to end across package
+ * Phase 5 contract §8 - the exit criteria, end to end across package
  * boundaries.
  *
  * Every other Phase 5 suite tests one package: `@authorbot/git-github` proves
  * the writer and reader against the fake, `coordinator.test.ts` proves the
  * coordinator against a stub app, `reconcile.test.ts` and
  * `publications.test.ts` prove their handlers against a fake reader. None of
- * them closes the loop the contract's exit criteria actually name — an HTTP
+ * them closes the loop the contract's exit criteria actually name - an HTTP
  * request arriving at the real app and coming back out as a git commit, then
  * that commit being read back through the real reader and served by the real
  * API.
@@ -63,7 +63,7 @@ describe("Phase 5 exit criterion 1: an annotation becomes a real commit, and Git
       };
 
       // `mirrorMode: "durable"` means the request itself asked the
-      // coordinator to drain — no test-only drain call here.
+      // coordinator to drain - no test-only drain call here.
       expect(app.mutations).toContain(app.projectId);
 
       // ---- the commit is real ------------------------------------------
@@ -298,7 +298,7 @@ describe("Phase 5 exit criterion 2: a Phase 4 submission completes through the G
         app.fake.fileAtHead(`.authorbot/annotations/${annotationId}/annotation.md`),
       ).toContain("status: accepted");
 
-      // 4. attribution — the human credit §14.3 keeps out of the git identity
+      // 4. attribution - the human credit §14.3 keeps out of the git identity
       const attribution = app.fake.fileAtHead(
         `.authorbot/attribution/${CHAPTER_1.id}.yml`,
       ) as string;
@@ -313,7 +313,7 @@ describe("Phase 5 exit criterion 2: a Phase 4 submission completes through the G
       expect(commit.message).toContain("Authorbot-Actor: github:p5-harriet");
       expect(commit.message).toContain(`Authorbot-Base-Revision: ${CHAPTER_1.revision}`);
 
-      // §14.3: the git identity is the *service*, never the human — the human
+      // §14.3: the git identity is the *service*, never the human - the human
       // is credited in the attribution record asserted above.
       expect(commit.author.name).toBe(AUTHORBOT_GIT_NAME);
       expect(commit.author.email).toBe(AUTHORBOT_GIT_EMAIL);
@@ -367,7 +367,7 @@ describe("Phase 5 exit criterion 3: moved-head retry succeeds within bounds; exh
         operationId: string;
       };
 
-      // The fault really fired — otherwise this test would pass vacuously as
+      // The fault really fired - otherwise this test would pass vacuously as
       // an ordinary happy-path commit.
       app.fake.assertAllFaultsFired();
 
@@ -377,7 +377,7 @@ describe("Phase 5 exit criterion 3: moved-head retry succeeds within bounds; exh
         expect(update.force).toBe(false);
       }
 
-      // Both writers' content is at HEAD — the retry rebased onto the
+      // Both writers' content is at HEAD - the retry rebased onto the
       // competitor's commit rather than replacing it.
       expect(app.fake.fileAtHead(COMPETITOR_PATH)).toBe(COMPETITOR_CONTENT);
       expect(
@@ -408,7 +408,7 @@ describe("Phase 5 exit criterion 3: moved-head retry succeeds within bounds; exh
         `/v1/projects/${app.projectId}/chapters/${CHAPTER_1.id}/annotations`,
         jsonRequest("POST", rangeSuggestionPayload(), { Cookie: cookie }),
       );
-      // The write is still *accepted* — the 202 is about the command being
+      // The write is still *accepted* - the 202 is about the command being
       // durably recorded, not about the commit having landed.
       expect(created.status).toBe(202);
       const { annotationId, operationId } = (await created.json()) as {
@@ -437,7 +437,7 @@ describe("Phase 5 exit criterion 3: moved-head retry succeeds within bounds; exh
         expect(update.force).toBe(false);
       }
 
-      // The book is otherwise untouched — a failed write is inert, not
+      // The book is otherwise untouched - a failed write is inert, not
       // destructive.
       expect(app.fake.state.readFile(head, "book.yml")).not.toBeNull();
       expect(app.fake.state.readFile(head, CHAPTER_1.path)).toContain("revision: 3");
@@ -478,7 +478,7 @@ describe("Phase 5 exit criterion 4: coordinator serialization holds; duplicate d
       }
       expect(new Set(ids).size).toBe(logins.length);
 
-      // Anything still queued is drained now — the assertion below is about
+      // Anything still queued is drained now - the assertion below is about
       // ordering and loss, not about whether an alarm had fired yet.
       await app.coordinator.drainOutbox();
 
@@ -592,7 +592,7 @@ describe("Phase 5 exit criterion 4: coordinator serialization holds; duplicate d
         app.fake.fileAtHead(`.authorbot/annotations/${annotationId}/annotation.md`),
       ).not.toBeNull();
 
-      // Drain again — including concurrently with itself, which is what an
+      // Drain again - including concurrently with itself, which is what an
       // alarm firing next to a mutation actually looks like.
       await Promise.all([
         app.coordinator.drainOutbox(),
@@ -620,7 +620,7 @@ describe("Phase 5 exit criterion 5: webhook reconciliation projects an external 
       expect(((await before.json()) as { revision: number }).revision).toBe(CHAPTER_3.revision);
 
       // Somebody edits the chapter in GitHub directly and bumps its own
-      // frontmatter revision — the §6 "external edit" case.
+      // frontmatter revision - the §6 "external edit" case.
       const source = app.fake.fileAtHead(CHAPTER_3.path) as string;
       const edited = source
         .replace("revision: 1", "revision: 2")
@@ -655,7 +655,7 @@ describe("Phase 5 exit criterion 5: webhook reconciliation projects an external 
       expect(project?.projectionStale).toBe(false);
 
       // Reconciling an external edit must not itself write to the
-      // repository — the push is the source of truth here.
+      // repository - the push is the source of truth here.
       expect(app.fake.state.getRef(BRANCH)).toBe(externalCommit);
     } finally {
       app.close();
@@ -732,7 +732,7 @@ describe("Phase 5 exit criterion 5: webhook reconciliation projects an external 
           { Cookie: editor },
         ),
       );
-      // 409 — a valid lease and a valid base, refused solely because the
+      // 409 - a valid lease and a valid base, refused solely because the
       // repository diverged.
       expect(submitted.status).toBe(409);
       const problem = (await submitted.json()) as { type: string; title: string };
@@ -763,7 +763,7 @@ describe("Phase 5 exit criterion 6: publication tracking distinguishes integrate
       // GitHub sends a `push` for Authorbot's own commit too, and that is
       // what advances the *integrated* commit: "integrated" means Authorbot
       // has projected it, not merely that a write returned success
-      // (contract §6 — never mark a revision published because a commit
+      // (contract §6 - never mark a revision published because a commit
       // succeeded).
       expect((await deliverPush(app, { deliveryId: "p5-pub-push-1" })).status).toBe(200);
 

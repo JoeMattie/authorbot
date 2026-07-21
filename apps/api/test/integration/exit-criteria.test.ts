@@ -1,10 +1,10 @@
 /**
  * Phase 2 exit criterion (contract §7.1, design §23): a range suggestion
- * survives refresh, repository rebuild, and service restart — proved via the
+ * survives refresh, repository rebuild, and service restart - proved via the
  * API against a real git clone of examples/book-repo, better-sqlite3, and
  * the repo-coordinator LocalGitAdapter wired inline.
  *
- * Also covers §7.5 (DB stores only hashes — no token/session plaintext) and
+ * Also covers §7.5 (DB stores only hashes - no token/session plaintext) and
  * the MIRROR_MODE=queue behavior (outbox recorded, drained later).
  */
 import { readFile } from "node:fs/promises";
@@ -182,7 +182,7 @@ describe("reply and withdraw round-trip through git", () => {
     // Reply.
     const replyResponse = await app.app.request(
       `/v1/projects/${app.projectId}/annotations/${created.annotationId}/replies`,
-      jsonRequest("POST", { body: "Agreed — the second clause drags." }, { Cookie: cookie }),
+      jsonRequest("POST", { body: "Agreed - the second clause drags." }, { Cookie: cookie }),
     );
     expect(replyResponse.status).toBe(202);
     const reply = (await replyResponse.json()) as { replyId: string; operationId: string };
@@ -197,9 +197,9 @@ describe("reply and withdraw round-trip through git", () => {
     const replyArtifact = await readFile(replyPath, "utf8");
     expect(replyArtifact).toContain("schema: authorbot.reply/v1");
     expect(replyArtifact).toContain(`annotation_id: ${created.annotationId}`);
-    expect(replyArtifact).toContain("Agreed — the second clause drags.");
+    expect(replyArtifact).toContain("Agreed - the second clause drags.");
 
-    // Withdraw by a maintainer (author-or-maintainer rule) — the artifact is
+    // Withdraw by a maintainer (author-or-maintainer rule) - the artifact is
     // re-rendered with status: withdrawn and credited to the withdrawer.
     const maintainerCookie = await devLogin(app, "marta", "maintainer");
     const withdrawResponse = await app.app.request(

@@ -80,7 +80,7 @@ const API_BASE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._~-]*$/;
  * both, collaboration is off and the build stays byte-comparable with a pre-2b
  * site.
  *
- * **Only a root-relative path is accepted** — `/` for an API at the origin
+ * **Only a root-relative path is accepted** - `/` for an API at the origin
  * root, or a base path such as `/my-book` for a book served under a subpath
  * (ADR-0019 §5-§6). An absolute http(s) URL is rejected at build time: the API
  * is same-origin with the site by design, so an absolute URL is either
@@ -508,7 +508,7 @@ function buildTimeline(
  * Load a book repository into the JSON-serializable {@link SiteModel}.
  * Chapters with `status: published` are included by default; `includeDrafts`
  * adds `draft`/`proposed`; `archived` is never included (Phase 1 contract
- * section 2). Records that fail their schema are skipped with a warning —
+ * section 2). Records that fail their schema are skipped with a warning -
  * the CLI's validate-gate makes that unreachable except under `--force`.
  */
 export async function loadSiteModel(options: LoadSiteModelOptions): Promise<LoadedSite> {

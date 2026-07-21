@@ -1,5 +1,5 @@
 /**
- * Phase 4 routes (Phase 4 contract §2–§4): lease claim/renew/release with
+ * Phase 4 routes (Phase 4 contract §2-§4): lease claim/renew/release with
  * lazy expiry, the §15.3 task bundle, and the submission command feeding the
  * §5 apply pipeline (`submission.apply` outbox rows drained by the
  * repo-coordinator processor with the injected `submission-applier.ts`).
@@ -16,11 +16,11 @@
  *
  * Documented ambiguity resolutions:
  * - The task bundle's `document` is the chapter AT CLAIM TIME (current
- *   projected revision) — historical revisions are not reconstructable from
+ *   projected revision) - historical revisions are not reconstructable from
  *   the projection; the bundle base becomes the submission's base and the §5
  *   rebase/conflict policy covers later movement. Its `{ baseRevision,
  *   baseContentHash }` pair is recorded in the claim's audit event (keyed by
- *   the lease id, written atomically with the lease) — that is "the lease's
+ *   the lease id, written atomically with the lease) - that is "the lease's
  *   bundle" the §4 verification order checks against.
  * - Claim/renew/release/expiry write NO Git artifacts: leases are
  *   operational-only (design §13) and a `leased` status in Git could not
@@ -160,7 +160,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
   /**
    * Work-item status compare-and-swap: sets status to NULL (NOT NULL
-   * violation → the whole batch aborts) when the row is not in `from` — the
+   * violation → the whole batch aborts) when the row is not in `from` - the
    * same cross-isolate backstop pattern as `annotations.casStatusStatement`.
    */
   const workItemCas = (id: string, from: string, to: string, updatedAt: string): SqlStatement =>
@@ -187,7 +187,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
   /**
    * Lazy expiry of one lease (contract §2 "enforced lazily on every
    * lease-relevant command"): single-winner conditional end, item back to
-   * `ready`, `lease_expired` emitted — only when this call actually won, and
+   * `ready`, `lease_expired` emitted - only when this call actually won, and
    * all three in ONE atomic batch (see `expireLeaseStatements`). Splitting
    * the revocation from the work-item reset used to leave a crash window in
    * which the item was stranded `leased` with an empty lease slot forever.
@@ -222,7 +222,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
     /**
      * Sentinel for "a rival command won a compare-and-swap under us, but the
-     * item is still claimable" — the caller re-runs the whole attempt once
+     * item is still claimable" - the caller re-runs the whole attempt once
      * against fresh state (see the claim route's retry below).
      */
     const RETRY = Symbol("retry-claim");
@@ -291,7 +291,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       const submissionType = requiredSubmissionType(workItem.type);
       // Contract §3: `target` is absent for chapter scope. `resolve_conflict`
       // items inherit the originating range selector on their row, but they
-      // are submitted as a whole chapter — advertising a span would tell the
+      // are submitted as a whole chapter - advertising a span would tell the
       // claimant to edit one sentence of a document they must merge.
       const target = submissionType === "chapter_replacement" ? null : bundleTarget(workItem);
       const bundle = {
@@ -341,14 +341,14 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       statements.push(
         // Order matters: the lease INSERT runs BEFORE the work-item CAS so a
         // cross-isolate claim race aborts on the partial unique index
-        // `idx_leases_active_work_item` — a UNIQUE violation the catch below
+        // `idx_leases_active_work_item` - a UNIQUE violation the catch below
         // maps to the contract's 409 `lease-held`. With the CAS first the
         // batch aborted on a NOT NULL violation instead, which carries no
         // information about who won and used to surface as a 500.
         repos.leases.claimStatement(lease),
         workItemCas(workItem.id, claimable.priorLeaseExpired ? "leased" : "ready", "leased", timestamp),
         // The claim audit event doubles as the durable record of the lease's
-        // task-bundle base (module docs) — target_id is the lease id.
+        // task-bundle base (module docs) - target_id is the lease id.
         auditStatement({
           projectId: guard.project.id,
           actorId: a.actor.id,
@@ -377,7 +377,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
           throw error;
         }
         // ANY constraint abort here means a rival command committed between
-        // our read and our write — the unique index on the lease INSERT, or
+        // our read and our write - the unique index on the lease INSERT, or
         // the NOT NULL abort of the work-item CAS. Both are ordinary
         // contention, never a 500: contract §2 requires the loser of two
         // simultaneous claims to see 409 `lease-held`.
@@ -391,7 +391,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
               expiresAt: holderLease.expiresAt,
             });
           }
-          // The rival's lease is already expired — the item is claimable
+          // The rival's lease is already expired - the item is claimable
           // again, so re-run rather than reporting a conflict that is not one.
           return RETRY;
         }
@@ -495,7 +495,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
           // isolate in between would otherwise leave the guarded UPDATE
           // matching 0 rows while this handler still returned 200 with a new
           // expiry, bumped `renewalCount`, an audit row, a `lease_renewed`
-          // event, and a stored idempotent replay — a lease the server will
+          // event, and a stored idempotent replay - a lease the server will
           // reject, with a countdown telling the holder otherwise. The abort
           // makes the whole batch atomic with the liveness check.
           repos.leases.renewCasStatement(lease.id, renewable.expiresAt, timestamp),
@@ -645,7 +645,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
       // Phase 5 §6 / design §14.5: a diverged repository blocks PROSE writes.
       // Checked inside the serializer and re-read from the row, not from the
-      // cached project the guard returned — divergence is set by a webhook
+      // cached project the guard returned - divergence is set by a webhook
       // reconciliation that can land between this request's auth check and
       // its command, and a submission accepted against a projection known to
       // disagree with the repository is precisely the clobber this refuses.
@@ -724,7 +724,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       // patch engine refuses newlines outright, and without this check a
       // multi-line payload (a human pressing Enter in the /work/ textarea, or
       // any API client) was accepted with 202 and only refused at apply time
-      // — where the refusal was laundered into a "the chapter changed
+      // - where the refusal was laundered into a "the chapter changed
       // underneath it" conflict, burning the work item and committing a
       // spurious resolve_conflict artifact to Git on an UNMOVED base.
       if (command.type === "range_replacement" && /[\r\n]/.test(command.content)) {
@@ -742,7 +742,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         return problem(c, "unsafe-content", { findings });
       }
 
-      // Retention (contract §6): submission rows — including `content` — are
+      // Retention (contract §6): submission rows - including `content` - are
       // DB-only and retained until completion/conflict resolution plus 7
       // days. Documented policy; no purge job exists yet in Phase 4.
       const timestamp = now();
@@ -794,13 +794,13 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         // leased → submitted → applying in the command (contract §4); the two
         // §9.5 edges collapse to one stored status inside this atomic batch.
         workItemCas(workItem.id, "leased", "applying", timestamp),
-        // The accepted submission consumes the lease (module docs) — as a
+        // The accepted submission consumes the lease (module docs) - as a
         // NULL-abort CAS requiring the lease to still be LIVE at write time.
         // The work-item CAS alone is not enough: it proves only that the item
         // is `leased`, not that THIS lease holds it. Between the liveness
         // check above and this batch another isolate can expire this lease
         // and hand the item to a new claimant, leaving the item `leased`
-        // again — the CAS would pass, this release would silently change 0
+        // again - the CAS would pass, this release would silently change 0
         // rows, and an expired lease's edit would be applied while the fresh
         // holder's lease stayed active against a completed item.
         repos.leases.consumeForSubmissionStatement(lease.id, timestamp, timestamp),
@@ -845,7 +845,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
   /**
    * The `{ baseRevision, baseContentHash }` recorded by the claim's audit
-   * event (target_id = lease id) — "the lease's bundle" of contract §4.
+   * event (target_id = lease id) - "the lease's bundle" of contract §4.
    */
   const claimBundleBase = async (
     leaseId: string,
@@ -877,7 +877,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
 /**
  * Phase 0 prose safety on submission content (contract §4): no raw HTML, no
- * forbidden URL schemes — and no authorbot marker-like comments, which the
+ * forbidden URL schemes - and no authorbot marker-like comments, which the
  * patch engine rejects rather than escapes (clients strip markers from
  * bundle-derived bodies with `stripBlockMarkers` before submitting).
  */
@@ -888,7 +888,7 @@ export function contentSafetyFindings(content: string): string[] {
   }
   // `parseProseMarkdown`, NOT `parseChapterMarkdown`: submission content is
   // chapter BODY text. A frontmatter-aware parse hid every payload that began
-  // with a `---` fence — raw `<script>` and `javascript:` URLs alike — inside
+  // with a `---` fence - raw `<script>` and `javascript:` URLs alike - inside
   // an unvisited `yaml` node, so the request was accepted with 202 instead of
   // the contract-mandated 422 and the payload was persisted verbatim and
   // committed into `.authorbot/work-items/<id>.md` unescaped.
@@ -903,7 +903,7 @@ export function contentSafetyFindings(content: string): string[] {
 }
 
 /**
- * The §15.3 bundle's acceptance criteria for a work-item type — the SAME
+ * The §15.3 bundle's acceptance criteria for a work-item type - the SAME
  * criteria the Git artifact for that type carries.
  *
  * `resolve_conflict` items are rendered with the merge criteria ("never

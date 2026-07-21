@@ -6,7 +6,7 @@ This document describes what Authorbot does when things go wrong, how to tell
 which thing is going wrong, and what to do about it. Every procedure here was
 checked against the code; where a capability does not exist, it says so
 plainly instead of describing one that would be nice to have. Those gaps are
-collected in [§9 Known gaps](#9-known-gaps) — read that section before you
+collected in [§9 Known gaps](#9-known-gaps) - read that section before you
 plan any work that depends on a tool existing.
 
 **Conventions.** `{project}` is the project id (a UUID) or its slug, depending
@@ -73,7 +73,7 @@ Every one of these is covered by an automated test in
 `apps/api/test/resilience-failure-injection.test.ts`. If you change behaviour
 here, that suite is where the contract lives.
 
-### 2.1 Coordinator backlog — "my comment never showed up in GitHub"
+### 2.1 Coordinator backlog - "my comment never showed up in GitHub"
 
 **Symptom.** Writes still return `202`. Reads work. Nothing new appears in the
 repository. `GET /v1/projects/{project}/operations/{operationId}` reports
@@ -105,7 +105,7 @@ not reached Git yet is refused:
 { "code": "state-conflict", "detail": "cannot vote on an annotation with status \"pending_git\"" }
 ```
 
-That is a clear, typed refusal rather than a dropped ballot — but it means a
+That is a clear, typed refusal rather than a dropped ballot - but it means a
 stuck coordinator silently freezes the suggestion → vote → work-item pipeline
 for everything queued behind it. Authors will report "my suggestion can't be
 approved" long before anyone notices the outbox. Check the outbox first when
@@ -116,7 +116,7 @@ permanently blocked.
 
 1. Confirm `gitIntegration` is `configured` in call 1. If it is
    `incomplete`, exactly one or two of `GITHUB_APP_ID`,
-   `GITHUB_APP_PRIVATE_KEY`, `GITHUB_INSTALLATION_ID` are set — a
+   `GITHUB_APP_PRIVATE_KEY`, `GITHUB_INSTALLATION_ID` are set - a
    half-configured app deliberately never half-works. If `invalid`, see
    [§5.3](#53-github-app-private-key).
 2. Confirm `MIRROR_MODE=durable` and that the `COORDINATOR` Durable Object
@@ -128,7 +128,7 @@ permanently blocked.
 4. The backlog drains itself once the coordinator runs. Any mutation, any
    webhook push, or the next alarm tick will do it.
 
-### 2.2 GitHub rate limiting — `403` with `retry-after`
+### 2.2 GitHub rate limiting - `403` with `retry-after`
 
 **Symptom.** Reads fine, writes accepted, operations stall then fail. The
 `git_operations` row shows a non-null `error`, `state` moves `queued →
@@ -143,7 +143,7 @@ SELECT id, state, attempts, error, updated_at
 **What it means.** GitHub answered `403` with `x-ratelimit-reset` and possibly
 `retry-after`. A rate limit is classified `retryable`, so a burst that clears
 inside the budget is absorbed and the commit succeeds. A `401`, or a `403`
-that is *not* a rate limit, is classified non-retryable and fails immediately —
+that is *not* a rate limit, is classified non-retryable and fails immediately -
 that one usually means the App lost `contents:write` or was uninstalled.
 
 **The retry budget is spent inside a single drain, not across drains.** The
@@ -152,7 +152,7 @@ persistently failing GitHub burns all three attempts and lands the operation
 in `failed`. Do not expect "wait and it will retry": once `state` is `failed`,
 nothing retries it.
 
-**Do.** Wait for the reset window. The content is not lost — the annotation
+**Do.** Wait for the reset window. The content is not lost - the annotation
 row is still `pending_git` with its body intact. There is no supported
 re-queue command (see [§9](#9-known-gaps)); recovery today means re-issuing
 the client request, or a maintainer resetting the row by hand.
@@ -160,7 +160,7 @@ the client request, or a maintainer resetting the row by hand.
 **Do not** conclude from a failed operation that the write was lost. Check the
 `annotations` / `replies` row before telling an author to retype anything.
 
-### 2.3 GitHub outage — unreachable, not rate limited
+### 2.3 GitHub outage - unreachable, not rate limited
 
 **Symptom.** Identical to 2.2 from the API's point of view, except the stored
 `error` is a transport failure rather than a status code. Reads are completely
@@ -186,7 +186,7 @@ as 2.2.
 
 **Symptom.** `500` responses carrying `application/problem+json` with
 `"code": "internal"` and a `correlationId`. The response deliberately contains
-no database error text — D1 error strings can carry SQL values.
+no database error text - D1 error strings can carry SQL values.
 
 **What it means, and what it guarantees.** Every command writes through one
 atomic `batch()`. If that batch fails, *nothing* lands: no record, no audit
@@ -200,14 +200,14 @@ outbox row still `processing`, never in a terminal success state. Rows found
 and the resumed operation *reuses* the commit it already made rather than
 producing a second one. So the outcome is a delay, not a duplicate and not a
 loss. If you see `git_operations` rows stuck in `committing`, the fix is to
-get a drain to run — not to touch the rows.
+get a drain to run - not to touch the rows.
 
 **Do.**
 
 1. Grab the `correlationId` from the response and find it in Cloudflare's
    Workers logs.
 2. Check D1 health in the Cloudflare dashboard.
-3. Retry. The failure leaves no poison — the identical request succeeds once
+3. Retry. The failure leaves no poison - the identical request succeeds once
    D1 is healthy.
 
 ### 2.5 A submission arrives against a stale projection
@@ -215,7 +215,7 @@ get a drain to run — not to touch the rows.
 Two distinct shapes, with two distinct refusals. Both are correct behaviour,
 not bugs.
 
-**Shape A — an external edit landed under a live lease.** An agent claimed a
+**Shape A - an external edit landed under a live lease.** An agent claimed a
 work item, someone edited that chapter directly on GitHub, and the push was
 reconciled while the agent was still working. The re-anchor pass returns the
 work item to `ready` (its task bundle no longer describes text that exists),
@@ -234,7 +234,7 @@ being reset; both are typed 409s and both mean "re-claim".)
 > `POST /work-items/{id}/lease/release`. If a work item is urgent, ask the
 > holder to release rather than waiting.
 
-**Shape B — the project is diverged (`409 project-diverged`).** The
+**Shape B - the project is diverged (`409 project-diverged`).** The
 reconciliation found something it cannot resolve deterministically. The
 response names the kind and includes a `recovery` field pointing at the fix.
 
@@ -253,7 +253,7 @@ There are exactly two divergence kinds:
 | `revision-regressed` | A chapter's frontmatter `revision` moved *backwards* in the repository. Usually a force-push, a revert, or a bad merge. |
 | `anchor-blocks-vanished` | A `<!-- authorbot:block id="…" -->` marker that live annotations point at disappeared from a chapter, with no successor minted. |
 
-**What divergence does and does not block.** It blocks **prose writes only** —
+**What divergence does and does not block.** It blocks **prose writes only** -
 submissions and chapter writes. Reads keep serving the last coherent
 projection, the published site keeps serving, and annotations, replies, votes
 and lease lifecycle all keep working. Refusing those would turn a repository
@@ -267,11 +267,11 @@ problem into a total outage for collaborators who cannot fix it.
 2. Decide which side is right.
    - **The repository is right** (someone intentionally reverted): clear
      divergence with `resync` left at its default `true`. This accepts the
-     repository as truth, re-projects it, and re-anchors annotations —
+     repository as truth, re-projects it, and re-anchors annotations -
      annotations whose anchors are genuinely gone become `needs_reanchor`
      rather than staying quietly wrong.
    - **The repository is wrong** (a bad force-push): fix the repository
-     first — restore the correct revision numbers or block markers and push —
+     first - restore the correct revision numbers or block markers and push -
      then clear with `"resync": false`, which just reopens writes.
 
 ```bash
@@ -287,7 +287,7 @@ diverges again. That is why `resync` defaults to `true`.
 
 ---
 
-## 3. Reading the audit log — "who changed this?"
+## 3. Reading the audit log - "who changed this?"
 
 ### 3.1 Where it is
 
@@ -297,13 +297,13 @@ cannot tamper with it, and neither can anything else.
 
 | Column | Notes |
 |---|---|
-| `id` | UUIDv7 — time-ordered, so `ORDER BY id` is chronological |
+| `id` | UUIDv7 - time-ordered, so `ORDER BY id` is chronological |
 | `project_id` | |
 | `actor_id` | Nullable. `NULL` means the system did it (projection rebuilds, divergence detection) |
 | `action` | See the vocabulary below |
 | `target_type` | `annotation`, `reply`, `lease`, `submission`, `chapter`, `project`, … |
 | `target_id` | Nullable |
-| `correlation_id` | The request id. **This is the join key** — one HTTP request's whole footprint shares it |
+| `correlation_id` | The request id. **This is the join key** - one HTTP request's whole footprint shares it |
 | `metadata` | JSON blob, varies by action |
 | `created_at` | ISO-8601 |
 
@@ -313,7 +313,7 @@ Index: `(project_id, created_at)`.
 
 **This is the single biggest operator gap.** There is no endpoint, no CLI, and
 no UI that reads `audit_events`. Every query below is `wrangler d1 execute`.
-(`GET /v1/projects/{project}/events` exists but reads a *different* table —
+(`GET /v1/projects/{project}/events` exists but reads a *different* table -
 the `events` stream, which is a collaboration feed, not the audit record.)
 
 ### 3.3 The queries you actually need
@@ -388,14 +388,14 @@ that is not GitHub. Nothing else in this section matters as much as that
 sentence.
 
 **D1 is a projection with a small operational tail.** For D1, use Cloudflare's
-Time Travel (point-in-time restore, 30 days) — Authorbot ships no backup job
+Time Travel (point-in-time restore, 30 days) - Authorbot ships no backup job
 of its own. But Time Travel is a convenience, not the plan: the plan is
 [§4.3](#43-the-restore-procedure).
 
 ### 4.2 What a restore does not bring back
 
 The restore drill (`apps/api/test/recovery-restore-drill.test.ts`) asserts
-this list *deliberately* — a lease surviving a rebuild would be a bug, and so
+this list *deliberately* - a lease surviving a rebuild would be a bug, and so
 would a token. Expect all of it to be gone:
 
 | Gone | Consequence |
@@ -403,12 +403,12 @@ would a token. Expect all of it to be gone:
 | **Human sessions** | Everyone signs in again. Old cookies get `401`. |
 | **Agent tokens** | Every token is dead. Mint new ones and redistribute. This is a feature: a bearer credential must not outlive the database holding its hash. |
 | **Leases** | Every leased work item comes back `ready` and is immediately claimable by anyone. Any agent still working against an old lease will be refused. |
-| **In-flight submissions** | Submission `content` is DB-only by design. An edit submitted but not yet applied to a chapter is **genuinely lost** — the author must redo it. This is the one real data loss in a restore. |
+| **In-flight submissions** | Submission `content` is DB-only by design. An edit submitted but not yet applied to a chapter is **genuinely lost** - the author must redo it. This is the one real data loss in a restore. |
 | **Votes** | Ballots are DB-only. Every *decision* those votes produced survives (it is a Git artifact); the raw tallies do not, so support counts restart from zero. |
 | **Outbox / git_operations** | Any command accepted but not yet committed is lost. Clients see an `operationId` that no longer resolves. |
 | **Idempotency keys** | A replayed request after a restore is a *real* request, not a cached response. Expect duplicates if clients retry aggressively across the restore. |
 | **Audit events** | The audit log is DB-only. **It is not restored from Git.** If you need audit history to survive, you need a D1 backup, not a rebuild. |
-| **Webhook/publication delivery ledgers** | Deduplication restarts. A redelivered GitHub push is processed again (harmless — the rebuild is idempotent). |
+| **Webhook/publication delivery ledgers** | Deduplication restarts. A redelivered GitHub push is processed again (harmless - the rebuild is idempotent). |
 
 ### 4.3 The restore procedure
 
@@ -431,7 +431,7 @@ right.
    degrading, which is what you want. Required: `AUTH_MODE`,
    `SESSION_SECRET`, `WEBHOOK_SECRET`, `PROJECT_SLUG`, `PROJECT_REPO`,
    `INITIAL_MAINTAINER`, and the `DB` binding. `DEV_LOGIN_ENABLED=true` is
-   *additionally* required when `AUTH_MODE=dev` — a second independent guard
+   *additionally* required when `AUTH_MODE=dev` - a second independent guard
    so dev login cannot ship through one misconfigured variable. With
    `AUTH_MODE=github` you also need `GITHUB_CLIENT_ID`,
    `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI`. With `MIRROR_MODE=durable`
@@ -458,7 +458,7 @@ right.
    and distribute them. Tell humans to sign in again.
 
 7. **Re-establish publication state.** `publication.deployedCommit` will be
-   `null` until CI reports again — the API never infers deployment from its
+   `null` until CI reports again - the API never infers deployment from its
    own knowledge. Trigger a build.
 
 **Rebuilding is safe to repeat.** The rebuild is idempotent: running it twice
@@ -486,7 +486,7 @@ endpoint that forces a rebuild** (see [§9](#9-known-gaps)). Your options are:
 ## 5. Key rotation
 
 Three secrets, three very different blast radii. **None of them supports two
-valid values at once** — there is no key ring anywhere in this system, so
+valid values at once** - there is no key ring anywhere in this system, so
 every rotation below is a hard cutover. Plan accordingly.
 
 ### 5.1 `SESSION_SECRET`
@@ -522,7 +522,7 @@ which makes it your emergency "log everybody out" button.
 
 ### 5.2 `WEBHOOK_SECRET` and `PUBLICATION_SECRET`
 
-**Two protocols, two secrets — set both.**
+**Two protocols, two secrets - set both.**
 
 | Consumer | Secret | Header | Signed material |
 |---|---|---|---|
@@ -535,7 +535,7 @@ repository's **Actions secrets**, so a single shared value meant whoever held
 either could forge the other's requests, and you could not rotate them
 atomically.
 
-**If `PUBLICATION_SECRET` is unset, the API falls back to `WEBHOOK_SECRET`** —
+**If `PUBLICATION_SECRET` is unset, the API falls back to `WEBHOOK_SECRET`** -
 purely for compatibility with deployments that predate the split. Treat that as
 a state to leave, not a configuration to keep. To split them, with no window in
 which anything is signed with the wrong key:
@@ -552,7 +552,7 @@ rotation: change the Worker secret, change the single consumer, confirm.
 **What breaks if a value goes wrong.**
 
 - **GitHub pushes: recoverable.** A push signed with the old secret gets
-  `401`, and — importantly — the failing request returns *before* recording a
+  `401`, and - importantly - the failing request returns *before* recording a
   delivery id. GitHub retries with the same delivery id, and once you have
   updated the App's webhook secret those retries are accepted. You lose
   reconciliation latency, not pushes.
@@ -572,7 +572,7 @@ rotation: change the Worker secret, change the single consumer, confirm.
 
 **Rotating `PUBLICATION_SECRET`, in this order:**
 
-1. Pick a maintenance moment with no build running — a callback signed with
+1. Pick a maintenance moment with no build running - a callback signed with
    the old key is lost, not retried.
 2. `wrangler secret put PUBLICATION_SECRET`.
 3. Immediately update the CI publisher's copy of the secret.
@@ -584,7 +584,7 @@ procedure with both windows open at once. Split them first.
 
 ### 5.3 GitHub App private key
 
-**Format.** PKCS#8 only — `-----BEGIN PRIVATE KEY-----`. GitHub's download
+**Format.** PKCS#8 only - `-----BEGIN PRIVATE KEY-----`. GitHub's download
 button gives you PKCS#1 (`BEGIN RSA PRIVATE KEY`), which is **rejected** with
 a message telling you the conversion:
 
@@ -601,7 +601,7 @@ expect.
 - **Already-minted installation tokens keep working until they expire.**
   Tokens last an hour and are cached in-process with a 5-minute refresh
   margin. A Worker isolate that survives the rotation can keep using its
-  cached token for up to about 55 minutes — the private key is deliberately
+  cached token for up to about 55 minutes - the private key is deliberately
   not part of the isolate-level auth cache key. In practice
   `wrangler secret put` produces new isolates and this resolves itself, but do
   not be surprised by a short period of mixed behaviour.
@@ -610,7 +610,7 @@ expect.
 installation id) are caught at boot and reported as `gitIntegration:
 "invalid"`. A key that is *well-formed but revoked* reports `"configured"` and
 fails later, inside the coordinator, at token-mint time. So after a rotation,
-do not trust `gitIntegration` alone — prove it with a real commit.
+do not trust `gitIntegration` alone - prove it with a real commit.
 
 **Do.**
 
@@ -631,7 +631,7 @@ performs no Git work at all.
 
 ---
 
-## 6. Integrated vs deployed — "this chapter looks stale"
+## 6. Integrated vs deployed - "this chapter looks stale"
 
 An author says the site is showing old text. There are four distinct places
 that could be behind, and they fail differently. Walk them in order.
@@ -643,13 +643,13 @@ that could be behind, and they fail differently. Walk them in order.
 
 **Call 1 answers most of this in one response.**
 
-### Step 1 — is it committed?
+### Step 1 - is it committed?
 
 ```jsonc
 "publication": { "integratedCommit": "abc123…", "deployedCommit": "def456…", "inSync": false }
 ```
 
-- `integratedCommit` is **`projects.projected_commit`** — the commit Authorbot
+- `integratedCommit` is **`projects.projected_commit`** - the commit Authorbot
   has *projected*. It advances when a push is reconciled, which includes
   Authorbot's own commits: "integrated" means Authorbot has read it back, not
   merely that a write returned success.
@@ -678,14 +678,14 @@ History, if you need it:
 GET /v1/projects/{project}/publications?limit=50
 ```
 
-### Step 2 — is it a different kind of stale?
+### Step 2 - is it a different kind of stale?
 
 Three things are easy to confuse with a deployment lag:
 
-- **`projection.stale: true`** — a push arrived and the refresh has not run
+- **`projection.stale: true`** - a push arrived and the refresh has not run
   yet. Normally clears within one alarm interval (default 60s). If it persists,
   the coordinator is not running.
-- **`divergence.state: "diverged"`** — prose writes are blocked project-wide.
+- **`divergence.state: "diverged"`** - prose writes are blocked project-wide.
   Reads keep serving the last coherent projection, so the site looks *frozen*
   rather than broken. → [§2.5](#25-a-submission-arrives-against-a-stale-projection).
 - **The chapter is `status: "draft"`.** Editorial state, not deployment state.
@@ -694,7 +694,7 @@ Three things are easy to confuse with a deployment lag:
   section; API diagnosis can use
   `GET /v1/projects/{project}/chapters/{chapterId}`.
 
-### Step 3 — one thing not to trust
+### Step 3 - one thing not to trust
 
 The chapter JSON exposes a `lastPublishedCommit` field. **It is always
 `null`.** Nothing populates it. Per-chapter publication status does not exist;
@@ -712,8 +712,8 @@ Every refusal is `application/problem+json` with a stable `code` and a
 |---|---|---|
 | `project-diverged` | 409 | Prose writes blocked; repository disagrees with the projection. Response carries `recovery`. |
 | `submission-base-mismatch` | 409 | The agent's task bundle is stale. Re-claim. |
-| `state-conflict` | 409 | The resource moved under the request. `detail` always names the offending status — read it. Covers a vote on a `pending_git` annotation and a submission against a work item the reconciliation reset to `ready`. |
-| `lease-held` | 409 | Another actor holds the work item — including a work item that is `ready` but still carries an unreleased lease ([§2.5](#25-a-submission-arrives-against-a-stale-projection)). |
+| `state-conflict` | 409 | The resource moved under the request. `detail` always names the offending status - read it. Covers a vote on a `pending_git` annotation and a submission against a work item the reconciliation reset to `ready`. |
+| `lease-held` | 409 | Another actor holds the work item - including a work item that is `ready` but still carries an unreleased lease ([§2.5](#25-a-submission-arrives-against-a-stale-projection)). |
 | `lease-expired` | 409 | The lease ran out mid-work. |
 | `revision-conflict` | 409 | The chapter moved under a write. |
 | `signature-invalid` | 401 | Publication callback signature or skew failed. |
@@ -724,7 +724,7 @@ Every refusal is `application/problem+json` with a stable `code` and a
 
 ## 8. Configuration reference
 
-Required — the Worker refuses to boot without these: `DB` binding,
+Required - the Worker refuses to boot without these: `DB` binding,
 `AUTH_MODE` (`dev` or `github`, no fallback), `SESSION_SECRET`,
 `WEBHOOK_SECRET`, `PROJECT_SLUG`, `PROJECT_REPO` (`owner/name`),
 `INITIAL_MAINTAINER` (`github:<login>`).
@@ -746,7 +746,7 @@ Optional: `MIRROR_MODE` (`inline` | `queue` | `durable`), `DEFAULT_BRANCH`,
 **One warning about `wrangler.jsonc`.** The checked-in
 `apps/api/wrangler.jsonc` is *not* the live deployment's configuration. It
 carries no `assets` binding and no auth variables, and `wrangler deploy`
-replaces `vars` wholesale — deploying it at a live Worker would wipe the
+replaces `vars` wholesale - deploying it at a live Worker would wipe the
 static-site binding and the auth configuration. The file says so at the top.
 Read it before you deploy from it.
 
@@ -798,8 +798,8 @@ this document and one of these disagree, the test is right.
 
 | File | Proves |
 |---|---|
-| `apps/api/test/recovery-restore-drill.test.ts` | [§4](#4-backup-and-restore) — destroys the database, rebuilds from Git, asserts what returns *and* what deliberately does not |
-| `apps/api/test/resilience-failure-injection.test.ts` | [§2](#2-failure-modes-what-each-looks-like-from-outside) — backlog, rate limiting, outage, D1 errors, stale/diverged submissions |
+| `apps/api/test/recovery-restore-drill.test.ts` | [§4](#4-backup-and-restore) - destroys the database, rebuilds from Git, asserts what returns *and* what deliberately does not |
+| `apps/api/test/resilience-failure-injection.test.ts` | [§2](#2-failure-modes-what-each-looks-like-from-outside) - backlog, rate limiting, outage, D1 errors, stale/diverged submissions |
 | `apps/api/test/resilience-load-concurrency.test.ts` | Phase 4 invariants under sustained concurrent claims and submissions |
 
 ## 11. Why the test timeout is 30 seconds, not vitest's 5
@@ -810,7 +810,7 @@ The 5-second default is sized for unit tests. This repository also has
 property tests that loop 120+ generated documents through parse → patch →
 re-parse, exhaustive adversarial tables, and integration tests that spawn real
 `git` against temporary repositories. Several of those sat just under 5s on a
-developer machine and timed out on a slower CI runner — green where they were
+developer machine and timed out on a slower CI runner - green where they were
 written, red where the release is gated, which is the worst place to discover
 a limit.
 

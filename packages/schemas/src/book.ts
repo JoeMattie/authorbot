@@ -19,7 +19,7 @@ export const annotationPolicySchema = z.enum(ANNOTATION_POLICY_MODES);
 export type AnnotationPolicyMode = (typeof ANNOTATION_POLICY_MODES)[number];
 
 /**
- * Book config `book.yml` — `authorbot.book/v1` (design section 8.2).
+ * Book config `book.yml` - `authorbot.book/v1` (design section 8.2).
  * Optional sections default at load time; the schema does not inject defaults.
  */
 export const bookConfigSchema = z.strictObject({
@@ -72,7 +72,7 @@ export const bookConfigSchema = z.strictObject({
    * `annotation_policy` is who may comment and suggest, and whether what they
    * write appears immediately: `open`, `approval-gated`, `collaborators-only`
    * (the default when the section is absent), or `locked`. It lives in
-   * `book.yml` — versioned, diffable, reviewable — because it is an editorial
+   * `book.yml` - versioned, diffable, reviewable - because it is an editorial
    * decision about the book, made deliberately and changed rarely.
    *
    * The emergency controls deliberately do NOT live here. Freeze and
@@ -87,7 +87,7 @@ export const bookConfigSchema = z.strictObject({
     .optional(),
   /**
    * Governance rules (Phase 6 contract section 3.6, amending Phase 3 section
-   * 3). Rules live here — versioned, diffable, and reviewable alongside the
+   * 3). Rules live here - versioned, diffable, and reviewable alongside the
    * prose they govern, and therefore editable from the Settings view. The
    * `RULES_JSON` environment variable remains a *bootstrap default* for a book
    * that has not set them; once `governance.rules` exists it wins outright.

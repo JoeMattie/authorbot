@@ -9,7 +9,7 @@
  *  - every `/v1/...` path the skill mentions exists in `openapi/openapi.yaml`;
  *  - every scope name the skill mentions is a real, mintable API scope;
  *  - the loop and the four safety rules are byte-identical everywhere they
- *    are repeated — the whole point of the shared blocks is that an agent
+ *    are repeated - the whole point of the shared blocks is that an agent
  *    reading a role file gets the same rules as one reading SKILL.md.
  */
 import { readFileSync, readdirSync } from "node:fs";

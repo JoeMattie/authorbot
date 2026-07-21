@@ -1,7 +1,7 @@
 /**
  * IdentityProvider interface (Phase 2 contract §3, ADR 0015). Two
  * implementations: `dev` (POST /v1/dev/login, mounted only when
- * AUTH_MODE=dev — containment by construction: the route does not exist in
+ * AUTH_MODE=dev - containment by construction: the route does not exist in
  * github mode) and `github` (OAuth web flow, exercised only when configured).
  */
 

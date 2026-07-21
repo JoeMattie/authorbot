@@ -1,6 +1,6 @@
 /**
- * Guard rail for the phase's hard rule: everything under `src/` — including
- * `src/testing/`, which is an in-process object and not a server — must run
+ * Guard rail for the phase's hard rule: everything under `src/` - including
+ * `src/testing/`, which is an in-process object and not a server - must run
  * unchanged in a Cloudflare Worker. This test is the only place in the
  * package that touches `node:` modules, and it does so from `test/`.
  */

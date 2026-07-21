@@ -1,5 +1,5 @@
 /**
- * Phase 4 leases (contract §2, §3, §8 exit criteria 1–2): the simultaneous-
+ * Phase 4 leases (contract §2, §3, §8 exit criteria 1-2): the simultaneous-
  * claim race, the task-bundle shape, the full stale-lease matrix (expired /
  * released / revoked / wrong-token / max-total-exceeded renewals), and both
  * expiry paths (lazy on command, eager sweep) returning items to `ready`
@@ -348,7 +348,7 @@ describe("stale-lease matrix (contract §8 exit criterion 2)", () => {
       expect(lease.expiresAt).toBe("2026-07-19T18:10:00Z");
       expect(lease.maxExpiresAt).toBe("2026-07-19T18:15:00Z");
 
-      // Partial clamp: 18:10 + 10m capped at 18:15 — allowed.
+      // Partial clamp: 18:10 + 10m capped at 18:15 - allowed.
       const first = await renew(harness, cookie, workItemId, lease.id, lease.token);
       expect(first.status).toBe(200);
       const firstBody = (await first.json()) as { expiresAt: string; renewalCount: number };

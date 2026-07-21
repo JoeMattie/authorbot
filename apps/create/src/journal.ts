@@ -81,7 +81,7 @@ export interface JournalData {
     promptPath?: string;
   };
   stages: Record<string, StageRecord>;
-  /** Names only — never values (§2.3). */
+  /** Names only - never values (§2.3). */
   secretsSet: string[];
   resources: CreatedResource[];
   /**
@@ -91,7 +91,7 @@ export interface JournalData {
    * This is what tells "a file the author edited" apart from "a file this
    * wizard wrote a minute ago". Without it, `collaborate` rewriting the
    * `wrangler.jsonc` that `publish` wrote would trip the
-   * never-overwrite-silently rule against the wizard's own output — turning a
+   * never-overwrite-silently rule against the wizard's own output - turning a
    * safety property into a prompt that trains authors to say yes.
    */
   managedFiles: Record<string, string>;
@@ -124,7 +124,7 @@ export function emptyJournal(now: string): JournalData {
  * gitignored only by this wizard's own template, so a shared, forked, or
  * published book can simply carry one, and the author who clones it and runs
  * `create-authorbot publish` has adopted whatever it says. What it says is not
- * cosmetic — `book.repo` picks which GitHub repository receives a Cloudflare
+ * cosmetic - `book.repo` picks which GitHub repository receives a Cloudflare
  * API token, `publish.siteUrl` becomes the GitHub App's callback and webhook
  * host and the base a maintainer token is sent to, and `collaborate.d1Name`
  * and `publish.workerName` land in argv.
@@ -493,7 +493,7 @@ export class Journal {
     return this.stage(name).status === "done";
   }
 
-  /** The first stage that is not yet done — where a bare re-run resumes. */
+  /** The first stage that is not yet done - where a bare re-run resumes. */
   resumeAt(order: readonly StageName[]): StageName | null {
     for (const name of order) {
       if (!this.isDone(name)) {
@@ -563,7 +563,7 @@ export class Journal {
    *
    * The counterpart to `recordResource`, for `unpublish` and `teardown`. A
    * journal that keeps listing a deleted Worker would tell the author, at the
-   * end of every future run, to clean up something that is already gone — and
+   * end of every future run, to clean up something that is already gone - and
    * a second teardown would try to delete it again and report a failure that
    * is really a success.
    */
@@ -588,7 +588,7 @@ export class Journal {
     }
     this.#data.updatedAt = now;
     // The journal lives inside the book directory, and the first write happens
-    // when the wizard marks a stage started — before the stage that creates
+    // when the wizard marks a stage started - before the stage that creates
     // that directory has run. Pointing `--dir` (or a --config `directory:`) at
     // a path that does not exist yet therefore failed with a bare ENOENT on
     // this file, which is the wizard's own bookkeeping and nothing the author

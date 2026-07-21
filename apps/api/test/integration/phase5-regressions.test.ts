@@ -5,7 +5,7 @@
  *
  * They run on the same real harness as the exit criteria (real app, real
  * coordinator, real reader/writer, fake GitHub) because every one of these
- * defects was about how those pieces INTERLEAVE — a stub would not have shown
+ * defects was about how those pieces INTERLEAVE - a stub would not have shown
  * any of them.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -123,7 +123,7 @@ const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0
 describe("a diverged project stops prose commits already queued (contract §6)", () => {
   /**
    * The defect: `proseWriteBlocked` guarded only submission INTAKE
-   * (phase4.ts). Nothing on the drain path read `projects.status` —
+   * (phase4.ts). Nothing on the drain path read `projects.status` -
    * `drainOutbox`, the drain runner, the processor and the applier all
    * ignored it, and `alarm()` drains BEFORE it refreshes. So a submission
    * accepted moments before a webhook reconciliation marked the project
@@ -131,7 +131,7 @@ describe("a diverged project stops prose commits already queued (contract §6)",
    * mis-models, overwriting the external commit that caused the divergence.
    */
   it("leaves the queued submission.apply row pending, then commits it once divergence clears", async () => {
-    // Drains run normally until the work item is ready — the annotation must
+    // Drains run normally until the work item is ready - the annotation must
     // actually reach `synced` for voting to be accepted. Only the submission's
     // own row is left pending, which is the window the defect lived in.
     let defer = false;
@@ -148,7 +148,7 @@ describe("a diverged project stops prose commits already queued (contract §6)",
 
     const drained = await app.coordinator.drainOutbox();
 
-    // The prose row was neither committed nor failed — it is still owed work.
+    // The prose row was neither committed nor failed - it is still owed work.
     expect(drained.prosePaused).toBe(true);
     expect(app.fake.state.getRef(BRANCH)).toBe(headBefore);
     const stillPending = await app.repos.outbox.listPending(app.projectId);
@@ -203,7 +203,7 @@ describe("the coordinator serializes refresh against drain (contract §5)", () =
    * called `reconcileProjection` with no chain, no lock and no
    * `blockConcurrencyWhile`. A Durable Object does not serialize concurrent
    * `fetch` invocations across awaits that are not storage operations, and the
-   * refresh awaits dozens of GitHub blob fetches — so `/refresh` (webhook) and
+   * refresh awaits dozens of GitHub blob fetches - so `/refresh` (webhook) and
    * `/drain` (mutation) interleaved freely. A refresh pinned at H1 resuming
    * after a drain committed H2 saw `snapshotRevision < current.revision`,
    * declared `revision-regressed`, and 403'd every submission project-wide
@@ -281,7 +281,7 @@ describe("re-anchoring uses the snapshot's bytes, not a fresh read", () => {
    * consistent snapshot, then called `readSource` → `readTextFile`, which
    * re-resolved the branch head. A push landing mid-pass produced a re-anchor
    * computed against one commit's text while `revision` and `blockIds` came
-   * from another's — a decision recorded at a revision that never contained
+   * from another's - a decision recorded at a revision that never contained
    * that text, persisted as an append-only audit row a later converging pass
    * does not undo. The snapshot already holds every matched file's bytes.
    */
@@ -298,7 +298,7 @@ describe("re-anchoring uses the snapshot's bytes, not a fresh read", () => {
       }),
     });
 
-    // An external edit to a projected chapter — the path that re-anchors.
+    // An external edit to a projected chapter - the path that re-anchors.
     const edited = (app.fake.fileAtHead(CHAPTER_1.path) as string).replace(
       "where nobody respectable ever looks.",
       "where nobody respectable ever bothers to look.",
@@ -356,7 +356,7 @@ describe("divergence is never declared from a snapshot that went stale", () => {
   it("leaves the projection stale instead of diverging when the head moved mid-pass", async () => {
     const app = await harness();
 
-    // A genuinely regressed revision — the finding the guard must not act on
+    // A genuinely regressed revision - the finding the guard must not act on
     // when the snapshot it came from is already behind the branch.
     const regressed = (app.fake.fileAtHead(CHAPTER_1.path) as string).replace(
       `revision: ${String(CHAPTER_1.revision)}`,

@@ -4,7 +4,7 @@
  *
  * The unit suite (`test/settings.test.ts`) covers the API's decisions. This one
  * runs against a real git work tree, drains the outbox through the real
- * processor, and then reads `book.yml` off disk — so what it asserts is that a
+ * processor, and then reads `book.yml` off disk - so what it asserts is that a
  * maintainer's edit becomes a commit whose file is still a valid
  * `authorbot.book/v1` document, attributed to the maintainer who made it.
  */
@@ -78,7 +78,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
     const row = await app.repos.bookConfigs.get(app.projectId);
     expect(row).not.toBeNull();
     expect(row?.status).toBe("committed");
-    // Exactly what the file says — this is a projection, not a second store.
+    // Exactly what the file says - this is a projection, not a second store.
     expect(row?.config).toEqual(readBookYml());
   });
 
@@ -90,7 +90,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
     await app.mirror.drain(app.projectId);
 
     const after = readBookYml();
-    // Still a valid authorbot.book/v1 document — the whole point of routing
+    // Still a valid authorbot.book/v1 document - the whole point of routing
     // this through the same validation path as any other write.
     const parsed = bookConfigSchema.parse(after);
     expect(parsed.title).toBe("Hollow Creek: An Anomaly");
@@ -134,7 +134,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
   it("a projection pass never reverts a settings change still in the outbox", async () => {
     // MIRROR_MODE=queue, so the commit stays queued and the repository still
     // holds the OLD title. A pass that wrote back what it read would silently
-    // undo the maintainer's edit while its commit sat in the queue — which is
+    // undo the maintainer's edit while its commit sat in the queue - which is
     // what `pending_git` deference exists to prevent. (This is also the live
     // deployment's mirror mode, so it is not a hypothetical.)
     const queued = await makeIntegrationApp({
@@ -191,7 +191,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
     expect(res.status).toBe(202);
     await app.mirror.drain(app.projectId);
 
-    // It is in the file, versioned and diffable — the reason §3.6 moved rules
+    // It is in the file, versioned and diffable - the reason §3.6 moved rules
     // out of RULES_JSON in the first place.
     const committed = bookConfigSchema.parse(readBookYml());
     const rule = committed.governance?.rules?.["suggestion_to_work_item"];
@@ -235,7 +235,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
     });
     await app.mirror.drain(app.projectId);
 
-    // A brand-new database over the same work tree — the rebuildability
+    // A brand-new database over the same work tree - the rebuildability
     // property every other artifact has.
     const fresh = await makeIntegrationApp({ workTreePath: repo.workTreePath });
     try {
@@ -252,7 +252,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
   /**
    * Regression (§3.6 "never editable"). The PATCH is a read-modify-write of
    * the `book_configs` projection, and the commit used to be a whole-file
-   * render of that projection — so a title edit re-committed every other key
+   * render of that projection - so a title edit re-committed every other key
    * from a possibly-stale copy, including the three the module documents as
    * never editable. An author who closed an XSS hole with a reviewed commit
    * (`content.raw_html: false`, exactly the path IMMUTABLE_FIELDS tells them
@@ -265,7 +265,7 @@ describe("book settings round trip through Git (contract §3.6)", () => {
     // The projection goes stale in the dangerous direction. This is a state
     // the system reaches on its own: `projectBookConfig` returns early on a
     // diverged project and keeps the previous row on an `invalid` outcome, so
-    // the row can sit frozen at a copy Git has since moved past — while
+    // the row can sit frozen at a copy Git has since moved past - while
     // `book_config.update` still drains, because it is not a prose kind.
     const row = await app.repos.bookConfigs.get(app.projectId);
     await app.repos.bookConfigs.upsert({

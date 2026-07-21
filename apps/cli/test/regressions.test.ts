@@ -317,7 +317,7 @@ describe("duplicate record ids across files", () => {
 });
 
 describe("maintainer force-create decision (rule_version 0, contract §4)", () => {
-  it("validates cleanly — `authorbot validate` accepts rule_version 0", async () => {
+  it("validates cleanly - `authorbot validate` accepts rule_version 0", async () => {
     const root = await makeRepo();
     const annId = "019de29b-0000-7000-8000-000000000001";
     const wid = "019de29b-0000-7000-8000-000000000002";

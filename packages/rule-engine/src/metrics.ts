@@ -25,7 +25,7 @@ export interface VoteTuple {
    * Whether the voter holds the **maintainer** role on the project at the time
    * the tally is computed (Phase 6 contract section 3.6). Optional so
    * pre-Phase-6 callers keep compiling; absent is read as "not a maintainer",
-   * which fails closed — an uncounted maintainer approval can only make a rule
+   * which fails closed - an uncounted maintainer approval can only make a rule
    * harder to satisfy, never easier.
    */
   readonly maintainer?: boolean;
@@ -75,16 +75,16 @@ export const EMPTY_VOTE_METRICS: VoteMetrics = Object.freeze({
  * - `human_approvals` / `agent_approvals` split approvals by actor type;
  *   `system` approvals count toward `approvals` only.
  * - `maintainer_approvals` counts approvals from any actor holding the
- *   maintainer role — human or agent.
+ *   maintainer role - human or agent.
  * - `human_maintainer_approvals` counts only maintainers whose actor type is
  *   `human`. The distinction is load-bearing rather than pedantic: Phase 7
  *   lets an author grant maintainer role to their own agent tokens, so a plain
  *   `maintainer_approvals` clause would be satisfiable by an agent the author
- *   owns — exactly the manufactured-consensus hole the human-approval
+ *   owns - exactly the manufactured-consensus hole the human-approval
  *   requirement exists to close (Phase 6 contract section 3.6).
  *
  * Fails closed on malformed input: an unknown vote value or actor type throws
- * (it can only mean a corrupted row — never silently miscount governance).
+ * (it can only mean a corrupted row - never silently miscount governance).
  */
 export function computeVoteMetrics(votes: readonly VoteTuple[]): VoteMetrics {
   let approvals = 0;

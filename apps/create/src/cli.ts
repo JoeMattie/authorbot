@@ -1,7 +1,7 @@
 /**
  * Argument handling and wiring (Phase 6 contract §1).
  *
- * Hand-rolled argv parsing, matching `@authorbot/cli` — the wizard's whole
+ * Hand-rolled argv parsing, matching `@authorbot/cli` - the wizard's whole
  * pitch is "npx and answer questions", and adding a CLI framework to a package
  * whose contract says "zero runtime dependencies beyond what the workspace
  * already ships" would contradict it on the first line.
@@ -365,7 +365,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
   const explicit = parsed.stage !== null || configStages !== null;
 
   if (parsed.options.dryRun) {
-    reporter.heading("Dry run — nothing will be changed");
+    reporter.heading("Dry run - nothing will be changed");
     reporter.explain(
       "Every command, file, and remote resource this would create is listed below and again as a plan at the end. Your machine, your GitHub account, and your Cloudflare account are all left exactly as they are.",
     );

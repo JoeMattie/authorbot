@@ -1,5 +1,5 @@
 /**
- * `GitHubBookRepoReader` — the `BookRepoReader` implementation that closes the
+ * `GitHubBookRepoReader` - the `BookRepoReader` implementation that closes the
  * projection gap (Phase 5 contract §3, design §7.5).
  *
  * It reads a committed book repository through the **Git Data API** rather
@@ -15,7 +15,7 @@
  *
  * The snapshot types below are a structural mirror of the Phase 2 interface
  * declared there, which remains the source of truth. They are re-declared
- * rather than imported because `apps/api` depends on this package — importing
+ * rather than imported because `apps/api` depends on this package - importing
  * back would make the dependency graph cyclic. Both sides bottom out in the
  * same `@authorbot/schemas` and `@authorbot/repo-coordinator` types, so
  * `GitHubBookRepoReader` satisfies `BookRepoReader` structurally and
@@ -97,7 +97,7 @@ export interface BookRepoReader {
  * story/`book.yml` projections that arrive later cost no extra round trip.
  */
 export interface GitHubBookRepoSnapshot extends BookRepoSnapshot {
-  /** Always present here — a Git read always knows its commit. */
+  /** Always present here - a Git read always knows its commit. */
   headCommit: string;
   /** Tree the snapshot was read from (the head commit's root tree). */
   treeSha: string;
@@ -112,7 +112,7 @@ export interface GitHubBookRepoSnapshot extends BookRepoSnapshot {
 export type GitHubReadErrorCode =
   /** GitHub answered with a non-OK status. */
   | "http"
-  /** The recursive tree was truncated — a partial snapshot is never returned. */
+  /** The recursive tree was truncated - a partial snapshot is never returned. */
   | "truncated-tree"
   /** More matching files than `maxFiles` allows. */
   | "file-budget-exceeded"
@@ -183,7 +183,7 @@ export function isGitHubReadError(value: unknown): value is GitHubReadError {
  *
  * The local reader additionally resolves against the repository root and
  * checks the result stays at or beneath it, because a filesystem can be
- * escaped by a symlink or a normalized prefix — famously, `/srv/book` plus
+ * escaped by a symlink or a normalized prefix - famously, `/srv/book` plus
  * `../book-secrets/creds.env` normalizes to a SIBLING directory that passes a
  * naive `startsWith` test. Here the "root" is a git tree, which has no
  * parent to escape to and no symlink to follow, so refusing `..` and absolute
@@ -241,7 +241,7 @@ export function isSnapshotPath(path: string): boolean {
  * Strip a leading YAML frontmatter block; returns the Markdown body.
  *
  * Byte-for-byte the same algorithm as `stripFrontmatter` in
- * `apps/api/src/projection/local-fs.ts` — annotation and reply bodies are
+ * `apps/api/src/projection/local-fs.ts` - annotation and reply bodies are
  * compared against projections built by either reader, so any divergence
  * would show up as spurious content changes. It is duplicated rather than
  * imported because that module is Node-only (`node:fs`).
@@ -302,7 +302,7 @@ export interface GitHubBookRepoReaderOptions {
   /** Branch to read; defaults to `main`. */
   branch?: string;
   /**
-   * Credentialed `fetch` — normally `GitHubAppAuth.authorizedFetch`. Tests
+   * Credentialed `fetch` - normally `GitHubAppAuth.authorizedFetch`. Tests
    * pass the fake GitHub's `fetch` directly.
    */
   fetch: AuthorizedFetch;
@@ -479,7 +479,7 @@ export class GitHubBookRepoReader implements BookRepoReader {
   /**
    * Raw text of one committed repository file, or `null` when it does not
    * exist. Containment is checked first, so a traversal attempt costs no
-   * request at all — the guard cannot be probed for timing or existence.
+   * request at all - the guard cannot be probed for timing or existence.
    */
   async readTextFile(path: string): Promise<string | null> {
     if (!isContainedRepoPath(path)) return null;
@@ -530,7 +530,7 @@ export class GitHubBookRepoReader implements BookRepoReader {
    *
    * A fixed pool of workers pulling from a shared cursor, rather than
    * chunked `Promise.all` batches: batching stalls the whole group on its
-   * slowest member, and — the reason it matters for the contract — it makes
+   * slowest member, and - the reason it matters for the contract - it makes
    * the *observed* peak concurrency lower than the bound, so a test asserting
    * the bound would pass for the wrong reason.
    */

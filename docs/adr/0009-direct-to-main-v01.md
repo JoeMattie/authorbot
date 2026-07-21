@@ -8,7 +8,7 @@ Accepted (2026-07-19)
 
 Design §26.1 left open direct-to-main versus pull-request mode per project.
 PR mode adds review workflow, protected-branch handling, merge-state
-tracking, and a second reconciliation surface — heavy for a v0.1 whose
+tracking, and a second reconciliation surface - heavy for a v0.1 whose
 mutations are already gated by validation, governance rules, and leases.
 
 ## Decision

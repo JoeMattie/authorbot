@@ -1,9 +1,9 @@
 /**
- * Phase 4 submissions and the apply pipeline (contract §4–§6, §8 exit
- * criteria 3–6): the §4 verification order with stable problem types, the
+ * Phase 4 submissions and the apply pipeline (contract §4-§6, §8 exit
+ * criteria 3-6): the §4 verification order with stable problem types, the
  * one-commit happy path (chapter bump + work item done + annotation accepted
  * + attribution, §14.3 trailers), the rebase-vs-conflict decision table
- * (§12.6 — the newer chapter is never clobbered), and §10.3 re-anchoring.
+ * (§12.6 - the newer chapter is never clobbered), and §10.3 re-anchoring.
  */
 import { describe, expect, it } from "vitest";
 import { parseWorkItemArtifact } from "@authorbot/repo-coordinator";
@@ -106,13 +106,13 @@ describe("submission verification order (contract §4)", () => {
       const unknownLease = await submit({ ...ctx, leaseId: uuidv7() });
       expect(unknownLease.status).toBe(404);
 
-      // 2. Holder — another member with submissions:write, right lease id.
+      // 2. Holder - another member with submissions:write, right lease id.
       const other = await devLogin(harness, "other", "editor");
       const notHolder = await submit({ ...ctx, cookie: other });
       expect(notHolder.status).toBe(403);
       expect(notHolder.body["code"]).toBe("forbidden");
 
-      // 3. Token hash — checked before type/base problems (order dominance).
+      // 3. Token hash - checked before type/base problems (order dominance).
       const wrongToken = await submit(
         { ...ctx, leaseToken: `authorbot_lease_${"x".repeat(43)}` },
         { type: "block_replacement" },
@@ -140,7 +140,7 @@ describe("submission verification order (contract §4)", () => {
       const marker = await submit(ctx, { content: `x <!-- authorbot:block id="y" -->` });
       expect(marker.status).toBe(422);
 
-      // 4./5. Inactive lease (released) — after the item left `leased` state
+      // 4./5. Inactive lease (released) - after the item left `leased` state
       // the lease check still fires first with its own problem type.
       await harness.app.request(
         `/v1/projects/${harness.projectId}/work-items/${ctx.workItemId}/lease/release`,
@@ -344,7 +344,7 @@ ${BLOCK_2_TEXT}
       const chapterFile = harness.repoFiles.get(CHAPTER_PATH)!;
       expect(chapterFile).toContain("revision: 5");
       expect(chapterFile).toContain("The haze settled over the ridge at dawn.");
-      // The concurrent edit is preserved — no clobber.
+      // The concurrent edit is preserved - no clobber.
       expect(chapterFile).toContain("Nobody in Hollow Creek dared speak of it.");
       expect((await harness.repos.workItems.getById(ctx.workItemId))?.status).toBe("completed");
     } finally {
@@ -376,7 +376,7 @@ ${BLOCK_2_TEXT}
       expect(conflictItem?.baseRevision).toBe(4);
 
       // 409-style problem recorded on the operation (the operation itself
-      // committed — its commit IS the conflict record — but `error` carries
+      // committed - its commit IS the conflict record - but `error` carries
       // the structured refusal for polling agents).
       const operation = await harness.repos.gitOperations.getById(operationId);
       expect(operation?.state).toBe("committed");
@@ -386,7 +386,7 @@ ${BLOCK_2_TEXT}
       expect(problem["conflictWorkItemId"]).toBe(conflictItem?.id);
 
       // The conflict-record commit carries the §13 artifact (both texts) and
-      // the original item re-rendered as `conflict` — chapter untouched.
+      // the original item re-rendered as `conflict` - chapter untouched.
       expect(harness.writer.commits).toHaveLength(1);
       const conflictCommit = harness.writer.commits[0]!;
       expect(conflictCommit.files.map((f) => f.path).sort()).toEqual(
@@ -544,7 +544,7 @@ describe("re-anchoring (contract §5, §8 exit criterion 6)", () => {
  * before a moved base may rebase. Unique resolution alone is not the second
  * conjunct: when the concurrent edit deletes the target block, §10.2 step 4
  * legitimately searches chapter-wide and can resurrect the quote in prose the
- * submitter never saw — a clobber reported as a clean rebase.
+ * submitter never saw - a clobber reported as a clean rebase.
  */
 describe("moved-base rebase safety (contract §5, §8 exit criterion 4)", () => {
   const V4_BLOCK_DELETED = `---
@@ -630,7 +630,7 @@ describe("re-anchor completeness and convergence (contract §5, §8.6)", () => {
       // Terminal rows are created FIRST, so with a single capped read they
       // fill the window and hide every live annotation behind them. UUIDv7
       // ids are creation-ordered, so this is the ordinary shape of a
-      // long-lived chapter — 200 LIFETIME annotations, not 200 open ones.
+      // long-lived chapter - 200 LIFETIME annotations, not 200 open ones.
       await seedAnnotations(harness, 205, "resolved", BLOCK_ID_2, "Hollow Creek");
       const live = await seedAnnotations(harness, 4, "open", BLOCK_ID_2, "Hollow Creek");
 
@@ -660,7 +660,7 @@ describe("re-anchor completeness and convergence (contract §5, §8.6)", () => {
 
       // Rewind ONLY the annotation, as a crash between the processor's atomic
       // finalize batch and the post-drain hook would leave it. The outbox row
-      // is `done`, so no future drain can re-emit that outcome — the repair
+      // is `done`, so no future drain can re-emit that outcome - the repair
       // must come from durable state.
       await harness.db
         .prepare(`UPDATE annotations SET chapter_revision = 3 WHERE id = ?`)
@@ -710,7 +710,7 @@ Nobody in Hollow Creek spoke of it.
       expect((await harness.repos.gitOperations.getById(operationId))?.error).not.toBeNull();
 
       // As a crash before the hook would leave it: committed, but with no
-      // problem recorded — a polling agent would read `committed` and
+      // problem recorded - a polling agent would read `committed` and
       // conclude its edit landed.
       await harness.db
         .prepare(`UPDATE git_operations SET error = NULL WHERE id = ?`)

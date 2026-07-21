@@ -307,7 +307,7 @@ describe("<authorbot-settings>", () => {
     expect(patches()).toHaveLength(0);
   });
 
-  it("omits the never-editable fields entirely — no control is bound to them", async () => {
+  it("omits the never-editable fields entirely - no control is bound to them", async () => {
     stubFetch({
       [`${API}/v1/me`]: () => json(200, me("maintainer")),
       [settingsUrl]: () => json(200, doc()),
@@ -335,7 +335,7 @@ describe("<authorbot-settings>", () => {
       expect((control as HTMLInputElement).value ?? "").not.toBe(BOOK_ID);
       expect((control as HTMLInputElement).value ?? "").not.toBe("content/chapters/*.md");
     }
-    // Nothing is merely disabled either — a greyed control is still an offer.
+    // Nothing is merely disabled either - a greyed control is still an offer.
     expect(host.querySelectorAll("[disabled]")).toHaveLength(0);
   });
 
@@ -373,7 +373,7 @@ describe("<authorbot-settings>", () => {
 
   it("requires an explicit confirmation before resending a guarded change", async () => {
     const breaks =
-      "Changing the slug breaks every existing link to this book — bookmarks, citations, and links shared by readers will 404.";
+      "Changing the slug breaks every existing link to this book - bookmarks, citations, and links shared by readers will 404.";
     stubFetch({
       [`${API}/v1/me`]: () => json(200, me("maintainer")),
       [settingsUrl]: (call) => {

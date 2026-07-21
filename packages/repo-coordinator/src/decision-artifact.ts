@@ -12,7 +12,7 @@
  * schema has no boolean flag, but its `result` vocabulary includes
  * `support_changed`. A decision whose `supportChanged` projection flag is set
  * renders `result: support_changed`; when support returns, the re-render
- * restores the stored result — only the `result` line changes between the two
+ * restores the stored result - only the `result` line changes between the two
  * renders. The inverse mapping is lossless: support can only change on a
  * decision that created a work item, and the stored result of such a decision
  * is `create_work_item` for rule crossings (`rule_version >= 1`) and
@@ -43,10 +43,10 @@ export interface DecisionArtifactInput {
   rule: string;
   /** Rule version; `0` marks a maintainer force-create (Phase 3 contract §4). */
   ruleVersion: number;
-  /** Aggregate metric snapshot at crossing — never per-voter data (§26.1). */
+  /** Aggregate metric snapshot at crossing - never per-voter data (§26.1). */
   metrics: Record<string, number>;
   /**
-   * The *stored* decision result. Must not be `support_changed` — that value
+   * The *stored* decision result. Must not be `support_changed` - that value
    * is derived from the `supportChanged` flag at render time so the original
    * result survives the flag being cleared again (design §11.3 "preserve the
    * original threshold-crossing snapshot").
@@ -119,7 +119,7 @@ export interface ParsedDecisionArtifact {
   artifact: Decision;
   /**
    * Projection-side stored result (the artifact's `support_changed` result
-   * decoded back to the original result — see module docs).
+   * decoded back to the original result - see module docs).
    */
   result: DecisionResult;
   /** Projection-side `supportChanged` flag. */

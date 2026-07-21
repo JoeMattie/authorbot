@@ -61,7 +61,7 @@ export type ReopenSuggestionCommand = z.infer<typeof reopenSuggestionCommandSche
 
 /**
  * Override 4: force-create a work item bypassing the rule. `work_type` is not
- * part of the command — it resolves from the annotation scope exactly as
+ * part of the command - it resolves from the annotation scope exactly as
  * rule-created items do (Phase 3 contract section 3).
  */
 export const forceCreateWorkItemCommandSchema = z.strictObject({

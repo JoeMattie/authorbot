@@ -1,6 +1,6 @@
 /**
  * Author-facing access control (Phase 7 contract, "Author-facing access
- * control"): the annotation policy, the freeze, and the agent pause — resolved
+ * control"): the annotation policy, the freeze, and the agent pause - resolved
  * per request and enforced server-side.
  *
  * ## Where each control lives, and why they differ
@@ -14,7 +14,7 @@
  * operational database. Migration 0007 argues the case at length; the short
  * version is that an emergency stop must take effect on the next request rather
  * than the next commit, and must keep working when the repository does not. A
- * settings PATCH is a 202 and refuses a diverged project — correct for a
+ * settings PATCH is a 202 and refuses a diverged project - correct for a
  * policy, useless for a stop button.
  *
  * ## Where enforcement happens
@@ -115,7 +115,7 @@ export async function loadAccessState(
  *
  * Derived rather than declared at each call site so that a new route inherits
  * the right gate from the scope it already had to choose. Routes whose scope
- * says nothing about the policy — reads, token management, member management —
+ * says nothing about the policy - reads, token management, member management -
  * map to `null` and are not policy-gated at all; they are gated by role, and by
  * the freeze when they write.
  */
@@ -138,7 +138,7 @@ export function capabilityForScope(scope: ApiScope | null): PolicyCapability | n
  * Does this policy admit a signed-in NON-member to this request?
  *
  * Only `open` and `approval-gated` widen anything, and only to a human session.
- * An agent token belonging to no membership stays out in every mode — the
+ * An agent token belonging to no membership stays out in every mode - the
  * contract is explicit that an agent's access is "a deliberate grant rather
  * than an implicit inheritance from their owner", and admitting unenrolled
  * tokens under `open` would be exactly that inheritance.
@@ -148,7 +148,7 @@ export function capabilityForScope(scope: ApiScope | null): PolicyCapability | n
  * votes or its work queue.
  *
  * For READS the widening covers chapters and annotations, because the
- * alternative is incoherent — a book that invites any signed-in user to comment
+ * alternative is incoherent - a book that invites any signed-in user to comment
  * must let them read what they are commenting on, and under `approval-gated` an
  * author must be able to see their own queued comment, which the contract
  * requires ("visible to its author, badged as awaiting review"). Note that this
@@ -176,7 +176,7 @@ export function policyAdmitsNonMember(input: {
  * The maintainer control plane: routes a freeze must NOT refuse.
  *
  * The contract scopes the freeze to writes "across annotations, votes, claims,
- * and submissions" — the collaboration surface. It cannot also cover the
+ * and submissions" - the collaboration surface. It cannot also cover the
  * author's own controls, because a freeze that blocked its own reversal would
  * be a one-way door, and "stop everything while I look" is precisely the
  * moment an author needs to change a role, revoke a token, or drain the queue.
@@ -208,7 +208,7 @@ export type WriteGateDenial =
  * arbitrary: the freeze is the broadest and most urgent statement about the
  * book, the agent pause is the next broadest, and the policy is the ordinary
  * standing rule. Reporting the broadest true reason first is what makes the
- * refusal legible — an author who froze the book wants to be told the book is
+ * refusal legible - an author who froze the book wants to be told the book is
  * frozen, not that their agent's role is insufficient.
  */
 export function checkWriteGate(input: WriteGateInput): WriteGateDenial | null {
@@ -219,7 +219,7 @@ export function checkWriteGate(input: WriteGateInput): WriteGateDenial | null {
   }
 
   // The pause applies to control routes too. An agent holding a maintainer-role
-  // membership is a supported (and, under `locked`, necessary) configuration —
+  // membership is a supported (and, under `locked`, necessary) configuration -
   // so if the pause exempted the control plane, a paused agent could unpause
   // itself, and the one population the control exists to stop would be the one
   // population able to lift it.

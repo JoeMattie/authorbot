@@ -70,9 +70,9 @@ export class SystemClock implements Clock {
   sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       // NOT unref'd, deliberately. An unref'd timer does not hold the event
-      // loop open, so whenever a sleep was the only thing pending — which is
+      // loop open, so whenever a sleep was the only thing pending - which is
       // exactly the case while polling a freshly deployed site, with the
-      // prompts finished and no fetch in flight — Node found nothing left to
+      // prompts finished and no fetch in flight - Node found nothing left to
       // do and exited mid-wait. The wizard vanished after "Waiting for
       // <url> to answer" with only V8's "unsettled top-level await" notice,
       // having neither confirmed nor denied that the deploy worked.
@@ -117,7 +117,7 @@ export class FetchHttpClient implements HttpClient {
       }
       throw new WizardError(
         `Could not reach ${safeHost(url)}: ${error instanceof Error ? error.message : String(error)}`,
-        "Check your network connection, then run again — finished steps are skipped.",
+        "Check your network connection, then run again - finished steps are skipped.",
       );
     } finally {
       clearTimeout(timer);
@@ -183,7 +183,7 @@ class NodeLoopbackServer implements LoopbackServer {
 /**
  * Loopback callback server for the GitHub App manifest flow (contract §4.1).
  *
- * Bound to `127.0.0.1` explicitly — not `localhost` (which may resolve to a
+ * Bound to `127.0.0.1` explicitly - not `localhost` (which may resolve to a
  * non-loopback address) and never `0.0.0.0`, which would expose the callback,
  * and therefore the one-time conversion code, to the local network.
  */

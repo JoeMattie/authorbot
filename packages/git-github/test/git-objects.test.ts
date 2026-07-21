@@ -192,7 +192,7 @@ describe("base64", () => {
   });
 
   it("round trips multi-byte UTF-8", () => {
-    const text = "chapître — “quoted” 😀";
+    const text = "chapître - “quoted” 😀";
     expect(new TextDecoder().decode(decodeBase64(encodeBase64(encodeUtf8(text), true)))).toBe(text);
   });
 });

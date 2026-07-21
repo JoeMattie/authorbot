@@ -4,7 +4,7 @@
  * Each `describe` below pins one finding. They live together rather than
  * scattered through the phase suites because what they have in common is not a
  * phase but a shape: every one of them is a place where two mechanisms that
- * were each individually correct disagreed about what they were protecting —
+ * were each individually correct disagreed about what they were protecting -
  * a role check standing in for a scope check, an escape predicate narrower than
  * the validator it feeds, a freeze that classified one route as "control" and
  * its twin as "collaboration". The tests are written to fail if the two drift
@@ -69,8 +69,8 @@ async function setPolicy(policy: AnnotationPolicy): Promise<void> {
 
 /**
  * The configuration the review's finding 1 is about: an agent token granted the
- * maintainer ROLE — which the Phase 7 contract explicitly encourages, so a
- * `locked` book stays annotatable by the author's own agents — while its token
+ * maintainer ROLE - which the Phase 7 contract explicitly encourages, so a
+ * `locked` book stays annotatable by the author's own agents - while its token
  * carries only the weak scopes it actually needs to annotate.
  */
 async function agentMaintainer(
@@ -98,7 +98,7 @@ const freeze = (headers: Record<string, string>, reason = "stopping to look") =>
   );
 
 // ---------------------------------------------------------------------------
-// Finding 1 — the control plane is not owned by the maintainer ROLE alone
+// Finding 1 - the control plane is not owned by the maintainer ROLE alone
 // ---------------------------------------------------------------------------
 
 describe("finding 1: an agent token cannot take over the control plane by role alone", () => {
@@ -171,7 +171,7 @@ describe("finding 1: an agent token cannot take over the control plane by role a
       const body = await json(response);
       expect(response.status, `${route.name} must be refused: ${JSON.stringify(body)}`).toBe(403);
       expect(body.code, route.name).toBe("forbidden");
-      // The refusal names a scope, not a role — the whole point of the fix is
+      // The refusal names a scope, not a role - the whole point of the fix is
       // that the token∩role intersection is what decides.
       expect(String(body.detail), route.name).toMatch(/scope/);
     }
@@ -208,7 +208,7 @@ describe("finding 1: an agent token cannot take over the control plane by role a
   /**
    * The other half of the fix: this must remain a SCOPE gate, not a blanket
    * "agents may not administer". The contract supports an author delegating the
-   * control plane to their own agent — it just has to be delegated on purpose,
+   * control plane to their own agent - it just has to be delegated on purpose,
    * by minting the token with the scope AND raising the role, rather than
    * arriving free with the role.
    */
@@ -250,7 +250,7 @@ describe("finding 1: an agent token cannot take over the control plane by role a
       "github:initial-maintainer",
     ))!;
     // An agent maintainer exists, so the naive "is anyone left?" count is
-    // satisfied — and used to be the only thing standing between an author and
+    // satisfied - and used to be the only thing standing between an author and
     // a book administered exclusively by a machine.
     await agentMaintainer(maintainer);
 
@@ -285,7 +285,7 @@ describe("finding 1: an agent token cannot take over the control plane by role a
 });
 
 // ---------------------------------------------------------------------------
-// Finding 4 — freeze must stop operation retry
+// Finding 4 - freeze must stop operation retry
 // ---------------------------------------------------------------------------
 
 describe("finding 4: a freeze stops operations/:id/retry", () => {
@@ -349,7 +349,7 @@ describe("finding 4: a freeze stops operations/:id/retry", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Finding 5 — freeze must not block credential rotation
+// Finding 5 - freeze must not block credential rotation
 // ---------------------------------------------------------------------------
 
 describe("finding 5: a frozen book can still rotate one credential", () => {
@@ -395,7 +395,7 @@ describe("finding 5: a frozen book can still rotate one credential", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Finding 6 — incident reasons must not leak through the anonymous feed
+// Finding 6 - incident reasons must not leak through the anonymous feed
 // ---------------------------------------------------------------------------
 
 describe("finding 6: the event feed does not publish freeze/pause reasons", () => {
@@ -419,7 +419,7 @@ describe("finding 6: the event feed does not publish freeze/pause reasons", () =
 
     const feed = await anonymousEvents();
     const types = feed.items.map((e: { type: string }) => e.type);
-    // The FACT is still published — a listening client must learn the book
+    // The FACT is still published - a listening client must learn the book
     // froze; it is the prose that is withheld.
     expect(types).toContain("project_frozen");
     expect(types).toContain("agents_paused");
@@ -459,7 +459,7 @@ describe("finding 6: the event feed does not publish freeze/pause reasons", () =
 });
 
 // ---------------------------------------------------------------------------
-// Finding 7 — SSE is bounded in time and in count
+// Finding 7 - SSE is bounded in time and in count
 // ---------------------------------------------------------------------------
 
 describe("finding 7: event streams are bounded", () => {
@@ -528,7 +528,7 @@ describe("finding 7: event streams are bounded", () => {
     expect((await json(third)).code).toBe("rate-limited");
     expect(third.headers.get("Retry-After")).not.toBeNull();
 
-    // A different address is unaffected — the cap is per client, not global.
+    // A different address is unaffected - the cap is per client, not global.
     const other = await harness.app.request(`/v1/projects/${harness.projectId}/events`, {
       headers: { Cookie: cookie, "CF-Connecting-IP": "198.51.100.4" },
     });
@@ -546,7 +546,7 @@ describe("finding 7: event streams are bounded", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Finding 8 — the per-actor limit is per PERSON, not per token
+// Finding 8 - the per-actor limit is per PERSON, not per token
 // ---------------------------------------------------------------------------
 
 describe("finding 8: a fleet does not scale by minting more tokens", () => {
@@ -565,7 +565,7 @@ describe("finding 8: a fleet does not scale by minting more tokens", () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     // Three tokens, each staying well under its own per-token ceiling of 30.
     // Their combined traffic must still be stopped by the owner's per-actor
-    // ceiling of 60 for the annotation class — otherwise "the actor limit
+    // ceiling of 60 for the annotation class - otherwise "the actor limit
     // bounds what one identity can do however many credentials it holds" is
     // false, and a fleet buys throughput by minting.
     const tokens: string[] = [];
@@ -595,7 +595,7 @@ describe("finding 8: a fleet does not scale by minting more tokens", () => {
 
     expect(limited, "63 requests across three tokens must trip the owner's ceiling").not.toBeNull();
     const body = await json(limited!);
-    // Attributed to the ACTOR ceiling, not the token's — no single token got
+    // Attributed to the ACTOR ceiling, not the token's - no single token got
     // anywhere near 30.
     expect(body.scope).toBe("actor");
     expect(body.limitClass).toBe("annotation");
@@ -622,7 +622,7 @@ describe("finding 8: a fleet does not scale by minting more tokens", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Finding 9 — the Phase 3 override routes carry real scopes
+// Finding 9 - the Phase 3 override routes carry real scopes
 // ---------------------------------------------------------------------------
 
 describe("finding 9: override routes require a real scope", () => {
@@ -638,7 +638,7 @@ describe("finding 9: override routes require a real scope", () => {
     expect(forced.status).toBe(403);
     expect(String((await json(forced)).detail)).toContain("work:claim");
 
-    // No work item was created — the point of the finding is the whole chain
+    // No work item was created - the point of the finding is the whole chain
     // (create a suggestion, then force work on it) being available for free.
     const decision = await harness.repos.decisions.getWorkItemCreation(annotationId);
     expect(decision).toBeNull();
@@ -684,7 +684,7 @@ describe("finding 9: override routes require a real scope", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Finding 10 — one secret per trust domain
+// Finding 10 - one secret per trust domain
 // ---------------------------------------------------------------------------
 
 describe("finding 10: the publication callback has its own secret", () => {
@@ -755,7 +755,7 @@ describe("finding 10: the publication callback has its own secret", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Finding 13 — approval re-checks the anchor the create path enforces
+// Finding 13 - approval re-checks the anchor the create path enforces
 // ---------------------------------------------------------------------------
 
 describe("finding 13: moderation approval re-validates revision and block", () => {

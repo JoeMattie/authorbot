@@ -2,7 +2,7 @@ import { z } from "zod";
 import { timestampSchema, uuidv7Schema } from "./primitives.js";
 
 /**
- * Release manifest `.authorbot/releases/<id>.yml` — `authorbot.release/v1`
+ * Release manifest `.authorbot/releases/<id>.yml` - `authorbot.release/v1`
  * (contract section 4). A release pins at least one chapter revision.
  */
 export const releaseSchema = z.strictObject({

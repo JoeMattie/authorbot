@@ -1,7 +1,7 @@
-# Phase 9 implementation contract — documentation and the project site
+# Phase 9 implementation contract - documentation and the project site
 
-Additive to Phase 0–8 contracts. Follows Phase 6 because the site documents
-the wizard, the "New chapter" button, and settings — none of which can be
+Additive to Phase 0-8 contracts. Follows Phase 6 because the site documents
+the wizard, the "New chapter" button, and settings - none of which can be
 screenshotted before they exist.
 
 **Goal:** a novelist who has never heard of Authorbot can land on
@@ -14,7 +14,7 @@ stops greeting newcomers with implementation contracts.
 Everything written so far is engineering documentation: seven phase contracts,
 twenty-plus ADRs, a design document written for an implementer. That is
 correct and should stay. But it is *all* we have, and the README leads with
-architecture and phase status — so an author arriving from a link sees a
+architecture and phase status - so an author arriving from a link sees a
 monorepo layout and a roadmap table rather than "this helps you write a serial
 novel with other people."
 
@@ -35,7 +35,7 @@ curious. Publishing them would bury the four pages an author actually needs.
 
 Rewritten for a first-time visitor, in this order: what Authorbot is (two
 sentences), who it is for, a screenshot, the one-line quickstart, what it
-costs (a GitHub account, a Cloudflare account, free tiers), and *then* links —
+costs (a GitHub account, a Cloudflare account, free tiers), and *then* links -
 site, getting started, how it works. Roadmap, monorepo layout, and phase
 contracts move below the fold or into `CONTRIBUTING.md`.
 
@@ -52,8 +52,8 @@ artifact of the delivery sequence and should not outlive it in places people
 read to understand the system.
 
 **Rename the phase-numbered test files** to describe their subject. There are
-nine, and nothing outside them refers to the names — no package script, no
-workflow, no document — so this is a rename and nothing more:
+nine, and nothing outside them refers to the names - no package script, no
+workflow, no document - so this is a rename and nothing more:
 
 | Now | Becomes |
 |---|---|
@@ -68,17 +68,17 @@ workflow, no document — so this is a rename and nothing more:
 | `phase7-access-control.test.ts` | `access-control-integration.test.ts` |
 
 (`concurrency-governance.test.ts`, `recovery-restore-drill.test.ts`, and
-`resilience-*.test.ts` are already named for what they test — that is the
+`resilience-*.test.ts` are already named for what they test - that is the
 standard the rest should meet.)
 
 **Do NOT mass-edit the inline citations.** Roughly 523 comments across 355
 files cite "Phase N contract §X". They are precise pointers to a document that
 still exists and still says that, and rewriting them is churn with real
-regression risk for no reader benefit — the alternative to a precise citation
+regression risk for no reader benefit - the alternative to a precise citation
 is usually a vaguer one.
 
 **Instead, make the citations navigable.** Add `docs/contracts.md`: a one-page
-index mapping each phase contract to the subject it specifies ("Phase 4 —
+index mapping each phase contract to the subject it specifies ("Phase 4 -
 leases, task bundles, submissions, conflict handling"), so a reader who meets
 "Phase 4 contract §5" in a comment can find out what that means in one hop.
 The phase contracts themselves keep their names: they are a historical record
@@ -86,32 +86,32 @@ of the build sequence, and that is legitimately what they are about.
 
 ## 4. The site
 
-Static, deployed to `authorbot.joemattie.com` on Cloudflare — the same shape
+Static, deployed to `authorbot.joemattie.com` on Cloudflare - the same shape
 as a book site, so we operate one kind of thing.
 
 **Pages:**
 
-1. **Landing** — what it is, the core promise ("Authorbot manages authorship.
+1. **Landing** - what it is, the core promise ("Authorbot manages authorship.
    It does not perform authorship."), a screenshot of the annotation gutter,
    the quickstart command, and honest scope: what it does *not* do (no LLM, no
    hosting, no lock-in).
-2. **Quickstart** — the wizard, start to finish, with what each stage asks and
+2. **Quickstart** - the wizard, start to finish, with what each stage asks and
    what you get. The page a link should point at.
-3. **How it works** — the three planes and the lifecycle of one change, in
+3. **How it works** - the three planes and the lifecycle of one change, in
    author language. Adapted from `docs/how-it-works.md`, with its ASCII
    diagrams redrawn as SVG for the web while the text stays canonical in the
    repository.
-4. **Guides** — task-shaped, one page each: write and publish a chapter;
+4. **Guides** - task-shaped, one page each: write and publish a chapter;
    invite a collaborator; tune governance; work with agents; upgrade;
    troubleshoot.
-5. **Reference** — CLI commands, the book repository format, and the API,
+5. **Reference** - CLI commands, the book repository format, and the API,
    **generated from source** (§6) rather than retyped.
-6. **How it's built** — one page for the engineering-curious, linking the
+6. **How it's built** - one page for the engineering-curious, linking the
    design document, contracts, and ADRs.
 
 **Not in scope:** a blog, a changelog beyond release notes, versioned doc
 trees (single current version until there is a v2), search (the site is small
-enough to navigate), and analytics — consistent with a project that collects
+enough to navigate), and analytics - consistent with a project that collects
 nothing.
 
 ## 5. Screenshots that cannot rot
@@ -124,7 +124,7 @@ Playwright suite**, not taken by hand.
   against the dev API with seeded fixture content, capturing each documented
   view at a fixed viewport in both colour schemes.
 - Output is committed, and CI fails when a regenerated screenshot differs
-  beyond a small threshold — the same signal a broken test gives.
+  beyond a small threshold - the same signal a broken test gives.
 - Every screenshot on the site is produced this way. A screenshot that cannot
   be generated from a running system does not go on the site.
 
@@ -154,7 +154,7 @@ JavaScript.
 A read-only demonstration book with seeded annotations, votes, and a work
 queue, so a visitor can see the collaboration UI without installing anything.
 **Read-only**: no sign-in, no writes, no moderation burden, no abuse surface.
-Deferred if it competes with Phase 7 hardening for attention — a good
+Deferred if it competes with Phase 7 hardening for attention - a good
 screenshot conveys most of the value at a fraction of the cost.
 
 ## 9. Exit criteria
@@ -185,5 +185,5 @@ install path for agent users (Phase 8), and again for the site's own links.
 Writing it once, against a settled surface, costs less and reads better.
 
 Accepted consequence: the README stays engineer-facing until then. That is
-honest — until Phase 6 the tool is not installable by a novelist, so the only
+honest - until Phase 6 the tool is not installable by a novelist, so the only
 audience who can act on it today is the one it currently addresses.

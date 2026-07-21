@@ -2,7 +2,7 @@ import type { DeclarativeRule, RuleCondition } from "@authorbot/schemas";
 import { METRIC_NAMES, type MetricName } from "./metrics.js";
 
 /**
- * Declarative rule evaluation (Phase 3 contract section 3). Rules are data —
+ * Declarative rule evaluation (Phase 3 contract section 3). Rules are data -
  * no user-supplied code, templates, or expressions are ever evaluated. The
  * rule shape is `authorbot.instance/v1` (`@authorbot/schemas`
  * `declarativeRuleSchema`); this module decides whether a metric record
@@ -11,7 +11,7 @@ import { METRIC_NAMES, type MetricName } from "./metrics.js";
  * Fail-closed policy: a condition naming a metric outside the closed Phase 3
  * vocabulary, a metric absent from the supplied record, or an operator
  * outside the contract's five (`gte|lte|gt|lt|eq`) makes the whole rule
- * unsatisfied — even inside an `any` group whose other conditions pass. A
+ * unsatisfied - even inside an `any` group whose other conditions pass. A
  * misconfigured rule must never create work items. Note: the instance schema
  * admits `neq` as config shape; the Phase 3 contract does not list it, so
  * evaluation rejects it (fail closed) until a later phase admits it.

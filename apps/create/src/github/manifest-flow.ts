@@ -79,8 +79,8 @@ export const GITHUB_WEB_BASE = "https://github.com";
  *
  * `!==` short-circuits at the first differing byte, so the time it takes to
  * refuse a callback leaks how much of `state` the caller guessed. It is not
- * practically exploitable here — 32 CSPRNG bytes behind a 16-byte unguessable
- * callback path, over a single-shot loopback listener — but the fix costs one
+ * practically exploitable here - 32 CSPRNG bytes behind a 16-byte unguessable
+ * callback path, over a single-shot loopback listener - but the fix costs one
  * function and removes the need for anyone to re-derive that argument. Lengths
  * are compared first because `timingSafeEqual` throws on a mismatch; a length
  * difference is not a secret.
@@ -102,7 +102,7 @@ export function statesMatch(returned: string | null, expected: string): boolean 
  * repository permission.
  *
  * `request_oauth_on_install` is FALSE, and that is load-bearing. It does not
- * decide whether this app can authenticate readers — the client credentials do
+ * decide whether this app can authenticate readers - the client credentials do
  * that, and sign-in works either way. All it decides is whether GitHub runs
  * the OAuth flow *during installation*, which sent the author straight to
  * `/v1/auth/github/callback` at the one moment it could not exist: the Worker
@@ -111,7 +111,7 @@ export function statesMatch(returned: string | null, expected: string): boolean 
  * middle of setup, on a page the wizard does not control, while the terminal
  * behind it carried on working.
  *
- * With it false, GitHub sends them to `setup_url` — the book's own site, which
+ * With it false, GitHub sends them to `setup_url` - the book's own site, which
  * `publish` put up minutes earlier and which answers 200.
  */
 export function buildManifest(
@@ -125,14 +125,14 @@ export function buildManifest(
       url: options.webhookUrl,
       active: true,
       // NO `secret` HERE. It is not a permitted manifest key, and GitHub
-      // rejects the entire manifest for its presence — "Error \"secret\" is
-      // not a permitted key" — before the app is ever created. GitHub
+      // rejects the entire manifest for its presence - "Error \"secret\" is
+      // not a permitted key" - before the app is ever created. GitHub
       // generates the webhook secret itself and hands it back from the
       // conversion, which is the value the caller uses, so proposing one was
       // never anything but a way to fail.
     },
     // `redirect_url` is where GitHub sends the *one-time creation code*, so it
-    // is the loopback server — not the site. `callback_urls` is a different
+    // is the loopback server - not the site. `callback_urls` is a different
     // thing entirely: where GitHub sends readers after they sign in, which is
     // on the book's own origin (ADR-0019). Conflating the two is the classic
     // way to make this flow hang forever waiting for a callback that went to
@@ -234,7 +234,7 @@ export async function runManifestFlow(
     resolveCode = resolve;
     rejectCode = reject;
   });
-  // The callback can arrive (and be refused) before anything awaits this — the
+  // The callback can arrive (and be refused) before anything awaits this - the
   // browser may be quicker than the next line of this function. Attaching an
   // inert handler now marks the rejection as observed, so Node does not report
   // an unhandled rejection for a failure the caller is about to be told about
@@ -344,7 +344,7 @@ export async function convertManifestCode(
 
   if (response.status === 404 || response.status === 422) {
     throw new WizardError(
-      "GitHub would not exchange the setup code — it has already been used, or it expired.",
+      "GitHub would not exchange the setup code - it has already been used, or it expired.",
       "Run `create-authorbot collaborate` again; the browser step has to be finished within an hour of starting it.",
     );
   }
@@ -440,14 +440,14 @@ export async function withDeadline<T>(
 /**
  * GitHub's PEM, in the one format the Worker can actually use.
  *
- * The manifest conversion returns a PKCS#1 key — `BEGIN RSA PRIVATE KEY` —
+ * The manifest conversion returns a PKCS#1 key - `BEGIN RSA PRIVATE KEY` -
  * and WebCrypto, which is all a Cloudflare Worker has, cannot import one. The
  * wizard stored it verbatim, so every book it set up reported
  * `gitIntegration: "invalid"` and did no Git work at all: chapters could not
  * be saved, the projection never ran, and nothing said why.
  *
  * `createPrivateKey` parses either format and re-exports as PKCS#8, so this is
- * a re-encoding rather than a conversion in any meaningful sense — the key
+ * a re-encoding rather than a conversion in any meaningful sense - the key
  * material is untouched.
  *
  * A key that cannot be parsed is passed through unchanged: the Worker's own

@@ -1,7 +1,7 @@
 /**
  * Fault injection (Phase 5 contract §7). The point of every test here is
  * that a fault fires **exactly** its budgeted number of times and then the
- * fake behaves correctly again — that is what makes the writer's bounded
+ * fake behaves correctly again - that is what makes the writer's bounded
  * retry and the auth layer's 401 refresh testable.
  */
 import { describe, expect, it } from "vitest";
@@ -111,7 +111,7 @@ describe("unauthorized", () => {
     expect(rejected.status).toBe(401);
 
     // A fresh token is minted; the same *old* token now works too, because
-    // the fault — not the credential — was the failure.
+    // the fault - not the credential - was the failure.
     const refreshed = await getInstallationToken(fake);
     expect(refreshed).not.toBe(token);
     await expect(api(fake, { method: "GET", path, token: refreshed })).resolves.toMatchObject({

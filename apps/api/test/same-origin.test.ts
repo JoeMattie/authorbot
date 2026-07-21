@@ -503,7 +503,7 @@ describe("OAuth return_to (github mode, ADR-0019 §4)", () => {
   it("propagates a same-origin return_to through the signed state cookie", async () => {
     const g = await makeGithubHarness();
     try {
-      // Hono#request builds requests against http://localhost — the API's own
+      // Hono#request builds requests against http://localhost - the API's own
       // origin, which under ADR-0019 is also the site's.
       const target = `${API_ORIGIN}/chapters/baseline#annotate`;
       const { response, stateCookie, state } = await startOauth(g, target);
@@ -625,7 +625,7 @@ describe("isValidReturnTo unit matrix", () => {
     [`${FOREIGN}/`, false],
     ["http://localhost:4321/ch/2", false],
     ["javascript:alert(1)", false],
-    ["HTTP://API.EXAMPLE/path", false], // not a literal origin prefix — conservative
+    ["HTTP://API.EXAMPLE/path", false], // not a literal origin prefix - conservative
   ])("%s → %s", (value, expected) => {
     expect(isValidReturnTo(value, API)).toBe(expected);
   });

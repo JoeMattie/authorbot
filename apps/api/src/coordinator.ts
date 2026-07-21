@@ -9,17 +9,17 @@
  * covered without workerd in the default suite.
  *
  * WORKER-SAFE: WebCrypto and `fetch` only. No `node:` import may reach this
- * file or anything it pulls in — notably not mirror.ts, which constructs
+ * file or anything it pulls in - notably not mirror.ts, which constructs
  * `LocalGitAdapter` (`node:child_process`). The shared drain lives in
  * drain.ts precisely so this file can reuse it without that edge.
  *
  * Degraded, not broken (contract §2): with no GitHub App credentials the
  * coordinator still sweeps leases and still reschedules its alarm, but
- * performs no Git work at all — no outbox row is claimed, no projection is
+ * performs no Git work at all - no outbox row is claimed, no projection is
  * rebuilt. That is exactly the state the live deployment runs in today, and
  * `gitIntegration` reports it rather than pretending.
  *
- * Serialization: EVERY action — drain, projection refresh, lease sweep — runs
+ * Serialization: EVERY action - drain, projection refresh, lease sweep - runs
  * on one per-project promise chain (`serialize` below), not just the drain.
  * A Durable Object serializes storage operations, not `fetch` invocations
  * across arbitrary awaits, and these actions await dozens of outbound GitHub
@@ -63,7 +63,7 @@ export const MAX_COORDINATOR_ALARM_SECONDS = 86_400;
  * Whether this deployment can talk to GitHub. `unconfigured` is the live
  * deployment's state and is reported by `GET /v1/projects/{id}`;
  * `incomplete` means some but not all of the three credential variables are
- * set — a half-configured app must never half-work, so it is not
+ * set - a half-configured app must never half-work, so it is not
  * `configured` (contract §2).
  */
 export type GitIntegrationStatus =
@@ -102,7 +102,7 @@ export interface AlarmScheduler {
  * (contract §5: "The DO holds no durable state beyond scheduling
  * bookkeeping; D1 remains the source of operational truth"). Today that is
  * just the project id the instance owns, recorded by coordinator-do.ts so an
- * alarm firing after an eviction knows what to work on — `idFromName` is
+ * alarm firing after an eviction knows what to work on - `idFromName` is
  * one-way.
  *
  * The coordinator itself deliberately takes no store: the one piece of state
@@ -128,7 +128,7 @@ export interface CoordinatorGit {
    * The writer takes no branch: every commit targets `projects.default_branch`
    * read from D1 (processor.ts). The reader used to take its branch from the
    * `DEFAULT_BRANCH` binding instead, and nothing reconciled the two after the
-   * first-boot seed — `seedProject` only INSERTs, and no repository exposes an
+   * first-boot seed - `seedProject` only INSERTs, and no repository exposes an
    * UPDATE touching `default_branch`. So an operator migrating the repository's
    * default branch and updating the binding (which
    * `docs/github-app-setup.md` tells them to do) moved the reader while the
@@ -144,7 +144,7 @@ export interface CoordinatorGit {
 }
 
 export interface ProjectCoordinatorOptions {
-  /** The project this coordinator owns — the DO's `idFromName` key. */
+  /** The project this coordinator owns - the DO's `idFromName` key. */
   projectId: string;
   db: SqlDatabase;
   clock?: Clock;
@@ -236,7 +236,7 @@ export interface ProjectCoordinator {
    * `projects.projection_stale` is set.
    */
   refreshProjection(options?: { onlyIfStale?: boolean }): Promise<RefreshProjectionResult>;
-  /** Eager lease expiry (Phase 4 §2) — runs with or without credentials. */
+  /** Eager lease expiry (Phase 4 §2) - runs with or without credentials. */
   sweepLeases(): Promise<SweepResult>;
   /** Flag the projection as owing a refresh; the next alarm performs it. */
   markProjectionStale(): Promise<void>;
@@ -269,7 +269,7 @@ export function createProjectCoordinator(
    * so `/refresh` (webhook) and `/drain` (mutation) interleaved freely: a
    * refresh pinned at head H1 could resume after a drain committed H2 and
    * bumped a chapter to revision N+1, see `snapshotRevision (N) <
-   * current.revision (N+1)`, and mark the whole project `diverged` — 403ing
+   * current.revision (N+1)`, and mark the whole project `diverged` - 403ing
    * every submission until a maintainer cleared it, with nothing actually
    * wrong in the repository. In the other order the refresh's rebuild wrote
    * H1's revision/contentHash/blockIds back over the freshly committed N+1.
@@ -363,7 +363,7 @@ export function createProjectCoordinator(
       // Read the branch the WRITER commits to, not a binding: one source of
       // truth for "which branch is this book" (see CoordinatorGit.readerFor).
       const reader = git.readerFor?.(project.defaultBranch) ?? git.reader;
-      // reconcileProjection owns clearing the flag — and clears it only if
+      // reconcileProjection owns clearing the flag - and clears it only if
       // nothing bumped the row mid-pass, so a push arriving during a refresh is
       // not swallowed.
       const result = await reconcileProjection({ db, repos, clock }, project, reader, {
@@ -454,7 +454,7 @@ export function createProjectCoordinator(
 
 /**
  * Error text with no credential material in it. The GitHub package already
- * scrubs tokens from its own messages; this is the second gate — anything the
+ * scrubs tokens from its own messages; this is the second gate - anything the
  * coordinator records or returns passes through here, and a non-Error value
  * (which could be an arbitrary thrown object) is never stringified.
  */
@@ -477,7 +477,7 @@ export interface CoordinatorBindings {
 
 /**
  * Credential status for `GET /v1/projects/{id}` (contract §2). Never returns
- * or logs any credential value — only which names are present.
+ * or logs any credential value - only which names are present.
  */
 export function gitIntegrationStatus(bindings: CoordinatorBindings): GitIntegrationStatus {
   return readGitHubAppCredentialResult(asEnvRecord(bindings)).status;
@@ -486,7 +486,7 @@ export function gitIntegrationStatus(bindings: CoordinatorBindings): GitIntegrat
 /**
  * The credential reader takes an open env record; `CoordinatorBindings` is a
  * closed interface, so it needs a widening. Read-only and no value is copied
- * out — the reader only ever looks up the three `GITHUB_APP_*` names.
+ * out - the reader only ever looks up the three `GITHUB_APP_*` names.
  */
 function asEnvRecord(bindings: CoordinatorBindings): Readonly<Record<string, unknown>> {
   return bindings as unknown as Readonly<Record<string, unknown>>;
@@ -510,7 +510,7 @@ export function parseRepoCoordinates(repo: string): { owner: string; repo: strin
  * is not fully configured. Both sides share ONE `GitHubAppAuth` (the
  * per-isolate singleton), so they share its installation-token cache and a
  * refresh benefits both. The token never leaves that object: the reader gets
- * `authorizedFetch` and the writer gets the auth object as its token source —
+ * `authorizedFetch` and the writer gets the auth object as its token source -
  * neither is ever handed a token string to hold, log, or persist.
  */
 export function createCoordinatorGit(
@@ -558,7 +558,7 @@ export function createCoordinatorGit(
   // asks for `projects.default_branch`, the same value the writer commits to.
   const reader = readerFor(branch);
   // The writer owns its own Authorization header and its own 401 refresh, so
-  // it takes the plain fetch — passing `auth.authorizedFetch` here would set
+  // it takes the plain fetch - passing `auth.authorizedFetch` here would set
   // the header twice.
   const writer = new GitHubBookRepoWriter({
     repo,

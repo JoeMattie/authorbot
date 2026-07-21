@@ -191,7 +191,7 @@ describe("resolveTarget context verification (design §10.2, contract §5/§8.5)
     expect(shiftedText.slice(42, 50)).toBe("the door");
     expect(shiftedText.indexOf("the door")).toBe(42);
     const result = resolveTarget(shifted, stored);
-    // The quote alone matches at 42, but the stored prefix does not — that is
+    // The quote alone matches at 42, but the stored prefix does not - that is
     // the first occurrence wearing the target's offsets, not the target.
     if (result.kind === "exact") {
       throw new Error("resolved `exact` onto an occurrence the stored context refutes");
@@ -205,7 +205,7 @@ describe("resolveTarget context verification (design §10.2, contract §5/§8.5)
   });
 
   it("a lone candidate whose context disagrees is not accepted", () => {
-    // The target block is gone and the quote survives exactly once elsewhere —
+    // The target block is gone and the quote survives exactly once elsewhere -
     // but in prose bearing no resemblance to the stored surroundings.
     const source = doc([
       [ID_B, "A totally unrelated paragraph mentioning the door once."],

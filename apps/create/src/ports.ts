@@ -2,7 +2,7 @@
  * Injection seams for everything the wizard cannot do purely in memory
  * (Phase 6 contract §6: "`gh`, `wrangler`, and the GitHub API replaced by
  * in-process fakes"). Nothing in `src/stages` may import `node:child_process`,
- * `node:http`, or `globalThis.fetch` directly — it asks one of these ports,
+ * `node:http`, or `globalThis.fetch` directly - it asks one of these ports,
  * which the test suite substitutes rather than monkey-patches.
  */
 
@@ -116,7 +116,7 @@ export interface LoopbackResponse {
 }
 
 export interface LoopbackServer {
-  /** `http://127.0.0.1:<port>` — always a loopback address, never 0.0.0.0. */
+  /** `http://127.0.0.1:<port>` - always a loopback address, never 0.0.0.0. */
   readonly origin: string;
   /** Idempotent; safe to call from a `finally` that may run twice. */
   close(): Promise<void>;
@@ -162,7 +162,7 @@ export interface Environment {
   readonly env: Readonly<Record<string, string | undefined>>;
   /**
    * The Node version actually running the wizard (`process.version`), which is
-   * the one that matters — not whichever `node` is first on PATH.
+   * the one that matters - not whichever `node` is first on PATH.
    */
   readonly nodeVersion: string;
   /** Terminal width, clamped by the reporter to at most 80 (contract §2.8). */
@@ -173,7 +173,7 @@ export interface Environment {
    *
    * `npx @authorbot/create` leaves nothing on PATH, so every "run this to
    * carry on" line that said `create-authorbot` was a command not found for
-   * anyone who started the documented way — offered at exactly the moment
+   * anyone who started the documented way - offered at exactly the moment
    * something had already gone wrong.
    */
   readonly invocation: string;

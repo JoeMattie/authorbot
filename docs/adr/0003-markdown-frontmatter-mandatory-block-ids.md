@@ -17,7 +17,7 @@ in-source block IDs versus a sidecar anchor map.
 - Each semantic block is preceded by an HTML-comment marker on its own line:
   `<!-- authorbot:block id="<uuidv7>" -->` (contract §3). Ordinary Markdown
   renderers ignore it, keeping the repository portable (§3.4).
-- Block IDs are **mandatory** in chapter sources — no sidecar anchor map
+- Block IDs are **mandatory** in chapter sources - no sidecar anchor map
   (§26.1). v0.1 requires markers on top-level paragraphs, headings, code
   blocks, and blockquotes; list items and table rows are optional in Phase 0.
 - Removing IDs in normal edits fails validation (`BLOCK_ID_MISSING`); a

@@ -386,7 +386,7 @@ export class CollectingOutput implements OutputPort {
     this.stderr.push(line);
   }
 
-  /** Everything printed, both streams — what a leak test inspects. */
+  /** Everything printed, both streams - what a leak test inspects. */
   all(): string {
     return [...this.stdout, ...this.stderr].join("\n");
   }

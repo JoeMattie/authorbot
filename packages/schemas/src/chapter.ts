@@ -18,7 +18,7 @@ export const chapterStatusSchema = z.enum(CHAPTER_STATUSES);
 export type ChapterStatus = z.infer<typeof chapterStatusSchema>;
 
 /**
- * Chapter frontmatter — `authorbot.chapter/v1` (design section 8.3,
+ * Chapter frontmatter - `authorbot.chapter/v1` (design section 8.3,
  * contract section 4).
  */
 export const chapterFrontmatterSchema = z.strictObject({

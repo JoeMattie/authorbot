@@ -6,7 +6,7 @@
  * keys are emitted in a fixed order, YAML serialization options are pinned
  * (`lineWidth: 0`, two-space indent, no anchors), line endings are normalized
  * to `\n`, and the body ends with exactly one trailing newline. A withdraw is
- * a re-render of the same annotation with `status: withdrawn` — only the
+ * a re-render of the same annotation with `status: withdrawn` - only the
  * frontmatter `status` line changes.
  *
  * Every rendered frontmatter object is validated against the Phase 0
@@ -27,7 +27,7 @@ export interface RenderedFile {
   content: string;
 }
 
-/** Pinned YAML options — changing these changes committed bytes. */
+/** Pinned YAML options - changing these changes committed bytes. */
 export const YAML_OPTIONS = {
   indent: 2,
   lineWidth: 0,

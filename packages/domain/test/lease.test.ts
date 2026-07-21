@@ -193,7 +193,7 @@ describe("checkWorkItemClaimable (design section 12.2 step 1)", () => {
     // lease" is unambiguous: the slot is free. An interrupted expiry or a bare
     // administrative revocation leaves exactly this state, and denying it as
     // `lease-held` made the item permanently unclaimable, unreleasable, and
-    // unsweepable — repairable only by direct database surgery.
+    // unsweepable - repairable only by direct database surgery.
     expect(checkWorkItemClaimable("leased", null, at(0))).toEqual({
       allowed: true,
       priorLeaseExpired: true,

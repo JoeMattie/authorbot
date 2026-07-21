@@ -246,7 +246,7 @@ describe("signing out", () => {
     const out = await h.app.request("/v1/auth/logout", { method: "POST" , headers: { cookie } });
     expect(out.status).toBe(204);
 
-    // And is dead after — revoked server-side, not merely forgotten by the
+    // And is dead after - revoked server-side, not merely forgotten by the
     // browser. Replaying the exact same value must fail.
     expect((await h.app.request("/v1/me", { headers: { cookie } })).status).toBe(401);
   });

@@ -5,7 +5,7 @@
  * The version lives in more places than the package manifests: the wizard
  * pins the toolchain a generated book installs, and the book template pins it
  * too. Both are deliberately constants rather than lookups so a change shows
- * up in a diff (see `scaffold/render.ts`) — but that only works if bumping
+ * up in a diff (see `scaffold/render.ts`) - but that only works if bumping
  * them is one action. Doing it by hand meant a release reached CI with the
  * wizard pinning a version that no longer existed, which a test caught after
  * a full build.

@@ -1,10 +1,10 @@
 /**
- * `@authorbot/git-github/testing` — the deterministic fake GitHub API
+ * `@authorbot/git-github/testing` - the deterministic fake GitHub API
  * (Phase 5 contract §7).
  *
  * Worker-safe like the rest of the package: the fake is an in-process object
  * with a `fetch`-shaped handler, not a server. It never reads the filesystem
- * — seed it with a path -> content map the caller assembled.
+ * - seed it with a path -> content map the caller assembled.
  *
  * Typical use:
  *

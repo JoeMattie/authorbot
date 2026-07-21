@@ -16,7 +16,7 @@ export interface MeActor {
  * One project membership as `/v1/me` returns it. Only `role` is load-bearing
  * for the islands: Phase 6 gates the authoring and settings surfaces on the
  * editor/maintainer roles, and the API checks the same role again on every
- * write — this is which affordances to *offer*, never the authorization.
+ * write - this is which affordances to *offer*, never the authorization.
  */
 export interface MeMembership {
   role: string;
@@ -64,7 +64,7 @@ export interface AnnotationTarget {
 export type VoteValue = "approve" | "reject" | "abstain";
 
 /**
- * Aggregate vote tally (Phase 3 contract §2/§26.1: counts only — never
+ * Aggregate vote tally (Phase 3 contract §2/§26.1: counts only - never
  * per-voter data). Mirrors the API's `tallyJson`.
  */
 export interface VoteTally {
@@ -78,7 +78,7 @@ export interface VoteTally {
   /**
    * Role-aware approval counts (Phase 6 contract §3.6). Optional because a
    * deployment predating the amendment omits them; the override panel shows
-   * "—" rather than a confident zero when they are absent.
+   * "-" rather than a confident zero when they are absent.
    */
   maintainerApprovals?: number;
   humanMaintainerApprovals?: number;
@@ -113,7 +113,7 @@ export interface Annotation {
   votes?: VoteTally;
   /** The create_work_item decision, or null (§6 badge). */
   decision?: DecisionSummary | null;
-  /** The viewer's own current vote — member-only (§2). */
+  /** The viewer's own current vote - member-only (§2). */
   myVote?: VoteValue | null;
 }
 
@@ -212,7 +212,7 @@ export interface BundleTarget {
 }
 
 /**
- * The claim response — design §15.3 / Phase 4 contract §3, verbatim.
+ * The claim response - design §15.3 / Phase 4 contract §3, verbatim.
  *
  * SECURITY: every string under `context`, `document.source` and
  * `workItem.acceptanceCriteria` is **untrusted project prose** (design
@@ -287,7 +287,7 @@ export interface SubmissionConflict {
 // ---- Phase 6 §3.5: chapter authoring ---------------------------------------
 
 /**
- * `GET .../chapters/{id}/source` — a chapter's prose as an author wrote it.
+ * `GET .../chapters/{id}/source` - a chapter's prose as an author wrote it.
  *
  * `body` is marker-free and frontmatter-free by construction (the API strips
  * block markers before returning it), which is what lets the composer be a
@@ -350,7 +350,7 @@ export interface GuardedField {
  */
 export type AnnotationPolicy = "open" | "approval-gated" | "collaborators-only" | "locked";
 
-/** `GET .../settings` — mirrors the API's field taxonomy exactly. */
+/** `GET .../settings` - mirrors the API's field taxonomy exactly. */
 export interface SettingsDocument {
   settings: {
     title: string;
@@ -383,7 +383,7 @@ export interface SettingsDocument {
   };
   /**
    * Values the API will never change, each with the reason. Present so the
-   * boundary can be EXPLAINED — never bound to a form control (contract §3.6:
+   * boundary can be EXPLAINED - never bound to a form control (contract §3.6:
    * never-editable fields are absent from the interface, not disabled).
    */
   readOnly: Record<string, string | boolean | null | Record<string, string>>;
@@ -475,7 +475,7 @@ export class CollabApi {
   /** OAuth start URL with `return_to` back to the current page (§2.4). */
   /**
    * Ends the session. Returns false only when the request could not be made or
-   * the API refused it — the caller keeps the button and says so, rather than
+   * the API refused it - the caller keeps the button and says so, rather than
    * reloading into a page where the reader is still signed in.
    */
   async signOut(): Promise<boolean> {
@@ -523,7 +523,7 @@ export class CollabApi {
 
   /**
    * Auth state with reachability (contract §1): `ok: false, status: 0` ONLY
-   * when the API cannot be reached at all — the caller must then render zero
+   * when the API cannot be reached at all - the caller must then render zero
    * collaboration chrome. Any HTTP response (401 included) is `ok: true`,
    * with `value: null` meaning "reachable but signed out".
    */
@@ -606,7 +606,7 @@ export class CollabApi {
     try {
       response = await this.post(url, body);
     } catch {
-      return { ok: false, status: 0, message: "network error — is the API reachable?" };
+      return { ok: false, status: 0, message: "network error - is the API reachable?" };
     }
     if (response.status !== 202 && !response.ok) {
       return { ok: false, status: response.status, message: await problemMessage(response) };
@@ -685,7 +685,7 @@ export class CollabApi {
     try {
       response = await pending;
     } catch {
-      return { ok: false, status: 0, message: "network error — is the API reachable?" };
+      return { ok: false, status: 0, message: "network error - is the API reachable?" };
     }
     if (!response.ok) {
       return { ok: false, status: response.status, message: await problemMessage(response) };
@@ -745,7 +745,7 @@ export class CollabApi {
     try {
       response = await pending;
     } catch {
-      return { ok: false, status: 0, message: "network error — is the API reachable?" };
+      return { ok: false, status: 0, message: "network error - is the API reachable?" };
     }
     if (!okStatuses.includes(response.status)) {
       let body: Record<string, unknown> | undefined;
@@ -789,7 +789,7 @@ export class CollabApi {
     );
   }
 
-  /** Release the lease — holder or maintainer; no token required (contract §2). */
+  /** Release the lease - holder or maintainer; no token required (contract §2). */
   async releaseLease(workItemId: string, leaseId?: string): Promise<ApiResult<{ status: string }>> {
     return this.jsonResult<{ status: string }>(
       this.post(this.workItemUrl(workItemId, "/lease/release"), leaseId === undefined ? {} : { leaseId }),
@@ -813,7 +813,7 @@ export class CollabApi {
   }
 
   /**
-   * One JSON page of the pollable event feed (`?poll=1`) — the SSE fallback
+   * One JSON page of the pollable event feed (`?poll=1`) - the SSE fallback
    * for environments without a streaming transport (contract §5).
    */
   async pollEvents(after: number): Promise<ApiResult<{ items: FeedEvent[]; latestId: number }>> {
@@ -848,7 +848,7 @@ export class CollabApi {
    * `state-conflict` here means the deployment has no repository reader
    * configured, so the current text cannot be read. The composer reports that
    * verbatim and refuses to open rather than presenting an empty box that
-   * would silently REPLACE the chapter with whatever is typed into it — a
+   * would silently REPLACE the chapter with whatever is typed into it - a
    * revise sends a complete replacement body.
    */
   async chapterSource(chapterId: string): Promise<ApiResult<ChapterSource>> {
@@ -892,7 +892,7 @@ export class CollabApi {
     );
   }
 
-  /** Publish a draft chapter — a separate explicit action (§3.5). */
+  /** Publish a draft chapter - a separate explicit action (§3.5). */
   async publishChapter(chapterId: string): Promise<ApiResult<ChapterAccepted>> {
     return this.chapterStatus(chapterId, "publish");
   }
@@ -947,7 +947,7 @@ export class CollabApi {
         this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/force-create-work-item`),
         { reason },
       ),
-      // 201: force-create makes a work item, so it answers "created" — unlike
+      // 201: force-create makes a work item, so it answers "created" - unlike
       // reject, which only transitions the suggestion and answers 200.
       [201],
     );
@@ -974,7 +974,7 @@ export class CollabApi {
         body: JSON.stringify({ login, role }),
       });
     } catch {
-      return { ok: false, status: 0, message: "network error — is the dev API running?" };
+      return { ok: false, status: 0, message: "network error - is the dev API running?" };
     }
     if (!response.ok) {
       return { ok: false, status: response.status, message: await problemMessage(response) };

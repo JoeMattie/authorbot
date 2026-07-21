@@ -3,8 +3,8 @@
  * repo-coordinator processor completes `submission.apply` rows, this hook
  *
  * - re-anchors the chapter's OTHER annotations against the applied revision
- *   (§10.3, deterministic steps only): blockId survives AND — for range
- *   scope — the exact quote is still present in that block's normalized text
+ *   (§10.3, deterministic steps only): blockId survives AND - for range
+ *   scope - the exact quote is still present in that block's normalized text
  *   → keep, bumping the anchored revision; otherwise `needs_reanchor`. Every
  *   result is recorded in the audit log with {@link REANCHOR_ALGORITHM_VERSION};
  * - records the §12.6 "409-style problem" on a conflicted submission's git
@@ -243,7 +243,7 @@ export interface ReanchorPassResult {
  * is a `BookRepoReader`), so routing it through a writer would have meant
  * either a second remote read or a fake writer. The algorithm, the audit
  * record, and the `annotation_needs_reanchor` event are identical in both
- * callers by construction — there is exactly one implementation.
+ * callers by construction - there is exactly one implementation.
  *
  * `force` exists for the external-edit case specifically. The Phase 4 caller
  * relies on `chapter_revision >= revision` to make replays converge, but an
@@ -432,8 +432,8 @@ function keptByDeterministicReanchor(
  * Record the structured conflict problem on the submission's operation
  * (contract §5: "409-style problem recorded on the operation") and emit
  * `work_item_created` for a newly created conflict item. The operation row
- * keeps its `committed` state — the commit that landed IS the conflict
- * record — while `error` carries the machine-readable refusal. Idempotent:
+ * keeps its `committed` state - the commit that landed IS the conflict
+ * record - while `error` carries the machine-readable refusal. Idempotent:
  * an operation that already carries an error is skipped.
  */
 async function recordConflictProblem(

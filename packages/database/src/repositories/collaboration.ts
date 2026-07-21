@@ -22,7 +22,7 @@ import type {
 import type { ListPage } from "./content.js";
 
 /**
- * SQL-computed aggregate for one annotation — the full Phase 3 contract §2
+ * SQL-computed aggregate for one annotation - the full Phase 3 contract §2
  * metrics vocabulary. Computed in SQL on demand, never cached denormalized.
  */
 export interface VoteTally {
@@ -221,7 +221,7 @@ function mapVoteEvent(row: SqlRow): VoteEventRecord {
 }
 
 /**
- * Outcome of a decision insert. `already_decided` is a NORMAL outcome — the
+ * Outcome of a decision insert. `already_decided` is a NORMAL outcome - the
  * caller lost a benign race on the `(source_annotation_id, action_type,
  * rule_version)` idempotency key and must treat the existing decision as its
  * own (contract §4: "losers of the race treat unique-violation as
@@ -288,7 +288,7 @@ export class DecisionsRepository {
       // rule_versions (contract §4: a rule crossing and a maintainer
       // force-create must not both create a work item). When the collision was
       // on that partial index rather than the exact triple, the existing row
-      // carries a different rule_version — find it by action_type.
+      // carries a different rule_version - find it by action_type.
       if (existing === null && record.actionType === "create_work_item") {
         existing = await this.getWorkItemCreation(record.sourceAnnotationId);
       }
@@ -337,7 +337,7 @@ export class DecisionsRepository {
   }
 
   /**
-   * Highest `rule_version` ever recorded for each rule NAME in a project — the
+   * Highest `rule_version` ever recorded for each rule NAME in a project - the
    * high-water mark a settings edit must stay above (Phase 6 §3.6).
    *
    * Rule versions were derived solely from the currently *effective* rules, and
@@ -345,7 +345,7 @@ export class DecisionsRepository {
    * re-adding it under the same name later restarted it at version 1. Decisions
    * are keyed `(source_annotation_id, action_type, rule_version)` with no rule
    * name, so the re-added rule's first evaluation collided with a decision row
-   * written by materially different semantics — the exact ambiguity the
+   * written by materially different semantics - the exact ambiguity the
    * versioning scheme exists to prevent, and the one
    * `DEFAULT_SUGGESTION_TO_WORK_ITEM_RULE` is pinned at version 2 to avoid.
    *
@@ -389,7 +389,7 @@ export class DecisionsRepository {
     return result.changes > 0;
   }
 
-  /** Insert-or-update by id — projection rebuild from decision artifacts. */
+  /** Insert-or-update by id - projection rebuild from decision artifacts. */
   upsertStatement(record: DecisionRecord): SqlStatement {
     return this.db
       .prepare(
@@ -538,7 +538,7 @@ export class WorkItemsRepository {
     return result.changes > 0;
   }
 
-  /** Insert-or-update by id — projection rebuild from work-item artifacts. */
+  /** Insert-or-update by id - projection rebuild from work-item artifacts. */
   upsertStatement(record: WorkItemRecord): SqlStatement {
     return this.db
       .prepare(
@@ -629,7 +629,7 @@ export class EventsRepository {
   }
 
   /**
-   * Rows strictly after the cursor, in id order — the SSE resume/poll read
+   * Rows strictly after the cursor, in id order - the SSE resume/poll read
    * (`Last-Event-ID` / `?after=`, contract §5). Cursor 0 reads from the start.
    */
   async listAfter(projectId: string, afterId: number, limit = 100): Promise<EventRecord[]> {

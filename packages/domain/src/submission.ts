@@ -96,7 +96,7 @@ export const contentHashSchema = z
 
 /**
  * Replacement content: CRLF folded to LF (matching chapter storage) but NOT
- * trimmed — leading/trailing whitespace is meaningful in a range
+ * trimmed - leading/trailing whitespace is meaningful in a range
  * replacement. Emptiness is a per-type rule handled in the command schema:
  * an empty `range_replacement` is a deletion and legal; block and chapter
  * replacements must be non-empty.
@@ -155,7 +155,7 @@ export type SubmissionBaseDenialReason =
  * (contract section 4). Revision is checked before hash so the commoner
  * staleness cause surfaces first. Hash comparison here is not secret
  * material (both values are content hashes the client already holds), so a
- * plain compare is correct — constant-time treatment is for lease tokens.
+ * plain compare is correct - constant-time treatment is for lease tokens.
  */
 export function checkSubmissionBase(
   bundle: { readonly baseRevision: number; readonly baseContentHash: string },

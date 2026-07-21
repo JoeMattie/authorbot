@@ -1,7 +1,7 @@
 /**
  * Server-Sent Events stream over the `events` table (Phase 3 contract §5,
  * design §15.5). Workers-compatible: a plain `ReadableStream<Uint8Array>`
- * driven by `setInterval` polling of the cursor-ordered table — no Node
+ * driven by `setInterval` polling of the cursor-ordered table - no Node
  * stream APIs. Heartbeat comments every 15s (configurable for tests); the
  * client resumes with `Last-Event-ID` (or `?after=`), and must refetch
  * authoritative resources after reconnecting (events are notifications, not
@@ -18,8 +18,8 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 15_000;
  * An SSE connection is the cheapest thing an unauthenticated caller can ask
  * this API for and the most expensive thing to hold: a timer pair and a
  * database poll every second, for as long as the socket stays open. With no
- * ceiling, "open a stream and walk away" was an unbounded, uncounted, and —
- * on a book with `PUBLIC_ANNOTATIONS=true` — unauthenticated commitment; the
+ * ceiling, "open a stream and walk away" was an unbounded, uncounted, and -
+ * on a book with `PUBLIC_ANNOTATIONS=true` - unauthenticated commitment; the
  * rate limiter cannot help, because it runs only on mutations.
  *
  * Five minutes is chosen because the cost of being wrong is nil: every client
@@ -31,8 +31,8 @@ export const DEFAULT_SSE_MAX_LIFETIME_MS = 5 * 60_000;
 /**
  * Concurrent streams one client address may hold (per isolate).
  *
- * Generous for the honest case — a reader with several tabs open on the book,
- * plus an agent or two — and a hard stop for a loop that opens sockets without
+ * Generous for the honest case - a reader with several tabs open on the book,
+ * plus an agent or two - and a hard stop for a loop that opens sockets without
  * closing them. Per isolate rather than globally because Workers scale by
  * running more isolates and there is no shared cheap counter for a read path;
  * an approximate cap that costs nothing is worth more here than an exact one
@@ -59,8 +59,8 @@ export interface StreamLimiter {
  * Per-client concurrent-stream accounting.
  *
  * Deliberately a plain `Map` with no expiry: a slot is released by the stream
- * that took it — on client disconnect, on the lifetime cap, or on a write
- * failure — and every one of those paths funnels through the same `stop()`, so
+ * that took it - on client disconnect, on the lifetime cap, or on a write
+ * failure - and every one of those paths funnels through the same `stop()`, so
  * a key cannot leak while its stream is gone. Keys are removed as their count
  * reaches zero, which is what keeps the map bounded by live connections rather
  * than by every address ever seen.
@@ -95,8 +95,8 @@ export function createStreamLimiter(
  *
  * `CF-Connecting-IP` is set by Cloudflare and cannot be spoofed by the client;
  * `X-Forwarded-For` is a fallback for other front ends and is read only for its
- * first entry. A request with neither — every in-process test, and any direct
- * connection — shares the `unknown` bucket, which is the conservative answer:
+ * first entry. A request with neither - every in-process test, and any direct
+ * connection - shares the `unknown` bucket, which is the conservative answer:
  * unattributable connections are pooled rather than each granted their own cap.
  */
 export function streamClientKey(headers: Headers): string {

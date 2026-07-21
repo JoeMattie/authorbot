@@ -4,7 +4,7 @@
  * corresponding fix in `src/writer.ts` is reverted.
  *
  * They live apart from `writer.test.ts` because they are not a description of
- * the §14.2 sequence — they are proofs about failure modes that produced
+ * the §14.2 sequence - they are proofs about failure modes that produced
  * repository/database divergence, and keeping them together makes it obvious
  * what must never regress.
  */
@@ -27,7 +27,7 @@ interface Harness {
 async function harness(
   options: {
     files?: Record<string, string>;
-    /** Wrap the fake's fetch — used to inject a transport-level rejection. */
+    /** Wrap the fake's fetch - used to inject a transport-level rejection. */
     wrap?: (
       inner: (request: Request) => Promise<Response>,
     ) => (input: Request | string, init?: RequestInit) => Promise<Response>;
@@ -74,7 +74,7 @@ describe("a rejected fetch is a RETRYABLE git failure, not a terminal one", () =
    * REJECTS (connection reset, TLS error, cancelled request) escaped as a raw
    * `TypeError`. The processor's guard is
    * `isGitWriteError(error) && error.retryable`, which is false for a
-   * TypeError, so it fell straight to `failOperation` — terminal, no retry,
+   * TypeError, so it fell straight to `failOperation` - terminal, no retry,
    * attempts not even consumed.
    *
    * That is the one failure mode that leaves a commit LANDED with no local
@@ -111,7 +111,7 @@ describe("a rejected fetch is a RETRYABLE git failure, not a terminal one", () =
   });
 
   it("a retry after a dropped ref update returns the LANDED sha, never a second commit", async () => {
-    // The ref update is applied and then the response is lost — the exact
+    // The ref update is applied and then the response is lost - the exact
     // shape that made git and D1 disagree.
     let dropAfterApply = true;
     const { fake, writer } = await harness({
@@ -235,7 +235,7 @@ describe("a truncated tree is an error, never a missing file", () => {
   /**
    * The defect: `readFile` walked the path a directory at a time and never
    * inspected `truncated`, so a truncated listing made an existing file read
-   * back as `null` — indistinguishable from "absent". The Phase 4 attribution
+   * back as `null` - indistinguishable from "absent". The Phase 4 attribution
    * append treats `null` as "no prior file" and re-renders a fresh
    * single-entry artifact, so one truncated `.authorbot/attribution/` listing
    * would commit away a chapter's entire attribution history inside a commit
@@ -270,7 +270,7 @@ describe("committed tree entries keep the mode the path already carries", () => 
    * The defect: `#createTree` emitted `mode: "100644"` for every file with no
    * reference to `base_tree`. GitHub lets a supplied entry override the base
    * entry wholesale, mode included, so any apply touching an executable
-   * chapter silently cleared its exec bit — inside a commit whose message and
+   * chapter silently cleared its exec bit - inside a commit whose message and
    * §14.3 trailers describe only a prose edit, and which no trailer records.
    * `LocalGitAdapter` preserves the bit, so the two `BookRepoWriter`
    * implementations disagreed on identical input.
@@ -360,7 +360,7 @@ describe("error messages are scrubbed before they escape", () => {
    * The defect: `GitHubWriteError` passed its message straight to `Error`,
    * while `scrubSecrets` was applied only inside `GitHubAuthError`. That
    * message is persisted to `git_operations.error` and served to any member by
-   * `GET /v1/projects/{id}/operations/{operationId}` — a durable, readable
+   * `GET /v1/projects/{id}/operations/{operationId}` - a durable, readable
    * sink. GitHub does not echo our token, but `apiOrigin` means api.github.com
    * is not the only endpoint the writer can be pointed at, and a token written
    * into D1 would be a retroactive, unrecoverable leak (contract §2:

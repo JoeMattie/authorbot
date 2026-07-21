@@ -2,7 +2,7 @@
  * Builds a `CliDeps` out of fakes and runs the real `runCli`.
  *
  * Every integration test goes through this, so they exercise argument parsing,
- * journal opening, context wiring, stage ordering, and error reporting — not a
+ * journal opening, context wiring, stage ordering, and error reporting - not a
  * test-only re-implementation of any of them.
  */
 import { NodeLoopbackServerFactory } from "../src/runtime/node-ports.js";

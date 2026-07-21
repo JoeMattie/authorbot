@@ -73,7 +73,7 @@ export class ProjectsRepository {
   /**
    * Mark the projection stale (a verified default-branch push arrived).
    * Deliberately unconditional and idempotent: two pushes racing must both
-   * leave the flag set, and setting it is always safe — the worst outcome is
+   * leave the flag set, and setting it is always safe - the worst outcome is
    * one redundant refresh.
    */
   markProjectionStaleStatement(projectId: string, at: string): SqlStatement {
@@ -84,7 +84,7 @@ export class ProjectsRepository {
 
   /**
    * Record a completed refresh: store the commit it was built from and clear
-   * the stale flag — but ONLY if no newer push arrived meanwhile.
+   * the stale flag - but ONLY if no newer push arrived meanwhile.
    *
    * `observedStaleAt` is the `updated_at` the row carried when the refresh
    * began. If a push bumped it since, the flag stays set and the next refresh
@@ -353,7 +353,7 @@ export class HumanSessionsRepository {
   /**
    * Revoke EVERY live session an actor holds (Phase 7 contract "Revoking":
    * revocation must "invalidate that actor's sessions, not merely their
-   * membership", and take effect "on the next request — not on session
+   * membership", and take effect "on the next request - not on session
    * expiry").
    *
    * Exposed as a statement as well as an awaited helper because a revocation
@@ -485,7 +485,7 @@ export class AgentTokensRepository {
     return result.changes > 0;
   }
 
-  /** Contract §3: last_used_at is updated at most once per minute — callers throttle. */
+  /** Contract §3: last_used_at is updated at most once per minute - callers throttle. */
   async touchLastUsed(id: string, lastUsedAt: string): Promise<void> {
     await this.db
       .prepare(`UPDATE agent_tokens SET last_used_at = ? WHERE id = ?`)

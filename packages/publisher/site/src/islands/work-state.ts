@@ -10,13 +10,13 @@
 import type { BundleTarget, TaskBundle } from "./api.js";
 
 /**
- * FALLBACK renewal prompt lead time — design §25 / contract §7 default
+ * FALLBACK renewal prompt lead time - design §25 / contract §7 default
  * (PT5M before expiry), used only until the server tells us otherwise.
  *
  * The lead time is operator-configurable (`LEASE_RENEWAL_PROMPT_BEFORE`,
  * contract §2), and the renew response carries the resulting
  * `renewalPromptAt`. Treating the 5-minute default as a constant made that
- * setting inert on the one surface it governs — and under a valid config such
+ * setting inert on the one surface it governs - and under a valid config such
  * as `LEASE_DURATION=PT4M` with `LEASE_RENEWAL_PROMPT_BEFORE=PT1M` the banner
  * showed for the lease's entire life. {@link leaseStatus} therefore derives
  * the lead time from the lease's own `renewalPromptAt` whenever the server has
@@ -34,7 +34,7 @@ export const COUNTDOWN_TICK_MS = 1_000;
 /** Bounded operation polling, mirroring the Phase 2b composer (§2.5). */
 export const MAX_SUBMIT_POLLS = 40;
 
-/** 1s, 1s, 2s, 3s, 5s … capped at 5s — an apply commit is slower than an annotation. */
+/** 1s, 1s, 2s, 3s, 5s … capped at 5s - an apply commit is slower than an annotation. */
 export function submitPollDelayMs(poll: number): number {
   const ladder = [1_000, 1_000, 2_000, 3_000, 5_000];
   return ladder[Math.min(poll, ladder.length - 1)] ?? 5_000;
@@ -71,7 +71,7 @@ export interface LeaseStatus {
   expired: boolean;
   /** True inside the last `RENEWAL_PROMPT_MS` before expiry (contract §7). */
   promptRenewal: boolean;
-  /** False once the lease sits at its max total duration — renewal is futile. */
+  /** False once the lease sits at its max total duration - renewal is futile. */
   renewable: boolean;
 }
 
@@ -153,13 +153,13 @@ export type SubmitEvent =
   | { type: "reset" };
 
 export const STALE_HINT =
-  "Still syncing — refresh the page to see the final result of this submission.";
+  "Still syncing - refresh the page to see the final result of this submission.";
 
 /**
  * The honest status ladder of contract §7: `submit → syncing →
  * completed | conflict`. A conflict is NOT an error state: the pipeline
  * committed a conflict record and opened a resolution work item, and the
- * chapter was left untouched — the view says exactly that.
+ * chapter was left untouched - the view says exactly that.
  */
 export function submitReduce(state: SubmitState, event: SubmitEvent): SubmitState {
   switch (event.type) {
@@ -229,8 +229,8 @@ export function submitReduce(state: SubmitState, event: SubmitEvent): SubmitStat
 
 /**
  * User-facing conflict copy. The pipeline's own reason is authoritative when
- * it reached us; otherwise say only what is certainly true — the chapter was
- * not changed and a resolution item exists — without inventing a cause.
+ * it reached us; otherwise say only what is certainly true - the chapter was
+ * not changed and a resolution item exists - without inventing a cause.
  */
 export function conflictMessage(reason: string | null): string {
   const tail =
@@ -248,7 +248,7 @@ export function conflictMessage(reason: string | null): string {
  *
  * SECURITY: this includes the lease token, which the API returns exactly once
  * and which is the only way the holder can renew or submit. It is kept in
- * **sessionStorage** — same-origin, per-tab, dropped when the tab closes — and
+ * **sessionStorage** - same-origin, per-tab, dropped when the tab closes - and
  * is deleted the moment the lease is released, submitted, or expires. It is
  * never written to localStorage (which would outlive the session), never put
  * in the URL, never sent anywhere but the API, and never logged. An attacker
@@ -395,7 +395,7 @@ export function submissionTypeFor(workItemType: string): string | null {
 const MARKER_LINE = /^[ \t]*<!--[ \t]*authorbot:block[ \t]+id="([^"]*)"[ \t]*-->[ \t]*$/;
 
 /**
- * The source text of one block inside a chapter — the lines after its
+ * The source text of one block inside a chapter - the lines after its
  * `<!-- authorbot:block id="…" -->` marker up to the next marker. Used to
  * prefill a `block_replacement` textarea; the marker itself is never included
  * (the API rejects `authorbot:` comments inside submission content).

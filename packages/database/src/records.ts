@@ -94,7 +94,7 @@ export interface ProjectRecord {
 export type PublicationBuildStatus = "queued" | "building" | "succeeded" | "failed";
 
 /**
- * Publication state per design §17.3. Written ONLY from signed CI callbacks —
+ * Publication state per design §17.3. Written ONLY from signed CI callbacks -
  * never inferred from a successful Git commit. One row per integrated commit.
  */
 export interface PublicationRecord {
@@ -300,7 +300,7 @@ export type WorkItemStatus =
 
 export type WorkItemPriority = "low" | "normal" | "high";
 
-/** One current vote per (annotation, actor) — Phase 3 contract §2. */
+/** One current vote per (annotation, actor) - Phase 3 contract §2. */
 export interface VoteRecord {
   id: string;
   projectId: string;
@@ -326,8 +326,8 @@ export interface VoteEventRecord {
 }
 
 /**
- * Sticky decision record (Phase 3 contract §4, design §11.3–11.4). Unique on
- * `(sourceAnnotationId, actionType, ruleVersion)` — the idempotency key that
+ * Sticky decision record (Phase 3 contract §4, design §11.3-11.4). Unique on
+ * `(sourceAnnotationId, actionType, ruleVersion)` - the idempotency key that
  * collapses concurrent threshold crossings to one decision. `ruleVersion` 0
  * is reserved for maintainer force-create.
  */
@@ -338,7 +338,7 @@ export interface DecisionRecord {
   actionType: string;
   rule: string;
   ruleVersion: number;
-  /** Aggregate metrics snapshot at crossing — never per-voter data (§26.1). */
+  /** Aggregate metrics snapshot at crossing - never per-voter data (§26.1). */
   metrics: Record<string, number>;
   result: DecisionResult;
   /** Design §11.3: set when support drops below the rule, cleared on return. */
@@ -367,7 +367,7 @@ export interface WorkItemRecord {
 
 /**
  * A row of the SSE event feed (Phase 3 contract §5, design §15.5). `id` is a
- * database-assigned monotonic integer — the stream cursor.
+ * database-assigned monotonic integer - the stream cursor.
  */
 export interface EventRecord {
   id: number;
@@ -385,9 +385,9 @@ export type NewEventRecord = Omit<EventRecord, "id">;
  * survive a fresh-DB rebuild).
  *
  * Two distinct notions, defined in migration 0004:
- * - ACTIVE — `releasedAt === null && revokedAt === null`; the lease occupies
+ * - ACTIVE - `releasedAt === null && revokedAt === null`; the lease occupies
  *   its work item's single slot (partial-unique-index predicate).
- * - LIVE — active AND `expiresAt > now` at query time; only a live lease may
+ * - LIVE - active AND `expiresAt > now` at query time; only a live lease may
  *   renew or submit. Expired ⇔ `expiresAt <= now` (same boundary as
  *   human_sessions).
  *
@@ -459,7 +459,7 @@ export interface AuditEventRecord {
   targetType: string;
   targetId: string | null;
   correlationId: string;
-  /** Safe metadata only — never token/session material (design §20.6). */
+  /** Safe metadata only - never token/session material (design §20.6). */
   metadata: unknown;
   createdAt: string;
 }

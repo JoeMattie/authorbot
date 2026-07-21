@@ -15,7 +15,7 @@ describe("escapeHtml", () => {
   });
 });
 
-describe("renderMarkdownToHtml — escaping", () => {
+describe("renderMarkdownToHtml - escaping", () => {
   it("escapes angle brackets and quotes in prose", () => {
     const html = renderMarkdownToHtml(`Tom said "5 < 7 & 7 > 5".`);
     expect(html).toContain("&quot;5 &lt; 7 &amp; 7 &gt; 5&quot;");
@@ -43,7 +43,7 @@ describe("renderMarkdownToHtml — escaping", () => {
   });
 });
 
-describe("renderMarkdownToHtml — raw HTML policy", () => {
+describe("renderMarkdownToHtml - raw HTML policy", () => {
   it("renders raw HTML as escaped text when raw_html is false", () => {
     const html = renderMarkdownToHtml("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
@@ -70,7 +70,7 @@ describe("renderMarkdownToHtml — raw HTML policy", () => {
   });
 });
 
-describe("renderMarkdownToHtml — block anchors", () => {
+describe("renderMarkdownToHtml - block anchors", () => {
   it("anchors a marked paragraph and strips the marker", () => {
     const html = renderMarkdownToHtml(`${marker(B1)}\nThe drift appeared.`);
     expect(html).toBe(`<p id="b-${B1}">The drift appeared.</p>\n`);
@@ -143,7 +143,7 @@ describe("renderMarkdownToHtml — block anchors", () => {
   });
 });
 
-describe("renderMarkdownToHtml — URL schemes", () => {
+describe("renderMarkdownToHtml - URL schemes", () => {
   it("drops links with disallowed schemes but keeps their text", () => {
     const html = renderMarkdownToHtml("[click me](javascript:alert(1))");
     expect(html).toContain("click me");
@@ -197,7 +197,7 @@ describe("renderMarkdownToHtml — URL schemes", () => {
   });
 });
 
-describe("renderMarkdownToHtml — structure", () => {
+describe("renderMarkdownToHtml - structure", () => {
   it("renders ordered and unordered lists", () => {
     const html = renderMarkdownToHtml("- one\n- two\n\n2. a\n3. b\n");
     expect(html).toContain("<ul>");
@@ -225,7 +225,7 @@ describe("renderMarkdownToHtml — structure", () => {
   });
 });
 
-describe("renderMarkdownToHtml — GFM", () => {
+describe("renderMarkdownToHtml - GFM", () => {
   const table = [
     "| Left | Center | Right | Default |",
     "|:-----|:------:|------:|---------|",

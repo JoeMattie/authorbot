@@ -5,7 +5,7 @@
 ## Context
 
 Today an author's CI clones this repository at a pinned ref, installs
-**429 MB** of `node_modules`, and compiles a TypeScript monorepo — every time
+**429 MB** of `node_modules`, and compiles a TypeScript monorepo - every time
 they publish a chapter. That is the most fragile and slowest part of author
 CI, and it makes them depend on our repository being reachable at build time.
 
@@ -15,8 +15,8 @@ producing it is not.
 
 Two problems were being conflated:
 
-- **Availability** — what if this repository disappears?
-- **Provenance and reproducibility** — is the build verifiable and pinned?
+- **Availability** - what if this repository disappears?
+- **Provenance and reproducibility** - is the build verifiable and pinned?
 
 A release tarball downloaded from GitHub at build time solves neither: it has
 the same availability profile as the repository (same account, same platform),
@@ -26,7 +26,7 @@ version gives provenance.
 
 ## Decision
 
-**Authors depend on versioned, prebuilt npm packages — not on a git checkout
+**Authors depend on versioned, prebuilt npm packages - not on a git checkout
 of this repository.**
 
 The scope is available (`@authorbot/*` and the bare `authorbot` name are both
@@ -40,7 +40,7 @@ unregistered as of this decision) and should be claimed.
 | `@authorbot/api` | prebuilt Worker entry + Durable Object | `wrangler.jsonc` `main` |
 | `@authorbot/create` | the Phase 6 wizard | `npx @authorbot/create` |
 
-Each ships **prebuilt `dist/`** — consumers never compile our source.
+Each ships **prebuilt `dist/`** - consumers never compile our source.
 Internal packages (`domain`, `schemas`, `markdown`, `publisher`,
 `repo-coordinator`, `rule-engine`, `database`, `git-github`) are published as
 dependencies but are not part of the public contract; only the three above
@@ -48,7 +48,7 @@ carry compatibility promises (ADR-0021 §2).
 
 ### The pin moves into the book repository
 
-`AUTHORBOT_REF` — a GitHub *repository variable* — is replaced by a normal
+`AUTHORBOT_REF` - a GitHub *repository variable* - is replaced by a normal
 dependency in the book repo's `package.json`, plus a lockfile.
 
 This is a strict improvement, and the reason is not convenience:
@@ -82,7 +82,7 @@ The "check out and build the Authorbot toolchain" steps are deleted.
 ### Status: trusted publishing is live (2026-07-21)
 
 All eleven packages are configured with GitHub Actions as their trusted
-publisher, and `v0.1.2` was published over OIDC — npm records the publisher as
+publisher, and `v0.1.2` was published over OIDC - npm records the publisher as
 `GitHub Actions <npm-oidc-no-reply@github.com>` rather than a user account,
 which is the evidence rather than an assumption. The bootstrap token has been
 deleted from the repository's secrets and revoked at npm, so there is no
@@ -113,7 +113,7 @@ and better than we would.
 
 None of that requires anything from us. Publishing a second, parallel
 distribution channel would mean building, checksumming, documenting, and
-testing artifacts that almost nobody uses — and an untested artifact that
+testing artifacts that almost nobody uses - and an untested artifact that
 silently rots is worse than none, because it looks supported.
 
 The disappearance scenario is therefore answered by standard tooling rather
@@ -130,7 +130,7 @@ migration the release carries.
 
 **Cost.** We take on release engineering: publishing on tag, keeping prebuilt
 `dist/` outputs correct, and not breaking the three public packages' APIs
-within a major. Authors gain a dependency on the npm registry — heavily
+within a major. Authors gain a dependency on the npm registry - heavily
 mirrored and cached, and already the least of the external dependencies in a
 GitHub-plus-Cloudflare deployment.
 

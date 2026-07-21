@@ -4,8 +4,8 @@
  * Shaped exactly like `fetch`: `(request: Request) => Promise<Response>`, so
  * it is injected as the `fetchImpl` of the real reader/writer/auth code and
  * exercises the same request-building and response-parsing paths the live
- * client uses. It is an object, not a server — no ports, no `node:http`, no
- * filesystem, no timers — so it runs unchanged in a Worker.
+ * client uses. It is an object, not a server - no ports, no `node:http`, no
+ * filesystem, no timers - so it runs unchanged in a Worker.
  *
  * Backed by `FakeRepoState`, which uses real git object hashing: the SHAs it
  * returns are the SHAs real git would compute for the same content.
@@ -65,7 +65,7 @@ export interface FakeGitHubOptions {
   requireAuth?: boolean;
   /**
    * Require the token endpoint's `Authorization` to look like an app JWT
-   * (three dot-separated segments). Default true — it catches a client that
+   * (three dot-separated segments). Default true - it catches a client that
    * accidentally presents an installation token to mint another one.
    */
   requireAppJwt?: boolean;
@@ -176,7 +176,7 @@ export class FakeGitHub {
   // ---------------------------------------------------------------- seeding
 
   /**
-   * Seed the repository from a path -> content map — e.g. the contents of
+   * Seed the repository from a path -> content map - e.g. the contents of
    * `examples/book-repo` read by the *caller* and passed in. The fake never
    * touches the filesystem, so it stays Worker-safe.
    */
@@ -534,7 +534,7 @@ export class FakeGitHub {
       size: bytes.length,
       node_id: `B_${sha.slice(0, 8)}`,
       url: `${FAKE_GITHUB_ORIGIN}/repos/${this.fullName}/git/blobs/${sha}`,
-      // Wrapped at 60 characters, as the real API does — consumers must strip
+      // Wrapped at 60 characters, as the real API does - consumers must strip
       // whitespace before decoding.
       content: encodeBase64(bytes, true),
       encoding: "base64",
@@ -582,7 +582,7 @@ export class FakeGitHub {
   /**
    * `GET /repos/{o}/{r}/compare/{base}...{head}`, reduced to the one field the
    * writer reads: `status`. Computed from the real commit graph
-   * (`FakeRepoState.isAncestor`), so it answers exactly as GitHub would —
+   * (`FakeRepoState.isAncestor`), so it answers exactly as GitHub would -
    * `identical` when the two shas match, `ahead` when `base` is reachable from
    * `head`, `behind` when the reverse holds, `diverged` otherwise.
    *

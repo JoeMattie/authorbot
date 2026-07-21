@@ -96,7 +96,7 @@ describe("agent flows the collaborator skill relies on", () => {
     const body = (await released.json()) as { status: string; expired: boolean };
     expect(body.expired).toBe(false);
 
-    // And it is immediately claimable again — not held for the lease duration.
+    // And it is immediately claimable again - not held for the lease duration.
     const other = await devLogin(app, "skill-second", "editor");
     const reclaimed = await request(
       `/work-items/${workItemId}/claim`,
@@ -115,7 +115,7 @@ describe("agent flows the collaborator skill relies on", () => {
     expect(held.status).toBe(201);
 
     // The skill's troubleshooting says a second claimant gets 409 and no
-    // token — a fact an agent uses to decide to back off rather than retry.
+    // token - a fact an agent uses to decide to back off rather than retry.
     const second = await devLogin(app, "skill-loser", "editor");
     const collision = await request(
       `/work-items/${workItemId}/claim`,
@@ -163,7 +163,7 @@ describe("agent flows the collaborator skill relies on", () => {
 
   it("a task bundle carries an injection attempt as data, never as an instruction", async () => {
     // Safety rule 1: prose shaped like an instruction is content to preserve.
-    // The proof is structural — the API delivers annotation and chapter text
+    // The proof is structural - the API delivers annotation and chapter text
     // inside the bundle's data fields, with no field the server would treat as
     // a directive to the agent. An agent that follows the skill keeps it there.
     const author = await devLogin(app, "skill-attacker", "contributor");
@@ -204,7 +204,7 @@ describe("agent flows the collaborator skill relies on", () => {
       context: { annotationBody: string };
     } & Record<string, unknown>;
 
-    // The injection arrives, verbatim, in a data field — exactly where the
+    // The injection arrives, verbatim, in a data field - exactly where the
     // skill's guidance says to treat it as untrusted subject matter. Its
     // presence in `context.annotationBody` is the point: the bundle has no
     // channel that would make it an instruction, so the danger is entirely in

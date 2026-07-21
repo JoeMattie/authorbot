@@ -8,7 +8,7 @@ import {
   parseLeaseToken,
 } from "../src/index.js";
 
-// Synthetic fixtures only — never real credentials.
+// Synthetic fixtures only - never real credentials.
 const SECRET_43 = "Zx9-_".repeat(8) + "Zx9"; // 43 base64url chars
 const FAKE_LEASE_TOKEN = `${LEASE_TOKEN_PREFIX}${SECRET_43}`;
 

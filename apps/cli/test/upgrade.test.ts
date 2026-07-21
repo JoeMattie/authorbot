@@ -32,7 +32,7 @@ async function readPinSpec(repoPath: string): Promise<string> {
   return (parsed as { devDependencies: Record<string, string> }).devDependencies["@authorbot/cli"] ?? "";
 }
 
-describe("authorbot upgrade — usage", () => {
+describe("authorbot upgrade - usage", () => {
   it("prints help and rejects nonsense combinations with exit 2", async () => {
     const io = captureIo();
     expect(await runUpgrade(["--help"], io.io, makeDeps())).toBe(0);
@@ -164,7 +164,7 @@ describe("authorbot upgrade --check", () => {
   });
 });
 
-describe("authorbot upgrade — no upgrade available", () => {
+describe("authorbot upgrade - no upgrade available", () => {
   it("says so, touches nothing, and exits 0", async () => {
     const repoPath = await makeBookRepo({ pin: "1.1.0" });
     const before = await snapshot(repoPath);
@@ -224,7 +224,7 @@ describe("authorbot upgrade --dry-run", () => {
   });
 });
 
-describe("authorbot upgrade — the validate gate (ADR-0021 §2)", () => {
+describe("authorbot upgrade - the validate gate (ADR-0021 §2)", () => {
   it("aborts the whole upgrade when a migration introduces a new error", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const before = await snapshot(repoPath);
@@ -306,7 +306,7 @@ describe("authorbot upgrade — the validate gate (ADR-0021 §2)", () => {
   });
 });
 
-describe("authorbot upgrade — the pull request (ADR-0021 §3 step 4)", () => {
+describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
   it("commits the pin and the migration separately, then opens a PR", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const git = fakeGit();
@@ -345,7 +345,7 @@ describe("authorbot upgrade — the pull request (ADR-0021 §3 step 4)", () => {
   });
 
   it("commits package.json alone, and says so, when the lockfile cannot be refreshed", async () => {
-    // Offline, or no npm. The upgrade is still worth having — but a lockfile
+    // Offline, or no npm. The upgrade is still worth having - but a lockfile
     // left pinning the old version fails `npm ci` in CI, and the author has to
     // be told that rather than discovering it on a red pull request.
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
@@ -404,7 +404,7 @@ describe("authorbot upgrade — the pull request (ADR-0021 §3 step 4)", () => {
   });
 });
 
-describe("authorbot upgrade — failure mid-sequence", () => {
+describe("authorbot upgrade - failure mid-sequence", () => {
   it("leaves a recoverable state and says exactly how to recover", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const git = fakeGit({ failAt: "push" });
@@ -435,7 +435,7 @@ describe("authorbot upgrade — failure mid-sequence", () => {
   });
 });
 
-describe("authorbot upgrade — steps 5 and 6", () => {
+describe("authorbot upgrade - steps 5 and 6", () => {
   it("applies D1 migrations before deploying, then verifies health", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0", d1Database: "book-db" });
     const wrangler = fakeWrangler({

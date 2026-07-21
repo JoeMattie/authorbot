@@ -62,7 +62,7 @@ export interface BookRepoSnapshot {
    * Reconciliation re-anchors annotations against chapter source. Reading that
    * source back through `readTextFile` re-resolved the branch head, so a push
    * landing mid-pass produced a re-anchor computed against one commit's bytes
-   * while the revision and block ids came from another's — a decision recorded
+   * while the revision and block ids came from another's - a decision recorded
    * at a revision that never contained that text, and persisted as an
    * append-only audit row a later converging pass does not undo. Taking the
    * source from the snapshot keeps the whole pass on one commit, which is the
@@ -86,7 +86,7 @@ export interface BookRepoReader {
    * Raw text of one committed repository file (repo-relative path), or null
    * when it does not exist. Phase 4 uses this for the claim task bundle's
    * `document.source` (contract §3: full chapter Markdown) and for the
-   * submission-apply pipeline's current-source + attribution reads — the
+   * submission-apply pipeline's current-source + attribution reads - the
    * chapters projection deliberately stores only hashes/block ids, never
    * source. Optional so pre-Phase-4 readers/fixtures stay valid; endpoints
    * that need source respond with a problem when it is absent.
@@ -96,7 +96,7 @@ export interface BookRepoReader {
 
 // NOTE: valid block ids are persisted on the `chapters` projection row
 // (`block_ids` JSON column) by the rebuild, so contract §4's "blockId exists
-// in that revision" check works from the database alone — including on
+// in that revision" check works from the database alone - including on
 // reader-less instances (the Worker before Phase 5) sharing a DB that a
 // reader-ful instance rebuilt. The former in-memory ProjectionIndex (and its
 // reader-less skip path) is gone.

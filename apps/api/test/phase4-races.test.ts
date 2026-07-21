@@ -1,11 +1,11 @@
 /**
- * Phase 4 cross-isolate interleaving regressions (contract §2, §4, §8.1–8.2).
+ * Phase 4 cross-isolate interleaving regressions (contract §2, §4, §8.1-8.2).
  *
  * The per-project `serialize()` queue orders commands inside ONE process; the
  * deployed D1/Workers topology runs many isolates, and the database
  * constraints are the real arbiter (serializer.ts: "DB unique indexes and
  * NULL-abort compare-and-swap statements are the cross-isolate backstops").
- * The in-process suites therefore cannot reach the states these tests need —
+ * The in-process suites therefore cannot reach the states these tests need -
  * the serializer hides them, which is exactly why the defects here survived a
  * green suite.
  *
@@ -130,7 +130,7 @@ describe("claim races across isolates (contract §2, §8.1)", () => {
       expect(result.body["holder"]).toBe("winner");
       expect(JSON.stringify(result.body)).not.toContain("token");
 
-      // Exactly one active lease survives — the winner's.
+      // Exactly one active lease survives - the winner's.
       const active = await harness.repos.leases.getActiveByWorkItem(workItemId);
       expect(active?.tokenHash).toBe("0".repeat(64));
     } finally {
@@ -148,7 +148,7 @@ describe("claim races across isolates (contract §2, §8.1)", () => {
 
       // The first lease has expired; the second actor claims it over. The
       // sweep timer fires inside the handler, revoking the lease and putting
-      // the item back to `ready` — so the handler's `leased → leased` CAS
+      // the item back to `ready` - so the handler's `leased → leased` CAS
       // aborts on a claim that is entirely legal.
       harness.clock.advanceMs(31 * MINUTE);
       interleaveBeforeBatch(harness, async () => {
@@ -197,7 +197,7 @@ describe("claim races across isolates (contract §2, §8.1)", () => {
 });
 
 describe("expiry atomicity (contract §2, §8.2)", () => {
-  it("a failed expiry write leaves NOTHING applied — no half-expired lease", async () => {
+  it("a failed expiry write leaves NOTHING applied - no half-expired lease", async () => {
     const harness = await makePhase4Harness();
     try {
       const cookie = await devLogin(harness, "holder", "editor");
@@ -264,7 +264,7 @@ describe("expiry atomicity (contract §2, §8.2)", () => {
 });
 
 describe("renew races across isolates (contract §2, §8.2)", () => {
-  it("a renewal that loses the race is rejected — no false 200, event, or audit row", async () => {
+  it("a renewal that loses the race is rejected - no false 200, event, or audit row", async () => {
     const harness = await makePhase4Harness();
     try {
       const cookie = await devLogin(harness, "holder", "editor");
@@ -311,8 +311,8 @@ describe("submission races across isolates (contract §4, §8.2)", () => {
       const document = bundle["document"] as { revision: number; contentHash: string };
 
       // While this submission is in flight, another isolate expires the lease
-      // and hands the item to a fresh claimant. The item is `leased` again —
-      // by someone else — so a work-item-status CAS alone cannot tell.
+      // and hands the item to a fresh claimant. The item is `leased` again -
+      // by someone else - so a work-item-status CAS alone cannot tell.
       let rivalLeaseId = "";
       interleaveBeforeBatch(harness, async () => {
         await harness.db
@@ -367,7 +367,7 @@ describe("submission content validation (contract §4 step 9)", () => {
     expect(findings.length).toBeGreaterThan(0);
     expect(findings.join(" ")).toContain("raw HTML");
     expect(findings.join(" ")).toContain("javascript");
-    // Without the fence the same payload was always caught — proving the
+    // Without the fence the same payload was always caught - proving the
     // fence was the sole cause.
     expect(contentSafetyFindings("<script>alert(1)</script>\n")).not.toHaveLength(0);
   });
@@ -429,7 +429,7 @@ describe("submission content validation (contract §4 step 9)", () => {
           { Cookie: cookie, "Idempotency-Key": uuidv7() },
         ),
       );
-      // The base did NOT move, so a conflict would have been a lie — and it
+      // The base did NOT move, so a conflict would have been a lie - and it
       // would have burned the work item and committed a conflict artifact.
       expect(response.status).toBe(400);
       expect(((await response.json()) as { code: string }).code).toBe("validation-failed");

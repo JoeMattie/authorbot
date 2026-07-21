@@ -16,7 +16,7 @@ import {
   toTimestamp,
 } from "../src/index.js";
 
-// Synthetic fixtures only — never real credentials.
+// Synthetic fixtures only - never real credentials.
 const SECRET_43 = "Ab1-_".repeat(8) + "Ab1"; // 43 base64url chars
 const FAKE_TOKEN = `${AGENT_TOKEN_PREFIX}${SECRET_43}`;
 

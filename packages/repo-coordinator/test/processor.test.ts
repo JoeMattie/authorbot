@@ -339,8 +339,8 @@ describe("malformed work", () => {
 
 /**
  * Regression (Phase 6 §3.6). Every other pending-state owner has a release
- * path — `submission.apply` via `releaseFailedApplyStatements`, pending
- * annotations and replies via the rebuild sweep — and `book_config` was the
+ * path - `submission.apply` via `releaseFailedApplyStatements`, pending
+ * annotations and replies via the rebuild sweep - and `book_config` was the
  * one that did not.
  *
  * A settings PATCH writes the new config to `book_configs` as `pending_git` in
@@ -348,7 +348,7 @@ describe("malformed work", () => {
  * when a settings commit dead-lettered, the row was terminal: the PATCH route
  * refuses further writes on that status, `projectBookConfig` short-circuits on
  * it so Git could never re-assert the committed `book.yml`, and
- * `resolveRuleEntries` kept reading — and therefore ENFORCING — governance
+ * `resolveRuleEntries` kept reading - and therefore ENFORCING - governance
  * rules from a document no commit contains. That is exactly the "second
  * configuration store" §3.6 forbids, failing silently and permanently.
  */
@@ -424,7 +424,7 @@ describe("a dead-lettered book_config.update releases its projection row", () =>
     // both key off this status, so leaving it would brick both permanently.
     expect(row?.status).toBe("committed");
     expect(row?.gitOperationId).toBeNull();
-    // And the config in force is the one that actually reached Git — not the
+    // And the config in force is the one that actually reached Git - not the
     // one whose commit failed.
     expect((row?.config as { title: string }).title).toBe("Committed Title");
   });
@@ -432,7 +432,7 @@ describe("a dead-lettered book_config.update releases its projection row", () =>
   it("drops the row when there is no committed config to fall back to", async () => {
     // A book's FIRST settings write has no predecessor. Dropping the row is
     // the honest state: the projection re-reads book.yml from Git, and
-    // governance falls back to the deployment's bootstrap rules — the
+    // governance falls back to the deployment's bootstrap rules - the
     // stricter direction, so a failed commit can never leave a weakened rule
     // in force.
     await enqueueDoomedSettingsWrite(undefined);
@@ -446,7 +446,7 @@ describe("a dead-lettered book_config.update releases its projection row", () =>
     const { operationId } = await enqueueDoomedSettingsWrite(CONFIG);
 
     // A second PATCH lands on the row before the first one's failure is
-    // processed — the compare-and-swap `markCommittedStatement` also relies on.
+    // processed - the compare-and-swap `markCommittedStatement` also relies on.
     const later = uuidv7();
     await seed.repos.gitOperations.insertStatement({
       id: later,

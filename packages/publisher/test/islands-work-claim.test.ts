@@ -333,7 +333,7 @@ describe("edit view (contract §7, design §16.4)", () => {
     mount();
     await expect.poll(() => panel()?.hidden).toBe(false);
     expect((panel().querySelector("textarea") as HTMLTextAreaElement).value).toBe("vanished on a Tuesday");
-    // No second claim was issued — the lease is the stored one.
+    // No second claim was issued - the lease is the stored one.
     expect(requests.filter((request) => request.url.endsWith("/claim")).length).toBe(0);
   });
 
@@ -498,7 +498,7 @@ describe("one claim at a time per tab (contract §7 draft preservation)", () => 
     const hints = [...document.querySelectorAll(".ab-work-hint")].map((n) => n.textContent ?? "");
     expect(hints.some((h) => h.includes("already have a work item claimed"))).toBe(true);
 
-    // The first lease's token — the only copy — survives.
+    // The first lease's token - the only copy - survives.
     expect(loadClaim(window.sessionStorage, PROJECT)?.lease.token).toBe(TOKEN);
     expect(
       requests.filter((r) => r.url.includes(`${SECOND_ITEM_ID}/claim`)),
@@ -519,7 +519,7 @@ describe("renewal prompt honours the server's configured lead time", () => {
         body: {
           leaseId: LEASE_ID,
           workItemId: WORK_ITEM_ID,
-          // Expires 20 minutes out, prompt 15 minutes ahead of that — an
+          // Expires 20 minutes out, prompt 15 minutes ahead of that - an
           // operator lead time of PT15M, not the PT5M default.
           expiresAt: "2026-07-19T18:50:00.000Z",
           maxExpiresAt: "2026-07-19T22:00:00.000Z",
@@ -535,7 +535,7 @@ describe("renewal prompt honours the server's configured lead time", () => {
 
     document.querySelector<HTMLButtonElement>(".ab-lease-renew")?.click();
 
-    // The server-supplied prompt instant is kept — and survives a refresh, so
+    // The server-supplied prompt instant is kept - and survives a refresh, so
     // a restored claim does not silently revert to the 5-minute default.
     await expect
       .poll(() => loadClaim(window.sessionStorage, PROJECT)?.lease.renewalPromptAt)
@@ -543,7 +543,7 @@ describe("renewal prompt honours the server's configured lead time", () => {
 
     // 20 minutes remain against a 15-minute configured lead time, so the
     // prompt stays hidden. Under the old hardcoded 5-minute threshold the
-    // configured value was inert and the banner was equally hidden — the
+    // configured value was inert and the banner was equally hidden - the
     // pure-state tests pin the arithmetic in both directions.
     expect(document.querySelector<HTMLElement>(".ab-lease-prompt")?.hidden).toBe(true);
   });

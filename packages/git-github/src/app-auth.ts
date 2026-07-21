@@ -88,12 +88,12 @@ export type GitHubCredentialStatus =
 
 export type GitHubAppCredentialResult =
   | { status: "configured"; credentials: GitHubAppCredentials }
-  /** None of the three variables is set — Git integration is simply off. */
+  /** None of the three variables is set - Git integration is simply off. */
   | { status: "unconfigured"; missing: readonly string[] }
-  /** Some but not all are set — a misconfiguration worth surfacing. */
+  /** Some but not all are set - a misconfiguration worth surfacing. */
   | { status: "incomplete"; missing: readonly string[] }
   /**
-   * All three are present but at least one cannot possibly work — a PKCS#1
+   * All three are present but at least one cannot possibly work - a PKCS#1
    * private key, a non-numeric app or installation id. Distinct from
    * `incomplete` because the operator's mistake is different and the fix is
    * different.
@@ -183,7 +183,7 @@ export function readGitHubAppCredentialResult(
   // Presence is not configuration. `configured` is the operator guide's
   // pre-flight gate before flipping MIRROR_MODE to durable on a live
   // deployment, and a presence-only check reported green for a PKCS#1 key, an
-  // App ID pasted into the Installation ID slot, or any other typo — with the
+  // App ID pasted into the Installation ID slot, or any other typo - with the
   // failure then surfacing only as git_operations rows going to conflict
   // inside the Durable Object, where nothing logs the reason. These checks are
   // structural and synchronous (no key import, no network), so they cost
@@ -199,7 +199,7 @@ export function readGitHubAppCredentialResult(
     problems.push({
       variable: GITHUB_APP_ENV_KEYS.installationId,
       detail:
-        "must be the numeric installation id (digits only) — it is NOT the App ID; " +
+        "must be the numeric installation id (digits only) - it is NOT the App ID; " +
         "find it in the installation's settings URL",
     });
   }
@@ -226,7 +226,7 @@ export function readGitHubAppCredentialResult(
  * plausible PKCS#8 PEM.
  *
  * Deliberately not an `importKey` call: this runs synchronously from
- * `configFromBindings` at boot. The PKCS#1 case is the one this exists for —
+ * `configFromBindings` at boot. The PKCS#1 case is the one this exists for -
  * GitHub's download button hands you `BEGIN RSA PRIVATE KEY`, WebCrypto cannot
  * read it, and the old presence-only check reported such a key as
  * `configured`. Never echoes any part of the key.
@@ -279,7 +279,7 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
  *
  * 1. **PKCS#1.** GitHub's download button hands you `BEGIN RSA PRIVATE KEY`,
  *    which `crypto.subtle.importKey` cannot read. Rather than fail with an
- *    opaque `DataError`, say so and give the conversion command — this is the
+ *    opaque `DataError`, say so and give the conversion command - this is the
  *    single most likely setup mistake an operator will make.
  * 2. **Escaped newlines.** Pasting a PEM into a secret store frequently
  *    stores the two characters `\` `n` instead of a newline. Base64 ignores
@@ -386,7 +386,7 @@ export async function createAppJwt(
   return `${signingInput}.${base64Url(new Uint8Array(signature))}`;
 }
 
-/** Decode a JWT's claims without verifying — for tests and diagnostics only. */
+/** Decode a JWT's claims without verifying - for tests and diagnostics only. */
 export function decodeJwtClaims(jwt: string): AppJwtClaims {
   const segment = jwt.split(".")[1];
   if (segment === undefined) throw new Error("not a JWT");
@@ -420,7 +420,7 @@ interface AccessTokenResponse {
 
 /**
  * A request body is replayable if we can send the identical bytes again. Only
- * then may we retry after a 401 — silently re-sending a consumed stream would
+ * then may we retry after a 401 - silently re-sending a consumed stream would
  * commit an empty or truncated payload, which for the writer means a wrong
  * commit. Strings (what this package sends) always qualify.
  */
@@ -443,7 +443,7 @@ async function discard(response: Response): Promise<void> {
  *
  * Caching is per instance; hold one instance per isolate (see
  * {@link getGitHubAppAuth}) and the 5-minute refresh margin does its job.
- * Concurrent callers share a single in-flight mint — without that, the
+ * Concurrent callers share a single in-flight mint - without that, the
  * reader's eight parallel blob fetches would each trigger their own token
  * request on a cold isolate.
  */
@@ -589,7 +589,7 @@ export class GitHubAppAuth {
   /**
    * `fetch` with a live installation token attached. On a 401 the token is
    * dropped and the request is retried **once** with a freshly minted one
-   * (§2) — but only when the body can be replayed byte-for-byte.
+   * (§2) - but only when the body can be replayed byte-for-byte.
    *
    * Bound as a property so it can be handed straight to the reader/writer.
    */
@@ -641,7 +641,7 @@ function isolateKey(credentials: GitHubAppCredentials, apiOrigin: string): strin
  *
  * The private key is not part of the cache key (it is a secret and it does not
  * vary independently of the app id), so rotating the key requires
- * {@link resetGitHubAppAuthCache} or a new isolate — which is what a secret
+ * {@link resetGitHubAppAuthCache} or a new isolate - which is what a secret
  * update produces anyway.
  */
 export function getGitHubAppAuth(

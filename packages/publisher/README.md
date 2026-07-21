@@ -1,10 +1,10 @@
 # @authorbot/publisher
 
 Static-site publisher for Authorbot book repositories (Phase 1 contract
-§1–§4; Phase 2b contract §1–§4; design §16.1–16.2, §17.2). Builds the public
+§1-§4; Phase 2b contract §1-§4; design §16.1-16.2, §17.2). Builds the public
 reading site with Astro 5 invoked programmatically and writes the
 `authorbot.build/v1` manifest. Without an API base the output contains
-**zero client JavaScript** — no `<script>` tags anywhere, byte-identical to
+**zero client JavaScript** - no `<script>` tags anywhere, byte-identical to
 a pre-collaboration build. With one (`apiUrl` option / `--api-url` /
 `publication.api_url`), chapter pages additionally mount the framework-free
 collaboration islands (see below).
@@ -23,7 +23,7 @@ const manifest = await buildSite({
   apiUrl: undefined,        // optional; enables the collaboration islands.
                             // Root-relative only: "/" or "/my-book"
                             // (overrides publication.api_url in book.yml)
-  devLogin: false,          // optional; surface the dev-login form —
+  devLogin: false,          // optional; surface the dev-login form -
                             // programmatic only, never exposed via the CLI
 });
 ```
@@ -71,7 +71,7 @@ The staging directory is removed by Astro after the build.
 ## Rendering safety (contract §4)
 
 Chapter and character Markdown is rendered to HTML by `render.ts` directly
-from the mdast AST — no HTML serializer library, every byte escaped at one
+from the mdast AST - no HTML serializer library, every byte escaped at one
 boundary:
 
 - All text and attribute values are HTML-escaped.
@@ -88,16 +88,16 @@ boundary:
 
 ## Page inventory (contract §2)
 
-- `index.html` — book title + chapter index (title, order, summary).
-- `chapters/<slug>/index.html` — prose with block anchors, prev/next nav by
+- `index.html` - book title + chapter index (title, order, summary).
+- `chapters/<slug>/index.html` - prose with block anchors, prev/next nav by
   `order`, footer with revision/authors when `publication.show_revision` /
   `show_attribution` are true, draft banner (and `noindex`) on
   draft/proposed chapters.
-- `story/index.html` — outline tree, nodes nested by parent, ordered.
-- `story/timeline/index.html` — table sorted by `sort_key` showing
+- `story/index.html` - outline tree, nodes nested by parent, ordered.
+- `story/timeline/index.html` - table sorted by `sort_key` showing
   `display_time`, title, participants (linked to character pages),
   locations, chapter links.
-- `story/characters/index.html` and `story/characters/<slug>/index.html` —
+- `story/characters/index.html` and `story/characters/<slug>/index.html` -
   character index and detail (frontmatter fields, rendered body, chapters
   whose `character_refs` mention the character).
 
@@ -106,14 +106,14 @@ hashed file), ~65ch measure, `prefers-color-scheme` dark mode, skip link,
 landmarks, `lang` from `book.yml`. No CSS framework, no icons, no client
 bundle.
 
-## Collaboration islands (`api_url`, Phase 2b contract §1–§4, ADR-0019)
+## Collaboration islands (`api_url`, Phase 2b contract §1-§4, ADR-0019)
 
-Enabled by an API base — `buildSite({ apiUrl })` / CLI `--api-url <path>`
+Enabled by an API base - `buildSite({ apiUrl })` / CLI `--api-url <path>`
 overrides the durable `publication.api_url` in `book.yml`.
 
 **Only a root-relative path is accepted** (`resolveCollab` in `src/load.ts`):
 `/` when the API answers at the origin root, or a base path such as
-`/my-book` when the book is served under a subpath — the islands then call
+`/my-book` when the book is served under a subpath - the islands then call
 `/my-book/v1/...` and the Worker must run with a matching
 `API_BASE_PATH=/my-book`. An **absolute http(s) URL fails the build** with an
 error naming ADR-0019: Authorbot serves the API from the same origin as the
@@ -122,13 +122,13 @@ exists. Catching it here beats shipping a site whose every collaboration call
 dies as a browser CORS error.
 
 Without an API base, `SiteModel.collab` is `null` and the output stays
-byte-identical script-free — regression-tested.
+byte-identical script-free - regression-tested.
 
 When enabled, **chapter pages only** gain four insertions (index, story, and
 character pages are untouched):
 
 - a CSP `<meta>` tag: `default-src 'self'; connect-src 'self'; img-src 'self'
-  data:` — same-origin only, so `'self'` covers the API too (ADR-0019 §1); no
+  data:` - same-origin only, so `'self'` covers the API too (ADR-0019 §1); no
   `'unsafe-inline'` needed, since the islands touch styles via the CSSOM only;
 - a `<link>` to `_astro/authorbot-collab.css`;
 - the mount element (see contract below);
@@ -136,11 +136,11 @@ character pages are untouched):
 
 The islands are **framework-free custom elements** (ADR-0018) in
 `site/src/islands/`, bundled by an explicit Vite step (`buildIslands()`) run
-only when enabled, with stable asset names — deliberately outside Astro's
+only when enabled, with stable asset names - deliberately outside Astro's
 script pipeline, which would emit chunks even into disabled builds. No
 runtime dependencies; ~8 KB gzipped JS + ~2 KB CSS against the contract's
 35 KB budget. Annotation/reply bodies render as plain text (`textContent` +
-`white-space: pre-wrap`; the bundle contains no `innerHTML` — asserted by
+`white-space: pre-wrap`; the bundle contains no `innerHTML` - asserted by
 test); no client-side Markdown.
 
 Features (contract §2): `/v1/me` auth state with a GitHub sign-in link
@@ -184,22 +184,22 @@ Collab builds emit one extra route, `/work/`, mounting
 `<authorbot-work-queue data-api-base data-project data-chapters>`. Phase 3
 listed ready work items; Phase 4 adds the claim-and-edit flow:
 
-- **Claim** — shown only to actors whose `/v1/me` scopes include
+- **Claim** - shown only to actors whose `/v1/me` scopes include
   `work:claim`; everyone else gets a plain hint, never a dead button.
   A lost race renders the API's 409 `lease-held` holder *display name* only.
-- **Edit view** (`.ab-claim`) — the §15.3 task bundle: request, chapter
+- **Edit view** (`.ab-claim`) - the §15.3 task bundle: request, chapter
   summary and story refs (all labelled untrusted project content), acceptance
   criteria, original text, and a textarea prefilled with the target.
-- **Lease** — `.ab-lease-remaining` counts down every second;
+- **Lease** - `.ab-lease-remaining` counts down every second;
   `.ab-lease-prompt` appears in the last five minutes (design §25 default,
   a UI-side constant), with `.ab-lease-renew` / `.ab-lease-release`.
-- **Submit** — `.ab-submit-status` walks `Submitting → Syncing → Completed`,
+- **Submit** - `.ab-submit-status` walks `Submitting → Syncing → Completed`,
   or `.ab-submit-conflict` when the pipeline reports `submission-conflict` on
   the operation: the chapter was left untouched and the created
   `resolve_conflict` work item is named in `.ab-conflict-id`.
 
 The lease token (returned exactly once by the claim) is kept in
-**sessionStorage** — per-tab, dropped when the tab closes — so a refresh
+**sessionStorage** - per-tab, dropped when the tab closes - so a refresh
 resumes the claim and the draft instead of stranding the lease. It is never
 rendered, never logged, never placed in localStorage or a URL, and is deleted
 the moment the lease is released, submitted, or expires.
@@ -208,11 +208,11 @@ the moment the lease is released, submitted, or expires.
 Node script (claim → print bundle → submit → poll → report commit); the
 Playwright suite runs both paths over the same `revise_range` work-item type.
 
-## The `/settings/` page — access control (Phase 7)
+## The `/settings/` page - access control (Phase 7)
 
 Collab builds emit `/settings/`, which mounts two independent islands: the
 Phase 6 `<authorbot-settings>` form over `book.yml`, and Phase 7's
-`<authorbot-access data-api-base data-project>` — the author-facing access
+`<authorbot-access data-api-base data-project>` - the author-facing access
 control surface (collaborators, agent tokens, the audit view, the annotation
 policy, freeze, pause-agents, the approval queue, and the revocations).
 
@@ -223,7 +223,7 @@ contract's 35 KB budget: that number exists because `authorbot-collab.js` is
 what *every reader* downloads on *every chapter page*, and a collaborator
 table, a token list, an audit log and a moderation queue are maintainer-only.
 For the same reason the Phase 7 routes live on `AccessApi extends CollabApi`
-in `site/src/islands/access-api.ts` rather than on `CollabApi` itself — class
+in `site/src/islands/access-api.ts` rather than on `CollabApi` itself - class
 methods do not tree-shake, so putting them on the shared client would cost
 every reader ~400 bytes gzipped of code they can never call. Both bundles are
 regression-tested: the collab bundle must not contain the access view, and an
@@ -236,7 +236,7 @@ enforceable by test rather than by review:
 - role and policy descriptions prefer **the server's own text**
   (`roleConsequences`, `collaboration.options`) over the shipped fallbacks, so
   the interface cannot drift from what the API actually grants;
-- `locked` is described as **author-only, not off** — the book stays usable by
+- `locked` is described as **author-only, not off** - the book stays usable by
   its maintainers and collaborators keep their membership and history;
 - every destructive confirmation states **what stops and what stays**: access
   ends on the next request and claimed work returns to the queue, but existing
@@ -262,7 +262,7 @@ only. Key selectors: `.ab-access-body`, `.ab-access-policy`,
 
 - **Index vs. drafts**: contract §2 shows the index as "published only";
   with `--include-drafts` the index lists all *included* chapters, drafts
-  visibly labeled — otherwise draft pages would be unreachable.
+  visibly labeled - otherwise draft pages would be unreachable.
 - **Manifest chapter list**: `chapters` records the chapters *included in
   the build* (what was actually published), not every file in the repo.
 - **Raw HTML under `--force`**: "never emitted" is implemented as

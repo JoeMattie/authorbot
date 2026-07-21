@@ -4,7 +4,7 @@
  *
  * ADR-0021 §4 requires author CI to run `wrangler d1 migrations apply` before
  * deploying the Worker. Those SQL files therefore have to be on disk in the
- * author's checkout — and the only version of them that can possibly match the
+ * author's checkout - and the only version of them that can possibly match the
  * Worker being deployed is the one shipped by the same package. So a book's
  * `wrangler.jsonc` sets:
  *

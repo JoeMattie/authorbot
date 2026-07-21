@@ -1,5 +1,5 @@
 /**
- * Byte-stable rendering of `book.yml` — `authorbot.book/v1` (Phase 6 contract
+ * Byte-stable rendering of `book.yml` - `authorbot.book/v1` (Phase 6 contract
  * §3.6: "editing the same `book.yml` that lives in Git … Settings changes are
  * commits: diffable, revertable, audited").
  *
@@ -13,7 +13,7 @@
  *
  * 2. **Minimal diffs.** Absent optional sections stay absent. A book that never
  *    set `planning` must not acquire an empty `planning: {}` because settings
- *    were edited once — the diff a maintainer reviews should contain only what
+ *    were edited once - the diff a maintainer reviews should contain only what
  *    they changed.
  *
  * Every config is validated against `bookConfigSchema` before serialization, so
@@ -45,7 +45,7 @@ const KEY_ORDER = [
   "governance",
 ] as const;
 
-/** Nested key order, section by section — same reasoning as {@link KEY_ORDER}. */
+/** Nested key order, section by section - same reasoning as {@link KEY_ORDER}. */
 const NESTED_KEY_ORDER: Record<string, readonly string[]> = {
   repository: ["default_branch"],
   content: ["chapters_glob", "raw_html"],
@@ -135,7 +135,7 @@ export function orderBookConfig(config: BookConfig): Record<string, unknown> {
  * that projection can be stale (it freezes while a project is diverged, and
  * `projectBookConfig` keeps the previous row on an `invalid` outcome). Rendering
  * the whole file from that copy therefore reverted anything the author had
- * committed directly to Git in the meantime — including the three fields
+ * committed directly to Git in the meantime - including the three fields
  * `IMMUTABLE_FIELDS` documents as never editable, so a title edit could silently
  * re-enable `content.raw_html` or repoint `repository.default_branch`. Writing
  * only the paths the maintainer actually edited makes that impossible: a key
@@ -143,7 +143,7 @@ export function orderBookConfig(config: BookConfig): Record<string, unknown> {
  *
  * It also keeps the author's own comments and key order, which a
  * `parse → plain object → stringify` round trip cannot (§3.6: "Settings changes
- * are commits: diffable" — a whole-file rewrite buries the one changed line).
+ * are commits: diffable" - a whole-file rewrite buries the one changed line).
  *
  * `head` is the file at the branch head, or `null` when the repository has no
  * `book.yml` yet, in which case there is nothing to preserve and the config is

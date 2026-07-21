@@ -1,7 +1,7 @@
 /**
  * Telling the author to run a command that exists.
  *
- * Roughly twenty messages — every resume hint, most error remedies — said
+ * Roughly twenty messages - every resume hint, most error remedies - said
  * `create-authorbot <stage>`. That binary exists only for a global install;
  * `npx @authorbot/create`, the documented way in, unpacks to a cache directory
  * and leaves nothing on PATH. So the advice offered at the moment something

@@ -15,8 +15,8 @@
  * be free, `order` is the last existing order plus ten, and a revise must
  * reuse the marker ids of blocks whose text did not change so that
  * annotations anchored there keep resolving. A plan rendered when the request
- * arrived would be computed against the projection — which lags the branch by
- * however long the outbox took to drain — and committing it would either
+ * arrived would be computed against the projection - which lags the branch by
+ * however long the outbox took to drain - and committing it would either
  * clobber a chapter that landed in between or claim a slug someone else took.
  * Composing here, against the head the commit is pinned to, is the same
  * discipline `submission-applier.ts` uses and for the same reason.
@@ -30,12 +30,12 @@
  *   and answering it twice is how the two answers drift.
  * - **Publish/unpublish bumps the revision.** The file's bytes change, and
  *   `revision` is the handle every base-revision and base-hash check in
- *   Phases 3–5 uses to mean "these exact bytes". Leaving it alone would let
+ *   Phases 3-5 uses to mean "these exact bytes". Leaving it alone would let
  *   two different chapter files share a revision, which turns a stale
  *   submission into a silent mismatch instead of a clean 409.
  * - **A stale base revision throws.** Unlike a submission there is no second
  *   party whose prose could be lost by refusing, so the honest outcome is a
- *   failed operation the author retries against the current text — not a
+ *   failed operation the author retries against the current text - not a
  *   `resolve_conflict` work item nobody asked for. The request path rejects
  *   the common case with 409 long before this; reaching here means the
  *   chapter moved between the request and the drain.
@@ -136,7 +136,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
         authors: withAuthor(fm.data.authors, actorRef),
       };
       // Body unchanged (a title/summary-only revise) keeps the committed body
-      // byte-for-byte, markers included — re-running the replacement would be
+      // byte-for-byte, markers included - re-running the replacement would be
       // a no-op today and a marker churn risk the day the parser changes.
       const content =
         body === undefined
@@ -188,7 +188,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
     // An explicit slug is the author's word; a derived one is the server's
     // guess. The request path already refuses an explicit slug that collides,
     // but it reads the PROJECTION, which under `MIRROR_MODE=queue` is empty
-    // until the coordinator alarm drains — so two authors could both be
+    // until the coordinator alarm drains - so two authors could both be
     // accepted with the same explicit slug and the second would silently ship
     // at `-2`. De-duplicating is only ever right for a slug the server chose:
     // an author who asked for a specific URL and got a different one has to be
@@ -264,7 +264,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
 
   /**
    * Highest `order` among committed chapters. Read from the repository rather
-   * than the projection because the projection has no `order` column — the
+   * than the projection because the projection has no `order` column - the
    * files are the only place the number lives. One read per chapter, on a
    * path an author takes by hand a few times a book.
    */
@@ -387,7 +387,7 @@ export function deriveSlug(title: string, ordinal?: number): string {
   return ordinal === undefined ? "chapter" : `chapter-${String(ordinal)}`;
 }
 
-/** `chapters/0030-the-ridge.md` — order-prefixed so `git ls` reads in order. */
+/** `chapters/0030-the-ridge.md` - order-prefixed so `git ls` reads in order. */
 export function chapterPath(directory: string, order: number, slug: string): string {
   return `${directory}/${String(Math.max(order, 0)).padStart(4, "0")}-${slug}.md`;
 }
@@ -418,7 +418,7 @@ function withAuthor(
  *
  * Field order is pinned to the canonical order rather than inherited, because
  * a create renders from nothing and a revise must produce the same bytes for
- * the same content — a chapter whose frontmatter order depends on how it was
+ * the same content - a chapter whose frontmatter order depends on how it was
  * first written is a diff nobody can read.
  */
 export function replaceFrontmatter(source: string, frontmatter: ChapterFrontmatter): string {
@@ -436,7 +436,7 @@ export function replaceFrontmatter(source: string, frontmatter: ChapterFrontmatt
   // from the first block, and `renderFrontmatter` already ends with `---\n`.
   // Joining with another `\n` therefore added one blank line per edit, so
   // every publish, unpublish, and title-only revise grew the file and changed
-  // its `contentHash` for a no-op round trip — a publish→unpublish pair never
+  // its `contentHash` for a no-op round trip - a publish→unpublish pair never
   // returned the author's committed prose to its original bytes. Normalizing
   // to exactly one separator makes the operation byte-idempotent, which is
   // what the docstring above promises.

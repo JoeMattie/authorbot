@@ -36,7 +36,7 @@ export type AgentTokenParseResult =
 
 /**
  * Shape-check a presented credential and split off the secret part (which the
- * API layer hashes for lookup). Failure results carry a reason only — never
+ * API layer hashes for lookup). Failure results carry a reason only - never
  * any fragment of the presented value.
  */
 export function parseAgentToken(value: string): AgentTokenParseResult {

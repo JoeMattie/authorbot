@@ -1,5 +1,5 @@
 /**
- * Phase 3 contract §4: maintainer overrides — reject, reopen, force-create,
+ * Phase 3 contract §4: maintainer overrides - reject, reopen, force-create,
  * cancel. Maintainer-only, reason-required, audited; force-create respects
  * the `(source_annotation_id, action_type, rule_version 0)` uniqueness key.
  */

@@ -1,7 +1,7 @@
 /**
  * Typed fault injection for the fake GitHub (Phase 5 contract §7).
  *
- * Every fault is an explicit, named, typed option with a firing budget — no
+ * Every fault is an explicit, named, typed option with a firing budget - no
  * magic paths, no magic header values, no "if the branch is called
  * `boom`" strings. A fault with `times: 1` fires exactly once and then the
  * fake behaves normally, which is what the writer's retry tests need: they
@@ -23,7 +23,7 @@ export interface CountedFault {
  * ref update. After `times` successful reads of `refs/heads/{branch}`, the
  * fake commits `files` onto that branch out of band. The writer's own commit
  * then has a stale parent, so its non-force `PATCH` is a genuine
- * non-fast-forward — a real race, not a synthesized status code.
+ * non-fast-forward - a real race, not a synthesized status code.
  */
 export interface MovedHeadFault extends CountedFault {
   /** Branch whose ref reads arm the fault. */
@@ -143,7 +143,7 @@ export class FaultController {
     return FAULT_NAMES.filter((name) => this.remaining(name) > 0);
   }
 
-  /** Throw when any armed fault never fired — guards vacuously-passing tests. */
+  /** Throw when any armed fault never fired - guards vacuously-passing tests. */
   assertAllFired(): void {
     const pending = this.pending();
     if (pending.length > 0) {

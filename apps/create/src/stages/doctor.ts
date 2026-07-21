@@ -1,5 +1,5 @@
 /**
- * `doctor` — prerequisites (Phase 6 contract §3.1).
+ * `doctor` - prerequisites (Phase 6 contract §3.1).
  *
  * Detects and reports, with install guidance, and installs nothing unasked.
  * It also runs standalone against an existing project, which is why it never
@@ -42,13 +42,13 @@ export async function diagnose(ctx: WizardContext): Promise<DoctorResult> {
 function line(report: ToolReport): string {
   const detail = [report.version, report.account].filter((part) => part !== undefined).join(", ");
   const suffix = detail.length > 0 ? ` (${detail})` : "";
-  return `${report.name}${suffix} — ${report.purpose}`;
+  return `${report.name}${suffix} - ${report.purpose}`;
 }
 
 export const doctorStage: Stage = async (ctx: WizardContext): Promise<StageOutcome> => {
   ctx.reporter.heading("Checking your machine");
   ctx.reporter.explain(
-    "Authorbot leans on a few tools you probably already have. Nothing is installed here — this only looks, and tells you what to do about anything missing.",
+    "Authorbot leans on a few tools you probably already have. Nothing is installed here - this only looks, and tells you what to do about anything missing.",
   );
 
   const { reports, ready } = await diagnose(ctx);
@@ -110,7 +110,7 @@ export const doctorStage: Stage = async (ctx: WizardContext): Promise<StageOutco
     ctx.reporter.ok("Everything required is in place.");
   } else {
     ctx.reporter.warn(
-      "Something required is missing. Fix the items marked above, then run this again — nothing you have already done will be repeated.",
+      "Something required is missing. Fix the items marked above, then run this again - nothing you have already done will be repeated.",
     );
   }
 

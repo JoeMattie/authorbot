@@ -6,7 +6,7 @@
  *   rule_version 0 and >= 1).
  * - Finding 2: a maintainer reject racing a rule crossing must never leave a
  *   self-contradictory state (a rejected suggestion with a live ready work
- *   item, or a maintainer reject silently clobbered) — status transitions are
+ *   item, or a maintainer reject silently clobbered) - status transitions are
  *   optimistic compare-and-swaps.
  * - Finding 4: the maintainer override reason is member-only and must not leak
  *   to anonymous readers on public books.
@@ -45,7 +45,7 @@ async function castVote(
   return h.app.request(votePath(h, id), jsonRequest("PUT", { value }, { Cookie: cookie }));
 }
 
-/** A second app (fresh serialize Map) over the same DB — a distinct isolate. */
+/** A second app (fresh serialize Map) over the same DB - a distinct isolate. */
 function siblingApp(h: TestHarness): Hono<AppEnv> {
   const deps: AppDeps = {
     db: h.db,
@@ -57,8 +57,8 @@ function siblingApp(h: TestHarness): Hono<AppEnv> {
 
 /**
  * Two approvals in place, so a third crosses the default rule
- * (approvals >= 3, net >= 2, human_approvals >= 1, and — Phase 6 contract
- * §3.6 — human_maintainer_approvals >= 1). The maintainer casts one of the two
+ * (approvals >= 3, net >= 2, human_approvals >= 1, and - Phase 6 contract
+ * §3.6 - human_maintainer_approvals >= 1). The maintainer casts one of the two
  * seeded approvals so the crossing vote itself can come from any contributor;
  * these tests are about the concurrency of the crossing, not about who is
  * allowed to cause it.
@@ -143,7 +143,7 @@ describe("Finding 1: force-create vs rule crossing → one work item", () => {
 });
 
 describe("Finding 2: reject vs rule crossing → never self-contradictory", () => {
-  it("sequential: reject then a crossing vote — no work item, stays rejected", async () => {
+  it("sequential: reject then a crossing vote - no work item, stays rejected", async () => {
     const h = await makeHarness();
     try {
       const { id, third, maintainer } = await seedTwoApprovals(h);
@@ -152,7 +152,7 @@ describe("Finding 2: reject vs rule crossing → never self-contradictory", () =
         jsonRequest("POST", { reason: "off-canon" }, { Cookie: maintainer }),
       );
       expect(rej.status).toBe(200);
-      // A vote can no longer cross — the suggestion is rejected (not votable).
+      // A vote can no longer cross - the suggestion is rejected (not votable).
       const vote = await castVote(h, third, id, "approve");
       expect(vote.status).toBe(409);
       expect((await h.repos.annotations.getById(id))?.status).toBe("rejected");
@@ -162,7 +162,7 @@ describe("Finding 2: reject vs rule crossing → never self-contradictory", () =
     }
   });
 
-  it("sequential: a crossing then a reject is a 409 — work item stays ready", async () => {
+  it("sequential: a crossing then a reject is a 409 - work item stays ready", async () => {
     const h = await makeHarness();
     try {
       const { id, third, maintainer } = await seedTwoApprovals(h);

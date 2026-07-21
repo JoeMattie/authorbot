@@ -1,5 +1,5 @@
 /**
- * @authorbot/cli — `authorbot` command-line interface (Phase 0).
+ * @authorbot/cli - `authorbot` command-line interface (Phase 0).
  *
  * The validation logic is importable so the API service can reuse it later:
  * `validateBookRepo(path)` returns the same `{ valid, errors, warnings }`

@@ -1,8 +1,8 @@
 /**
  * The outside world, as `authorbot upgrade` sees it.
  *
- * Every effect the command has — reading files, running git, talking to the
- * npm registry, invoking wrangler, fetching a URL — goes through one of these
+ * Every effect the command has - reading files, running git, talking to the
+ * npm registry, invoking wrangler, fetching a URL - goes through one of these
  * interfaces. Nothing below imports `node:child_process` or `fetch`. The
  * point is not testability alone: it is that a command which rewrites an
  * author's prose and redeploys their site should have an enumerable list of
@@ -12,7 +12,7 @@
 import type { ValidationReport } from "../validate/findings.js";
 import type { BookRepoMigration } from "./migrations.js";
 
-/** Filesystem access, rooted nowhere — paths are absolute. */
+/** Filesystem access, rooted nowhere - paths are absolute. */
 export interface UpgradeFs {
   exists(path: string): Promise<boolean>;
   readFile(path: string): Promise<string>;
@@ -72,7 +72,7 @@ export interface D1MigrationResult {
 export interface DeployResult {
   /**
    * The deployed URL, when the deploy tool reported one. `undefined` means
-   * the deploy happened but we do not know where — which is why health
+   * the deploy happened but we do not know where - which is why health
    * cannot then be verified.
    */
   readonly url?: string;
@@ -98,7 +98,7 @@ export interface HealthPort {
  *
  * `validate` is injected alongside the ports rather than imported directly so
  * that the before/after gate can be exercised with a validator that fails on
- * demand — the gate is the safety property most worth testing, and it is
+ * demand - the gate is the safety property most worth testing, and it is
  * untestable if the only way to trip it is to author a genuinely broken book.
  */
 /**
@@ -106,9 +106,9 @@ export interface HealthPort {
  * `package.json`.
  *
  * The toolchain bump used to change the pin and commit that alone, leaving the
- * lockfile pinning the version being upgraded away from. `npm ci` — which both
+ * lockfile pinning the version being upgraded away from. `npm ci` - which both
  * generated workflows run, and which exists precisely to refuse a lockfile
- * that disagrees with its manifest — then failed on the upgrade's own pull
+ * that disagrees with its manifest - then failed on the upgrade's own pull
  * request. Every upgrade opened a pull request whose CI could not pass.
  */
 export interface LockfilePort {

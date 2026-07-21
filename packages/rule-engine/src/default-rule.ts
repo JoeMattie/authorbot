@@ -7,7 +7,7 @@ import {
 /**
  * The default governance rule: the design section 25 block (approvals ≥ 3,
  * net_score ≥ 2, human_approvals ≥ 1) **plus** the Phase 6 contract section
- * 3.6 amendment `human_maintainer_approvals >= 1` — nothing becomes work on
+ * 3.6 amendment `human_maintainer_approvals >= 1` - nothing becomes work on
  * the author's book without the author agreeing to it.
  *
  * `book.yml`'s `governance.rules` overrides it, `RULES_JSON` overrides it as a
@@ -25,7 +25,7 @@ export const DEFAULT_RULE_NAME = "suggestion_to_work_item";
  *
  * **`version: 2`, not 1.** Adding the human-maintainer clause is a rule change,
  * and Phase 3's decision uniqueness key is
- * `(source_annotation_id, action_type, rule_version)` — leaving the version at
+ * `(source_annotation_id, action_type, rule_version)` - leaving the version at
  * 1 would make the old and new rules indistinguishable in the decision record,
  * so a decision could not be read back to the rule that produced it. Bumping is
  * safe for books that already crossed under version 1: their decision rows

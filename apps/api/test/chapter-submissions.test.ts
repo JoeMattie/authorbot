@@ -1,9 +1,9 @@
 /**
- * Phase 6 contract §3.5 — the direct authoring path.
+ * Phase 6 contract §3.5 - the direct authoring path.
  *
  * These tests exist to prove exit criterion 2: "the author signs in with
  * GitHub, clicks New chapter, writes prose in a plain composer, saves, and the
- * chapter exists as a draft — committed, attributed, and validated — having
+ * chapter exists as a draft - committed, attributed, and validated - having
  * never seen a UUID or a block marker." Every request body below is what a
  * plain title-and-prose form would send: no frontmatter, no markers, no ids.
  *
@@ -147,7 +147,7 @@ describe("create (contract §3.5)", () => {
   it("derives a kebab-case, path-safe slug from the title", () => {
     expect(deriveSlug("The Ridge")).toBe("the-ridge");
     expect(deriveSlug("Chapter 1: What Avery Saw!")).toBe("chapter-1-what-avery-saw");
-    expect(deriveSlug("  Café — Déjà Vu  ")).toBe("cafe-deja-vu");
+    expect(deriveSlug("  Café - Déjà Vu  ")).toBe("cafe-deja-vu");
     expect(deriveSlug("Avery’s Notebook")).toBe("averys-notebook");
     expect(deriveSlug("///")).toBe("chapter");
     expect(deriveSlug("../../etc/passwd")).toBe("etc-passwd");
@@ -156,7 +156,7 @@ describe("create (contract §3.5)", () => {
   /**
    * Regression: NFKD only decomposes precomposed Latin, so every Cyrillic and
    * Greek character was dropped and the whole book slugged to `chapter`,
-   * `chapter-2`, … — URLs carrying no information about the chapter, and a
+   * `chapter-2`, … - URLs carrying no information about the chapter, and a
    * hard failure at the 51st once MAX_SLUG_ATTEMPTS ran out.
    */
   it("romanizes Cyrillic and Greek titles rather than erasing them", () => {
@@ -168,7 +168,7 @@ describe("create (contract §3.5)", () => {
   /**
    * Regression: scripts with no settled romanization still slug to nothing, so
    * the fallback must at least be DISTINCT per chapter instead of colliding on
-   * the literal `chapter` for every one of them — which also ran the
+   * the literal `chapter` for every one of them - which also ran the
    * de-duplication loop out of attempts at the 51st chapter.
    */
   it("falls back to a distinct ordinal slug for an unromanizable title", () => {
@@ -187,8 +187,8 @@ describe("create (contract §3.5)", () => {
 
   /**
    * Regression: the request path refuses a colliding explicit slug, but it
-   * reads the PROJECTION. Under `MIRROR_MODE=queue` — the deployed Worker's
-   * mode — the projection is empty until the coordinator alarm drains, so two
+   * reads the PROJECTION. Under `MIRROR_MODE=queue` - the deployed Worker's
+   * mode - the projection is empty until the coordinator alarm drains, so two
    * authors could both be accepted with the same explicit slug and the second
    * silently shipped at `-2`. De-duplication is only ever right for a slug the
    * SERVER guessed: `slug` is a guarded field precisely because it must not
@@ -324,7 +324,7 @@ describe("revise (contract §3.5)", () => {
 
     const chapter = await harness.repos.chapters.getById(chapterId);
     const next = harness.repoFiles.get(chapter?.path ?? "") ?? "";
-    // The block id survived, so the annotation still resolves by step 1 —
+    // The block id survived, so the annotation still resolves by step 1 -
     // which is the whole point of reusing ids for unchanged text.
     const reanchored = resolveTarget(next, target);
     expect(reanchored.kind).not.toBe("not_found");
@@ -416,7 +416,7 @@ describe("publish / unpublish (contract §3.5: deliberately distinct from writin
    * the body already carried, so every frontmatter-only edit inserted one more
    * blank line. Publish, unpublish, and title-only revise all take that path,
    * so an author's committed prose grew by a line per operation and a
-   * publish→unpublish pair never returned the file to its original bytes —
+   * publish→unpublish pair never returned the file to its original bytes -
    * contradicting the function's own "keeping the body byte-for-byte".
    */
   it("is byte-idempotent across publish → unpublish, apart from the frontmatter", async () => {
@@ -540,7 +540,7 @@ describe("validation before the outbox (contract §3.5)", () => {
     expect(JSON.stringify(response.body)).toContain("javascript");
   });
 
-  it("refuses author-supplied block markers — the author must never write one", async () => {
+  it("refuses author-supplied block markers - the author must never write one", async () => {
     const response = await submit({
       title: "Marked up",
       body: `<!-- authorbot:block id="${CHAPTER_ID}" -->\nA paragraph.`,
@@ -563,7 +563,7 @@ describe("validation before the outbox (contract §3.5)", () => {
  * The claim "committed, attributed, and validated" is only worth as much as
  * the validator that checks it. The suite above uses the same Phase 0
  * primitives the composer does, which would pass even if both were wrong
- * together — so this one takes the bytes the API actually committed, drops
+ * together - so this one takes the bytes the API actually committed, drops
  * them into a copy of the blank book template, and runs the real
  * `authorbot validate` binary over the result.
  */
@@ -641,8 +641,8 @@ describe("project divergence blocks the authoring path (design §14.5)", () => {
         .run();
 
       // A drain wired the way the coordinator wires it: prose kinds paused
-      // while the project is diverged. The row must stay `pending` — neither
-      // committed nor failed — so the backlog resumes by itself once a
+      // while the project is diverged. The row must stay `pending` - neither
+      // committed nor failed - so the backlog resumes by itself once a
       // maintainer clears the divergence.
       const runner = createDrainRunner({
         db: queued.db,
@@ -672,7 +672,7 @@ describe("project divergence blocks the authoring path (design §14.5)", () => {
  * Regression (contract §3.5: "Editing an existing chapter uses the same
  * composer"). The revise half of POST chapter-submissions requires a COMPLETE
  * replacement body plus the correct `baseRevision`, but no route returned a
- * chapter's prose — `chapterJson` carries only projection metadata. A revise
+ * chapter's prose - `chapterJson` carries only projection metadata. A revise
  * therefore had to be written blind or sourced out-of-band from Git, which is
  * the exact problem Phase 6 exists to remove.
  */

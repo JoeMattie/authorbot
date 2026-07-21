@@ -6,8 +6,8 @@ import { visit } from "unist-util-visit";
  * Safety scan per contract section 5:
  *
  * - `RAW_HTML_FORBIDDEN`: raw HTML nodes in prose. Authorbot marker comments
- *   (`<!-- authorbot:... -->`) are exempt; every other html node — including
- *   ordinary HTML comments — is reported. Enforcement (checking
+ *   (`<!-- authorbot:... -->`) are exempt; every other html node - including
+ *   ordinary HTML comments - is reported. Enforcement (checking
  *   `content.raw_html`) is the caller's concern.
  * - `URL_SCHEME_FORBIDDEN`: link/image/definition URLs whose scheme is
  *   outside `http`, `https`, `mailto`, or relative.

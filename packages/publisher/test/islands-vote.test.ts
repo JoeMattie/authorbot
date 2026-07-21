@@ -7,7 +7,7 @@ import type { Annotation } from "../site/src/islands/api.js";
 /**
  * Phase 3 contract §6: the approve/reject/abstain segmented control (aria-
  * pressed, current-vote highlight, enabled only with votes:write), the live
- * tally, and the "Queued as work item" badge — as a unit (VoteControl) and
+ * tally, and the "Queued as work item" badge - as a unit (VoteControl) and
  * wired into the suggestion cards (the element).
  */
 
@@ -289,7 +289,7 @@ describe("suggestion vote control (element)", () => {
       },
     });
     expect(document.querySelector('.ab-vote-btn[data-vote="approve"] .ab-vote-count')?.textContent).toBe("5");
-    // Same card node — updated in place, not rebuilt.
+    // Same card node - updated in place, not rebuilt.
     expect(document.querySelector(".ab-card")).toBe(card);
   });
 

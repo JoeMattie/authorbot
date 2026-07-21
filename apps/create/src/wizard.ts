@@ -59,7 +59,7 @@ export async function runStages(
     }
 
     // Optional stages are offered rather than run, with the previous stage's
-    // result already on screen — which is the only moment the author has
+    // result already on screen - which is the only moment the author has
     // enough information to decide.
     if (!options.explicit && index > 0 && OPTIONAL_STAGES.includes(name)) {
       const wanted = await ctx.prompter.confirm({
@@ -68,19 +68,19 @@ export async function runStages(
         hint:
           name === "upgrade"
             ? "Optional, and not needed now: a book created a minute ago is already on the current version. It exists for moving an older book forward."
-            : `Optional. You can stop here and run \`create-authorbot ${name}\` whenever you like — nothing you have done will be repeated.`,
+            : `Optional. You can stop here and run \`create-authorbot ${name}\` whenever you like - nothing you have done will be repeated.`,
         defaultValue: name !== "upgrade" && name !== "agent",
       });
       if (!wanted) {
         ctx.reporter.blank();
         // Naming the declined stage as the way to "continue" made every
-        // optional step look like an unfinished one — most sharply for
+        // optional step look like an unfinished one - most sharply for
         // `upgrade`, which a book created ten seconds ago can never need, and
         // which the author was nonetheless told to run to carry on.
         ctx.reporter.ok("Stopped here. Everything done so far is in place.");
         ctx.reporter.info(
           name === "upgrade"
-            ? "Your book is set up. `create-authorbot upgrade` exists for moving an existing book to a newer Authorbot later — there is nothing to upgrade on a book this new."
+            ? "Your book is set up. `create-authorbot upgrade` exists for moving an existing book to a newer Authorbot later - there is nothing to upgrade on a book this new."
             : `This step is optional. Run \`create-authorbot ${name}\` whenever you want it, and nothing already done will be repeated.`,
         );
         break;
@@ -123,10 +123,10 @@ export function reportResources(ctx: WizardContext): void {
   }
   ctx.reporter.heading("What now exists, and how to remove it");
   ctx.reporter.explain(
-    "These live outside your machine. If you decide not to keep this book, this is everything to clean up — nothing else was created anywhere.",
+    "These live outside your machine. If you decide not to keep this book, this is everything to clean up - nothing else was created anywhere.",
   );
   for (const resource of resources) {
-    ctx.reporter.bullet(`${resource.name} — ${resource.description}`);
+    ctx.reporter.bullet(`${resource.name} - ${resource.description}`);
     ctx.reporter.literal(resource.deleteWith);
   }
 }
@@ -144,7 +144,7 @@ export function reportProgress(ctx: WizardContext, order: readonly StageName[]):
           : record.status === "started"
             ? "part  "
             : "todo ";
-    ctx.reporter.info(`${marker}  ${name} — ${STAGE_SUMMARIES[name]}`);
+    ctx.reporter.info(`${marker}  ${name} - ${STAGE_SUMMARIES[name]}`);
   }
   const next = ctx.journal.resumeAt(order);
   if (next !== null) {
@@ -172,7 +172,7 @@ export function reportError(ctx: WizardContext, error: unknown): number {
   }
   ctx.reporter.problem(
     ctx.vault.redact(error instanceof Error ? error.message : String(error)),
-    "This is a bug in the wizard rather than something you did. Please report it at https://github.com/JoeMattie/authorbot/issues — and re-running is safe, because every step checks before it acts.",
+    "This is a bug in the wizard rather than something you did. Please report it at https://github.com/JoeMattie/authorbot/issues - and re-running is safe, because every step checks before it acts.",
   );
   return 1;
 }

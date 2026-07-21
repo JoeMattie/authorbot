@@ -62,7 +62,7 @@ const OAUTH_CONFIG: GitHubOAuthConfig = {
  * Every route the app can serve. `/v1/dev/login` exists only under the dev
  * identity provider and the OAuth routes only under the GitHub one (ADR
  * 0015), so the union of both modes is the honest definition of
- * "implemented" — either mode alone would report the other's routes as
+ * "implemented" - either mode alone would report the other's routes as
  * missing.
  */
 let served: Set<string>;
@@ -177,7 +177,7 @@ describe("openapi.yaml is synced with the router", () => {
   });
 
   it("documents the submission types the domain actually accepts", () => {
-    // Was `full_document` — a type no Phase 4 handler would ever accept.
+    // Was `full_document` - a type no Phase 4 handler would ever accept.
     expect(spec.components.schemas["SubmissionType"]?.enum).toEqual([
       "range_replacement",
       "block_replacement",

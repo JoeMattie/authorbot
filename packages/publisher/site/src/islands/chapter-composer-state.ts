@@ -1,7 +1,7 @@
 /**
  * Chapter composer state (Phase 6 contract §3.5): a pure reducer plus the
  * sessionStorage persistence for an in-progress chapter draft. No DOM, no
- * network — every transition below is unit tested directly, exactly as the
+ * network - every transition below is unit tested directly, exactly as the
  * Phase 2b composer's state machine is (`composer-state.ts`).
  *
  * The operation polling budget is NOT redefined here: a chapter submission is
@@ -63,7 +63,7 @@ export interface ChapterComposerState {
   pending: ChapterPending | null;
   /** Completed polls of the operation endpoint. */
   polls: number;
-  /** True once a save has committed — this is what unlocks Publish. */
+  /** True once a save has committed - this is what unlocks Publish. */
   saved: boolean;
 }
 
@@ -236,7 +236,7 @@ export function chapterComposerReduce(
 
 /**
  * The draft as it survives a reload (Phase 2b rule: drafts and focus survive a
- * refresh). Kept in **sessionStorage** only — same-origin, per-tab, dropped
+ * refresh). Kept in **sessionStorage** only - same-origin, per-tab, dropped
  * when the tab closes. Never localStorage: an unfinished chapter is the
  * author's private prose and has no business outliving the session.
  */

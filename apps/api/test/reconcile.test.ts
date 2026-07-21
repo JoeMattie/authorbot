@@ -64,7 +64,7 @@ async function seedAnnotations(h: TestHarness): Promise<Fixture> {
   // Seeded through the SNAPSHOT, not by inserting rows: annotations are
   // repo-owned projections, so a directly-inserted `open` row would be deleted
   // by the very first rebuild for not existing in the repository. Going
-  // through the snapshot is also the honest fixture — these are annotations
+  // through the snapshot is also the honest fixture - these are annotations
   // that really are committed artifacts.
   const stable = uuidv7();
   const fragile = uuidv7();
@@ -541,7 +541,7 @@ describe("projection refresh seam (contract §6)", () => {
         { projectId: h.projectId, reason: "webhook-push", deliveryId: "delivery-seam" },
       ]);
 
-      // The projection was NOT rebuilt inline — the coordinator owns it — but
+      // The projection was NOT rebuilt inline - the coordinator owns it - but
       // the stale flag is durable, so the work is not lost.
       const projected = await h.repos.chapters.getById(CHAPTER_ID);
       expect(projected?.revision).toBe(3);

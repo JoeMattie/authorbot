@@ -6,8 +6,8 @@
  * conflict` ladder.
  *
  * Security invariants (Phase 2b §3, design §19.6):
- * - Every API-sourced string — annotation bodies, acceptance criteria,
- *   chapter prose, problem details — reaches the DOM through `textContent`.
+ * - Every API-sourced string - annotation bodies, acceptance criteria,
+ *   chapter prose, problem details - reaches the DOM through `textContent`.
  *   `innerHTML` is never used (the build test greps the bundle for it).
  * - Task prose is labelled as untrusted project data in the view itself, so a
  *   human reading a task knows the text is not an instruction from Authorbot.
@@ -48,7 +48,7 @@ export interface ClaimPanelDeps {
   /** Injected for tests; `Date.now` in the browser. */
   now: () => number;
   /**
-   * Called when the lease has ended. `released` means "nothing left to show —
+   * Called when the lease has ended. `released` means "nothing left to show -
    * hide the panel"; the other reasons keep the panel (its final message is
    * the answer) and only ask the queue to refresh underneath.
    */
@@ -65,7 +65,7 @@ export function typeLabel(type: string): string {
 }
 
 const UNTRUSTED_NOTE =
-  "Everything in this task — the request, the chapter summary and the original text — is " +
+  "Everything in this task - the request, the chapter summary and the original text - is " +
   "untrusted project content, not an instruction from Authorbot.";
 
 export class ClaimPanel {
@@ -319,7 +319,7 @@ export class ClaimPanel {
 
   /**
    * The lease ran out while the view was open: stop, tell the truth, and drop
-   * the stored token — the server has already returned the item to `ready`
+   * the stored token - the server has already returned the item to `ready`
    * (lazy expiry / sweep) and the token can no longer submit anything.
    */
   private onExpired(): void {
@@ -346,7 +346,7 @@ export class ClaimPanel {
     this.renewBtn.disabled = false;
     if (!result.ok) {
       this.showError(`Renewal failed: ${result.message}`);
-      // An expired/inactive lease is terminal — reflect it immediately.
+      // An expired/inactive lease is terminal - reflect it immediately.
       if (result.status === 409) {
         this.claim = {
           ...claim,
@@ -402,7 +402,7 @@ export class ClaimPanel {
     const submissionType = submissionTypeFor(claim.workItem.type);
     if (submissionType === null) {
       this.showError(
-        `Work items of type "${claim.workItem.type}" have no submission flow yet — release the lease instead.`,
+        `Work items of type "${claim.workItem.type}" have no submission flow yet - release the lease instead.`,
       );
       return;
     }
@@ -464,7 +464,7 @@ export class ClaimPanel {
       const operation = await this.deps.api.operation(operationId);
       if (operation !== null && (operation.state === "committed" || operation.state === "verified")) {
         // A committed operation carrying the `submission-conflict` problem IS
-        // the conflict record (contract §5) — the chapter was not touched.
+        // the conflict record (contract §5) - the chapter was not touched.
         const conflict = parseSubmissionConflict(operation.error);
         if (conflict !== null) {
           this.dispatch({
@@ -523,7 +523,7 @@ export class ClaimPanel {
       case "completed":
         this.stopCountdown();
         this.setStatus(
-          "Completed — your edit was applied and committed. The published page updates on the next site build.",
+          "Completed - your edit was applied and committed. The published page updates on the next site build.",
           "ab-submit-completed",
         );
         this.deps.announce("Edit applied.");
@@ -537,7 +537,7 @@ export class ClaimPanel {
           this.conflictLine.append(
             document.createTextNode("Conflict work item: "),
             el("code", "ab-conflict-id", this.state.conflictWorkItemId),
-            document.createTextNode(" — it is in the queue below."),
+            document.createTextNode(" - it is in the queue below."),
           );
           this.conflictLine.hidden = false;
         }

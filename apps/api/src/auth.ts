@@ -154,10 +154,10 @@ export function requireAuth(services: AuthServices): MiddlewareHandler<AppEnv> {
       if (auth === null) {
         return problem(c, "unauthorized", { detail: "missing or invalid credential" });
       }
-      // CSRF (ADR-0019 §3 — retained after CORS removal): cookie-authenticated
+      // CSRF (ADR-0019 §3 - retained after CORS removal): cookie-authenticated
       // mutations must present an Origin (or Referer) matching the API's own
       // origin; missing/foreign fails closed. Bearer requests are exempt (no
-      // ambient credential) — they took the branch above.
+      // ambient credential) - they took the branch above.
       if (!CSRF_SAFE_METHODS.has(c.req.method)) {
         const apiOrigin = new URL(c.req.url).origin;
         const ok = csrfOriginAllowed(
@@ -217,15 +217,15 @@ export function authOf(c: Context<AppEnv>): AuthContext {
  */
 export interface ProjectGuardOptions {
   /**
-   * `control` marks the maintainer control plane — settings, freeze, pause,
-   * role changes, revocations, moderation rejection — which a freeze must not
+   * `control` marks the maintainer control plane - settings, freeze, pause,
+   * role changes, revocations, moderation rejection - which a freeze must not
    * refuse, because a freeze that blocked its own reversal would be a one-way
    * door. Everything else is `collaboration` and is frozen with the book.
    */
   surface?: WriteSurface;
   /**
    * Override the policy capability that would be derived from `scope`. Used by
-   * the routes whose scope does not describe what they do — moderation
+   * the routes whose scope does not describe what they do - moderation
    * approval requires `annotations:write` on a maintainer but is not a
    * collaborator annotating, and lease release is holder-or-maintainer with no
    * scope at all.
@@ -236,7 +236,7 @@ export interface ProjectGuardOptions {
    * non-member.
    *
    * Used by reply creation. `open` and `approval-gated` widen who may START a
-   * thread on the book — "any signed-in GitHub user may comment/suggest" — and
+   * thread on the book - "any signed-in GitHub user may comment/suggest" - and
    * Phase 7 supplies a moderation queue for exactly one object type, the
    * annotation. Admitting non-members into reply threads too would create a
    * second unmoderated write path on a book whose author chose moderation,
@@ -253,25 +253,25 @@ export interface ProjectGuardOptions {
 
 /**
  * Guard: `{projectId}` must match the configured project (contract §4;
- * the path accepts the project UUID or its slug) — 404 otherwise — and the
- * actor must hold `scope` through an unrevoked membership — 403 otherwise.
+ * the path accepts the project UUID or its slug) - 404 otherwise - and the
+ * actor must hold `scope` through an unrevoked membership - 403 otherwise.
  *
  * Phase 7 adds four gates to the same choke point, applied to unsafe methods
  * only (reads pass through untouched, which is what makes "reads and the
  * published site are provably unaffected" structural rather than audited):
  *
- *   1. **Freeze** — refuses collaboration writes from everyone, maintainers
+ *   1. **Freeze** - refuses collaboration writes from everyone, maintainers
  *      included.
- *   2. **Agent pause** — refuses every agent-token write, control plane
+ *   2. **Agent pause** - refuses every agent-token write, control plane
  *      included, while human collaborators keep working.
- *   3. **Annotation policy** — `locked` admits only maintainers (including an
+ *   3. **Annotation policy** - `locked` admits only maintainers (including an
  *      author's agent holding a maintainer-role membership); `open` and
  *      `approval-gated` additionally admit a signed-in non-member to
  *      annotation writes; `collaborators-only` is the Phase 2 behaviour.
- *   4. **Rate limits** — per actor and per token, `429` + `Retry-After`.
+ *   4. **Rate limits** - per actor and per token, `429` + `Retry-After`.
  *
- * The membership requirement is relaxed for exactly one case — a signed-in
- * human writing an annotation to an `open` or `approval-gated` book — and the
+ * The membership requirement is relaxed for exactly one case - a signed-in
+ * human writing an annotation to an `open` or `approval-gated` book - and the
  * scope check is relaxed with it, because a non-member has no membership and
  * therefore no scopes to hold.
  */
@@ -292,7 +292,7 @@ export async function requireProjectScope(
 
   // The access state is read for mutations (where every gate applies) and for
   // reads by a NON-member (where a permissive policy may be the only thing
-  // admitting them). A member's GET — the overwhelmingly common case — pays
+  // admitting them). A member's GET - the overwhelmingly common case - pays
   // nothing: it can neither be gated nor widened.
   const access =
     mutating || auth.membership === null

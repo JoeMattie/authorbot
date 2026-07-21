@@ -39,7 +39,7 @@ export interface CommandSpec {
   /**
    * Piped to stdin and never shown. This is how secrets reach
    * `wrangler secret put` without touching disk, argv, or the terminal
-   * (contract §4.4) — argv is visible in the process table, stdin is not.
+   * (contract §4.4) - argv is visible in the process table, stdin is not.
    */
   readonly stdin?: string;
   /** True when the command changes something. Read-only probes still run in a dry run. */
@@ -120,7 +120,7 @@ export class Actions {
 
   /**
    * Runs a command, or records it. Read-only commands (`mutates: false`) run
-   * even in a dry run — `doctor` has to actually look at the machine for its
+   * even in a dry run - `doctor` has to actually look at the machine for its
    * report to mean anything, and looking changes nothing.
    */
   async run(spec: CommandSpec): Promise<ExecResult> {
@@ -155,7 +155,7 @@ export class Actions {
         `${spec.command} failed (exit ${String(result.code)}) while trying to ${spec.purpose}.` +
           (firstLines.length > 0 ? `\n${firstLines}` : ""),
         spec.onFailure ??
-          `Run "${rendered}" yourself to see the full output, then re-run this command — finished steps are skipped.`,
+          `Run "${rendered}" yourself to see the full output, then re-run this command - finished steps are skipped.`,
       );
     }
     return result;
@@ -182,7 +182,7 @@ export class Actions {
       ours = this.#o.journal.managedDigest(spec.filePath) === digestOf(current);
       if (!ours && spec.onConflict === "keep") {
         this.#o.reporter.info(
-          `Left ${spec.filePath} as it is — it already exists and differs from the template.`,
+          `Left ${spec.filePath} as it is - it already exists and differs from the template.`,
         );
         return "kept";
       }
@@ -190,7 +190,7 @@ export class Actions {
         this.#record({
           kind: "file",
           summary: `overwrite (after backup): ${spec.filePath}`,
-          detail: `${spec.purpose} — the existing file differs and would be copied to ${spec.filePath}.bak-<timestamp> first.`,
+          detail: `${spec.purpose} - the existing file differs and would be copied to ${spec.filePath}.bak-<timestamp> first.`,
         });
         return "planned";
       }
@@ -267,7 +267,7 @@ export class Actions {
   }
 
   /**
-   * Notes that a secret was set. The value is never passed to this method —
+   * Notes that a secret was set. The value is never passed to this method -
    * it went to its destination on a command's stdin and is already gone.
    */
   async secretSet(name: string, destination: string): Promise<void> {
@@ -286,7 +286,7 @@ export class Actions {
   printPlan(): void {
     this.#o.reporter.heading("Plan (nothing above or below this line was changed)");
     if (this.#plan.length === 0) {
-      this.#o.reporter.info("Nothing to do — everything this run would create already exists.");
+      this.#o.reporter.info("Nothing to do - everything this run would create already exists.");
       return;
     }
     for (const entry of this.#plan) {

@@ -105,7 +105,7 @@ describe("Idempotency-Key middleware", () => {
     // Regression: the claim row used to be inserted before the handler and
     // the response stored after it, so a same-key retry arriving while the
     // first attempt was in flight (or after a crash between the command batch
-    // and setResponse) re-executed the whole command — two annotations, two
+    // and setResponse) re-executed the whole command - two annotations, two
     // git operations, two outbox rows for one logical mutation. With the
     // claim+response batched atomically with the command, the loser's batch
     // fails on the unique index, rolls back, and replays the winner.

@@ -17,7 +17,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
  * The environment a child gets, minus the parent npm's own configuration.
  *
  * `npx @authorbot/create` is the documented way to run this wizard, and npx
- * exports its whole config as `npm_config_*` — `npm_config_prefix`,
+ * exports its whole config as `npm_config_*` - `npm_config_prefix`,
  * `npm_config_local_prefix`, `npm_config_globalconfig`, a dozen more. A child
  * `npm install` inherits them and resolves against npx's cache directory
  * instead of the book, so the install fails every time.

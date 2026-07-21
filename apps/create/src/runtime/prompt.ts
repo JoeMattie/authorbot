@@ -15,7 +15,7 @@
  *
  * One seam worth naming: that redaction is per chunk, so a secret split across
  * two writes could slip through. Prompt text is composed here and short, and a
- * secret's value is masked rather than echoed, so the exposure is narrow — but
+ * secret's value is masked rather than echoed, so the exposure is narrow - but
  * narrower than "not redacted at all", which is what handing over the real
  * stdout would have meant.
  */
@@ -62,7 +62,7 @@ export class TtyPrompter implements Prompter {
    *
    * An `AbortedError` rather than `process.exit`, so the run unwinds the same
    * way as any other early stop and still prints what it created and how to
-   * remove it — which is precisely what someone who cancelled halfway through
+   * remove it - which is precisely what someone who cancelled halfway through
    * setting up a book needs in front of them.
    */
   #settle<T>(value: T | symbol): T {
@@ -78,7 +78,7 @@ export class TtyPrompter implements Prompter {
    * `TextPrompt` and `ConfirmPrompt` carry a `hint`, and clack has nowhere to
    * put one: `text` has a placeholder, which vanishes the moment anyone types,
    * and `confirm` has nothing at all. Moving to clack therefore silently
-   * dropped every explanatory line the wizard had — including the one telling
+   * dropped every explanatory line the wizard had - including the one telling
    * an author that a maintainer bearer token is something they almost
    * certainly do not have and that "no" is the expected answer. The question
    * survived; the part that made it answerable did not.

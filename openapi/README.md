@@ -9,26 +9,26 @@ coordination-plane API, covering the endpoint outline of the design document
 
 Single-file spec, one path item per endpoint, grouped by tag:
 
-- `identity` — `/v1/me`, project metadata, members, agent tokens.
-- `chapters` — chapter projections, chapter submissions, story documents
+- `identity` - `/v1/me`, project metadata, members, agent tokens.
+- `chapters` - chapter projections, chapter submissions, story documents
   (outline, timeline, characters).
-- `annotations` — annotations, replies, votes, withdraw, re-anchor.
-- `work` — work items, claim (returns the task bundle), lease renew/release,
+- `annotations` - annotations, replies, votes, withdraw, re-anchor.
+- `work` - work items, claim (returns the task bundle), lease renew/release,
   work-item submissions.
-- `operations` — Git operation status, the SSE event stream, and the GitHub
+- `operations` - Git operation status, the SSE event stream, and the GitHub
   webhook receiver.
 
 Reusable pieces live under `components`:
 
-- `schemas` — domain shapes (`Chapter`, `Annotation`, `Vote`, `Decision`,
+- `schemas` - domain shapes (`Chapter`, `Annotation`, `Vote`, `Decision`,
   `WorkItem`, `Lease`, `Submission`, `Operation`, `TaskBundle`, `Problem`,
   plus shared primitives such as `Uuid`, `Timestamp`, `ActorRef`,
   `ContentHash`). Schemas are structural skeletons: shapes and enums are
   binding; per-field constraint details may still tighten during Phase 1.
-- `parameters` — cursor pagination (`Cursor`, `Limit`), `Idempotency-Key`,
+- `parameters` - cursor pagination (`Cursor`, `Limit`), `Idempotency-Key`,
   `If-Match`, and common path ids.
-- `responses` — one `application/problem+json` response per §15.4 error code.
-- `securitySchemes` — `githubSession` (GitHub-OAuth-backed session cookie)
+- `responses` - one `application/problem+json` response per §15.4 error code.
+- `securitySchemes` - `githubSession` (GitHub-OAuth-backed session cookie)
   and `agentToken` (bearer). The GitHub webhook endpoint is
   signature-authenticated instead and declares `security: []`.
 
@@ -57,7 +57,7 @@ from it. Phase 0 deliberately ships no generator tooling in the workspace;
 when a client package is added (Phase 1+), generate it from this file with
 an OpenAPI-3.1-capable TypeScript generator (e.g. `openapi-typescript` for
 types, or `@hey-api/openapi-ts` for a typed fetch client) as a build step in
-that package — not here.
+that package - not here.
 
 ## Validating
 

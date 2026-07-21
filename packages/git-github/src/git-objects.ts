@@ -105,7 +105,7 @@ export async function hashGitObject(
   payload: Uint8Array,
 ): Promise<string> {
   const framed = concatBytes([encodeUtf8(`${type} ${payload.length}\0`), payload]);
-  // `crypto.subtle` is WebCrypto — available in Workers and Node 22 alike.
+  // `crypto.subtle` is WebCrypto - available in Workers and Node 22 alike.
   const digest = await crypto.subtle.digest("SHA-1", framed as unknown as ArrayBufferView);
   return toHex(new Uint8Array(digest));
 }

@@ -44,7 +44,7 @@ export async function verifySessionCookieValue(
 /**
  * Session cookie attributes (ADR-0019 §2): ALWAYS
  * `HttpOnly; Secure; SameSite=Lax`. The `SameSite=None` path existed only for
- * the cross-origin deployment shape, which is no longer supported — the weaker
+ * the cross-origin deployment shape, which is no longer supported - the weaker
  * posture is now unreachable by configuration.
  *
  * `Path=/` rather than the base path: a book under `/my-book` still shares its
@@ -63,7 +63,7 @@ export function sessionCookieHeader(value: string): string {
  *
  * Same attributes as `sessionCookieHeader` minus the value, because a browser
  * only replaces a cookie when Path, Domain, Secure and SameSite all match the
- * one it holds — a clear that differs in any of them silently leaves the
+ * one it holds - a clear that differs in any of them silently leaves the
  * original in place, and the reader stays signed in with no way to tell.
  */
 export function clearSessionCookieHeader(): string {
@@ -76,7 +76,7 @@ export const OAUTH_STATE_COOKIE = "authorbot_oauth_state";
 /**
  * OAuth state cookie payload (Phase 2b contract §3): the CSRF state plus the
  * validated `return_to` propagated from the start route. Packed as
- * `base64url(JSON).hmacHex` — signed with the session secret, so the callback
+ * `base64url(JSON).hmacHex` - signed with the session secret, so the callback
  * trusts only what the start route wrote.
  */
 export interface OauthStatePayload {

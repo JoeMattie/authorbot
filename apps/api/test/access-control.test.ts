@@ -1,14 +1,14 @@
 /**
  * Phase 7 author-facing access control, at the HTTP boundary.
  *
- * Exit criteria 6–10 in order: an author can see and change everything from the
+ * Exit criteria 6-10 in order: an author can see and change everything from the
  * API alone; revocation is effective on the next request; freeze refuses every
  * write path while reads keep working; each policy mode is enforced
  * server-side; and `approval-gated` keeps unapproved comments out of votes,
  * out of rules, and out of everyone else's view.
  *
- * The Git half of exit criterion 10 — "reaches no Git commit … approval mirrors
- * it … rejection leaves no trace in the repository" — is asserted against a
+ * The Git half of exit criterion 10 - "reaches no Git commit … approval mirrors
+ * it … rejection leaves no trace in the repository" - is asserted against a
  * real repository in test/integration/phase7-access-control.test.ts.
  */
 import { beforeEach, describe, expect, it } from "vitest";
@@ -81,7 +81,7 @@ async function setPolicy(policy: AnnotationPolicy): Promise<void> {
 }
 
 /**
- * A valid signed-in session belonging to NO membership — the "any signed-in
+ * A valid signed-in session belonging to NO membership - the "any signed-in
  * GitHub user" of the `open` and `approval-gated` rows.
  *
  * Dev login always grants a membership, so the membership is revoked
@@ -113,7 +113,7 @@ const readAnnotations = (headers: Record<string, string>) =>
   );
 
 // ---------------------------------------------------------------------------
-// Exit criterion 9 — each policy enforced server-side
+// Exit criterion 9 - each policy enforced server-side
 // ---------------------------------------------------------------------------
 
 describe("annotation policy is enforced server-side (exit criterion 9)", () => {
@@ -229,7 +229,7 @@ describe("annotation policy is enforced server-side (exit criterion 9)", () => {
     expect((await readAnnotations({ Cookie: cookie })).status).toBe(200);
   });
 
-  it("locked refuses votes, claims, and submissions too — a vote is a write", async () => {
+  it("locked refuses votes, claims, and submissions too - a vote is a write", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     const contributor = await devLogin(harness, "voter-person", "contributor");
     const annotationId = await createOpenSuggestion(harness, maintainer);
@@ -244,7 +244,7 @@ describe("annotation policy is enforced server-side (exit criterion 9)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Exit criterion 8 — freeze
+// Exit criterion 8 - freeze
 // ---------------------------------------------------------------------------
 
 describe("freeze refuses every write path while reads keep working (exit criterion 8)", () => {
@@ -410,7 +410,7 @@ describe("freeze refuses every write path while reads keep working (exit criteri
     }
   });
 
-  it("does not block the controls that undo it — a freeze is not a one-way door", async () => {
+  it("does not block the controls that undo it - a freeze is not a one-way door", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     await freeze(maintainer);
 
@@ -481,13 +481,13 @@ describe("pause agents stops the fleet and leaves humans working", () => {
     expect(paused.status).toBe(403);
     expect((await json(paused)).code).toBe("agents-paused");
 
-    // Humans are untouched — the whole point of the control.
+    // Humans are untouched - the whole point of the control.
     const contributor = await devLogin(harness, "human-collaborator", "contributor");
     expect((await annotate({ Cookie: contributor })).status).toBe(202);
     expect((await annotate({ Cookie: maintainer })).status).toBe(202);
   });
 
-  it("leaves agent READS working — a paused agent is stopped, not blinded", async () => {
+  it("leaves agent READS working - a paused agent is stopped, not blinded", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     const { token } = await mintToken(harness, maintainer, ["chapters:read", "annotations:read"]);
     await harness.app.request(
@@ -544,7 +544,7 @@ describe("pause agents stops the fleet and leaves humans working", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Exit criterion 10 — the moderation queue
+// Exit criterion 10 - the moderation queue
 // ---------------------------------------------------------------------------
 
 describe("approval-gated moderation (exit criterion 10)", () => {
@@ -578,7 +578,7 @@ describe("approval-gated moderation (exit criterion 10)", () => {
     expect(queued!.body).toBe(validAnnotationPayload().body);
   });
 
-  it("never wakes the mirror — there is nothing to drain", async () => {
+  it("never wakes the mirror - there is nothing to drain", async () => {
     expect(harness.mutationsCommitted).toHaveLength(0);
   });
 
@@ -603,7 +603,7 @@ describe("approval-gated moderation (exit criterion 10)", () => {
     expect(body.pending).toEqual([]);
     expect(body.items.some((a: { id: string }) => a.id === pendingId)).toBe(false);
 
-    // Not readable directly either — a queue id must not be a back door.
+    // Not readable directly either - a queue id must not be a back door.
     const direct = await harness.app.request(
       `/v1/projects/${harness.projectId}/annotations/${pendingId}`,
       { headers: { Cookie: other } },
@@ -623,7 +623,7 @@ describe("approval-gated moderation (exit criterion 10)", () => {
     expect((await harness.repos.votes.tally(pendingId)).approvals).toBe(0);
   });
 
-  it("cannot trigger a governance rule — an unapproved suggestion manufactures no work", async () => {
+  it("cannot trigger a governance rule - an unapproved suggestion manufactures no work", async () => {
     // Three approvals is the design §25 threshold. Nobody can cast one, so the
     // rule cannot fire; assert the outcome as well as the mechanism.
     for (const login of ["voter-one", "voter-two", "voter-three"]) {
@@ -729,7 +729,7 @@ describe("approval-gated moderation (exit criterion 10)", () => {
     expect((await json(queue)).pendingCount).toBe(1);
   });
 
-  it("is not approvable while the book is frozen — approval commits content", async () => {
+  it("is not approvable while the book is frozen - approval commits content", async () => {
     await harness.app.request(
       `/v1/projects/${harness.projectId}/access/freeze`,
       jsonRequest("POST", { reason: "spam wave" }, { Cookie: maintainer }),
@@ -775,7 +775,7 @@ describe("approval-gated moderation (exit criterion 10)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Exit criterion 7 — revocation
+// Exit criterion 7 - revocation
 // ---------------------------------------------------------------------------
 
 describe("revocation is effective on the next request (exit criterion 7)", () => {
@@ -838,7 +838,7 @@ describe("revocation is effective on the next request (exit criterion 7)", () =>
     const nextRequest = await harness.app.request(`/v1/me`, { headers: { Cookie: editor } });
     expect(nextRequest.status).toBe(401);
 
-    // The lease is ended and the work item is back in the queue immediately —
+    // The lease is ended and the work item is back in the queue immediately -
     // not in four hours.
     expect((await harness.repos.leases.getById(leaseId))!.revokedAt).not.toBeNull();
     expect((await harness.repos.workItems.getById(workItemId))!.status).toBe("ready");
@@ -961,7 +961,7 @@ describe("revocation is effective on the next request (exit criterion 7)", () =>
       const response = await annotate({ Authorization: `Bearer ${token}` });
       expect(response.status).toBe(401);
     }
-    // The human maintainer keeps working — this is a token revocation, not a
+    // The human maintainer keeps working - this is a token revocation, not a
     // shutdown.
     expect((await annotate({ Cookie: maintainer })).status).toBe(202);
   });
@@ -988,7 +988,7 @@ describe("revocation is effective on the next request (exit criterion 7)", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Exit criterion 6 — the author can see and do all of it from the API
+// Exit criterion 6 - the author can see and do all of it from the API
 // ---------------------------------------------------------------------------
 
 describe("an author can run the whole surface without a database or CLI (exit criterion 6)", () => {
@@ -1011,7 +1011,7 @@ describe("an author can run the whole surface without a database or CLI (exit cr
     expect(editor.joinedAt).toBeTruthy();
     expect(editor.lastActedAt).toBeTruthy();
     expect(editor.isAgent).toBe(false);
-    // Nobody granted this membership — dev login self-serves — so the honest
+    // Nobody granted this membership - dev login self-serves - so the honest
     // answer is null rather than a plausible-looking guess.
     expect(editor.addedByActorId).toBeNull();
     // Scope consequences in plain language, not scope names.
@@ -1019,7 +1019,7 @@ describe("an author can run the whole surface without a database or CLI (exit cr
     expect(body.roleConsequences.reader).toMatch(/Cannot comment/i);
   });
 
-  it("lists agent tokens as metadata only — never the token value", async () => {
+  it("lists agent tokens as metadata only - never the token value", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     const { token } = await mintToken(harness, maintainer, ["annotations:write"], "drafting-agent");
 
@@ -1114,7 +1114,7 @@ describe("an author can run the whole surface without a database or CLI (exit cr
 });
 
 // ---------------------------------------------------------------------------
-// Exit criterion 1 — rate limits
+// Exit criterion 1 - rate limits
 // ---------------------------------------------------------------------------
 
 describe("rate limits (exit criterion 1)", () => {
@@ -1125,7 +1125,7 @@ describe("rate limits (exit criterion 1)", () => {
       "annotations:write",
     ]);
     // The annotation class allows 30 per token per minute. Each request here
-    // is refused on its merits (unknown chapter) but is still counted — the
+    // is refused on its merits (unknown chapter) but is still counted - the
     // limiter runs in the guard, before the handler, which is what stops a
     // loop of failing requests from being free.
     const unknownChapter = uuidv7();
@@ -1219,7 +1219,7 @@ describe("the annotation policy is set from the settings view", () => {
     expect(patched.settings.collaboration.annotation_policy).toBe("locked");
 
     // The projection row lands immediately, so enforcement does not wait for
-    // the commit — exactly like a governance rule edit.
+    // the commit - exactly like a governance rule edit.
     const contributor = await devLogin(harness, "now-locked-out", "contributor");
     expect((await annotate({ Cookie: contributor })).status).toBe(423);
     expect((await annotate({ Cookie: maintainer })).status).toBe(202);

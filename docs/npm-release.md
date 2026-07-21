@@ -11,18 +11,18 @@ number promises to the people who pinned it.
 
 | Package | What it is | Who consumes it |
 |---|---|---|
-| `@authorbot/cli` | the `authorbot` binary — `validate`, `build`, `upgrade` | author CI, local use |
+| `@authorbot/cli` | the `authorbot` binary - `validate`, `build`, `upgrade` | author CI, local use |
 | `@authorbot/api` | prebuilt Worker entry, Durable Object, and D1 migrations | `wrangler.jsonc` `main` |
 | `@authorbot/create` | the setup wizard | `npx @authorbot/create` |
 
-`@authorbot/create` does not exist yet — Phase 6 §1 builds it. Whoever adds
+`@authorbot/create` does not exist yet - Phase 6 §1 builds it. Whoever adds
 `apps/create` must also add it to `scripts/publishable.mjs` and give it the
 same packaging fields as the rest; see *Adding a package to the release* at the
 bottom. Until then it is listed here because ADR-0022 names it, not because it
 ships.
 
-Seven more packages — `schemas`, `markdown`, `domain`, `rule-engine`,
-`database`, `repo-coordinator`, `git-github`, `publisher` — are published
+Seven more packages - `schemas`, `markdown`, `domain`, `rule-engine`,
+`database`, `repo-coordinator`, `git-github`, `publisher` - are published
 because the three above depend on them. **They are not a public contract.**
 Their exports may change in any release, including a patch. Do not import them
 directly; if you need something they hold, ask for it to be re-exported from
@@ -72,11 +72,11 @@ way to shortcut this without giving some author a broken deploy window.
 
 **Choosing a number**, in the terms above:
 
-- **patch** — bug fixes; no new validation errors, no schema change.
-- **minor** — new commands, flags, endpoints, or artifact schema versions
+- **patch** - bug fixes; no new validation errors, no schema change.
+- **minor** - new commands, flags, endpoints, or artifact schema versions
   accepted alongside the old; new validation *warnings*; expand-phase
   migrations.
-- **major** — anything that can make a previously-valid book invalid, remove
+- **major** - anything that can make a previously-valid book invalid, remove
   a flag or export, or contract the database schema.
 
 Every package is released at the same version, including the internal ones.
@@ -133,8 +133,8 @@ node -e 'import("@authorbot/api/dist/worker.js").then(m => console.log(Object.ke
 ls node_modules/@authorbot/api/migrations
 ```
 
-`ProjectCoordinator` and a default export must both be there — they are what
-`wrangler.jsonc` resolves `main` and `class_name` against — and the migrations
+`ProjectCoordinator` and a default export must both be there - they are what
+`wrangler.jsonc` resolves `main` and `class_name` against - and the migrations
 directory is what an author's `migrations_dir` points at.
 
 ### 3. Tag and push
@@ -166,7 +166,7 @@ confusing authentication error.
 
 ### 4. Write the release notes
 
-Tag the GitHub release with what changed and — critically — whether it carries
+Tag the GitHub release with what changed and - critically - whether it carries
 a book-format migration or a database migration. That is what an author reads
 before deciding when to run `authorbot upgrade`.
 
@@ -180,7 +180,7 @@ attach the trust policy to.
 
 Two ways through, in order of preference.
 
-### Option A — publish the first version from a laptop
+### Option A - publish the first version from a laptop
 
 Claim the scope and push an initial version by hand, then never do it again:
 
@@ -196,7 +196,7 @@ done
 No provenance on this one release (a laptop has no OIDC identity to attest
 with). Every release after it gets provenance from the workflow.
 
-### Option B — one granular token, then delete it
+### Option B - one granular token, then delete it
 
 Create a **granular access token** on npmjs.com scoped to the `@authorbot`
 packages with read-and-write permission and the shortest expiry offered, and
@@ -204,8 +204,8 @@ store it as the `NPM_TOKEN` repository secret. The release workflow's publish
 step reads it as `NODE_AUTH_TOKEN` and will use it when OIDC is unavailable.
 
 **Then delete the secret.** Once each package exists, configure trusted
-publishing for it — on npmjs.com, under the package's *Settings → Trusted
-publisher*, naming this repository and `release.yml` — and remove `NPM_TOKEN`.
+publishing for it - on npmjs.com, under the package's *Settings → Trusted
+publisher*, naming this repository and `release.yml` - and remove `NPM_TOKEN`.
 A long-lived registry credential sitting in repository secrets is the thing
 trusted publishing exists to get rid of; leaving it there because it works
 means the migration never finishes.
@@ -222,8 +222,8 @@ cd templates/book-repo && npm install
 
 and commit the resulting `package-lock.json`. Until that is done, a repository
 created straight from the template fails its first CI run with the message the
-workflow prints — *"package-lock.json is missing. Run 'npm install' locally and
-commit the lockfile"* — which is accurate, but the template should not ship
+workflow prints - *"package-lock.json is missing. Run 'npm install' locally and
+commit the lockfile"* - which is accurate, but the template should not ship
 needing it.
 
 (The wizard generates the lockfile itself when it creates a book, so this only
@@ -244,7 +244,7 @@ npm audit signatures
 
 For an author, that plus the integrity hashes in their `package-lock.json`
 means the toolchain building their book is provably the code at the tag they
-pinned. It is a strictly stronger guarantee than the git ref this replaced —
+pinned. It is a strictly stronger guarantee than the git ref this replaced -
 a tag can be moved, a signed attestation cannot.
 
 Provenance requires `id-token: write`, which is the only elevated permission
@@ -264,11 +264,11 @@ toolchain reading files a newer one rewrote (ADR-0021 §5).
   lockfile, push.) CI redeploys on the older release.
 - **Format migration:** `git revert` the migration commit. Book-repo migrations
   are committed separately from content precisely so this is possible without
-  touching prose. `--rollback` does **not** do this for you — it names the
+  touching prose. `--rollback` does **not** do this for you - it names the
   migrations that ran between the two versions and leaves the revert to you,
   because reverting prose is a decision, not a side effect of a pin change.
 - **Database:** there is no automatic down-migration. Expand/contract is what
-  makes this survivable — the previous Worker can run against the expanded
+  makes this survivable - the previous Worker can run against the expanded
   schema, so rolling the Worker back is enough and the extra column is
   harmless.
 
@@ -289,6 +289,6 @@ lockfile that already resolved the version. Publish a fixed patch instead, and
    `prepack` that runs `node ../../scripts/copy-license.mjs`.
 3. Run `pnpm check:packaging`. It will tell you what is missing.
 
-Scoped packages default to **restricted** — that is, private — so a package
+Scoped packages default to **restricted** - that is, private - so a package
 without `publishConfig.access` either fails to publish or, worse, publishes
 privately and is invisible to authors. The check refuses to pass without it.

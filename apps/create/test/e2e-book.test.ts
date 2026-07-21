@@ -9,8 +9,8 @@
  * against fakes, and this one proves the fakes were not lying about the shape
  * of the world.
  *
- * The claim being tested is exit criterion 1 — an author gets a validated book
- * "without writing a single line of frontmatter, YAML, or Markdown" — and
+ * The claim being tested is exit criterion 1 - an author gets a validated book
+ * "without writing a single line of frontmatter, YAML, or Markdown" - and
  * criterion 8: a chapterless book validates, builds, and renders a welcoming
  * empty state.
  */
@@ -61,7 +61,7 @@ async function linkToolchain(directory: string): Promise<void> {
  * test of this repository and starts being a test of npm's availability. It
  * took this file from 7.8s to 26s and made an npm outage a red build.
  *
- * Everything else — git, the toolchain binary itself — runs for real, which is
+ * Everything else - git, the toolchain binary itself - runs for real, which is
  * the point of an end-to-end test. Only the install is answered locally, and
  * the lockfile it would have produced is written here so the assertions about
  * a committed lockfile still mean something.

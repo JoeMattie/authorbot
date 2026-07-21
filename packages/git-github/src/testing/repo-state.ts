@@ -10,7 +10,7 @@
  *
  * This is a value store, not a server: it has no HTTP, no faults and no
  * filesystem access. `FakeGitHub` wraps it with the Git Data API surface.
- * Worker-compatible — no `node:` imports anywhere.
+ * Worker-compatible - no `node:` imports anywhere.
  */
 import {
   decodeUtf8,
@@ -195,7 +195,7 @@ export class FakeRepoState {
     return this.refs.get(branch) ?? null;
   }
 
-  /** Set a ref with no fast-forward check — seeding and fault injection only. */
+  /** Set a ref with no fast-forward check - seeding and fault injection only. */
   setRefUnchecked(branch: string, sha: string): void {
     this.refs.set(branch, sha);
   }
@@ -240,7 +240,7 @@ export class FakeRepoState {
   // ----------------------------------------------------------------- trees
 
   /**
-   * Compose a new tree from `baseTree` plus `changes` — the `base_tree` merge
+   * Compose a new tree from `baseTree` plus `changes` - the `base_tree` merge
    * semantics of `POST /git/trees`. Entries not named by a change are
    * preserved byte-for-byte (untouched subtrees are not even expanded, so
    * their shas are carried over unchanged). `sha: null` deletes a path, and

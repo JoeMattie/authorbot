@@ -186,7 +186,7 @@ describe("escape helpers", () => {
  * user input: an annotation body containing a delimiter line with ONE LEADING
  * SPACE passed the markdown safety scan, was emitted unescaped into
  * `## Context`, and the committed artifact then failed `checkWorkItemDelimiters`
- * — `WORK_ITEM_DELIMITER_INVALID`, permanently, because nothing on the write
+ * - `WORK_ITEM_DELIMITER_INVALID`, permanently, because nothing on the write
  * path runs that check and the bad bytes land first. Repeatable at will by
  * anyone who could comment.
  *
@@ -222,7 +222,7 @@ describe("adversarial free text cannot break repo validation", () => {
         expect(check.valid, `${field} = ${JSON.stringify(variant)}: ${JSON.stringify(check.issues)}`)
           .toBe(true);
         // Exactly one real section, opened and closed by the renderer's own
-        // delimiters — not by anything the body smuggled in.
+        // delimiters - not by anything the body smuggled in.
         expect(check.sections, JSON.stringify(variant)).toHaveLength(1);
         expect(parseWorkItemArtifact(file.content).sections[field], JSON.stringify(variant)).toBe(
           body,
@@ -258,7 +258,7 @@ describe("adversarial free text cannot break repo validation", () => {
     ];
     let seed = 0x9e3779b9;
     const next = (bound: number): number => {
-      // xorshift32 — deterministic, so a failure is reproducible.
+      // xorshift32 - deterministic, so a failure is reproducible.
       seed ^= seed << 13;
       seed ^= seed >>> 17;
       seed ^= seed << 5;

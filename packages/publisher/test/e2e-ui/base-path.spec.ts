@@ -1,10 +1,10 @@
 /**
- * ADR-0019 §6 — a book served under a subpath of a larger site, end to end in
+ * ADR-0019 §6 - a book served under a subpath of a larger site, end to end in
  * a real browser.
  *
  * This is the test that makes "same origin only" tolerable as a prescription:
  * the constraint is one ORIGIN, not the root of a domain. Three things have to
- * agree for that to be true, and they either all do or none do —
+ * agree for that to be true, and they either all do or none do -
  *
  *   1. the emitted asset tree is nested under the prefix, so the URLs Astro
  *      writes point at files that actually exist there;
@@ -13,12 +13,12 @@
  *
  * Getting (1) wrong publishes a site whose every asset 404s while an unlinked
  * root copy is the only reachable tree. Getting (2) or (3) wrong publishes a
- * site that reads fine and whose every collaboration call 404s — which is
+ * site that reads fine and whose every collaboration call 404s - which is
  * precisely the failure a build-time check cannot see and a unit test does not
  * model. Hence a browser test: it exercises the pairing the way a reader does.
  *
  * The base-path deployment is a wholly separate stack (own repo, own database,
- * own API process, own origin — see global-setup), so nothing here can pass by
+ * own API process, own origin - see global-setup), so nothing here can pass by
  * accidentally talking to the root deployment.
  */
 import { expect, test } from "@playwright/test";
@@ -76,7 +76,7 @@ test("a book published under a base path reads, and its islands work", async ({ 
   await expect(card).toBeVisible();
   await expect(card.locator(".ab-status-open")).toBeVisible();
 
-  // It persists across a reload — the read path is prefixed too, not just the
+  // It persists across a reload - the read path is prefixed too, not just the
   // write path that happened to be relative to the current page.
   await page.reload();
   await expect(page.locator(".ab-card", { hasText: SUGGESTION_BODY })).toBeVisible();
@@ -87,7 +87,7 @@ test("a book published under a base path reads, and its islands work", async ({ 
 test("the base-path deployment serves nothing at the origin root", async ({ page }) => {
   // The mirror image of the asset assertion above: if the tree were emitted
   // un-nested, the root would serve a copy of the book that no link points at
-  // — the exact bug ADR-0019 §6 and the nested `siteOutDir` exist to prevent.
+  // - the exact bug ADR-0019 §6 and the nested `siteOutDir` exist to prevent.
   const response = await page.goto(`${baseSiteUrl()}/chapters/baseline/`, {
     waitUntil: "commit",
   });

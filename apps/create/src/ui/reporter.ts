@@ -9,7 +9,7 @@
  *   further, a wider one does not widen. Nothing ever requires more than 80.
  * - **Colour degrades.** `NO_COLOR` (any value, per the convention), a
  *   non-TTY stdout, or `TERM=dumb` disables styling, and every styled string
- *   still reads correctly as plain text — colour is never the only carrier of
+ *   still reads correctly as plain text - colour is never the only carrier of
  *   meaning. Symbols are ASCII for the same reason.
  */
 import type { Environment, OutputPort } from "../ports.js";
@@ -70,12 +70,12 @@ export function themeFor(env: Environment): Theme {
  *
  * The escape sequences were written out by hand here, which worked and meant
  * every new colour was another pair of magic numbers to get right. chalk also
- * knows what a terminal can actually take — 16 colours, 256, or truecolor — so
+ * knows what a terminal can actually take - 16 colours, 256, or truecolor - so
  * the palette can be richer than the eight that were safe to hardcode.
  *
  * `this.#theme.colour` decides *whether* to colour anything, and this instance
  * is constructed with colour forced on so that stays true. chalk does its own
- * environment detection, and left to itself it would be a second opinion —
+ * environment detection, and left to itself it would be a second opinion -
  * output coloured in one place and not another for reasons neither party fully
  * owns. The theme already answers to NO_COLOR, TERM=dumb and a non-TTY stdout;
  * it is the authority, and `#style` is where it is consulted.
@@ -141,7 +141,7 @@ export class Reporter {
   /**
    * Says the wizard's name the way the author can actually type it.
    *
-   * Roughly twenty messages tell someone to run `create-authorbot <stage>` —
+   * Roughly twenty messages tell someone to run `create-authorbot <stage>` -
    * every resume hint and most error remedies. That binary exists only for a
    * global install; `npx @authorbot/create`, the documented way in, leaves
    * nothing on PATH. So the advice offered at the moment something had already
@@ -172,7 +172,7 @@ export class Reporter {
   }
 
   /**
-   * Redacts, THEN wraps — in that order, and the order matters.
+   * Redacts, THEN wraps - in that order, and the order matters.
    *
    * A multi-line secret (a PEM, most obviously) is emitted as several lines.
    * Redacting each line on its way out would find no line that equals the
@@ -202,7 +202,7 @@ export class Reporter {
   /**
    * Runs `work` under a spinner, when the terminal can show one.
    *
-   * For the steps that take minutes rather than moments — installing the
+   * For the steps that take minutes rather than moments - installing the
    * toolchain, deploying, waiting for a site to answer. Silence for four
    * minutes reads as a hang: the first author to meet the cold toolchain
    * install asked whether to kill the process, and was right to, because
@@ -213,8 +213,8 @@ export class Reporter {
    * asked, which is whether this is taking longer than it should.
    *
    * Degrades to the ordinary step line whenever the terminal cannot take a
-   * spinner — a redrawing cursor in a log file is worse than no spinner at
-   * all — so the caller's output is the same either way, minus the animation.
+   * spinner - a redrawing cursor in a log file is worse than no spinner at
+   * all - so the caller's output is the same either way, minus the animation.
    */
   async during<T>(label: string, work: () => Promise<T>): Promise<T> {
     if (!this.#theme.unicode) {
@@ -283,7 +283,7 @@ export class Reporter {
   }
 
   /**
-   * Contract §2.7 — "explain before doing". One or two plain sentences about
+   * Contract §2.7 - "explain before doing". One or two plain sentences about
    * what is about to happen and why, before anything happens.
    */
   explain(text: string): void {
@@ -326,7 +326,7 @@ export class Reporter {
     }
   }
 
-  /** Verbatim block (a command, a URL, a file path) — never wrapped. */
+  /** Verbatim block (a command, a URL, a file path) - never wrapped. */
   literal(text: string): void {
     for (const line of this.#named(this.#vault.redact(text)).split("\n")) {
       this.#emit(`    ${this.#style(line, "cyan")}`);
@@ -339,7 +339,7 @@ export class Reporter {
    *
    * It exists because one value in the whole wizard is *meant* to be read by
    * the author: the agent token, which the server keeps only as a hash. Every
-   * other method here redacts — which is correct, and which silently turned
+   * other method here redacts - which is correct, and which silently turned
    * "this is the only time this token will ever be shown" into a banner over
    * the word `[redacted]`, losing a token that could not be recovered by any
    * means including minting another one.

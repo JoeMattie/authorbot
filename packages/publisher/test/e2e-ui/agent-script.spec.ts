@@ -1,8 +1,8 @@
 /**
  * Phase 4 contract §7/§8.3 (design §27.5): the **agent** path over the same
  * work-item type the human path completes in `work-flow.spec.ts`. It runs
- * `examples/agent-workflow.mjs` as a real child process against the dev API —
- * no test-only shortcuts, only the documented endpoints — and checks that it
+ * `examples/agent-workflow.mjs` as a real child process against the dev API -
+ * no test-only shortcuts, only the documented endpoints - and checks that it
  * claims, prints the bundle (labelled untrusted), submits, polls, and reports
  * the commit that actually contains the new prose.
  */
@@ -97,7 +97,7 @@ test("the script refuses to run without a project, and reports a lost claim hone
   expect(missingProject.code).toBe(1);
   expect(missingProject.stderr).toContain("AUTHORBOT_PROJECT is required");
 
-  // A work item that does not exist is a clean, explained failure — not a crash.
+  // A work item that does not exist is a clean, explained failure - not a crash.
   const unknown = await runScript(["0190f301-7045-7b2d-9d91-95b3c8228b54", "text"]);
   expect(unknown.code).toBe(1);
   expect(unknown.stderr).toContain("claim failed");

@@ -132,7 +132,7 @@ test("lease countdown prompts renewal near expiry, renews, and releases", async 
   await expect(prompt).toBeHidden();
 
   // The API issued a 5m10s lease; the prompt fires at T-5m, i.e. about ten
-  // seconds in. No mocked clocks — this is the real countdown.
+  // seconds in. No mocked clocks - this is the real countdown.
   await expect(prompt).toBeVisible({ timeout: 60_000 });
   // The copy states the real prompt window (mm:ss) rather than a hardcoded
   // "5 minutes" that a configured LEASE_RENEWAL_PROMPT_BEFORE would falsify.

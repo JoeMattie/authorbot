@@ -1,6 +1,6 @@
 /*
  * The single shared stylesheet for the reading site (design section 16.1:
- * restraint — the prose is the product). No framework, no JavaScript.
+ * restraint - the prose is the product). No framework, no JavaScript.
  */
 
 :root {
@@ -286,7 +286,7 @@ h1:first-child,
 
 /*
  * Anchor targets: following a #b-<uuid> link must visibly mark the block,
- * with a non-color cue (design section 16.6: never rely on color alone —
+ * with a non-color cue (design section 16.6: never rely on color alone -
  * and the surface tint alone is ~1.1:1 against the page background).
  * scroll-margin keeps the target clear of the viewport edge.
  */

@@ -1,6 +1,6 @@
 /**
  * Base-path support (ADR-0019 §6). A book may be served under a subpath of a
- * larger site — `example.com/my-book/` — with its API under the same prefix,
+ * larger site - `example.com/my-book/` - with its API under the same prefix,
  * so `API_BASE_PATH=/my-book` makes the routes live at `/my-book/v1/*`.
  *
  * This is what makes "same origin only" tolerable: the constraint is one
@@ -18,7 +18,7 @@ const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._~-]*$/;
  * no-trailing-slash path such as `/my-book` or `/books/hollow-creek`.
  *
  * Invalid input throws at boot rather than silently serving the API somewhere
- * the site is not looking for it — a base path that is wrong by one character
+ * the site is not looking for it - a base path that is wrong by one character
  * produces a site whose every collaboration call 404s.
  */
 export function normalizeBasePath(raw: string | undefined): string {

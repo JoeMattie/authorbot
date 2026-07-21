@@ -1,9 +1,9 @@
 /**
  * Global setup for the Phase 2b e2e (contract §5). In order:
  *
- *   1. temp book repo — copy examples/book-repo, `git init` + commit, so the
+ *   1. temp book repo - copy examples/book-repo, `git init` + commit, so the
  *      dev API's LocalGitAdapter mirror has a real work tree to commit into;
- *   2. static server first (ephemeral port) — its origin must be known before
+ *   2. static server first (ephemeral port) - its origin must be known before
  *      the site is built, and it is the ONE origin everything is served from:
  *      it reverse-proxies `/v1/*` to the API (ADR-0019, same-origin only);
  *   3. Phase 2 Node dev API (apps/api dist/dev-server.js as a child process):
@@ -56,7 +56,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     [publisherDist, "pnpm --filter @authorbot/publisher build"],
   ] as const) {
     await stat(file).catch(() => {
-      throw new Error(`missing ${file} — run \`${hint}\` first (or the root: pnpm test:e2e)`);
+      throw new Error(`missing ${file} - run \`${hint}\` first (or the root: pnpm test:e2e)`);
     });
   }
 
@@ -154,7 +154,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const apiPort = await freePort();
   await startApi({ repo: repoDir, sqlite: path.join(tmp, "e2e.sqlite"), port: apiPort });
   await waitForApi(`http://127.0.0.1:${apiPort}`);
-  // The site origin now answers /v1/* too — one origin, as deployed.
+  // The site origin now answers /v1/* too - one origin, as deployed.
   site.setApiTarget({ host: "127.0.0.1", port: apiPort });
   await waitForApi(site.origin);
 

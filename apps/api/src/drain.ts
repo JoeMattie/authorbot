@@ -5,8 +5,8 @@
  * There is exactly ONE drain implementation in the API. `MIRROR_MODE=inline`
  * (mirror.ts, Node/dev, `LocalGitAdapter`) and `MIRROR_MODE=durable`
  * (coordinator.ts, Worker, `GitHubBookRepoWriter`) differ only in which
- * `BookRepoWriter` they inject; the sequence — processor drain, then the §10.3
- * re-anchor / conflict-recording hook, inside one serialized chain — is this
+ * `BookRepoWriter` they inject; the sequence - processor drain, then the §10.3
+ * re-anchor / conflict-recording hook, inside one serialized chain - is this
  * module and is therefore identical in both.
  *
  * WORKER-SAFE: no node-only import may enter this file or the modules it
@@ -17,7 +17,7 @@
  * Serialization: the repo-coordinator processor assumes a single drainer per
  * project (rows found `processing` at drain entry are treated as crash
  * leftovers, so an overlapping drain would reprocess a row another drain is
- * mid-flight on). `createDrainRunner` therefore chains drains per project id —
+ * mid-flight on). `createDrainRunner` therefore chains drains per project id -
  * a second call while one is running waits, it does not run beside it.
  */
 import type { SqlDatabase } from "@authorbot/database";

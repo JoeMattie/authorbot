@@ -1,14 +1,14 @@
 /**
  * Rule configuration. **Amended by Phase 6 contract §3.6**: governance rules
  * live in `book.yml` under `governance.rules`, "so they are versioned,
- * diffable, and reviewable alongside the prose they govern — and therefore
+ * diffable, and reviewable alongside the prose they govern - and therefore
  * editable [in Settings]. The environment variable remains as a bootstrap
  * default for a book that has not set them."
  *
  * The resulting precedence, highest first:
  *
- * 1. `book.yml` `governance.rules` — the book's own governance.
- * 2. `RULES_JSON` — a JSON object in the exact shape of the
+ * 1. `book.yml` `governance.rules` - the book's own governance.
+ * 2. `RULES_JSON` - a JSON object in the exact shape of the
  *    `authorbot.instance/v1` `rules` section, validated against that schema
  *    **at boot**: an invalid value throws from `createApi`, never degrades to
  *    the default at runtime.
@@ -20,7 +20,7 @@
  * vote rather than on the next deploy.
  *
  * Governance never degrades silently. A stored config that cannot be read as
- * rules throws rather than falling back — falling back would quietly *weaken*
+ * rules throws rather than falling back - falling back would quietly *weaken*
  * a book's governance, which is precisely the failure this system must not
  * have.
  */
@@ -34,7 +34,7 @@ import {
 } from "@authorbot/rule-engine";
 
 export interface RuleEntry {
-  /** Rule name (the key in the config mapping) — recorded on decisions. */
+  /** Rule name (the key in the config mapping) - recorded on decisions. */
   readonly name: string;
   readonly rule: DeclarativeRule;
 }
@@ -73,7 +73,7 @@ export function parseRuleEntries(rulesJson: string | undefined): RuleEntry[] {
  *
  * `null` is the "not configured, fall back" signal and is returned only for an
  * absent `governance` section or an absent `governance.rules`. An explicit
- * empty map cannot occur — `bookConfigSchema` rejects it — so there is no way
+ * empty map cannot occur - `bookConfigSchema` rejects it - so there is no way
  * for a book to end up governed by zero rules by accident.
  *
  * Throws if `config` is not a valid `authorbot.book/v1` document. The caller
@@ -98,7 +98,7 @@ export function ruleEntriesFromBookConfig(config: unknown): RuleEntry[] | null {
  * Effective rules for a request: the book's own `governance.rules` when it has
  * them, otherwise the boot-time entries (`RULES_JSON`, else the default).
  *
- * `bookConfig` is `null` when the project has no projected `book.yml` at all —
+ * `bookConfig` is `null` when the project has no projected `book.yml` at all -
  * a book created before Phase 6, or one whose projection has not run yet.
  * Those books keep working on the bootstrap default exactly as they did, which
  * is the compatibility requirement §3.6 states.

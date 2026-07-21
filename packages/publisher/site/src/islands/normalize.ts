@@ -1,7 +1,7 @@
 /**
  * Browser-side mirror of `@authorbot/markdown` `normalizeBlockText` (Phase 2b
  * contract §2.2): the normalized plain-text stream of a rendered semantic
- * block — NFC per text node, whitespace collapsed to single spaces, trimmed —
+ * block - NFC per text node, whitespace collapsed to single spaces, trimmed -
  * computed from the DOM the publisher emitted instead of the mdast AST.
  *
  * Parity is proven by unit tests against the markdown package's own
@@ -151,7 +151,7 @@ export function normalizeDomBlock(root: Element): string {
  * Normalized-stream offset of a DOM text boundary inside `root`, or null when
  * the node is not part of the block's stream. `edge` disambiguates a boundary
  * sitting on collapsed whitespace: a selection start rounds forward past the
- * pending joiner space, a selection end stays before it — so round-tripping a
+ * pending joiner space, a selection end stays before it - so round-tripping a
  * DOM Range yields the tight `[start, end)` of its visible characters.
  */
 export function locateDomBoundary(

@@ -2,7 +2,7 @@
  * UUIDv7 generation (Phase 0 contract §2: entity ids are UUIDv7, lowercase).
  * WebCrypto only (`crypto.getRandomValues`), so it runs identically in Node
  * and Cloudflare Workers. Within one millisecond ids stay monotonic by using
- * the 12-bit `rand_a` field as a sequence counter — cursor pagination orders
+ * the 12-bit `rand_a` field as a sequence counter - cursor pagination orders
  * by id (Phase 2 contract §4 / design §15.1), so creation order must sort.
  */
 

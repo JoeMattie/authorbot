@@ -15,7 +15,7 @@ pseudonymous, or aggregate-only export.
 
 - Default: **aggregate-only** vote export (design §26.1). When a proposal
   crosses a decision boundary, the committed decision record carries the rule,
-  rule version, and aggregate metrics snapshot — privacy-safe voter
+  rule version, and aggregate metrics snapshot - privacy-safe voter
   information only (§7.3; decision shape per contract §4 has `metrics` as an
   object of numbers, no voter list).
 - Raw votes never trigger commits or publication (§7.4).

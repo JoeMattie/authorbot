@@ -3,12 +3,12 @@
  * (Phase 4 contract §5; design §14.2).
  *
  * `applyChapterFrontmatterUpdate` takes a full chapter file (frontmatter +
- * marked-up Markdown body — typically the output of the `@authorbot/markdown`
+ * marked-up Markdown body - typically the output of the `@authorbot/markdown`
  * patch engine, whose frontmatter still shows the base revision) and
  * re-renders **only the frontmatter**:
  *
  * - `revision` is bumped to the given value (must be strictly greater than
- *   the stored one — an apply may never move a revision backwards);
+ *   the stored one - an apply may never move a revision backwards);
  * - `authors` gains `{ actor }` for the applying actor when not already
  *   present (contract §6 "stable order": existing entries keep their order,
  *   a new author is appended last);

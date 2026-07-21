@@ -111,7 +111,7 @@ export function resolveTextBoundary(
  * more than one anchored block, or contains no visible characters.
  *
  * Boundary clamping (§2.2): the block is derived from the resolved START
- * boundary, not from `commonAncestorContainer` — common browser gestures
+ * boundary, not from `commonAncestorContainer` - common browser gestures
  * (triple-click paragraph selection, dragging just past the line end) place
  * the END boundary in the inter-block whitespace or the next sibling, which
  * hoists the common ancestor above the block even though every visible
@@ -140,7 +140,7 @@ export function captureRange(range: {
   let endBoundary = resolveTextBoundary(range.endContainer, range.endOffset, "end");
   if (endBoundary === null || !block.contains(endBoundary.node)) {
     // The end boundary landed outside the block. If visible characters were
-    // actually selected out there, this is a genuine multi-block selection —
+    // actually selected out there, this is a genuine multi-block selection -
     // still rejected. Otherwise (inter-block whitespace, a following element
     // at offset 0) it is a boundary overshoot: clamp to the block's end.
     if (

@@ -9,7 +9,7 @@ import {
 import type { SiteChapter } from "./model.js";
 
 /**
- * Build manifest assembly — `authorbot.build/v1` (Phase 1 contract
+ * Build manifest assembly - `authorbot.build/v1` (Phase 1 contract
  * section 3, design section 17.2).
  */
 

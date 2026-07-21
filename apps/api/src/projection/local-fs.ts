@@ -56,7 +56,7 @@ async function listDir(path: string): Promise<string[]> {
 }
 
 export class LocalFsBookRepoReader implements BookRepoReader {
-  /** Absolute, normalized repository root — the containment base. */
+  /** Absolute, normalized repository root - the containment base. */
   private readonly root: string;
 
   constructor(private readonly repoPath: string) {
@@ -68,7 +68,7 @@ export class LocalFsBookRepoReader implements BookRepoReader {
    * bundles and the submission-apply pipeline; reader.ts doc).
    *
    * Path traversal is refused: the resolved path must stay inside the
-   * repository. "Inside" means at the root or beneath a separator — a bare
+   * repository. "Inside" means at the root or beneath a separator - a bare
    * `startsWith` on the raw base admitted any SIBLING directory sharing the
    * base's name (`/srv/book` + `../book-secrets/creds.env` normalizes to
    * `/srv/book-secrets/creds.env`, which passes a prefix test), and comparing

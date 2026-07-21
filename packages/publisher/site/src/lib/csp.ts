@@ -4,14 +4,14 @@
  * ## Why every prose page carries it, not just the collaborative ones
  *
  * Phase 2b introduced this policy for the collaboration islands and attached it
- * to the pages that load them. That left the pages which render *prose* — the
- * chapter page in an api-url-less build, and every character page — emitting
+ * to the pages that load them. That left the pages which render *prose* - the
+ * chapter page in an api-url-less build, and every character page - emitting
  * `set:html` with no policy at all. Today nothing exploitable reaches that
  * HTML: raw HTML in chapters is escaped, `content.raw_html` is immutable
  * through the API, and enabling it takes a reviewed commit. But §19.4 asks for
  * defence in depth precisely because "nothing exploitable reaches it today" is
  * a statement about the current code, not about the book that legitimately
- * turns `content.raw_html` on — and on that book these are the pages that
+ * turns `content.raw_html` on - and on that book these are the pages that
  * inject author-supplied markup into the document.
  *
  * A CSP costs nothing on a static page and is the layer that turns an injected

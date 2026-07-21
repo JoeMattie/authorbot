@@ -10,11 +10,11 @@ Phase 2b supported two deployment shapes: the recommended same-origin one
 elsewhere). Supporting both cost us, permanently:
 
 - CORS configuration, preflight handling, and exact-origin allow-lists
-  (`apps/api/src/cors.ts`, `origins.ts` — ~200 lines plus tests).
+  (`apps/api/src/cors.ts`, `origins.ts` - ~200 lines plus tests).
 - A session cookie that switches between `SameSite=Lax` and
   `SameSite=None; Secure` depending on configuration.
 - `return_to` validation that must consider a set of foreign origins.
-- Two security postures to reason about, review, and keep correct forever —
+- Two security postures to reason about, review, and keep correct forever -
   and the weaker one is the configurable one.
 
 The production deployment is same-origin. Every deployment we would recommend
@@ -48,7 +48,7 @@ Consequently:
 6. **A base path is supported**, so a book can live under a subpath of a
    larger site: with `api_url: "/my-book"`, the islands call
    `/my-book/v1/...` and the Worker serves the API under that prefix. Getting
-   this right is what makes the prescription tolerable — the constraint is
+   this right is what makes the prescription tolerable - the constraint is
    "one origin", not "the root of a domain".
 
 ## Consequences
@@ -59,7 +59,7 @@ of code and test surface disappears. Getting-started loses its most confusing
 fork.
 
 **Cost.** A site published to GitHub Pages can never have collaboration
-features; it is a read-only mirror. This is honest rather than limiting —
+features; it is a read-only mirror. This is honest rather than limiting -
 that combination never worked. Deployments wanting collaboration need a host
 that can serve both planes (Cloudflare Workers in our case).
 

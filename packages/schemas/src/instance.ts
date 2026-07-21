@@ -49,7 +49,7 @@ export const ruleNameSchema = z
   .regex(/^[a-z][a-z0-9_]*$/, "must be a snake_case rule name");
 
 /**
- * The `rules` mapping — `{ "<rule_name>": { version, when, action } }`.
+ * The `rules` mapping - `{ "<rule_name>": { version, when, action } }`.
  *
  * Shared by `authorbot.instance/v1` (`rules`, the bootstrap default carried by
  * the `RULES_JSON` environment variable) and `authorbot.book/v1`
@@ -61,7 +61,7 @@ export const rulesMapSchema = z.record(ruleNameSchema, declarativeRuleSchema);
 export type RulesMap = z.infer<typeof rulesMapSchema>;
 
 /**
- * Instance (deployment) config — `authorbot.instance/v1` (design section 25).
+ * Instance (deployment) config - `authorbot.instance/v1` (design section 25).
  * Every section is optional: the file overrides defaults, and defaults are
  * applied by the loader, not by this schema. Secrets never belong here.
  */

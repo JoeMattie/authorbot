@@ -6,8 +6,8 @@
  * where every `@authorbot/*` import resolves through a symlink to source that
  * was just compiled. An author has none of that. They have a tarball from the
  * registry, `npm ci`, and `npx authorbot`. The gap between those two worlds is
- * exactly where packaging bugs live — a missing `dist/`, an unpublished
- * transitive dependency, a `bin` without a shebang — and none of them can fail
+ * exactly where packaging bugs live - a missing `dist/`, an unpublished
+ * transitive dependency, a `bin` without a shebang - and none of them can fail
  * a normal test run.
  *
  * So this builds the workspace's tarballs, copies templates/book-repo into a
@@ -60,7 +60,7 @@ try {
   await cp(vendor, join(book, "vendor"), { recursive: true });
 
   // The template pins `@authorbot/cli` by version, which only resolves once
-  // the package is on the registry. Point it at the local tarball instead —
+  // the package is on the registry. Point it at the local tarball instead -
   // and override the transitive @authorbot/* deps too, since the tarball
   // declares them by version as well. This is the one place the rehearsal
   // differs from the real thing, and it differs only in *where* the packages
