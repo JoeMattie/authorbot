@@ -9,6 +9,18 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.16
+
+- **`unpublish` and `teardown`.** `npx @authorbot/create unpublish` removes the
+  Worker, the database and the GitHub App, leaving your repository and its
+  history alone so `publish` can put the site back. `teardown` also deletes the
+  remote repository, then tells you what to type to remove the local copy — it
+  never deletes files on your own disk.
+- **The wizard is drawn rather than printed**: boxed stage headings, an arrow
+  for steps, and check/triangle/cross for outcomes — each degrading to plain
+  ASCII under `NO_COLOR`, in a pipe, or on a dumb terminal.
+- **A changelog**, here and inside every published package.
+
 ## 0.1.15
 
 - **The wizard can tell whether your book can actually save anything.** It used
