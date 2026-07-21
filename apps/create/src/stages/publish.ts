@@ -178,6 +178,28 @@ export const publishStage: Stage = async (ctx: WizardContext): Promise<StageOutc
   ctx.reporter.step(`Waiting for ${siteUrl} to answer`);
   const live = await waitForSite(ctx, siteUrl);
   if (!live) {
+    // Before calling a deploy failed, ask a resolver that is not this
+    // machine's. A brand-new hostname is very often looked up (and cached as
+    // "does not exist") moments before it is created — including by this
+    // wizard's own check that the domain was free — and a negative cache
+    // outlives the poll. The site is then live to the entire internet while
+    // the one machine that just deployed it insists it is not.
+    const published = await resolvesPublicly(ctx, siteUrl);
+    if (published) {
+      ctx.reporter.blank();
+      ctx.reporter.ok(`Your book is live: ${siteUrl}`);
+      ctx.reporter.warn(
+        "Your machine cannot see it yet, but public DNS can, so the deploy worked.",
+      );
+      ctx.reporter.info(
+        "This is a stale negative DNS entry on your side: the name was looked up just before it existed, and that answer is cached until it expires — usually a few minutes. Everyone else can already read the site.",
+      );
+      await ctx.journal.update((data) => {
+        data.publish = { ...data.publish, workerName, siteUrl };
+      }, nowIso(ctx));
+      return { continue: true, note: `published at ${siteUrl} (local DNS still stale)` };
+    }
+
     throw new WizardError(
       `The deploy finished but ${siteUrl} is not serving your book yet.`,
       "A first deploy sometimes takes a minute to propagate. Open that address in a browser; if it is still failing in a few minutes, run `create-authorbot publish` again.",
@@ -481,6 +503,52 @@ async function confirmDomainIsFree(ctx: WizardContext, domain: string): Promise<
       "Run `create-authorbot publish` again and give a hostname that is not already serving something — a subdomain like book.example.com is the usual choice. Nothing was deployed.",
     );
   }
+}
+
+/**
+ * Whether the wider internet can resolve this hostname, regardless of what
+ * this machine's resolver believes.
+ *
+ * Asked over DNS-over-HTTPS precisely because it is not the system resolver:
+ * an ordinary lookup would consult the same cache that is the problem. A
+ * hostname that answers here but not locally means the deploy landed and this
+ * machine is holding a stale "does not exist" — the difference between "your
+ * book is live" and "your deploy failed", which is not a distinction to leave
+ * to a coin toss.
+ *
+ * Any doubt returns false: this only ever upgrades a failure into a success,
+ * so it has to be sure. A network that blocks DoH simply reports what it
+ * reported before.
+ */
+async function resolvesPublicly(ctx: WizardContext, url: string): Promise<boolean> {
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return false;
+  }
+
+  for (const type of ["A", "AAAA"]) {
+    try {
+      const response = await ctx.http.request(
+        `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`,
+        { headers: { accept: "application/dns-json" }, timeoutMs: 10_000 },
+      );
+      if (response.status !== 200) {
+        continue;
+      }
+      const body = JSON.parse(response.body) as { Status?: number; Answer?: unknown[] };
+      // Status 0 is NOERROR; an Answer section means the name exists and has
+      // an address, which is as much as this needs to know.
+      if (body.Status === 0 && Array.isArray(body.Answer) && body.Answer.length > 0) {
+        return true;
+      }
+    } catch {
+      // Blocked, offline, or malformed: fall through to the next type and, if
+      // that fails too, report nothing rather than guessing.
+    }
+  }
+  return false;
 }
 
 async function waitForSite(ctx: WizardContext, url: string): Promise<boolean> {
