@@ -87,7 +87,7 @@ export function renderWrangler(settings: WranglerSettings): string {
       "  // binding — so it is aliased to a stub that throws, keeping a native",
       "  // module out of the bundle.",
       `  "alias": {`,
-      `    "better-sqlite3": "node_modules/@authorbot/api/dist/stubs/better-sqlite3.js"`,
+      `    "better-sqlite3": "./node_modules/@authorbot/api/dist/stubs/better-sqlite3.js"`,
       `  },`,
     );
   }
