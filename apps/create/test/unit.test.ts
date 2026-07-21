@@ -12,6 +12,7 @@ import { Journal, emptyJournal, parseJournal } from "../src/journal.js";
 import { EXAMPLE_CONFIG, parseConfig } from "../src/config.js";
 import { defaultFlow, parseArgs } from "../src/cli.js";
 import { DESTRUCTIVE_STAGES, OPTIONAL_STAGES, isStageName } from "../src/stages/names.js";
+import { PLAIN_LOGO, logoLines } from "../src/ui/logo.js";
 import { SecretVault } from "../src/secrets.js";
 import type { WizardError } from "../src/errors.js";
 import { themeFor, wrap } from "../src/ui/reporter.js";
@@ -420,5 +421,40 @@ describe("destructive stages are never walked", () => {
   it("still resolves them when named explicitly", () => {
     expect(isStageName("unpublish")).toBe(true);
     expect(isStageName("teardown")).toBe(true);
+  });
+});
+
+describe("the logo", () => {
+  // Hand-padded ASCII art drifts. The first draft had the robot's panel
+  // overhanging its own border by two columns, which is only visible to
+  // someone looking at it in a terminal — so the widths are asserted instead.
+  it("draws every row of the mark to the same width", () => {
+    const lines = logoLines({ colour: false, unicode: true, width: 80 });
+    const mark = lines.slice(1, 4).map((line) => [...line].length);
+    expect(new Set(mark).size).toBe(1);
+  });
+
+  it("centres the mark over the wordmark", () => {
+    const lines = logoLines({ colour: false, unicode: true, width: 80 });
+    const border = lines[1] ?? "";
+    const wordmark = lines[5] ?? "";
+    const indent = border.length - border.trimStart().length;
+    const markWidth = [...border.trim()].length;
+    const slack = [...wordmark].length - markWidth;
+    // Centred to within a column, which is all an odd difference allows.
+    expect(Math.abs(indent - Math.round(slack / 2))).toBeLessThanOrEqual(1);
+  });
+
+  it("falls back to one plain line where box characters cannot be drawn", () => {
+    expect(logoLines({ colour: false, unicode: false, width: 80 })).toEqual([PLAIN_LOGO]);
+  });
+
+  it("falls back when the terminal is narrower than the wordmark", () => {
+    expect(logoLines({ colour: false, unicode: true, width: 20 })).toEqual([PLAIN_LOGO]);
+  });
+
+  it("emits no escape sequences when colour is off", () => {
+    const text = logoLines({ colour: false, unicode: true, width: 80 }).join("\n");
+    expect(text).not.toContain(String.fromCharCode(27));
   });
 });

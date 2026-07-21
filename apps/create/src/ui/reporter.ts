@@ -15,6 +15,7 @@
 import type { Environment, OutputPort } from "../ports.js";
 import type { SecretVault } from "../secrets.js";
 import { BINARY_NAME } from "../invocation.js";
+import { logoLines } from "./logo.js";
 
 const MAX_WIDTH = 80;
 const MIN_WIDTH = 40;
@@ -166,6 +167,19 @@ export class Reporter {
 
   blank(): void {
     this.#emit("");
+  }
+
+  /**
+   * The mark, once, at the top of a run.
+   *
+   * Not per stage: a logo that reappears every few seconds stops being a mark
+   * and becomes noise between the author and what they are being told.
+   */
+  logo(): void {
+    for (const line of logoLines(this.#theme)) {
+      this.#emit(line);
+    }
+    this.blank();
   }
 
   /**

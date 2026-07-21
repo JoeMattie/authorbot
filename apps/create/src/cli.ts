@@ -237,6 +237,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
   // what it has been told about.
   registerEnvironmentCredentials(vault, deps.env.env);
   const reporter = new Reporter(deps.out, vault, themeFor(deps.env), deps.env.invocation);
+  // Once, before anything else this run prints.
+  reporter.logo();
 
   let parsed: ParsedArgs;
   try {
