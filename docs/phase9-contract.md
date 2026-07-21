@@ -43,6 +43,47 @@ The existing `docs/how-it-works.md` and `docs/getting-started.md` are rewritten
 for authors and become the site's source (§5), leaving the repository copies
 as the canonical text rather than a duplicate.
 
+## 3a. Naming that survives the build order
+
+The repository is full of names that describe *how it was built* rather than
+what the thing is. `apps/api/test/phase4-leases.test.ts` tells a newcomer
+nothing; `leases.test.ts` tells them everything. The phase numbering is an
+artifact of the delivery sequence and should not outlive it in places people
+read to understand the system.
+
+**Rename the phase-numbered test files** to describe their subject. There are
+nine, and nothing outside them refers to the names — no package script, no
+workflow, no document — so this is a rename and nothing more:
+
+| Now | Becomes |
+|---|---|
+| `phase4-leases.test.ts` | `leases.test.ts` |
+| `phase4-submissions.test.ts` | `submissions.test.ts` |
+| `phase4-races.test.ts` | `lease-races.test.ts` |
+| `phase4-exit-criteria.test.ts` | `work-lifecycle.test.ts` |
+| `phase4-helpers.ts` | `work-helpers.ts` |
+| `phase5-exit-criteria.test.ts` | `github-integration.test.ts` |
+| `phase5-regressions.test.ts` | `github-regressions.test.ts` |
+| `phase5-helpers.ts` | `github-helpers.ts` |
+| `phase7-access-control.test.ts` | `access-control-integration.test.ts` |
+
+(`concurrency-governance.test.ts`, `recovery-restore-drill.test.ts`, and
+`resilience-*.test.ts` are already named for what they test — that is the
+standard the rest should meet.)
+
+**Do NOT mass-edit the inline citations.** Roughly 523 comments across 355
+files cite "Phase N contract §X". They are precise pointers to a document that
+still exists and still says that, and rewriting them is churn with real
+regression risk for no reader benefit — the alternative to a precise citation
+is usually a vaguer one.
+
+**Instead, make the citations navigable.** Add `docs/contracts.md`: a one-page
+index mapping each phase contract to the subject it specifies ("Phase 4 —
+leases, task bundles, submissions, conflict handling"), so a reader who meets
+"Phase 4 contract §5" in a comment can find out what that means in one hop.
+The phase contracts themselves keep their names: they are a historical record
+of the build sequence, and that is legitimately what they are about.
+
 ## 4. The site
 
 Static, deployed to `authorbot.joemattie.com` on Cloudflare — the same shape
@@ -129,7 +170,9 @@ screenshot conveys most of the value at a fraction of the cost.
 5. CLI and API reference pages are generated, not hand-written.
 6. The README leads with the author's question, not the architecture.
 7. No contract, ADR, or design-document content is republished to the site.
-8. `authorbot.joemattie.com` deploys from `main` and is keyboard navigable,
+8. No test file is named after a build phase; `docs/contracts.md` maps every
+   phase citation to the subject it covers.
+9. `authorbot.joemattie.com` deploys from `main` and is keyboard navigable,
    dark-mode correct, and readable without JavaScript.
 
 ## 10. Sequencing note
