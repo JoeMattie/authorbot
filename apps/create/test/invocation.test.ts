@@ -27,7 +27,7 @@ function reporterFor(invocation: string): { reporter: Reporter; lines: string[] 
   const reporter = new Reporter(
     out,
     new SecretVault(),
-    { colour: false, width: 80 },
+    { colour: false, unicode: false, width: 80 },
     invocation,
   );
   return { reporter, lines };

@@ -24,6 +24,17 @@ const MIN_WIDTH = 40;
 export interface Theme {
   readonly colour: boolean;
   readonly width: number;
+  /**
+   * Whether to draw with box characters and arrows rather than dashes and
+   * hyphens.
+   *
+   * Tied to the same signal as colour, deliberately: a terminal that cannot be
+   * trusted with `\u001b[32m` is a terminal that should not be sent `┌`
+   * either, and NO_COLOR is set by people who want output they can pipe,
+   * paste, and read in a log. Every symbol below has an ASCII twin that says
+   * the same thing, so nothing is carried by the glyph alone.
+   */
+  readonly unicode: boolean;
 }
 
 export function themeFor(env: Environment): Theme {
@@ -33,7 +44,11 @@ export function themeFor(env: Environment): Theme {
   const dumb = env.env["TERM"] === "dumb";
   const colour = (noColor === undefined || noColor === "") && !dumb && env.isTty;
   const columns = Number.isFinite(env.columns) && env.columns > 0 ? env.columns : MAX_WIDTH;
-  return { colour, width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(columns))) };
+  return {
+    colour,
+    unicode: colour,
+    width: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(columns))),
+  };
 }
 
 const CODES: Record<string, [string, string]> = {
@@ -153,11 +168,33 @@ export class Reporter {
     this.#emit("");
   }
 
-  /** Section banner introducing a stage. */
+  /**
+   * Section banner introducing a stage.
+   *
+   * A drawn box where the terminal can take it, the original underline where
+   * it cannot. Both are one visual break between stages, which is the job:
+   * the wizard prints a lot, and without a hard edge every stage reads as a
+   * continuation of the last one.
+   */
   heading(text: string): void {
+    const label = this.#named(this.#vault.redact(text));
     this.blank();
-    this.#emit(this.#style(this.#vault.redact(text), "bold"));
-    this.#emit(this.#style("-".repeat(Math.min(text.length, this.#theme.width)), "dim"));
+    if (!this.#theme.unicode) {
+      this.#emit(this.#style(label, "bold"));
+      this.#emit(this.#style("-".repeat(Math.min(label.length, this.#theme.width)), "dim"));
+      return;
+    }
+    // Four characters of border and padding, so the text still respects width.
+    const inner = Math.min(label.length, this.#theme.width - 4);
+    const line = "\u2500".repeat(inner + 2);
+    this.#emit(this.#style(`\u250c${line}\u2510`, "dim"));
+    this.#emit(
+      `${this.#style("\u2502", "dim")} ${this.#style(label.slice(0, inner), "bold")} ${this.#style(
+        "\u2502",
+        "dim",
+      )}`,
+    );
+    this.#emit(this.#style(`\u2514${line}\u2518`, "dim"));
   }
 
   /**
@@ -173,21 +210,22 @@ export class Reporter {
 
   /** A step that is about to run or has just run. */
   step(text: string): void {
+    const marker = this.#theme.unicode ? "\u203a" : "-";
     for (const [index, line] of this.#lines(text, "  ").entries()) {
-      this.#emit(index === 0 ? `-${line.slice(1)}` : line);
+      this.#emit(index === 0 ? this.#style(marker, "cyan") + line.slice(1) : line);
     }
   }
 
   ok(text: string): void {
-    this.#prefixed(this.#style("ok", "green"), text);
+    this.#prefixed(this.#style(this.#theme.unicode ? "\u2713 " : "ok", "green"), text);
   }
 
   warn(text: string): void {
-    this.#prefixed(this.#style("!!", "yellow"), text);
+    this.#prefixed(this.#style(this.#theme.unicode ? "\u25b2 " : "!!", "yellow"), text);
   }
 
   fail(text: string): void {
-    this.#prefixed(this.#style("XX", "red"), text);
+    this.#prefixed(this.#style(this.#theme.unicode ? "\u2717 " : "XX", "red"), text);
   }
 
   info(text: string): void {
