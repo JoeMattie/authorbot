@@ -80,4 +80,18 @@ try {
 } catch (error) {
   fatal(error);
   process.exitCode = 1;
+} finally {
+  // Let the process end.
+  //
+  // Once a readline interface has attached to a TTY stdin, closing it does not
+  // reliably release the underlying handle, so Node finishes every last piece
+  // of work and then sits in the event loop forever with nothing to do. The
+  // author sees the whole run complete, "ok Done.", and no prompt back —
+  // indistinguishable from a hang, and only Ctrl-C ends it.
+  //
+  // The mirror of the timer that was `unref()`d and let the process exit too
+  // early. Here the handle is real work's leftovers, so pause rather than
+  // destroy: anything still legitimately reading stdin keeps its data, and a
+  // process with nothing left to do simply exits.
+  process.stdin.pause();
 }
