@@ -9,6 +9,22 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.20
+
+- **The GitHub App key was stored in a format the Worker cannot read.** GitHub's
+  manifest hands back a PKCS#1 key; WebCrypto, which is all a Cloudflare Worker
+  has, can only import PKCS#8. So every book reported its integration as
+  `invalid` and did no Git work at all — chapters could not be saved, the
+  projection never ran, settings could not read `book.yml` — with all three
+  credentials present and correct. **Books set up before this release need
+  their GitHub App deleted and `collaborate` run again**, because the key was
+  stored once and cannot be re-read.
+- The check meant to catch exactly that missed it: it listed the bad statuses
+  and `invalid` was not among them. It now accepts only `configured`.
+- Pressing Esc at a prompt exits instead of hanging until Ctrl-C.
+- `teardown` names the Cloudflare API token it cannot delete for you, and links
+  the GitHub App deletion straight to the page with the button on it.
+
 ## 0.1.19
 
 - Spinners with an elapsed timer on the steps that take minutes — installing

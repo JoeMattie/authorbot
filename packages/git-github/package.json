@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/git-github",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Worker-compatible GitHub integration for Authorbot (Phase 5 contract): GitHub App auth, Git Data API reader/writer, and a deterministic in-process fake GitHub with a real git object model",
   "keywords": [
     "authorbot",

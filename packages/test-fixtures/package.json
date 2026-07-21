@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/test-fixtures",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Fixture book repositories for Authorbot Phase 0: a valid minimal repo plus invalid repos each broken in one documented way, with typed helpers to enumerate them and read their expected validation error codes (Phase 0 contract section 5)",
   "license": "MIT",
   "type": "module",
