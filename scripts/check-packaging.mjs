@@ -89,6 +89,15 @@ for (const dir of PUBLISHABLE) {
   }
 
   const packed = packFiles(dir);
+  if (!Array.isArray(packed?.files)) {
+    // A shape change in `npm pack --json` should say so, not surface as
+    // "Cannot read properties of undefined" three frames deep.
+    throw new Error(
+      `npm pack --json returned no file list for ${dir} — the output shape has ` +
+        `probably changed. Check the pinned npm version in .github/workflows/release.yml. ` +
+        `Received keys: ${Object.keys(packed ?? {}).join(", ") || "(none)"}`,
+    );
+  }
   const names = packed.files.map((f) => f.path);
 
   if (!names.some((n) => n.startsWith("dist/"))) fail("tarball contains no dist/ — did `build` run?");

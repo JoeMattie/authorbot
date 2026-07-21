@@ -77,7 +77,13 @@ jobs:
       # ships an older npm, so upgrade it rather than silently falling back to
       # token auth.
       - name: Upgrade npm to a version that supports trusted publishing
-        run: npm install -g npm@latest
+        # PINNED, not @latest. npm's `pack --json` output shape and its
+        # notice placement have both changed under us mid-release: a workflow
+        # that installs the newest npm can break with no change to this
+        # repository, which is the opposite of what a release gate is for.
+        # Bump this deliberately, and only after the packaging check passes
+        # against it locally.
+        run: npm install -g npm@11.17.0
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
