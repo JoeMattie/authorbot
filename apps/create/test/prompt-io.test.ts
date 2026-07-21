@@ -1,69 +1,127 @@
 /**
- * The real `TtyPrompter` driven by a real stream.
+ * `TtyPrompter`, which now sits on `@clack/prompts`.
  *
- * Every other test injects a fake prompter, so the class that actually reads
- * the terminal was never exercised — and it shipped returning "" for every
- * answer, because `rl.close()` emits `close` synchronously and the Ctrl-D
- * handler resolved the promise before the answer did. The first prompt of the
- * first run of the wizard rejected valid input and looped forever.
+ * What is worth testing changed with it. Reading a line, redrawing on
+ * validation failure, and masking a secret are clack's problem now, and it has
+ * its own suite for them. What is still this repository's problem is the part
+ * that wraps clack:
+ *
+ *  - every byte reaching the terminal goes through the secret vault, which is
+ *    the guarantee that made adopting a prompt library acceptable at all;
+ *  - a cancelled prompt becomes an `AbortedError`, so the run unwinds through
+ *    the same path as any other early stop instead of calling `process.exit`
+ *    and skipping the "here is what was created" summary.
+ *
+ * The streams below imitate a TTY because clack asks for raw mode and speaks
+ * the keypress protocol; a plain PassThrough hangs forever waiting for input
+ * it can never receive, which is exactly what the previous version of this
+ * file did when the implementation changed under it.
  */
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { TtyPrompter } from "../src/runtime/prompt.js";
+import { AbortedError } from "../src/errors.js";
+import { SecretVault } from "../src/secrets.js";
 
-function prompterOn(lines: string[]): { prompter: TtyPrompter; written: string[] } {
-  const input = new PassThrough();
-  const written: string[] = [];
-  const prompter = new TtyPrompter({
-    input: input as unknown as NodeJS.ReadStream,
-    output: {
-      write: (l: string) => {
-        written.push(l);
-      },
-      error: (l: string) => {
-        written.push(l);
-      },
-    },
-  });
-  // Feed answers after the interface is listening.
-  setTimeout(() => {
-    for (const line of lines) input.write(`${line}\n`);
-  }, 5);
-  return { prompter, written };
+/** A PassThrough that claims to be a terminal, which is all clack checks. */
+function ttyInput(): PassThrough & { isTTY?: boolean; setRawMode?: (mode: boolean) => void } {
+  const stream = new PassThrough() as PassThrough & {
+    isTTY?: boolean;
+    setRawMode?: (mode: boolean) => void;
+  };
+  stream.isTTY = true;
+  stream.setRawMode = () => {};
+  return stream;
 }
 
-describe("TtyPrompter reads what the user actually typed", () => {
-  it("returns the typed answer, not an empty string", async () => {
-    const { prompter } = prompterOn(["The Causal Projector"]);
-    const answer = await prompter.text({
-      id: "book.title",
-      message: "What is your book called?",
-    });
-    expect(answer).toBe("The Causal Projector");
-  });
+/** Collects everything the prompt library writes, after redaction. */
+function collector(): PassThrough & { text: () => string } {
+  const chunks: string[] = [];
+  const stream = new PassThrough() as PassThrough & { text: () => string };
+  stream.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+  stream.text = () => chunks.join("");
+  return stream;
+}
 
-  it("does not re-ask a valid answer", async () => {
-    const { prompter } = prompterOn(["Mara Voss"]);
-    let asked = 0;
-    const answer = await prompter.text({
-      id: "x",
-      message: "Name?",
-      validate: (v: string) => {
-        asked += 1;
-        return v.trim() === "" ? "A name is required." : null;
-      },
-    });
-    expect(answer).toBe("Mara Voss");
-    expect(asked).toBe(1);
-  });
+const ENTER = "\r";
+const CTRL_C = "";
 
-  it("still treats end-of-input as an empty answer rather than hanging", async () => {
-    const input = new PassThrough();
+describe("TtyPrompter", () => {
+  it("returns what was typed", async () => {
+    const input = ttyInput();
+    const target = collector();
     const prompter = new TtyPrompter({
       input: input as unknown as NodeJS.ReadStream,
       output: { write: () => {}, error: () => {} },
+      target,
     });
-    setTimeout(() => input.end(), 5);
-    await expect(prompter.text({ id: "y", message: "anything?" })).resolves.toBe("");
+
+    const answer = prompter.text({ id: "book.title", message: "What is your book called?" });
+    setTimeout(() => input.write(`The Causal Projector${ENTER}`), 20);
+
+    await expect(answer).resolves.toBe("The Causal Projector");
+  });
+
+  it("redacts a secret that reaches a prompt's message", async () => {
+    // The reason clack is given a redacting stream rather than stdout: this
+    // has to hold for output composed by a library that has never heard of the
+    // vault.
+    const vault = new SecretVault();
+    const secret = vault.register("TOKEN", "super-secret-token-value");
+    const input = ttyInput();
+    const target = collector();
+    const prompter = new TtyPrompter({
+      input: input as unknown as NodeJS.ReadStream,
+      output: { write: () => {}, error: () => {} },
+      vault,
+      target,
+    });
+
+    const answer = prompter.text({ id: "x", message: `Confirm the token ${secret}?` });
+    setTimeout(() => input.write(`yes${ENTER}`), 20);
+    await answer;
+
+    expect(target.text()).not.toContain("super-secret-token-value");
+  });
+
+  it("turns Ctrl-C into an AbortedError rather than killing the process", async () => {
+    // The wizard's early-stop path prints what it created and how to remove
+    // it. Exiting from inside a prompt would skip exactly that, for the person
+    // who most needs it: someone abandoning setup halfway through.
+    const input = ttyInput();
+    const prompter = new TtyPrompter({
+      input: input as unknown as NodeJS.ReadStream,
+      output: { write: () => {}, error: () => {} },
+      target: collector(),
+    });
+
+    const answer = prompter.text({ id: "x", message: "anything?" });
+    setTimeout(() => input.write(CTRL_C), 20);
+
+    await expect(answer).rejects.toBeInstanceOf(AbortedError);
+  });
+
+  it("re-asks on a validation failure and accepts the corrected answer", async () => {
+    const input = ttyInput();
+    const asked: string[] = [];
+    const prompter = new TtyPrompter({
+      input: input as unknown as NodeJS.ReadStream,
+      output: { write: () => {}, error: () => {} },
+      target: collector(),
+    });
+
+    const answer = prompter.text({
+      id: "x",
+      message: "Name?",
+      validate: (value) => {
+        asked.push(value);
+        return value.trim() === "" ? "A name is required." : null;
+      },
+    });
+    setTimeout(() => input.write(ENTER), 20);
+    setTimeout(() => input.write(`Mara Voss${ENTER}`), 80);
+
+    await expect(answer).resolves.toBe("Mara Voss");
+    expect(asked).toContain("");
   });
 });

@@ -1,13 +1,26 @@
 /**
  * Terminal prompting, and its non-interactive counterpart.
  *
- * Hidden input (contract §2.3) is done by hand rather than with a dependency:
- * raw mode, no echo, and a `finally` that restores the terminal on every exit
- * path including Ctrl-C — a wizard that leaves a terminal in raw mode with
- * echo off after a failed secret prompt is a worse bug than the one that
- * caused the failure.
+ * Built on `@clack/prompts`: the arrow-key select, the masked secret field,
+ * and cancellation that works were all hand-rolled here before, and two of the
+ * three were broken at some point in the doing.
+ *
+ * THE VAULT STILL SEES EVERY BYTE. `secrets.ts` describes redaction as
+ * covering *every* way text leaves this process, and that is worth more than
+ * any amount of presentation: it is the only reason a credential cannot reach
+ * a terminal, a screen share, or a scrollback buffer. So clack is not handed
+ * `process.stdout`. It is handed a stream that redacts and then forwards,
+ * which keeps the guarantee over output this file never composed and does not
+ * know the shape of.
+ *
+ * One seam worth naming: that redaction is per chunk, so a secret split across
+ * two writes could slip through. Prompt text is composed here and short, and a
+ * secret's value is masked rather than echoed, so the exposure is narrow — but
+ * narrower than "not redacted at all", which is what handing over the real
+ * stdout would have meant.
  */
-import { createInterface } from "node:readline";
+import { Writable } from "node:stream";
+import { confirm, isCancel, password, select, text } from "@clack/prompts";
 import type {
   ConfirmPrompt,
   OutputPort,
@@ -16,221 +29,134 @@ import type {
   SelectPrompt,
   TextPrompt,
 } from "../ports.js";
-import { NonInteractiveError, WizardError } from "../errors.js";
+import { AbortedError, NonInteractiveError, WizardError } from "../errors.js";
 import type { SecretVault } from "../secrets.js";
-import { wrap } from "../ui/reporter.js";
-
-const WIDTH = 80;
 
 export interface TtyPrompterOptions {
   readonly input: NodeJS.ReadStream;
   readonly output: OutputPort;
   readonly rawInput?: NodeJS.ReadStream;
-  /**
-   * The run's vault. Prompt text is composed from values the wizard is holding
-   * (a Worker name, a site URL, a repository), and `secrets.ts` describes
-   * redaction as covering *every* way text leaves this process. Writing
-   * straight to the OutputPort made this a fourth sink outside that guarantee —
-   * latent today only because no prompt happens to interpolate a secret, which
-   * is a property of the current call sites rather than of the design.
-   */
+  /** The run's vault. Every byte the prompt library writes passes through it. */
   readonly vault?: SecretVault;
+  /** The stream prompts draw on. Defaults to stdout; injected by tests. */
+  readonly target?: NodeJS.WritableStream;
+}
+
+/**
+ * A stream that redacts on its way to the terminal.
+ *
+ * This is what made adopting a prompt library acceptable: without it, every
+ * byte clack writes would be output the vault has never seen.
+ */
+class RedactingStream extends Writable {
+  readonly #target: NodeJS.WritableStream;
+  readonly #vault: SecretVault | undefined;
+
+  constructor(target: NodeJS.WritableStream, vault: SecretVault | undefined) {
+    super();
+    this.#target = target;
+    this.#vault = vault;
+  }
+
+  override _write(
+    chunk: unknown,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    const written = String(chunk);
+    this.#target.write(this.#vault === undefined ? written : this.#vault.redact(written));
+    callback();
+  }
 }
 
 export class TtyPrompter implements Prompter {
   readonly #input: NodeJS.ReadStream;
-  readonly #output: OutputPort;
+  readonly #output: Writable;
   readonly #vault: SecretVault | undefined;
 
   constructor(options: TtyPrompterOptions) {
     this.#input = options.input;
-    this.#output = options.output;
     this.#vault = options.vault;
+    this.#output = new RedactingStream(options.target ?? process.stdout, options.vault);
   }
 
-  /** The only way this class writes. Everything goes through the vault. */
-  #write(line: string): void {
-    this.#output.write(this.#vault === undefined ? line : this.#vault.redact(line));
+  #redact(value: string): string {
+    return this.#vault === undefined ? value : this.#vault.redact(value);
   }
 
-  #ask(question: string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const rl = createInterface({ input: this.#input, output: process.stdout, terminal: true });
-      // `rl.close()` emits `close` synchronously, so the Ctrl-D handler below
-      // used to win the race and resolve with "" before the real answer —
-      // every typed answer was discarded and every prompt re-asked forever.
-      // One settle guard, and the answer resolves before the close fires.
-      let settled = false;
-      const settle = (value: string): void => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
-      rl.question(question, (answer) => {
-        settle(answer);
-        rl.close();
-      });
-      rl.on("close", () => {
-        // Ctrl-D at a prompt: no answer is coming, and looping would spin.
-        settle("");
-      });
-      // Ctrl-C must always get you out. readline swallows SIGINT when it owns
-      // the TTY, so without this an unanswerable prompt — a validator that
-      // never passes, say — traps the terminal with no way back short of
-      // killing the process from elsewhere.
-      rl.on("SIGINT", () => {
-        rl.close();
-        this.#write("");
-        this.#write("Cancelled. Nothing was changed; run the same command to pick up where you left off.");
-        process.exit(130);
-      });
-      rl.on("error", reject);
-    });
-  }
-
-  #preamble(message: string, hint?: string): void {
-    for (const line of wrap(message, WIDTH)) {
-      this.#write(line);
+  /**
+   * Ctrl-C at any prompt.
+   *
+   * An `AbortedError` rather than `process.exit`, so the run unwinds the same
+   * way as any other early stop and still prints what it created and how to
+   * remove it — which is precisely what someone who cancelled halfway through
+   * setting up a book needs in front of them.
+   */
+  #settle<T>(value: T | symbol): T {
+    if (isCancel(value)) {
+      throw new AbortedError("cancelled at a prompt");
     }
-    if (hint !== undefined) {
-      for (const line of wrap(hint, WIDTH, "  ")) {
-        this.#write(line);
-      }
-    }
+    return value as T;
   }
 
   async text(prompt: TextPrompt): Promise<string> {
-    for (;;) {
-      this.#preamble(prompt.message, prompt.hint);
-      const suffix = prompt.defaultValue === undefined ? "" : ` [${prompt.defaultValue}]`;
-      const raw = (await this.#ask(`>${suffix} `)).trim();
-      const value = raw.length === 0 ? (prompt.defaultValue ?? "") : raw;
-      const error = prompt.validate?.(value) ?? null;
-      if (error === null) {
-        return value;
-      }
-      this.#write(`  ${error}`);
-    }
+    const answer = await text({
+      message: this.#redact(prompt.message),
+      input: this.#input,
+      output: this.#output,
+      ...(prompt.hint === undefined ? {} : { placeholder: this.#redact(prompt.hint) }),
+      ...(prompt.defaultValue === undefined
+        ? {}
+        : { initialValue: prompt.defaultValue, defaultValue: prompt.defaultValue }),
+      ...(prompt.validate === undefined
+        ? {}
+        : {
+            validate: (value: string | undefined) => {
+              const problem = prompt.validate?.(value ?? "");
+              return problem === null ? undefined : problem;
+            },
+          }),
+    });
+    return this.#settle(answer);
   }
 
   async confirm(prompt: ConfirmPrompt): Promise<boolean> {
-    for (;;) {
-      this.#preamble(prompt.message, prompt.hint);
-      // A destructive step never shows a capital Y (contract §2.1): the
-      // default is no, and the rendering says so.
-      const shape = prompt.destructive === true ? "y/N" : prompt.defaultValue ? "Y/n" : "y/N";
-      const raw = (await this.#ask(`> [${shape}] `)).trim().toLowerCase();
-      if (raw.length === 0) {
-        return prompt.destructive === true ? false : prompt.defaultValue;
-      }
-      if (raw === "y" || raw === "yes") {
-        return true;
-      }
-      if (raw === "n" || raw === "no") {
-        return false;
-      }
-      this.#write('  Please answer "y" or "n".');
-    }
+    const answer = await confirm({
+      message: this.#redact(prompt.message),
+      input: this.#input,
+      output: this.#output,
+      initialValue: prompt.defaultValue ?? false,
+    });
+    return this.#settle(answer);
   }
 
   async select(prompt: SelectPrompt): Promise<string> {
-    for (;;) {
-      this.#preamble(prompt.message);
-      for (const [index, choice] of prompt.choices.entries()) {
-        const marker = choice.value === prompt.defaultValue ? "*" : " ";
-        this.#write(`  ${marker} ${String(index + 1)}. ${choice.label}`);
-        if (choice.hint !== undefined) {
-          for (const line of wrap(choice.hint, WIDTH, "       ")) {
-            this.#write(line);
-          }
-        }
-      }
-      const raw = (await this.#ask("> ")).trim();
-      if (raw.length === 0 && prompt.defaultValue !== undefined) {
-        return prompt.defaultValue;
-      }
-      const byNumber = Number.parseInt(raw, 10);
-      if (Number.isInteger(byNumber) && byNumber >= 1 && byNumber <= prompt.choices.length) {
-        const choice = prompt.choices[byNumber - 1];
-        if (choice !== undefined) {
-          return choice.value;
-        }
-      }
-      const byValue = prompt.choices.find((choice) => choice.value === raw);
-      if (byValue !== undefined) {
-        return byValue.value;
-      }
-      this.#write(`  Enter a number from 1 to ${String(prompt.choices.length)}.`);
-    }
+    const answer = await select({
+      message: this.#redact(prompt.message),
+      input: this.#input,
+      output: this.#output,
+      options: prompt.choices.map((choice) => ({
+        value: choice.value,
+        label: this.#redact(choice.label),
+        ...(choice.hint === undefined ? {} : { hint: this.#redact(choice.hint) }),
+      })),
+      ...(prompt.defaultValue === undefined ? {} : { initialValue: prompt.defaultValue }),
+    });
+    return this.#settle(answer);
   }
 
   async secret(prompt: SecretPrompt): Promise<string> {
-    this.#preamble(prompt.message, prompt.hint);
-    if (!this.#input.isTTY) {
-      throw new WizardError(
-        "A secret was requested but this is not an interactive terminal, so it cannot be typed without being echoed.",
-        "Run the wizard in a terminal, or use --non-interactive with a config file that supplies the value from your secret store.",
-      );
-    }
-    this.#write("> (typing is hidden)");
-    return await readHidden(this.#input);
+    const answer = await password({
+      message: this.#redact(prompt.message),
+      input: this.#input,
+      output: this.#output,
+      // Asterisks rather than nothing. A field that gives no feedback at all
+      // reads as a frozen terminal, and the usual response to that is to paste
+      // the credential a second time.
+      mask: "*",
+    });
+    return this.#settle(answer);
   }
-}
-
-/**
- * Reads a line with echo suppressed. Bytes are handled one at a time so
- * nothing is ever written back to the terminal, and the raw-mode/listener
- * state is unwound in `finally` regardless of how the read ends.
- */
-function readHidden(input: NodeJS.ReadStream): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const wasRaw = input.isRaw === true;
-    let value = "";
-    const cleanup = (): void => {
-      input.removeListener("data", onData);
-      input.removeListener("error", onError);
-      if (!wasRaw) {
-        try {
-          input.setRawMode(false);
-        } catch {
-          // Terminal already gone; nothing left to restore.
-        }
-      }
-      input.pause();
-    };
-    const onData = (chunk: Buffer): void => {
-      for (const byte of chunk) {
-        if (byte === 0x03) {
-          cleanup();
-          reject(new WizardError("Cancelled.", "Run the same command again when ready."));
-          return;
-        }
-        if (byte === 0x0d || byte === 0x0a) {
-          cleanup();
-          resolve(value);
-          return;
-        }
-        if (byte === 0x7f || byte === 0x08) {
-          value = value.slice(0, -1);
-          continue;
-        }
-        value += String.fromCharCode(byte);
-      }
-    };
-    const onError = (error: Error): void => {
-      cleanup();
-      reject(error);
-    };
-    try {
-      input.setRawMode(true);
-    } catch (error) {
-      reject(error instanceof Error ? error : new Error(String(error)));
-      return;
-    }
-    input.resume();
-    input.on("data", onData);
-    input.on("error", onError);
-  });
 }
 
 /**
