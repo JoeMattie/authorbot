@@ -9,6 +9,12 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.18
+
+- The wizard opens with the Authorbot mark, drawn in the logo's own orange and
+  teal, degrading to one plain line under `NO_COLOR`, in a pipe, or on a narrow
+  terminal.
+
 ## 0.1.17
 
 - **`npm install` failed for everyone who started the documented way.** npx
