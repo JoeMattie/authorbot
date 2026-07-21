@@ -22,7 +22,7 @@
     "url": "git+https://github.com/JoeMattie/authorbot.git"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/bin.js', 0o755)\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "sync-templates": "node scripts/sync-templates.mjs"
