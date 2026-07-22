@@ -20,6 +20,7 @@ import type {
   GitPort,
   HealthPort,
   HealthResult,
+  LockfilePort,
   PullRequestRequest,
   ReleasesPort,
   UpgradeDeps,
@@ -42,6 +43,8 @@ export async function cleanupTempDirs(): Promise<void> {
 export interface MakeRepoOptions {
   /** The `@authorbot/cli` range written into package.json. */
   readonly pin?: string;
+  /** Existing collaborative API pin. Omitted for a static-only book. */
+  readonly apiPin?: string;
   /** Omit package.json entirely. */
   readonly withoutPackageJson?: boolean;
   /** Add a wrangler.jsonc with a D1 binding of this name. */
@@ -66,6 +69,7 @@ export async function makeBookRepo(options: MakeRepoOptions = {}): Promise<strin
           private: true,
           scripts: { validate: "authorbot validate .", upgrade: "authorbot upgrade" },
           devDependencies: {
+            ...(options.apiPin === undefined ? {} : { "@authorbot/api": options.apiPin }),
             "@authorbot/cli": options.pin ?? "1.0.0",
             wrangler: "^4.0.0",
           },
@@ -159,9 +163,14 @@ export function fakeGit(overrides: Partial<Pick<FakeGit, "clean" | "failAt">> = 
     async deleteBranch(_repo: string, name: string) {
       calls.push(`deleteBranch ${name}`);
     },
-    async commit(_repo: string, request: CommitRequest) {
+    async commit(repo: string, request: CommitRequest) {
       calls.push(`commit ${request.paths.join(",")}`);
       maybeFail(git, "commit");
+      for (const relative of request.paths) {
+        if (!(await nodeFs.exists(path.join(repo, relative)))) {
+          throw new Error(`fake git: cannot stage missing path ${relative}`);
+        }
+      }
       commits.push({ message: request.message, paths: request.paths });
       return `sha${commits.length}`;
     },
@@ -249,6 +258,7 @@ export function fakeHealth(result: HealthResult): HealthPort {
 }
 
 export interface DepsOverrides {
+  lockfile?: LockfilePort;
   releases?: ReleasesPort;
   git?: GitPort;
   wrangler?: WranglerPort;
@@ -259,7 +269,56 @@ export interface DepsOverrides {
 
 export function makeDeps(overrides: DepsOverrides = {}): UpgradeDeps {
   return {
-    lockfile: { relock: async () => true },
+    lockfile:
+      overrides.lockfile ??
+      {
+        async relock(repoPath) {
+          const manifest = JSON.parse(await nodeFs.readFile(path.join(repoPath, "package.json"))) as {
+            name?: string;
+            version?: string;
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+          };
+          const direct = {
+            ...(manifest.dependencies ?? {}),
+            ...(manifest.devDependencies ?? {}),
+          };
+          const packages: Record<string, unknown> = {
+            "": {
+              name: manifest.name ?? "book",
+              version: manifest.version ?? "0.0.0",
+              ...(manifest.dependencies === undefined
+                ? {}
+                : { dependencies: manifest.dependencies }),
+              ...(manifest.devDependencies === undefined
+                ? {}
+                : { devDependencies: manifest.devDependencies }),
+            },
+          };
+          for (const packageName of ["@authorbot/cli", "@authorbot/api"] as const) {
+            const spec = direct[packageName];
+            if (spec !== undefined) {
+              packages[`node_modules/${packageName}`] = {
+                version: spec.replace(/^[~^]/, ""),
+              };
+            }
+          }
+          await nodeFs.writeFile(
+            path.join(repoPath, "package-lock.json"),
+            `${JSON.stringify(
+              {
+                name: manifest.name ?? "book",
+                version: manifest.version ?? "0.0.0",
+                lockfileVersion: 3,
+                requires: true,
+                packages,
+              },
+              null,
+              2,
+            )}\n`,
+          );
+        },
+      },
     fs: nodeFs,
     git: overrides.git ?? fakeGit(),
     releases: overrides.releases ?? fakeReleases(["1.0.0", "1.1.0"]),
@@ -327,6 +386,22 @@ export function markerMigration(
         return [];
       }
       await repo.write(file, `${before.trimEnd()}\n\n${marker}\n`);
+      return [file];
+    },
+  };
+}
+
+/** A migration that violates the toolchain/migration commit boundary. */
+export function toolchainOverlappingMigration(
+  file: "package.json" | "package-lock.json" = "package.json",
+): BookRepoMigration {
+  return {
+    id: "9997-overlaps-toolchain",
+    from: "1.0.0",
+    to: "1.1.0",
+    description: `Illegally rewrite ${file}`,
+    async apply(repo: MigrationRepo) {
+      await repo.write(file, `${await repo.read(file)}\n`);
       return [file];
     },
   };

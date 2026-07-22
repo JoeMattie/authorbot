@@ -23,6 +23,7 @@ import {
   nonIdempotentMigration,
   snapshot,
   snapshotsEqual,
+  toolchainOverlappingMigration,
 } from "./upgrade-fakes.js";
 
 afterEach(cleanupTempDirs);
@@ -200,7 +201,8 @@ describe("authorbot upgrade --dry-run", () => {
     const out = io.stdout();
     expect(out).toContain("1.0.0 -> 1.1.0");
     expect(out).toContain("Plan (nothing below has been done)");
-    expect(out).toContain('"@authorbot/cli"]: 1.0.0 -> 1.1.0');
+    expect(out).toContain("align direct Authorbot packages: 1.0.0 -> 1.1.0");
+    expect(out).toContain("regenerate package-lock.json");
     expect(out).toContain("README.md");
     expect(out).toContain("0 error(s) before, 0 after, 0 new");
     expect(out).toContain("apply pending D1 migrations to book-db");
@@ -304,6 +306,21 @@ describe("authorbot upgrade - the validate gate (ADR-0021 §2)", () => {
     expect(git.branches).toEqual([]);
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
   });
+
+  it("refuses a book migration that overlaps the toolchain commit", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    const io = captureIo();
+    const deps = makeDeps({ git, migrations: [toolchainOverlappingMigration()] });
+
+    expect(await runUpgrade([repoPath], io.io, deps)).toBe(2);
+
+    expect(io.stderr()).toContain("must not change package.json");
+    expect(io.stderr()).toContain("upgrade helper owns those files");
+    expect(git.branches).toEqual([]);
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
 });
 
 describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
@@ -339,25 +356,137 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
 
     // The working copy really was written back.
     expect(await readPinSpec(repoPath)).toBe("1.1.0");
+    expect(await nodeFs.readFile(path.join(repoPath, "package-lock.json"))).toContain('"@authorbot/cli": "1.1.0"');
     expect(await nodeFs.readFile(path.join(repoPath, "README.md"))).toContain(
       "<!-- migrated by 0001-a -->",
     );
   });
 
-  it("commits package.json alone, and says so, when the lockfile cannot be refreshed", async () => {
-    // Offline, or no npm. The upgrade is still worth having - but a lockfile
-    // left pinning the old version fails `npm ci` in CI, and the author has to
-    // be told that rather than discovering it on a red pull request.
+  it("fails closed before branching when the lockfile cannot be refreshed", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
     const git = fakeGit();
     const io = captureIo();
-    const offline = { ...makeDeps({ git }), lockfile: { relock: async () => false } };
+    const failed = makeDeps({
+      git,
+      lockfile: {
+        async relock() {
+          throw new Error("npm install failed: EALLOWSCRIPTS inherited config is forbidden");
+        },
+      },
+    });
 
-    expect(await runUpgrade([repoPath], io.io, offline)).toBe(0);
+    expect(await runUpgrade([repoPath], io.io, failed)).toBe(1);
 
-    expect(git.commits[0]?.paths).toEqual(["package.json"]);
-    expect(io.stderr()).toContain("package-lock.json");
+    expect(git.branches).toEqual([]);
+    expect(git.commits).toEqual([]);
+    expect(git.pullRequest).toBeUndefined();
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+    expect(io.stderr()).toContain("EALLOWSCRIPTS inherited config is forbidden");
+    expect(io.stderr()).toContain("before creating a branch");
     expect(io.stderr()).toContain("npm ci");
+  });
+
+  it("rejects a stale lockfile even when the relocker exits successfully", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0", apiPin: "1.0.0" });
+    await nodeFs.writeFile(
+      path.join(repoPath, "package-lock.json"),
+      `${JSON.stringify(
+        {
+          name: "my-book",
+          version: "0.0.0",
+          lockfileVersion: 3,
+          packages: {
+            "": {
+              devDependencies: {
+                "@authorbot/api": "1.0.0",
+                "@authorbot/cli": "1.0.0",
+              },
+            },
+            "node_modules/@authorbot/api": { version: "1.0.0" },
+            "node_modules/@authorbot/cli": { version: "1.0.0" },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    const io = captureIo();
+    const deps = makeDeps({
+      git,
+      lockfile: {
+        async relock() {
+          // Models npm exiting zero without touching an existing lockfile.
+        },
+      },
+    });
+
+    expect(await runUpgrade([repoPath], io.io, deps)).toBe(1);
+
+    expect(git.branches).toEqual([]);
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+    expect(io.stderr()).toContain("kept a stale @authorbot/cli root spec");
+  });
+
+  it("rejects a lockfile that resolves past the selected release", async () => {
+    const repoPath = await makeBookRepo({ pin: "^1.0.0", apiPin: "^1.0.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    const io = captureIo();
+    const deps = makeDeps({
+      git,
+      lockfile: {
+        async relock(workingCopy) {
+          const manifest = JSON.parse(
+            await nodeFs.readFile(path.join(workingCopy, "package.json")),
+          ) as { devDependencies: Record<string, string> };
+          await nodeFs.writeFile(
+            path.join(workingCopy, "package-lock.json"),
+            `${JSON.stringify(
+              {
+                lockfileVersion: 3,
+                packages: {
+                  "": { devDependencies: manifest.devDependencies },
+                  "node_modules/@authorbot/api": { version: "1.2.0" },
+                  "node_modules/@authorbot/cli": { version: "1.2.0" },
+                },
+              },
+              null,
+              2,
+            )}\n`,
+          );
+        },
+      },
+    });
+
+    expect(await runUpgrade([repoPath], io.io, deps)).toBe(1);
+
+    expect(git.branches).toEqual([]);
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+    expect(io.stderr()).toContain("resolved @authorbot/cli to 1.2.0");
+    expect(io.stderr()).toContain("not the selected release 1.1.0");
+  });
+
+  it("keeps an existing API package aligned and does not add it to a static book", async () => {
+    const collaborative = await makeBookRepo({ pin: "1.0.0", apiPin: "0.9.7" });
+    expect(await runUpgrade([collaborative], captureIo().io, makeDeps())).toBe(0);
+    const collaborativeManifest = JSON.parse(
+      await nodeFs.readFile(path.join(collaborative, "package.json")),
+    ) as { devDependencies: Record<string, string> };
+    expect(collaborativeManifest.devDependencies["@authorbot/cli"]).toBe("1.1.0");
+    expect(collaborativeManifest.devDependencies["@authorbot/api"]).toBe("1.1.0");
+    const lock = await nodeFs.readFile(path.join(collaborative, "package-lock.json"));
+    expect(lock).toContain('"@authorbot/api": "1.1.0"');
+    expect(lock).toContain('"@authorbot/cli": "1.1.0"');
+
+    const staticBook = await makeBookRepo({ pin: "1.0.0" });
+    expect(await runUpgrade([staticBook], captureIo().io, makeDeps())).toBe(0);
+    const staticManifest = JSON.parse(
+      await nodeFs.readFile(path.join(staticBook, "package.json")),
+    ) as { devDependencies: Record<string, string> };
+    expect(staticManifest.devDependencies["@authorbot/api"]).toBeUndefined();
   });
 
   it("makes a single commit when only the pin moves", async () => {
@@ -369,11 +498,33 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     expect(git.pullRequest?.body).toContain("only the pin changed");
   });
 
-  it("keeps a channel pin a channel", async () => {
-    const repoPath = await makeBookRepo({ pin: "^1.0.0" });
+  it("keeps a channel pin a channel and aligns an existing API package", async () => {
+    const repoPath = await makeBookRepo({ pin: "^1.0.0", apiPin: "0.9.7" });
     const io = captureIo();
     expect(await runUpgrade([repoPath], io.io, makeDeps())).toBe(0);
     expect(await readPinSpec(repoPath)).toBe("^1.1.0");
+    const manifest = JSON.parse(await nodeFs.readFile(path.join(repoPath, "package.json"))) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(manifest.devDependencies["@authorbot/api"]).toBe("^1.1.0");
+  });
+
+  it("pins an explicit --to target exactly even when the book used a channel", async () => {
+    const repoPath = await makeBookRepo({ pin: "^1.0.0", apiPin: "^1.0.0" });
+    const io = captureIo();
+
+    expect(await runUpgrade([repoPath, "--to", "1.1.0"], io.io, makeDeps())).toBe(0);
+
+    const manifest = JSON.parse(await nodeFs.readFile(path.join(repoPath, "package.json"))) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(manifest.devDependencies["@authorbot/cli"]).toBe("1.1.0");
+    expect(manifest.devDependencies["@authorbot/api"]).toBe("1.1.0");
+    const lock = JSON.parse(await nodeFs.readFile(path.join(repoPath, "package-lock.json"))) as {
+      packages: Record<string, { version?: string }>;
+    };
+    expect(lock.packages["node_modules/@authorbot/cli"]?.version).toBe("1.1.0");
+    expect(lock.packages["node_modules/@authorbot/api"]?.version).toBe("1.1.0");
   });
 
   it("preserves the author's package.json formatting outside the pin", async () => {
@@ -504,11 +655,16 @@ describe("authorbot upgrade - steps 5 and 6", () => {
 
 describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
   it("rolls the pin back as a pull request and re-validates", async () => {
-    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const repoPath = await makeBookRepo({ pin: "^1.1.0", apiPin: "^1.1.0" });
     const git = fakeGit();
     const io = captureIo();
     expect(await runUpgrade([repoPath, "--rollback", "1.0.0"], io.io, makeDeps({ git }))).toBe(0);
     expect(await readPinSpec(repoPath)).toBe("1.0.0");
+    const manifest = JSON.parse(await nodeFs.readFile(path.join(repoPath, "package.json"))) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(manifest.devDependencies["@authorbot/api"]).toBe("1.0.0");
+    expect(manifest.devDependencies["@authorbot/cli"]).toBe("1.0.0");
     expect(git.branches[0]).toMatch(/^authorbot\/rollback-1\.0\.0-/);
     expect(git.commits).toHaveLength(1);
     expect(git.commits[0]?.message).toContain("roll back toolchain 1.1.0 -> 1.0.0");
@@ -532,6 +688,30 @@ describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
     const io = captureIo();
     expect(await runUpgrade([repoPath, "--rollback", "1.0.0"], io.io, makeDeps())).toBe(0);
     expect(io.stdout()).toContain("no book-format migration ran between these versions");
+  });
+
+  it("fails closed before branching when the rollback lockfile cannot be refreshed", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0", apiPin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    const io = captureIo();
+    const deps = makeDeps({
+      git,
+      lockfile: {
+        async relock() {
+          throw new Error("npm rollback relock failed while offline");
+        },
+      },
+    });
+
+    expect(await runUpgrade([repoPath, "--rollback", "1.0.0"], io.io, deps)).toBe(1);
+
+    expect(git.branches).toEqual([]);
+    expect(git.commits).toEqual([]);
+    expect(git.pullRequest).toBeUndefined();
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+    expect(io.stderr()).toContain("npm rollback relock failed while offline");
+    expect(io.stderr()).toContain("before creating a branch");
   });
 
   it("reports a book left invalid by the rollback and exits 1", async () => {

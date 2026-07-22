@@ -42,7 +42,7 @@ import {
   migrationRepoFor,
   readD1Binding,
   readDefaultBranch,
-  rewritePin,
+  rewriteAuthorbotPins,
   UpgradeRepoError,
 } from "./repo.js";
 import { compareVersions, parseVersion, renderPin, type SemVer } from "./semver.js";
@@ -323,6 +323,139 @@ interface WorkingCopyOutcome {
   readonly contents: Map<string, string>;
 }
 
+interface PreparedToolchainFiles {
+  readonly packageJson: string;
+  readonly packageLock: string;
+}
+
+const AUTHORBOT_RUNTIME_PACKAGES = ["@authorbot/cli", "@authorbot/api"] as const;
+const DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
+
+function parseJsonObject(contents: string, fileName: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch (error) {
+    throw new Error(
+      `${fileName} is not valid JSON after relocking: ` +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${fileName} is not a JSON object after relocking`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function objectField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, unknown> | undefined {
+  const value = record[field];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function directDependency(
+  manifest: Record<string, unknown>,
+  packageName: string,
+): { field: (typeof DEPENDENCY_FIELDS)[number]; spec: string } | undefined {
+  for (const field of DEPENDENCY_FIELDS) {
+    const spec = objectField(manifest, field)?.[packageName];
+    if (typeof spec === "string") {
+      return { field, spec };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * npm exiting zero is not enough. A project or user config can disable
+ * package-lock writes, leaving the stale file copied into the temporary
+ * checkout untouched. Verify both the root dependency specs and the versions
+ * npm actually resolved before allowing any branch or repository mutation.
+ */
+function verifyToolchainLock(
+  packageJson: string,
+  packageLock: string,
+  target: SemVer,
+): void {
+  const manifest = parseJsonObject(packageJson, "package.json");
+  const lock = parseJsonObject(packageLock, "package-lock.json");
+  const packages = objectField(lock, "packages");
+  const root = packages === undefined ? undefined : objectField(packages, "");
+  if (packages === undefined || root === undefined) {
+    throw new Error("package-lock.json has no npm packages root after relocking");
+  }
+
+  for (const packageName of AUTHORBOT_RUNTIME_PACKAGES) {
+    const dependency = directDependency(manifest, packageName);
+    if (dependency === undefined) {
+      continue;
+    }
+    const lockedSpec = objectField(root, dependency.field)?.[packageName];
+    if (lockedSpec !== dependency.spec) {
+      throw new Error(
+        `package-lock.json kept a stale ${packageName} root spec ` +
+          `(${String(lockedSpec)} instead of ${dependency.spec})`,
+      );
+    }
+    const resolved = objectField(packages, `node_modules/${packageName}`)?.["version"];
+    if (resolved !== target.raw) {
+      throw new Error(
+        `package-lock.json resolved ${packageName} to ${String(resolved)}, ` +
+          `not the selected release ${target.raw}`,
+      );
+    }
+  }
+}
+
+function upgradeTargetSpec(plan: UpgradePlan, explicitTarget: boolean): string {
+  return explicitTarget ? plan.target.raw : renderPin(plan.pinLocation.pin, plan.target);
+}
+
+/**
+ * Resolve the manifest and lockfile together in a throwaway checkout before
+ * creating an upgrade branch. A failed npm run therefore leaves the author's
+ * repository byte-identical and cannot open a pull request that is known to
+ * fail `npm ci`.
+ */
+async function prepareToolchainFiles(
+  plan: UpgradePlan,
+  deps: UpgradeDeps,
+  targetSpec: string,
+): Promise<PreparedToolchainFiles> {
+  const tempRoot = await deps.fs.makeTempDir("authorbot-relock-");
+  const workingCopy = path.join(tempRoot, "repo");
+  try {
+    await deps.fs.copyTree(plan.repoPath, workingCopy);
+    const packageJson = rewriteAuthorbotPins(plan.pinLocation.packageJsonText, targetSpec);
+    await deps.fs.writeFile(path.join(workingCopy, "package.json"), packageJson);
+    await deps.lockfile.relock(workingCopy);
+    const lockPath = path.join(workingCopy, "package-lock.json");
+    if (!(await deps.fs.exists(lockPath))) {
+      throw new Error("npm completed without creating package-lock.json");
+    }
+    const packageLock = await deps.fs.readFile(lockPath);
+    verifyToolchainLock(packageJson, packageLock, plan.target);
+    return { packageJson, packageLock };
+  } finally {
+    await deps.fs.removeTree(tempRoot);
+  }
+}
+
+function reportRelockFailure(io: CliIo, error: unknown): void {
+  io.err(
+    "authorbot: could not refresh package-lock.json: " +
+      (error instanceof Error ? error.message : String(error)),
+  );
+  io.err(
+    "authorbot: operation stopped before creating a branch or changing your repository. " +
+      "A pull request with a stale lockfile would fail `npm ci`.",
+  );
+}
+
 /**
  * Steps 2 and 3: migrate a copy, validate before and after, and decide.
  *
@@ -342,6 +475,17 @@ async function migrateWorkingCopy(
     await deps.fs.copyTree(plan.repoPath, workingCopy);
     const repo = migrationRepoFor(deps.fs, workingCopy);
     const run = await applyMigrations(plan.migrations, repo);
+
+    const toolchainOverlap = run.changed.filter(
+      (file) => file === "package.json" || file === "package-lock.json",
+    );
+    if (toolchainOverlap.length > 0) {
+      throw new MigrationRegistryError(
+        `book-format migration(s) must not change ${toolchainOverlap.join(", ")}. ` +
+          "The upgrade helper owns those files so the selected release and verified lockfile " +
+          "remain one atomic commit. This is a bug in the migration, not in your book.",
+      );
+    }
 
     const after = await deps.validate(workingCopy);
     const newErrors = findNewErrors(before, after);
@@ -455,6 +599,15 @@ async function runUpgradeFlow(
   }
   reportValidation(outcome, io);
 
+  const newSpec = upgradeTargetSpec(plan, options.to !== undefined);
+  let toolchainFiles: PreparedToolchainFiles;
+  try {
+    toolchainFiles = await prepareToolchainFiles(plan, deps, newSpec);
+  } catch (error) {
+    reportRelockFailure(io, error);
+    return 1;
+  }
+
   const branch = branchName("upgrade", plan.target, deps.now());
   const base = options.base ?? (await readDefaultBranch(deps.fs, plan.repoPath));
   const completed: string[] = [];
@@ -465,31 +618,15 @@ async function runUpgradeFlow(
 
     // Commit 1: the toolchain pin, alone. Reverting this commit rolls the
     // toolchain back without touching prose (ADR-0021 §5).
-    const newSpec = renderPin(plan.pinLocation.pin, plan.target);
-    await deps.fs.writeFile(
-      path.join(plan.repoPath, "package.json"),
-      rewritePin(plan.pinLocation.packageJsonText, newSpec),
-    );
-    // The lockfile has to move with the pin. `npm ci` - which both generated
-    // workflows run, and which exists to refuse a lockfile that disagrees with
-    // its manifest - otherwise fails on this pull request, so every upgrade
-    // opened one whose CI could not pass.
-    const relocked = await deps.lockfile.relock(plan.repoPath);
-    const pinPaths = relocked ? ["package.json", "package-lock.json"] : ["package.json"];
-    if (!relocked) {
-      io.err(
-        "authorbot: could not refresh package-lock.json (npm unavailable, or offline). " +
-          "Run `npm install --package-lock-only` on the upgrade branch and commit it, " +
-          "or CI will fail on `npm ci` because the lockfile still pins the old version.",
-      );
-    }
+    await deps.fs.writeFile(path.join(plan.repoPath, "package.json"), toolchainFiles.packageJson);
+    await deps.fs.writeFile(path.join(plan.repoPath, "package-lock.json"), toolchainFiles.packageLock);
     await deps.git.commit(plan.repoPath, {
       message:
         `chore(authorbot): upgrade toolchain ${plan.current.raw} -> ${plan.target.raw}\n\n` +
-        `Pins ${plan.pinLocation.field}["@authorbot/cli"] to ${newSpec}.\n` +
+        `Pins the book's direct Authorbot packages to ${newSpec}.\n` +
         "Reverting this commit rolls the toolchain back; it does NOT undo any\n" +
         "book-format migration (ADR-0021 §5).",
-      paths: pinPaths,
+      paths: ["package.json", "package-lock.json"],
     });
     completed.push("committed the toolchain pin");
 
@@ -518,7 +655,7 @@ async function runUpgradeFlow(
       branch,
       base,
       title: `Upgrade Authorbot ${plan.current.raw} -> ${plan.target.raw}`,
-      body: pullRequestBody(plan, outcome),
+      body: pullRequestBody(plan, outcome, newSpec),
     });
     completed.push("opened the pull request");
     io.out(`authorbot: pull request opened: ${url}`);
@@ -567,7 +704,7 @@ async function runDryRun(
   const outcome = await migrateWorkingCopy(plan, deps, io);
   const base = options.base ?? (await readDefaultBranch(deps.fs, plan.repoPath));
   const d1 = await readD1Binding(deps.fs, plan.repoPath);
-  const newSpec = renderPin(plan.pinLocation.pin, plan.target);
+  const newSpec = upgradeTargetSpec(plan, options.to !== undefined);
 
   if (options.json) {
     io.out(
@@ -597,7 +734,10 @@ async function runDryRun(
 
   io.out("");
   io.out("Plan (nothing below has been done):");
-  io.out(`  1. pin ${plan.pinLocation.field}["@authorbot/cli"]: ${plan.pinLocation.pin.spec} -> ${newSpec}`);
+  io.out(
+    `  1. align direct Authorbot packages: ${plan.pinLocation.pin.spec} -> ${newSpec}, ` +
+      "then regenerate package-lock.json",
+  );
   if (outcome.changed.length === 0) {
     io.out("  2. book-format migrations: none change any file");
   } else {
@@ -629,7 +769,11 @@ async function runDryRun(
   return 0;
 }
 
-function pullRequestBody(plan: UpgradePlan, outcome: WorkingCopyOutcome): string {
+function pullRequestBody(
+  plan: UpgradePlan,
+  outcome: WorkingCopyOutcome,
+  targetSpec: string,
+): string {
   const lines = [
     `Upgrades the Authorbot toolchain from **${plan.current.raw}** to **${plan.target.raw}**.`,
     "",
@@ -638,7 +782,7 @@ function pullRequestBody(plan: UpgradePlan, outcome: WorkingCopyOutcome): string
     "",
     "### Commits",
     "",
-    `1. **Toolchain pin** - \`@authorbot/cli\` ${plan.pinLocation.pin.spec} → ${renderPin(plan.pinLocation.pin, plan.target)}.`,
+    `1. **Toolchain pin** - \`@authorbot/cli\` ${plan.pinLocation.pin.spec} → ${targetSpec}; any existing \`@authorbot/api\` pin moves to the same release, and \`package-lock.json\` is regenerated with them.`,
   ];
   if (outcome.changed.length > 0) {
     lines.push(
@@ -672,7 +816,7 @@ function pullRequestBody(plan: UpgradePlan, outcome: WorkingCopyOutcome): string
     "### Before merging",
     "",
     "- Read the diff. This is prose and configuration you own.",
-    "- Refresh your lockfile if your CI does not (`npm install --package-lock-only`).",
+    "- Confirm the manifest and committed lockfile move together.",
     "- After merging, CI applies pending D1 migrations and redeploys (ADR-0021 §4).",
   );
   return lines.join("\n");
@@ -874,15 +1018,23 @@ async function runRollback(
     io.out("authorbot: (ADR-0021 §5. Reverting the pin alone leaves migrated files with an older toolchain.)");
   }
 
+  const targetSpec = plan.target.raw;
   if (options.dryRun) {
     io.out("");
-    io.out(`authorbot: --dry-run; the pin would become ${renderPin(plan.pinLocation.pin, plan.target)} and nothing else changed.`);
+    io.out(`authorbot: --dry-run; the pin would become ${targetSpec} and nothing else changed.`);
     return 0;
   }
 
   if (!(await deps.git.isClean(plan.repoPath))) {
     io.err("authorbot: the working tree has uncommitted changes; commit or stash them first.");
     return 2;
+  }
+  let toolchainFiles: PreparedToolchainFiles;
+  try {
+    toolchainFiles = await prepareToolchainFiles(plan, deps, targetSpec);
+  } catch (error) {
+    reportRelockFailure(io, error);
+    return 1;
   }
   const originalBranch = await deps.git.currentBranch(plan.repoPath);
   const branch = branchName("rollback", plan.target, deps.now());
@@ -892,18 +1044,14 @@ async function runRollback(
   try {
     await deps.git.createBranch(plan.repoPath, branch);
     completed.push(`created branch ${branch}`);
-    const newSpec = renderPin(plan.pinLocation.pin, plan.target);
-    await deps.fs.writeFile(
-      path.join(plan.repoPath, "package.json"),
-      rewritePin(plan.pinLocation.packageJsonText, newSpec),
-    );
-    const rollbackRelocked = await deps.lockfile.relock(plan.repoPath);
+    await deps.fs.writeFile(path.join(plan.repoPath, "package.json"), toolchainFiles.packageJson);
+    await deps.fs.writeFile(path.join(plan.repoPath, "package-lock.json"), toolchainFiles.packageLock);
     await deps.git.commit(plan.repoPath, {
       message:
         `chore(authorbot): roll back toolchain ${current.raw} -> ${plan.target.raw}\n\n` +
         "Toolchain only. Book-format migrations, if any ran, are reverted separately\n" +
         "(ADR-0021 §5).",
-      paths: rollbackRelocked ? ["package.json", "package-lock.json"] : ["package.json"],
+      paths: ["package.json", "package-lock.json"],
     });
     completed.push("committed the pin rollback");
     await deps.git.push(plan.repoPath, branch);

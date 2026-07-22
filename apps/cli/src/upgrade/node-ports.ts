@@ -31,6 +31,36 @@ const execFileAsync = promisify(execFile);
 /** Directories a book-repo migration must never see or copy. */
 const EXCLUDED_DIRS = new Set([".git", "node_modules"]);
 
+/**
+ * Preserve the caller's environment, except for npm configuration inherited
+ * from an outer npm/npx invocation when the child is itself npm or npx.
+ *
+ * `npx authorbot upgrade` runs the CLI beneath npm. npm exports its active
+ * configuration as `npm_config_*` environment variables, but those settings
+ * belong to the outer invocation. Passing them into the nested lockfile npm
+ * can make an otherwise valid book fail before it reads package.json. In
+ * particular, npm rejects an inherited `npm_config_allow_scripts` during a
+ * project-scoped install.
+ *
+ * Other commands keep the environment byte-for-byte: this is an npm nesting
+ * boundary, not a general environment scrubber.
+ */
+function childEnvironment(env: NodeJS.ProcessEnv, command: string): NodeJS.ProcessEnv {
+  const base = path.basename(command).replace(/\.(cmd|exe)$/i, "");
+  if (base !== "npm" && base !== "npx") {
+    return { ...env };
+  }
+
+  const cleaned: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (/^npm_config_/i.test(key) || /^NPM_CONFIG_/.test(key)) {
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
 export class CommandError extends Error {
   readonly command: string;
   readonly stderr: string;
@@ -49,7 +79,12 @@ async function run(
   cwd: string,
 ): Promise<{ stdout: string; stderr: string }> {
   try {
-    const result = await execFileAsync(file, args, { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+    const result = await execFileAsync(file, args, {
+      cwd,
+      encoding: "utf8",
+      env: childEnvironment(process.env, file),
+      maxBuffer: 32 * 1024 * 1024,
+    });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     const stderr =
@@ -118,16 +153,22 @@ export const nodeLockfile: LockfilePort = {
     // `--package-lock-only` rewrites the lockfile from package.json without
     // touching node_modules: this runs inside a temporary working copy, and
     // installing there would be minutes of work thrown away. It still needs
-    // the registry to resolve the new versions, so it can fail offline -
-    // hence the boolean rather than a throw. An upgrade that is otherwise
-    // good should not be abandoned because a lockfile could not be refreshed;
-    // it should say so.
-    try {
-      await run("npm", ["install", "--package-lock-only", "--no-audit", "--no-fund"], repoPath);
-      return true;
-    } catch {
-      return false;
-    }
+    // the registry to resolve new versions. Failure is fatal: opening an
+    // upgrade pull request with a stale lockfile would knowingly break its
+    // `npm ci`. Let CommandError propagate so npm's exact diagnostic reaches
+    // the author.
+    await run(
+      "npm",
+      [
+        "install",
+        "--package-lock-only",
+        "--package-lock=true",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+      ],
+      repoPath,
+    );
   },
 };
 
