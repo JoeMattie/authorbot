@@ -33,7 +33,9 @@ import {
 import {
   ProjectCoordinatorDurableObject,
   callCoordinator,
+  callCoordinatorListFileHistory,
   callCoordinatorReadTextFile,
+  callCoordinatorReadTextFileAtCommit,
   COORDINATOR_ORIGIN,
   PROJECT_ID_KEY,
   type DurableObjectNamespaceLike,
@@ -626,6 +628,9 @@ describe("ProjectCoordinator Durable Object wrapper", () => {
     expect(await (await call("source?path=chapters%2Fmissing.md")).json()).toEqual({
       outcome: "unavailable",
     });
+    expect(await (await call("history?path=chapters%2Fmissing.md")).json()).toEqual({
+      outcome: "unavailable",
+    });
   });
 
   it("reads repository source through the Worker-to-coordinator boundary", async () => {
@@ -650,6 +655,48 @@ describe("ProjectCoordinator Durable Object wrapper", () => {
     await expect(
       callCoordinatorReadTextFile(namespace, harness.projectId, "chapters/absent.md"),
     ).resolves.toEqual({ outcome: "not-found" });
+  });
+
+  it("pages history metadata and reads only the selected historical snapshot", async () => {
+    const path = "chapters/draft.md";
+    const firstSource = "# First production draft\n";
+    const built = await makeGit({ [path]: firstSource });
+    const firstCommit = built.fake.state.getRef("main") as string;
+    const secondSource = "# Second production draft\n";
+    const secondCommit = await built.fake.state.commitFiles({
+      branch: "main",
+      files: { [path]: secondSource },
+      message: "Revise production draft",
+    });
+    const configured = new ProjectCoordinatorDurableObject(
+      { storage: new FakeDoStorage() },
+      { DB: UNUSED_D1, PROJECT_REPO: FULL_NAME, DEFAULT_BRANCH: "main" },
+      { db: harness.db, git: built.git },
+    );
+    const namespace: DurableObjectNamespaceLike = {
+      idFromName: (name) => name,
+      get: () => ({
+        fetch: async (input: string, init?: { method?: string }) =>
+          configured.fetch(new Request(input, { method: init?.method ?? "GET" })),
+      }),
+    };
+
+    const history = await callCoordinatorListFileHistory(
+      namespace,
+      harness.projectId,
+      path,
+      { limit: 10 },
+    );
+    expect(history).toMatchObject({ outcome: "found", page: 1, hasMore: false });
+    if (history.outcome === "found") {
+      expect(history.entries.map((entry) => entry.commitSha)).toEqual([secondCommit, firstCommit]);
+    }
+    await expect(
+      callCoordinatorReadTextFileAtCommit(namespace, harness.projectId, path, firstCommit),
+    ).resolves.toEqual({ outcome: "found", source: firstSource });
+    await expect(
+      callCoordinatorReadTextFileAtCommit(namespace, harness.projectId, path, secondCommit),
+    ).resolves.toEqual({ outcome: "found", source: secondSource });
   });
 
   it("404s an unknown action rather than guessing", async () => {

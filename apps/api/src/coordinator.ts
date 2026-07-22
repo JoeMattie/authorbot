@@ -46,7 +46,11 @@ import {
   type GitHubAppCredentials,
 } from "@authorbot/git-github";
 import type { BookRepoWriter, DrainRowOutcome } from "@authorbot/repo-coordinator";
-import type { Clock, RepositorySourceReadResult } from "./deps.js";
+import type {
+  Clock,
+  RepositoryHistoryListResult,
+  RepositorySourceReadResult,
+} from "./deps.js";
 import { createDrainRunner, type DrainRunner } from "./drain.js";
 import { uuidv7 } from "./ids.js";
 import { sweepExpiredLeases, type SweepResult } from "./leases.js";
@@ -246,6 +250,33 @@ export interface ProjectCoordinator {
   ensureAlarm(): Promise<number | null>;
   /** Read one file from the configured repository branch. */
   readTextFile(path: string): Promise<RepositorySourceReadResult>;
+  /** List one bounded commit page for a repository file. */
+  listFileHistory(
+    path: string,
+    options?: { page?: number; limit?: number },
+  ): Promise<RepositoryHistoryListResult>;
+  /** Read one file from an immutable historical commit. */
+  readTextFileAtCommit(path: string, commitSha: string): Promise<RepositorySourceReadResult>;
+}
+
+interface HistoryCapableReader extends BookRepoReader {
+  listFileHistory?(
+    path: string,
+    options?: { page?: number; limit?: number },
+  ): Promise<{
+    entries: Array<{
+      commitSha: string;
+      message: string;
+      authoredAt: string | null;
+      committedAt: string | null;
+      authorName: string | null;
+      authorLogin: string | null;
+      parentShas: string[];
+    }>;
+    page: number;
+    hasMore: boolean;
+  }>;
+  readTextFileAtCommit?(path: string, commitSha: string): Promise<string | null>;
 }
 
 export function createProjectCoordinator(
@@ -394,6 +425,35 @@ export function createProjectCoordinator(
       return source === null ? { outcome: "not-found" } : { outcome: "found", source };
     });
 
+  const historyReader = async (): Promise<HistoryCapableReader | null> => {
+    if (git === null) return null;
+    const project = await repos.projects.getById(projectId);
+    if (project === null) return null;
+    return (git.readerFor?.(project.defaultBranch) ?? git.reader) as HistoryCapableReader;
+  };
+
+  const listFileHistory = (
+    path: string,
+    readOptions: { page?: number; limit?: number } = {},
+  ): Promise<RepositoryHistoryListResult> =>
+    serialize(async () => {
+      const reader = await historyReader();
+      if (reader?.listFileHistory === undefined) return { outcome: "unavailable" };
+      const page = await reader.listFileHistory(path, readOptions);
+      return { outcome: "found", ...page };
+    });
+
+  const readTextFileAtCommit = (
+    path: string,
+    commitSha: string,
+  ): Promise<RepositorySourceReadResult> =>
+    serialize(async () => {
+      const reader = await historyReader();
+      if (reader?.readTextFileAtCommit === undefined) return { outcome: "unavailable" };
+      const source = await reader.readTextFileAtCommit(path, commitSha);
+      return source === null ? { outcome: "not-found" } : { outcome: "found", source };
+    });
+
   const scheduleNext = async (): Promise<number | null> => {
     if (alarms === null) {
       return null;
@@ -469,6 +529,8 @@ export function createProjectCoordinator(
     alarm,
     ensureAlarm,
     readTextFile,
+    listFileHistory,
+    readTextFileAtCommit,
   };
 }
 

@@ -27,6 +27,34 @@ export interface RepositorySourceReader {
   readTextFile(projectId: string, path: string): Promise<RepositorySourceReadResult>;
 }
 
+export interface RepositoryHistoryEntry {
+  commitSha: string;
+  message: string;
+  authoredAt: string | null;
+  committedAt: string | null;
+  authorName: string | null;
+  authorLogin: string | null;
+  parentShas: string[];
+}
+
+export type RepositoryHistoryListResult =
+  | { outcome: "found"; entries: RepositoryHistoryEntry[]; page: number; hasMore: boolean }
+  | { outcome: "unavailable" };
+
+/** Bounded historical repository reads routed through the project coordinator. */
+export interface RepositoryHistoryReader {
+  listFileHistory(
+    projectId: string,
+    path: string,
+    options?: { page?: number; limit?: number },
+  ): Promise<RepositoryHistoryListResult>;
+  readTextFileAtCommit(
+    projectId: string,
+    path: string,
+    commitSha: string,
+  ): Promise<RepositorySourceReadResult>;
+}
+
 export interface Clock {
   now(): Date;
 }
@@ -136,6 +164,8 @@ export interface AppDeps {
   reader?: BookRepoReader;
   /** Production source-read seam owned by the per-project coordinator. */
   repositorySourceReader?: RepositorySourceReader;
+  /** Historical metadata/snapshots; absent on deployments without Git access. */
+  repositoryHistoryReader?: RepositoryHistoryReader;
   /**
    * Called after any mutation that enqueued an outbox row - the
    * repo-coordinator processor is wired here later. Optional; a rejection is

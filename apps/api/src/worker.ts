@@ -19,7 +19,9 @@ import { createApi, type AuthorbotApi } from "./app.js";
 import { coordinatorAlarmMsFromEnv, gitIntegrationStatus } from "./coordinator.js";
 import {
   callCoordinator,
+  callCoordinatorListFileHistory,
   callCoordinatorReadTextFile,
+  callCoordinatorReadTextFileAtCommit,
   type DurableObjectNamespaceLike,
 } from "./coordinator-do.js";
 import type { AppConfig, AppDeps, MirrorMode } from "./deps.js";
@@ -272,6 +274,12 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
     deps.repositorySourceReader = {
       readTextFile: async (projectId, path) =>
         callCoordinatorReadTextFile(coordinator, projectId, path),
+    };
+    deps.repositoryHistoryReader = {
+      listFileHistory: async (projectId, path, options) =>
+        callCoordinatorListFileHistory(coordinator, projectId, path, options),
+      readTextFileAtCommit: async (projectId, path, commitSha) =>
+        callCoordinatorReadTextFileAtCommit(coordinator, projectId, path, commitSha),
     };
     // Webhook-driven reconciliation (contract §6) - wired whenever the
     // binding exists, independently of MIRROR_MODE, because a `push` must be
