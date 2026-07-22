@@ -6,7 +6,8 @@ export const REVISION_DIFF_TIMEOUT_MS = 100;
 export interface RevisionDiffInput {
   baseContent: string;
   proposedContent: string;
-  baseRevision: number;
+  /** Null for repository documents without an embedded numeric revision. */
+  baseRevision: number | null;
   path?: string;
 }
 
@@ -31,7 +32,7 @@ export function createRevisionDiff(input: RevisionDiffInput): RevisionDiffResult
     `b/${path}`,
     input.baseContent,
     input.proposedContent,
-    `revision ${input.baseRevision}`,
+    input.baseRevision === null ? "base" : `revision ${input.baseRevision}`,
     "proposed",
     { context: 4, timeout: REVISION_DIFF_TIMEOUT_MS },
   );

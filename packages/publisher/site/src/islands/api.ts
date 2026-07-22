@@ -132,7 +132,7 @@ export interface WorkItem {
   status: string;
   sourceAnnotationId: string;
   chapterId: string;
-  baseRevision: number;
+  baseRevision: number | null;
   target: AnnotationTarget | null;
   priority: string;
   createdAt: string;

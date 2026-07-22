@@ -17,7 +17,7 @@ import {
   type SqlStatement,
 } from "@authorbot/database";
 import { parseChapterMarkdown, parseProseMarkdown, scanSafety, stripBlockMarkers } from "@authorbot/markdown";
-import { chapterFrontmatterSchema } from "@authorbot/schemas";
+import { bookConfigSchema, chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
 import { CHAPTER_WRITE_KIND, MAX_CHAPTER_BODY_BYTES } from "./chapter-submissions.js";
@@ -27,6 +27,12 @@ import { uuidv7 } from "./ids.js";
 import { SUBMISSION_APPLY_KIND } from "./phase4.js";
 import { problem } from "./problems.js";
 import { proseWriteBlocked } from "./reconcile.js";
+import {
+  isSafeRepositoryDocumentPath,
+  validateRepositoryDocument,
+  type RepositoryDocumentKind,
+  type ValidatedRepositoryDocument,
+} from "./repository-documents.js";
 import { createRevisionDiff } from "./revision-diff.js";
 import type { ProjectSerializer } from "./serializer.js";
 
@@ -58,17 +64,21 @@ export interface RevisionProposalsContext {
 }
 
 const contentHashSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
-const commonCreateFields = {
-  chapterId: z.string().min(1),
-  baseRevision: z.number().int().min(1),
-  baseContentHash: contentHashSchema,
+const proposalControlFields = {
   changeSummary: z.string().trim().min(1).max(2000).optional(),
   notes: z.string().max(10_000).optional(),
   applyImmediately: z.boolean().optional(),
 };
 
+const chapterBaseFields = {
+  chapterId: z.string().min(1),
+  baseRevision: z.number().int().min(1),
+  baseContentHash: contentHashSchema,
+  ...proposalControlFields,
+};
+
 const chapterProposalSchema = z.strictObject({
-  ...commonCreateFields,
+  ...chapterBaseFields,
   proposalType: z.literal("chapter_replacement"),
   proposedContent: z
     .string()
@@ -80,14 +90,24 @@ const chapterProposalSchema = z.strictObject({
 });
 
 const summaryProposalSchema = z.strictObject({
-  ...commonCreateFields,
+  ...chapterBaseFields,
   proposalType: z.literal("chapter_summary"),
   proposedContent: z.string().max(2000),
+});
+
+const repositoryDocumentProposalSchema = z.strictObject({
+  ...proposalControlFields,
+  proposalType: z.literal("repository_document"),
+  targetKind: z.enum(["outline", "timeline", "character"]),
+  targetPath: z.string().min(1).max(1024),
+  baseContentHash: contentHashSchema,
+  proposedContent: z.string().min(1),
 });
 
 const createProposalSchema = z.discriminatedUnion("proposalType", [
   chapterProposalSchema,
   summaryProposalSchema,
+  repositoryDocumentProposalSchema,
 ]);
 
 const reviewSchema = z.strictObject({
@@ -272,23 +292,23 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
       const row = rowById.get(proposal.id);
       const currentRevision = row?.chapter_revision ?? null;
       const currentContentHash = row?.chapter_content_hash ?? null;
-      const chapterId = row?.current_chapter_id ?? proposal.chapterId ?? proposal.id;
-      const chapterTitle = row?.chapter_title ?? "Chapter revision";
-      const chapterPath = row?.chapter_path ?? "";
+      const chapterTitle = row?.chapter_title ?? targetLabel(proposal);
+      const chapterPath = row?.chapter_path ?? proposal.targetPath;
       result.set(proposal.id, {
         target: {
-          kind: "chapter",
-          id: chapterId,
-          path: chapterPath,
+          kind: proposal.targetKind,
+          id: proposal.targetId,
+          path: proposal.targetPath,
           label: chapterTitle,
         },
         currentRevision,
         currentContentHash,
         conflictWarning:
-          currentRevision === null ||
-          currentContentHash === null ||
-          currentRevision !== proposal.baseRevision ||
-          currentContentHash !== proposal.baseContentHash,
+          proposal.targetKind === "chapter" &&
+          (currentRevision === null ||
+            currentContentHash === null ||
+            currentRevision !== proposal.baseRevision ||
+            currentContentHash !== proposal.baseContentHash),
         author:
           row?.author_id === null || row?.author_id === undefined
             ? null
@@ -338,6 +358,9 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
     id: proposal.id,
     projectId: proposal.projectId,
     chapterId: proposal.chapterId,
+    targetKind: proposal.targetKind,
+    targetId: proposal.targetId,
+    targetPath: proposal.targetPath,
     proposalType: proposal.proposalType,
     origin: proposal.origin,
     workItemId: proposal.workItemId,
@@ -407,11 +430,103 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
     return { chapter, source: read.source };
   };
 
+  const configuredDocumentPathIsAllowed = async (
+    projectId: string,
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<boolean> => {
+    if (!isSafeRepositoryDocumentPath(path)) return false;
+    const row = await repos.bookConfigs.get(projectId);
+    const parsed = bookConfigSchema.safeParse(row?.config);
+    const planning = parsed.success ? parsed.data.planning : undefined;
+    if (kind === "outline") {
+      return path === (planning?.outline ?? "story/outline.yml");
+    }
+    if (kind === "timeline") {
+      return path === (planning?.timeline ?? "story/timeline.yml");
+    }
+    return repositoryPathMatchesGlob(
+      path,
+      planning?.characters_glob ?? "story/characters/*.md",
+    );
+  };
+
+  const repositoryDocumentBaseOrProblem = async (
+    c: Context<AppEnv>,
+    project: ProjectRecord,
+    input: {
+      targetKind: RepositoryDocumentKind;
+      targetPath: string;
+      baseContentHash: string;
+      targetId?: string;
+    },
+  ): Promise<{ source: string; document: ValidatedRepositoryDocument } | Response> => {
+    if (
+      !(await configuredDocumentPathIsAllowed(
+        project.id,
+        input.targetKind,
+        input.targetPath,
+      ))
+    ) {
+      return problem(c, "validation-failed", {
+        detail: "targetPath is not the configured repository document for this target kind",
+      });
+    }
+    const read = await readRepositoryText(deps, project.id, input.targetPath);
+    if (read.outcome !== "found") {
+      return problem(c, read.outcome === "not-found" ? "not-found" : "state-conflict", {
+        detail:
+          read.outcome === "unavailable"
+            ? "this deployment cannot read repository document source"
+            : "repository document source not found at the branch head",
+      });
+    }
+    const validated = await validateRepositoryDocument({
+      kind: input.targetKind,
+      path: input.targetPath,
+      content: read.source,
+    });
+    if (!validated.ok) {
+      return problem(c, "state-conflict", {
+        detail: "the current repository document failed validation",
+        issues: validated.issues,
+      });
+    }
+    if (input.targetId !== undefined && validated.document.targetId !== input.targetId) {
+      return problem(c, "state-conflict", {
+        detail: "the repository document identity no longer matches this proposal",
+      });
+    }
+    const actualHash = `sha256:${await sha256Hex(read.source)}`;
+    if (actualHash !== input.baseContentHash) {
+      return problem(c, "revision-conflict", {
+        detail: "the repository document no longer matches the proposal base",
+        baseContentHash: input.baseContentHash,
+        currentContentHash: actualHash,
+      });
+    }
+    return { source: read.source, document: validated.document };
+  };
+
   const proposalBaseOrProblem = async (
     c: Context<AppEnv>,
     project: ProjectRecord,
     proposal: RevisionProposalRecord,
-  ): Promise<ChapterProjectionRecord | Response> => {
+  ): Promise<Response | null> => {
+    if (proposal.targetKind !== "chapter") {
+      const current = await repositoryDocumentBaseOrProblem(c, project, {
+        targetKind: proposal.targetKind,
+        targetPath: proposal.targetPath,
+        targetId: proposal.targetId,
+        baseContentHash: proposal.baseContentHash,
+      });
+      return current instanceof Response ? current : null;
+    }
+    if (proposal.chapterId === null || proposal.baseRevision === null) {
+      return problem(c, "state-conflict", {
+        detail: "chapter proposal is missing its chapter base identity",
+      });
+    }
     const current = await currentBaseOrProblem(
       c,
       project,
@@ -419,8 +534,55 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
       proposal.baseRevision,
       proposal.baseContentHash,
     );
-    return current instanceof Response ? current : current.chapter;
+    return current instanceof Response ? current : null;
   };
+
+  app.get("/v1/projects/:projectId/repository-documents/source", auth, async (c) => {
+    const allowed = await guard(c, ["revisions:write"]);
+    if ("response" in allowed) return allowed.response;
+    const kind = z.enum(["outline", "timeline", "character"]).safeParse(c.req.query("kind"));
+    const path = c.req.query("path");
+    if (!kind.success || path === undefined) {
+      return problem(c, "validation-failed", {
+        detail: "kind and path identify the repository document to edit",
+      });
+    }
+    if (!(await configuredDocumentPathIsAllowed(allowed.project.id, kind.data, path))) {
+      return problem(c, "validation-failed", {
+        detail: "path is not the configured repository document for this target kind",
+      });
+    }
+    const read = await readRepositoryText(deps, allowed.project.id, path);
+    if (read.outcome !== "found") {
+      return problem(c, read.outcome === "not-found" ? "not-found" : "state-conflict", {
+        detail:
+          read.outcome === "unavailable"
+            ? "this deployment cannot read repository document source"
+            : "repository document source not found at the branch head",
+      });
+    }
+    const validated = await validateRepositoryDocument({
+      kind: kind.data,
+      path,
+      content: read.source,
+    });
+    if (!validated.ok) {
+      return problem(c, "state-conflict", {
+        detail: "the current repository document failed validation",
+        issues: validated.issues,
+      });
+    }
+    return c.json({
+      target: {
+        kind: validated.document.kind,
+        id: validated.document.targetId,
+        path: validated.document.path,
+        label: validated.document.label,
+      },
+      content: read.source,
+      contentHash: `sha256:${await sha256Hex(read.source)}`,
+    });
+  });
 
   // Proposal metadata intentionally omits both immutable snapshots. Clients
   // fetch one selected proposal/diff after the revisions:read guard succeeds.
@@ -521,6 +683,9 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
       const project = (await repos.projects.getById(allowed.project.id)) ?? allowed.project;
       const blocked = proseWriteBlocked(c, project);
       if (blocked !== null) return blocked;
+      if (command.proposalType === "repository_document") {
+        return createRepositoryDocumentProposal(c, project, command);
+      }
       const current = await currentBaseOrProblem(
         c,
         project,
@@ -576,6 +741,9 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
         id: proposalId,
         projectId: project.id,
         chapterId: current.chapter.id,
+        targetKind: "chapter",
+        targetId: current.chapter.id,
+        targetPath: current.chapter.path,
         proposalType: command.proposalType,
         origin,
         workItemId: null,
@@ -635,6 +803,131 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
       return c.json(responseBody, responseStatus);
     });
   });
+
+  async function createRepositoryDocumentProposal(
+    c: Context<AppEnv>,
+    project: ProjectRecord,
+    command: Extract<CreateProposalCommand, { proposalType: "repository_document" }>,
+  ): Promise<Response> {
+    const current = await repositoryDocumentBaseOrProblem(c, project, {
+      targetKind: command.targetKind,
+      targetPath: command.targetPath,
+      baseContentHash: command.baseContentHash,
+    });
+    if (current instanceof Response) return current;
+    const proposed = await validateRepositoryDocument({
+      kind: command.targetKind,
+      path: command.targetPath,
+      content: command.proposedContent,
+    });
+    if (!proposed.ok) {
+      return problem(c, "validation-failed", { issues: proposed.issues });
+    }
+    if (proposed.document.targetId !== current.document.targetId) {
+      return problem(c, "validation-failed", {
+        detail: "editing a repository document cannot change its canonical identity",
+      });
+    }
+    if (proposed.document.content === current.source) {
+      return problem(c, "state-conflict", {
+        detail: "the proposed content is identical to the current repository document",
+      });
+    }
+
+    const actor = authOf(c);
+    const proposalId = uuidv7(clock.now());
+    const timestamp = now();
+    const correlationId = c.get("correlationId");
+    const applying = command.applyImmediately === true;
+    const command202 = applying
+      ? repositoryDocumentWriteCommand(ctx, {
+          project,
+          proposalId,
+          reviewerActorId: actor.actor.id,
+          correlationId,
+        })
+      : null;
+    const responseStatus = applying ? 202 : 201;
+    const responseBody = {
+      proposalId,
+      operationId: command202?.operationId ?? null,
+      correlationId,
+      status: applying ? "applying" : "pending_review",
+    };
+    const proposal: RevisionProposalRecord = {
+      id: proposalId,
+      projectId: project.id,
+      chapterId: null,
+      targetKind: proposed.document.kind,
+      targetId: proposed.document.targetId,
+      targetPath: proposed.document.path,
+      proposalType: "repository_document",
+      origin: "document_edit",
+      workItemId: null,
+      submissionId: null,
+      authorActorId: actor.actor.id,
+      baseRevision: null,
+      baseContentHash: command.baseContentHash,
+      baseContent: current.source,
+      proposedContent: proposed.document.content,
+      changeSummary: command.changeSummary ?? null,
+      notes: command.notes ?? null,
+      status: applying ? "applying" : "pending_review",
+      reviewedByActorId: applying ? actor.actor.id : null,
+      reviewedAt: applying ? timestamp : null,
+      reviewReason: null,
+      gitOperationId: command202?.operationId ?? null,
+      resultingRevision: null,
+      commitSha: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const statements: SqlStatement[] = [
+      ...(command202 === null ? [] : [command202.statements[0] as SqlStatement]),
+      repos.revisionProposals.insertStatement(proposal),
+      auditStatement({
+        projectId: project.id,
+        actorId: actor.actor.id,
+        action: "revision_proposal.create",
+        proposalId,
+        correlationId,
+        metadata: {
+          proposalType: "repository_document",
+          targetKind: proposal.targetKind,
+          targetId: proposal.targetId,
+          targetPath: proposal.targetPath,
+          applyImmediately: applying,
+        },
+      }),
+      eventStatement(project.id, "revision_proposal_created", {
+        proposalId,
+        targetKind: proposal.targetKind,
+        targetId: proposal.targetId,
+        targetPath: proposal.targetPath,
+        authorActorId: actor.actor.id,
+        correlationId,
+      }),
+      ...(command202 === null ? [] : command202.statements.slice(1)),
+      ...(command202 === null
+        ? []
+        : [
+            eventStatement(project.id, "revision_proposal_approved", {
+              proposalId,
+              targetKind: proposal.targetKind,
+              targetId: proposal.targetId,
+              targetPath: proposal.targetPath,
+              operationId: command202.operationId,
+              reviewerActorId: actor.actor.id,
+              applyImmediately: true,
+              correlationId,
+            }),
+          ]),
+      ...ctx.claimStatements(c, responseStatus, responseBody),
+    ];
+    await deps.db.batch(statements);
+    if (applying) await ctx.notifyMutation(project.id);
+    return c.json(responseBody, responseStatus);
+  }
 
   app.post(
     "/v1/projects/:projectId/revision-proposals/:proposalId/approve",
@@ -711,6 +1004,8 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
         workItem.projectId !== project.id ||
         submission.projectId !== project.id ||
         submission.workItemId !== workItem.id ||
+        proposal.chapterId === null ||
+        proposal.baseRevision === null ||
         workItem.chapterId !== proposal.chapterId ||
         workItem.baseRevision !== proposal.baseRevision ||
         proposal.proposalType !== "chapter_replacement" ||
@@ -748,7 +1043,16 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
         ),
         workItemCas(workItem.id, "submitted", "applying", timestamp),
       ];
-    } else {
+    } else if (proposal.targetKind === "chapter") {
+      if (
+        proposal.chapterId === null ||
+        proposal.baseRevision === null ||
+        proposal.proposalType === "repository_document"
+      ) {
+        return problem(c, "state-conflict", {
+          detail: "chapter proposal is missing its chapter base identity",
+        });
+      }
       command202 = chapterWriteCommand(ctx, {
         project,
         proposalId: proposal.id,
@@ -757,6 +1061,14 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
         proposedContent: proposal.proposedContent,
         baseRevision: proposal.baseRevision,
         authorActorId: proposal.authorActorId,
+        reviewerActorId: reviewer.actor.id,
+        correlationId,
+        reason,
+      });
+    } else {
+      command202 = repositoryDocumentWriteCommand(ctx, {
+        project,
+        proposalId: proposal.id,
         reviewerActorId: reviewer.actor.id,
         correlationId,
         reason,
@@ -784,6 +1096,9 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
       eventStatement(project.id, "revision_proposal_approved", {
         proposalId: proposal.id,
         chapterId: proposal.chapterId,
+        targetKind: proposal.targetKind,
+        targetId: proposal.targetId,
+        targetPath: proposal.targetPath,
         operationId: command202.operationId,
         reviewerActorId: reviewer.actor.id,
         correlationId,
@@ -830,6 +1145,8 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
         workItem.projectId !== project.id ||
         submission.projectId !== project.id ||
         submission.workItemId !== workItem.id ||
+        proposal.chapterId === null ||
+        proposal.baseRevision === null ||
         workItem.chapterId !== proposal.chapterId ||
         workItem.baseRevision !== proposal.baseRevision ||
         proposal.proposalType !== "chapter_replacement" ||
@@ -883,6 +1200,9 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
         eventStatement(project.id, "revision_proposal_rejected", {
           proposalId: proposal.id,
           chapterId: proposal.chapterId,
+          targetKind: proposal.targetKind,
+          targetId: proposal.targetId,
+          targetPath: proposal.targetPath,
           reviewerActorId: reviewer.actor.id,
           workItemId: proposal.workItemId,
           correlationId,
@@ -947,8 +1267,34 @@ function chapterWriteCommand(
   });
 }
 
+function repositoryDocumentWriteCommand(
+  ctx: RevisionProposalsContext,
+  input: {
+    project: ProjectRecord;
+    proposalId: string;
+    reviewerActorId: string;
+    correlationId: string;
+    reason?: string | null;
+  },
+) {
+  return ctx.commandStatements({
+    project: input.project,
+    correlationId: input.correlationId,
+    actorId: input.reviewerActorId,
+    action: "revision_proposal.approve",
+    targetType: "revision_proposal",
+    targetId: input.proposalId,
+    outboxKind: "repository_document.write",
+    outboxPayload: { revisionProposalId: input.proposalId },
+    metadata: {
+      proposalId: input.proposalId,
+      reason: input.reason ?? null,
+    },
+  });
+}
+
 function proposalBaseContent(
-  command: CreateProposalCommand,
+  command: Exclude<CreateProposalCommand, { proposalType: "repository_document" }>,
   source: string,
 ): string | null {
   const parsed = parseChapterMarkdown(source);
@@ -963,6 +1309,43 @@ function proposalBaseContent(
   return command.proposalType === "chapter_summary"
     ? (frontmatter.data.summary ?? "")
     : stripBlockMarkers(chapterBodyOf(source)).trim();
+}
+
+function targetLabel(proposal: RevisionProposalRecord): string {
+  if (proposal.targetKind === "outline") return "Outline";
+  if (proposal.targetKind === "timeline") return "Timeline";
+  if (proposal.targetKind === "character") {
+    const id = proposal.targetId.startsWith("character:")
+      ? proposal.targetId.slice("character:".length)
+      : proposal.targetId;
+    return id || "Character";
+  }
+  return "Chapter revision";
+}
+
+/** Minimal contained glob matcher for configured character documents. */
+function repositoryPathMatchesGlob(path: string, glob: string): boolean {
+  if (!isSafeRepositoryDocumentPath(path) || !isSafeRepositoryDocumentPath(glob)) {
+    return false;
+  }
+  let pattern = "^";
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index] as string;
+    if (char === "*") {
+      if (glob[index + 1] === "*") {
+        pattern += ".*";
+        index += 1;
+      } else {
+        pattern += "[^/]*";
+      }
+    } else if (char === "?") {
+      pattern += "[^/]";
+    } else {
+      pattern += char.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
+    }
+  }
+  pattern += "$";
+  return new RegExp(pattern, "u").test(path);
 }
 
 function proposedContentFindings(content: string): string[] {

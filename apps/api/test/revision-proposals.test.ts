@@ -34,6 +34,9 @@ Original paragraph.
 `;
 const CONTENT_HASH = `sha256:${createHash("sha256").update(SOURCE).digest("hex")}`;
 const BASE_BODY = "Original paragraph.";
+const OUTLINE_PATH = "story/outline.yml";
+const OUTLINE_SOURCE = "schema: authorbot.story-graph/v1\nnodes: []\n";
+const OUTLINE_HASH = `sha256:${createHash("sha256").update(OUTLINE_SOURCE).digest("hex")}`;
 
 function sourceReader(): FakeReader {
   const snapshot = fixtureSnapshot();
@@ -42,6 +45,7 @@ function sourceReader(): FakeReader {
   snapshot.chapters[0] = { ...chapter, contentHash: CONTENT_HASH };
   const reader = new FakeReader(snapshot);
   reader.files.set(CHAPTER_PATH, SOURCE);
+  reader.files.set(OUTLINE_PATH, OUTLINE_SOURCE);
   return reader;
 }
 
@@ -287,6 +291,113 @@ describe("Phase 11 revision proposal HTTP pipeline", () => {
       baseContent: "Existing summary",
       proposedContent: "A sharper summary.",
     });
+  });
+
+  it("reads, proposes, reviews, and one-click applies repository planning documents", async () => {
+    const source = await h.app.request(
+      `/v1/projects/${h.projectId}/repository-documents/source?kind=outline&path=${encodeURIComponent(OUTLINE_PATH)}`,
+      { headers: { Cookie: editor } },
+    );
+    expect(source.status).toBe(200);
+    expect(await source.json()).toEqual({
+      target: { kind: "outline", id: "outline", path: OUTLINE_PATH, label: "Outline" },
+      content: OUTLINE_SOURCE,
+      contentHash: OUTLINE_HASH,
+    });
+
+    const proposedContent = [
+      "schema: authorbot.story-graph/v1",
+      "nodes:",
+      `  - id: chapter:${CHAPTER_ID}`,
+      "    type: chapter",
+      "    title: Baseline",
+      `    chapter_id: ${CHAPTER_ID}`,
+      "    order: 10",
+      "",
+    ].join("\n");
+    const created = await createDirect({
+      proposalType: "repository_document",
+      targetKind: "outline",
+      targetPath: OUTLINE_PATH,
+      baseContentHash: OUTLINE_HASH,
+      proposedContent,
+      changeSummary: "Add the baseline chapter to the outline.",
+    });
+    expect(created.response.status).toBe(201);
+    const proposalId = created.body["proposalId"] as string;
+    expect(await h.repos.revisionProposals.getById(proposalId)).toMatchObject({
+      chapterId: null,
+      targetKind: "outline",
+      targetId: "outline",
+      targetPath: OUTLINE_PATH,
+      proposalType: "repository_document",
+      origin: "document_edit",
+      baseRevision: null,
+      baseContent: OUTLINE_SOURCE,
+      proposedContent,
+      status: "pending_review",
+    });
+
+    const diff = await h.app.request(`${proposalPath(h, proposalId)}/diff`, {
+      headers: { Cookie: editor },
+    });
+    expect(diff.status).toBe(200);
+    expect(await diff.json()).toMatchObject({
+      target: { kind: "outline", id: "outline", path: OUTLINE_PATH, label: "Outline" },
+      proposal: { baseRevision: null, currentRevision: null },
+    });
+
+    const approved = await h.app.request(
+      `${proposalPath(h, proposalId)}/approve`,
+      jsonRequest("POST", {}, { Cookie: maintainer, "Idempotency-Key": uuidv7() }),
+    );
+    expect(approved.status).toBe(202);
+    const approvedBody = (await approved.json()) as { operationId: string };
+    expect(await h.repos.outbox.getByGitOperationId(approvedBody.operationId)).toMatchObject({
+      kind: "repository_document.write",
+      payload: { revisionProposalId: proposalId },
+    });
+
+    const immediate = await createDirect(
+      {
+        proposalType: "repository_document",
+        targetKind: "outline",
+        targetPath: OUTLINE_PATH,
+        baseContentHash: OUTLINE_HASH,
+        proposedContent: proposedContent.replace("Baseline", "Baseline revised"),
+        applyImmediately: true,
+      },
+      maintainer,
+    );
+    expect(immediate.response.status).toBe(202);
+    expect(await h.repos.revisionProposals.getById(immediate.body["proposalId"] as string)).toMatchObject({
+      status: "applying",
+      targetKind: "outline",
+      reviewedByActorId: expect.any(String),
+      gitOperationId: immediate.body["operationId"],
+    });
+  });
+
+  it("refuses unconfigured document paths and stale repository-document bases", async () => {
+    const wrongPath = await createDirect({
+      proposalType: "repository_document",
+      targetKind: "outline",
+      targetPath: "private/outline.yml",
+      baseContentHash: OUTLINE_HASH,
+      proposedContent: OUTLINE_SOURCE,
+    });
+    expect(wrongPath.response.status).toBe(400);
+
+    h.reader.files.set(OUTLINE_PATH, `${OUTLINE_SOURCE}# moved\n`);
+    const stale = await createDirect({
+      proposalType: "repository_document",
+      targetKind: "outline",
+      targetPath: OUTLINE_PATH,
+      baseContentHash: OUTLINE_HASH,
+      proposedContent: `${OUTLINE_SOURCE}# proposed\n`,
+    });
+    expect(stale.response.status).toBe(409);
+    expect(stale.body).toMatchObject({ type: expect.stringContaining("revision-conflict") });
   });
 
   it("approves direct proposals through linked chapter.write and supports audited applyImmediately", async () => {
@@ -614,6 +725,9 @@ async function seedWorkProposal(
     id: proposalId,
     projectId: h.projectId,
     chapterId: CHAPTER_ID,
+    targetKind: "chapter",
+    targetId: CHAPTER_ID,
+    targetPath: "chapters/001-baseline.md",
     proposalType: "chapter_replacement",
     origin: "work_submission",
     workItemId,
