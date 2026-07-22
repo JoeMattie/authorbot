@@ -16,6 +16,19 @@ import { uuidv7 } from "../src/ids.js";
 
 const CHAPTER_2 = "01900000-0000-7000-8000-000000000002";
 const NOW = "2026-07-22T18:00:00Z";
+const ACTIVE_WORK_ITEM_STATUSES = [
+  "ready",
+  "leased",
+  "submitted",
+  "applying",
+  "conflict",
+] as const satisfies readonly WorkItemStatus[];
+const ALL_WORK_ITEM_STATUSES = [
+  ...ACTIVE_WORK_ITEM_STATUSES,
+  "completed",
+  "failed",
+  "cancelled",
+] as const satisfies readonly WorkItemStatus[];
 
 type Activity = Partial<{
   openSuggestions: number;
@@ -48,6 +61,7 @@ describe("chapter-list activity summaries", () => {
     const body = (await response.json()) as ChapterPage;
 
     expect(body.items.map((chapter) => chapter.id)).toEqual([CHAPTER_ID, CHAPTER_2]);
+    expect(body.nextCursor).toBeNull();
     expect(body.items[0]?.activity).toEqual({
       openSuggestions: 2,
       openBlockComments: 2,
@@ -62,6 +76,19 @@ describe("chapter-list activity summaries", () => {
       openReplies: 0,
       openWorkItems: 0,
     });
+
+    const internal = await h.repos.chapters.listSummariesByProject(
+      h.projectId,
+      ACTIVE_WORK_ITEM_STATUSES,
+      { limit: 2 },
+    );
+    expect(internal.items[0]?.activity).toEqual(
+      expect.objectContaining({
+        openCommentReplies: 3,
+        openSuggestionReplies: 1,
+      }),
+    );
+    expect(internal.hasMore).toBe(false);
   });
 
   it("omits categories the caller cannot read instead of reporting zero", async () => {
@@ -100,6 +127,7 @@ describe("chapter-list activity summaries", () => {
   it("uses one bounded collaboration query for a paginated chapter list", async () => {
     const originalPrepare = h.db.prepare.bind(h.db);
     let collaborationQueries = 0;
+    let activitySql: string | null = null;
     h.db.prepare = (sql: string) => {
       if (
         sql.includes("annotation_activity") ||
@@ -107,6 +135,7 @@ describe("chapter-list activity summaries", () => {
         sql.includes("work_activity")
       ) {
         collaborationQueries += 1;
+        activitySql = sql;
       }
       return originalPrepare(sql);
     };
@@ -120,6 +149,26 @@ describe("chapter-list activity summaries", () => {
     expect(firstPage.items).toHaveLength(1);
     expect(firstPage.nextCursor).toBe(CHAPTER_ID);
     expect(collaborationQueries).toBe(1);
+
+    const secondResponse = await h.app.request(
+      `/v1/projects/${h.projectId}/chapters?limit=1&cursor=${CHAPTER_ID}`,
+      { headers: { Cookie: maintainer } },
+    );
+    expect(secondResponse.status).toBe(200);
+    const secondPage = (await secondResponse.json()) as ChapterPage;
+    expect(secondPage.items.map((chapter) => chapter.id)).toEqual([CHAPTER_2]);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(collaborationQueries).toBe(2);
+
+    if (activitySql === null) throw new Error("chapter activity SQL was not captured");
+    const planRows = await originalPrepare(`EXPLAIN QUERY PLAN ${activitySql}`)
+      .bind(h.projectId, "", 2, ...ACTIVE_WORK_ITEM_STATUSES)
+      .all<{ detail: string }>();
+    const plan = planRows.map((row) => row.detail).join("\n");
+    expect(plan).not.toMatch(/\bSCAN r\b/);
+    expect(plan.match(/SEARCH r USING COVERING INDEX idx_replies_annotation_status/g)).toHaveLength(
+      2,
+    );
   });
 });
 
@@ -223,17 +272,7 @@ async function seedActivity(h: TestHarness): Promise<void> {
     await insertReply(annotationId, "open");
   }
 
-  const statuses: readonly WorkItemStatus[] = [
-    "ready",
-    "leased",
-    "submitted",
-    "applying",
-    "conflict",
-    "completed",
-    "failed",
-    "cancelled",
-  ];
-  for (const status of statuses) {
+  for (const status of ALL_WORK_ITEM_STATUSES) {
     const workItem: WorkItemRecord = {
       id: uuidv7(),
       projectId: h.projectId,

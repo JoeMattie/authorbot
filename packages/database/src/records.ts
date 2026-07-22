@@ -203,7 +203,9 @@ export interface ChapterActivitySummary {
   openSuggestions: number;
   openBlockComments: number;
   openChapterComments: number;
-  openReplies: number;
+  /** Kept split so granular comment/suggestion reads can filter safely. */
+  openCommentReplies: number;
+  openSuggestionReplies: number;
   openWorkItems: number;
 }
 
@@ -211,6 +213,12 @@ export interface ChapterActivitySummary {
 export interface ChapterSummaryRecord {
   chapter: ChapterProjectionRecord;
   activity: ChapterActivitySummary;
+}
+
+/** A cursor page with an explicit lookahead result. */
+export interface ChapterSummaryPageRecord {
+  items: ChapterSummaryRecord[];
+  hasMore: boolean;
 }
 
 export interface AnnotationRecord {

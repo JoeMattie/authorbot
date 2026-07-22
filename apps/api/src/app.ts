@@ -796,7 +796,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return limit;
     }
     const cursor = c.req.query("cursor") ?? "";
-    const summaries = await repos.chapters.listSummariesByProject(
+    const summaryPage = await repos.chapters.listSummariesByProject(
       guard.project.id,
       ACTIVE_WORK_ITEM_STATUSES,
       { limit, afterId: cursor },
@@ -805,7 +805,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const canReadFeedback = requestAuth.scopes.includes("annotations:read");
     const canReadWork = requestAuth.scopes.includes("work:read");
     return c.json({
-      items: summaries.map(({ chapter, activity }) => ({
+      items: summaryPage.items.map(({ chapter, activity }) => ({
         ...chapterJson(chapter),
         activity: {
           ...(canReadFeedback
@@ -813,16 +813,15 @@ export function createApi(deps: AppDeps): AuthorbotApi {
                 openSuggestions: activity.openSuggestions,
                 openBlockComments: activity.openBlockComments,
                 openChapterComments: activity.openChapterComments,
-                openReplies: activity.openReplies,
+                openReplies: activity.openCommentReplies + activity.openSuggestionReplies,
               }
             : {}),
           ...(canReadWork ? { openWorkItems: activity.openWorkItems } : {}),
         },
       })),
-      nextCursor:
-        summaries.length === limit
-          ? (summaries[summaries.length - 1]?.chapter.id ?? null)
-          : null,
+      nextCursor: summaryPage.hasMore
+        ? (summaryPage.items[summaryPage.items.length - 1]?.chapter.id ?? null)
+        : null,
     });
   });
 

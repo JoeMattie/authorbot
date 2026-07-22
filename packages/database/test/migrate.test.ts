@@ -78,6 +78,10 @@ describe("migration runner", () => {
         .all<{ name: string }>();
       return rows.map((row) => row.name);
     };
+    expect(await indexColumns("idx_chapters_project_id")).toEqual([
+      "project_id",
+      "id",
+    ]);
     expect(await indexColumns("idx_annotations_project_chapter_activity")).toEqual([
       "project_id",
       "chapter_id",
@@ -88,6 +92,7 @@ describe("migration runner", () => {
     expect(await indexColumns("idx_replies_annotation_status")).toEqual([
       "annotation_id",
       "status",
+      "project_id",
     ]);
     expect(await indexColumns("idx_work_items_project_chapter_status")).toEqual([
       "project_id",
