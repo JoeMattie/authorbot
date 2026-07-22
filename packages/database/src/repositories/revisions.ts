@@ -241,6 +241,37 @@ export class RevisionProposalsRepository {
     return result.changes;
   }
 
+  /**
+   * Batch-safe review CAS. Unlike the ordinary conditional UPDATE, a stale
+   * status writes NULL into the NOT NULL status column so the entire D1 batch
+   * aborts instead of enqueuing a second Git operation beside a lost race.
+   * Callers pre-read the id, so a missing row remains a route-level 404.
+   */
+  transitionReviewOrAbortStatement(
+    id: string,
+    fromStatus: RevisionProposalStatus,
+    update: RevisionProposalReviewUpdate,
+  ): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE revision_proposals
+            SET status = CASE WHEN status = ? THEN ? ELSE NULL END,
+                reviewed_by_actor_id = ?, reviewed_at = ?, review_reason = ?,
+                git_operation_id = ?, updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(
+        fromStatus,
+        update.status,
+        update.reviewedByActorId,
+        update.reviewedAt,
+        update.reviewReason,
+        update.gitOperationId ?? null,
+        update.updatedAt,
+        id,
+      );
+  }
+
   /** Complete an apply attempt without altering the retained review record. */
   finalizeStatement(
     id: string,

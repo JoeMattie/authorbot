@@ -328,6 +328,48 @@ describe("revision proposal review lifecycle", () => {
     s.db.close();
   });
 
+  it("aborts an entire batch when a competing review already won", async () => {
+    const s = await seedBasics();
+    const proposal = makeProposal(s);
+    await s.repos.revisionProposals.insert(proposal);
+    await s.repos.revisionProposals.transitionReview(proposal.id, "pending_review", {
+      status: "rejected",
+      reviewedByActorId: s.actor.id,
+      reviewedAt: REVIEWED_AT,
+      reviewReason: "First decision wins.",
+      updatedAt: REVIEWED_AT,
+    });
+
+    await expect(
+      s.db.batch([
+        s.repos.revisionProposals.transitionReviewOrAbortStatement(
+          proposal.id,
+          "pending_review",
+          {
+            status: "applying",
+            reviewedByActorId: s.actor.id,
+            reviewedAt: APPLIED_AT,
+            reviewReason: null,
+            updatedAt: APPLIED_AT,
+          },
+        ),
+        s.db.prepare(`INSERT INTO events (project_id, type, payload, created_at)
+          VALUES (?, ?, ?, ?)`)
+          .bind(s.project.id, "must_rollback", "{}", APPLIED_AT),
+      ]),
+    ).rejects.toThrow(/NOT NULL constraint failed/);
+    expect(
+      await s.db
+        .prepare(`SELECT COUNT(*) AS count FROM events WHERE type = 'must_rollback'`)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+    expect(await s.repos.revisionProposals.getById(proposal.id)).toMatchObject({
+      status: "rejected",
+      reviewReason: "First decision wins.",
+    });
+    s.db.close();
+  });
+
   it("links approval to Git, then finalizes its revision without losing review metadata", async () => {
     const s = await seedBasics();
     const proposal = makeProposal(s);
