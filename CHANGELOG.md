@@ -9,6 +9,15 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.28
+
+- **Review draft can read the chapter in deployed books again.** The redesigned
+  Drafts view could list a draft from the database, but opening it asked the
+  Worker for repository text through a reader that is intentionally absent in
+  production. Chapter editing and Work task bundles now read through the
+  project coordinator that owns GitHub access.
+- No book-format migration or database migration is required for this release.
+
 ## 0.1.27
 
 - **The reading site and author console have been redesigned together.** The
