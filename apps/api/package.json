@@ -63,6 +63,7 @@
     "@authorbot/repo-coordinator": "workspace:*",
     "@authorbot/rule-engine": "workspace:*",
     "@authorbot/schemas": "workspace:*",
+    "diff": "^9.0.0",
     "hono": "^4.6.0",
     "yaml": "^2.5.0",
     "zod": "^4.0.0"
