@@ -9,6 +9,30 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.32
+
+- **Chapter navigation shows the work around each chapter.** Signed-in
+  collaborators now see separate, accessible counts for open suggestions,
+  block or range comments, whole-chapter comments, replies, and active Work on
+  the chapter list, current chapter, previous and next links, and Draft rows.
+  The counts come from one indexed database read instead of one request per
+  chapter.
+- **Any open note can become Work with one click.** Maintainers can promote
+  suggestions and comments at chapter, block, or range scope without entering
+  a reason. Accepted cards settle into a compact green state, and Previous and
+  Next controls move through a chapter's notes without manual scrolling.
+- **Upgrades repair their own lockfile.** `authorbot upgrade` now aligns the CLI
+  and API packages, refreshes `package-lock.json` with scripts disabled, checks
+  the resolved versions, and fails before changing the repository if npm cannot
+  produce a safe lockfile.
+- The collaboration UI now has its first project-scoped `zustand/vanilla`
+  store for shared session and chapter-summary reads. Optimistic mutation and
+  event reconciliation remain explicitly staged as the next Phase 11
+  increment.
+- This release includes database migration `0009_chapter_activity.sql`, which
+  adds indexes for the chapter activity aggregate. No book-format migration is
+  required.
+
 ## 0.1.31
 
 - **Suggestion cards take you back to the prose they reference.** Clicking a
