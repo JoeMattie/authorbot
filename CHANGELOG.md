@@ -9,6 +9,30 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.33
+
+- **Collaboration state now stays coherent across the whole site.** Account,
+  chapter, annotation, reply, vote, Work, operation, and lease state share one
+  lazily loaded browser store. Writes update the page immediately, reconcile
+  against authoritative responses and events, and roll back honestly when a
+  request fails.
+- **New Work claims can recover without persisting lease secrets.** A client
+  that loses an in-memory lease token can rotate it through a new
+  credential-bound recovery endpoint. Only the exact browser session or agent
+  token that made the claim can recover it, and recovery cannot renew or revive
+  an expired lease. Claims already live when a book upgrades have no credential
+  binding; release and claim them again before relying on recovery.
+- **Live collaboration uses fewer requests and exposes less state.** Concurrent
+  reads are coalesced, event streams restart when authorization changes, and
+  anonymous or signed-in nonmember event polling receives only explicitly
+  reviewed public event types and payload fields.
+- Background synchronization no longer tears down a sign-in form or editor
+  while someone is using it. Optimistic voting, replies, notes, drafts, and
+  Work actions retain focus and settle against the same shared state.
+- The collaborator skill documents lost-token recovery and safe retry behavior.
+  No book-format migration or D1 database migration is required for this
+  release.
+
 ## 0.1.32
 
 - **Chapter navigation shows the work around each chapter.** Signed-in
