@@ -32,11 +32,6 @@
 #      https://example.com/my-book/), set the AUTHORBOT_BASE_URL repository
 #      variable to that path or URL. Leave it unset for a book at the root of
 #      its own hostname, which is the usual case.
-#   5. Only once you have turned on collaboration (stage 3 of
-#      docs/getting-started.md), set the AUTHORBOT_D1_DATABASE repository
-#      variable to your D1 database name. That switches on the migration step
-#      below. Leave it unset for a static-only book - there is no database to
-#      migrate.
 
 name: publish
 
@@ -136,7 +131,9 @@ jobs:
       # `migrations_dir` in wrangler.jsonc, so the schema and the Worker code
       # are always the same pinned version. Applying is idempotent: wrangler
       # records what it has run in a d1_migrations table and skips it next
-      # time. Skipped entirely for a static-only book, which has no database.
+      # time. A static-only book has no @authorbot/api package, so the step
+      # exits cleanly. Once the API package is pinned, a missing DB binding is
+      # an error: silently deploying a Worker ahead of its schema is unsafe.
       # A book's very first push happens before `create-authorbot publish` has
       # had a chance to store the Cloudflare credentials, so this workflow used
       # to fail on every brand-new book: a red cross and a failure email before
@@ -158,16 +155,16 @@ jobs:
           fi
 
       - name: Apply pending database migrations
-        if: ${{ steps.creds.outputs.present == 'true' && vars.AUTHORBOT_D1_DATABASE != '' }}
+        if: ${{ steps.creds.outputs.present == 'true' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Passed as an environment variable rather than interpolated into
-          # the command: an expression is substituted into the shell script
-          # before the shell sees it, so a value containing shell syntax would
-          # execute rather than be an argument.
-          D1_DATABASE: ${{ vars.AUTHORBOT_D1_DATABASE }}
-        run: npx wrangler d1 migrations apply "$D1_DATABASE" --remote
+        run: |
+          if [ ! -d node_modules/@authorbot/api/migrations ]; then
+            echo "::notice::No @authorbot/api package is pinned, so this static-only book has no D1 migrations."
+            exit 0
+          fi
+          npx wrangler d1 migrations apply DB --remote
 
       # Deploys the Worker described by wrangler.jsonc, whose `assets` block
       # points at the _site directory built above. Stage 3 of

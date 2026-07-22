@@ -1,5 +1,7 @@
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   applyMigrations,
   BOOK_REPO_MIGRATIONS,
@@ -26,12 +28,79 @@ afterEach(cleanupTempDirs);
 const at = mustParseVersion;
 
 describe("the shipped registry", () => {
-  it("is empty, and every entry it ever gains is well-formed", () => {
-    // Empty is the correct state until a format change actually ships:
-    // inventing a migration to exercise the mechanism would rewrite author
-    // files for no reason. selectMigrations validates whatever lands here.
-    expect(BOOK_REPO_MIGRATIONS).toHaveLength(0);
-    expect(selectMigrations(BOOK_REPO_MIGRATIONS, at("1.0.0"), at("9.9.9"))).toEqual([]);
+  it("contains the fail-safe D1 workflow migration", () => {
+    expect(BOOK_REPO_MIGRATIONS.map((migration) => migration.id)).toEqual([
+      "0001-fail-safe-d1-migrations",
+    ]);
+    expect(
+      selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.30"), at("0.1.31")).map(
+        (selected) => selected.migration.id,
+      ),
+    ).toEqual(["0001-fail-safe-d1-migrations"]);
+    expect(selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.31"), at("0.1.31"))).toEqual([]);
+  });
+
+  it("rewrites the generated migration step without disturbing custom workflow content", async () => {
+    const workflow = `# One-time setup for your repository:
+#   5. Only once you have turned on collaboration, set the
+#      AUTHORBOT_D1_DATABASE repository variable. Leave it unset otherwise.
+
+name: publish
+
+# custom preface stays exactly here
+jobs:
+  publish:
+    steps:
+      # time. Skipped entirely for a static-only book, which has no database.
+      - name: Apply pending database migrations
+        if: \${{ steps.creds.outputs.present == 'true' && vars.AUTHBOT_D1_DATABASE != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Keep shell syntax out of an interpolated expression.
+          D1_DATABASE: \${{ vars.AUTHORBOT_D1_DATABASE }}
+        run: npx wrangler d1 migrations apply "$D1_DATABASE" --remote
+
+      # custom deploy comment stays exactly here
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+`;
+    const repoPath = await makeBookRepo();
+    await mkdir(path.join(repoPath, ".github/workflows"), { recursive: true });
+    await nodeFs.writeFile(path.join(repoPath, ".github/workflows/publish.yml"), workflow);
+    const repo = migrationRepoFor(nodeFs, repoPath);
+    const selected = selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.30"), at("0.1.31"));
+
+    const first = await applyMigrations(selected, repo);
+    expect(first.changed).toEqual([".github/workflows/publish.yml"]);
+    const migrated = await repo.read(".github/workflows/publish.yml");
+    expect(() => parseYaml(migrated)).not.toThrow();
+    expect(migrated).toContain("# custom preface stays exactly here");
+    expect(migrated).toContain("# custom deploy comment stays exactly here");
+    expect(migrated).toContain("[ ! -d node_modules/@authorbot/api/migrations ]");
+    expect(migrated).toContain("npx wrangler d1 migrations apply DB --remote");
+    expect(migrated).not.toContain("AUTHORBOT_D1_DATABASE");
+
+    const second = await applyMigrations(selected, repo);
+    expect(second.changed).toEqual([]);
+    expect(await repo.read(".github/workflows/publish.yml")).toBe(migrated);
+  });
+
+  it("leaves missing and customized publish workflows alone", async () => {
+    const withoutWorkflowPath = await makeBookRepo();
+    const missing = migrationRepoFor(nodeFs, withoutWorkflowPath);
+    const selected = selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.30"), at("0.1.31"));
+    expect((await applyMigrations(selected, missing)).changed).toEqual([]);
+
+    const customPath = await makeBookRepo();
+    await mkdir(path.join(customPath, ".github/workflows"), { recursive: true });
+    await nodeFs.writeFile(
+      path.join(customPath, ".github/workflows/publish.yml"),
+      "name: custom\njobs: {}\n",
+    );
+    const custom = migrationRepoFor(nodeFs, customPath);
+    expect((await applyMigrations(selected, custom)).changed).toEqual([]);
+    expect(await custom.read(".github/workflows/publish.yml")).toBe("name: custom\njobs: {}\n");
   });
 });
 

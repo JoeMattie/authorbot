@@ -66,6 +66,22 @@ describe("template drift", () => {
   });
 });
 
+describe("generated publish workflow", () => {
+  const workflow = STATIC_TEMPLATE_FILES[".github/workflows/publish.yml"] ?? "";
+
+  it("cannot silently skip migrations for a configured collaboration Worker", () => {
+    expect(() => parseYaml(workflow)).not.toThrow();
+    expect(workflow).not.toContain("AUTHORBOT_D1_DATABASE");
+    expect(workflow).toContain("[ ! -d node_modules/@authorbot/api/migrations ]");
+    expect(workflow).toContain("npx wrangler d1 migrations apply DB --remote");
+
+    const migrate = workflow.indexOf("npx wrangler d1 migrations apply DB --remote");
+    const deploy = workflow.indexOf("- name: Deploy to Cloudflare");
+    expect(migrate).toBeGreaterThan(-1);
+    expect(deploy).toBeGreaterThan(migrate);
+  });
+});
+
 describe("book.yml", () => {
   it("passes the Authorbot book schema", () => {
     const text = renderBookYml(identity);

@@ -184,6 +184,18 @@ describe("authorbot-collab element", () => {
     expect(highlight?.textContent).toBe("drift");
     expect(highlight?.classList.contains("ab-highlight-suggestion")).toBe(true);
     expect(highlight?.getAttribute("tabindex")).toBe("0");
+
+    // Navigation is reciprocal: selecting prose reveals its card, and
+    // selecting the card brings the anchored prose back into view.
+    const targetBlock = document.getElementById(`b-${BLOCK_ID}`) as HTMLElement;
+    const scrollTarget = vi.fn();
+    targetBlock.scrollIntoView = scrollTarget;
+    card.click();
+    expect(scrollTarget).toHaveBeenCalledWith({
+      block: "center",
+      inline: "nearest",
+      behavior: "smooth",
+    });
   });
 
   it("renders zero collaboration chrome when the API is unreachable (§1)", async () => {
