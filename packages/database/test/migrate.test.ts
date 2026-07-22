@@ -22,12 +22,14 @@ const EXPECTED_TABLES = [
   "audit_events",
   "leases",
   "submissions",
+  "revision_proposals",
 ];
 
 describe("migration runner", () => {
   it("finds the numbered migration files at the repo root", async () => {
     const files = await listMigrationFiles(MIGRATIONS_DIR);
     expect(files).toContain("0001_phase2.sql");
+    expect(files).toContain("0011_phase11_revision_proposals.sql");
     expect(files).toEqual([...files].sort());
   });
 
@@ -183,6 +185,37 @@ describe("migration runner", () => {
         .bind(beforeId)
         .run(),
     ).rejects.toThrow();
+    db.close();
+  });
+
+  it("installs the revision-proposal queue indexes and immutability trigger", async () => {
+    const db = openSqliteDatabase(":memory:");
+    const result = await applyMigrations(db, MIGRATIONS_DIR);
+    expect(result.applied).toContain("0011_phase11_revision_proposals.sql");
+
+    const indexes = await db
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'index' AND tbl_name = 'revision_proposals'
+          ORDER BY name`,
+      )
+      .all<{ name: string }>();
+    expect(indexes.map((row) => row.name)).toEqual(
+      expect.arrayContaining([
+        "idx_revision_proposals_chapter",
+        "idx_revision_proposals_project_status",
+        "idx_revision_proposals_submission",
+        "idx_revision_proposals_work_item",
+      ]),
+    );
+
+    const trigger = await db
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'trigger' AND name = 'revision_proposals_immutable_payload'`,
+      )
+      .first<{ name: string }>();
+    expect(trigger?.name).toBe("revision_proposals_immutable_payload");
     db.close();
   });
 

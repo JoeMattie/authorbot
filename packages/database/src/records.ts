@@ -595,3 +595,64 @@ export interface RateLimitCounterRecord {
   count: number;
   expiresAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 11: review-gated chapter and summary revisions (migration 0011)
+// ---------------------------------------------------------------------------
+
+/** The content surface replaced by a revision proposal. */
+export type RevisionProposalType = "chapter_replacement" | "chapter_summary";
+
+/** How a proposal entered the shared maintainer-review pipeline. */
+export type RevisionProposalOrigin =
+  | "work_submission"
+  | "direct_edit"
+  | "summary_proposal";
+
+/**
+ * A proposal begins pending review, may be applied through the Git outbox,
+ * and finishes in one of the four terminal states. The repository guards
+ * every transition with the expected current status so concurrent reviewers
+ * cannot act on the same proposal twice.
+ */
+export type RevisionProposalStatus =
+  | "pending_review"
+  | "applying"
+  | "approved"
+  | "rejected"
+  | "conflicted"
+  | "withdrawn";
+
+/**
+ * Immutable proposal payload plus its mutable review/apply envelope.
+ *
+ * `baseContent` is deliberately retained beside `proposedContent`: review
+ * pages can render an exact diff without fetching an old Git tree once per
+ * proposal. Migration 0011 prevents either snapshot, its authorship, or its
+ * work/submission identity from changing after insertion.
+ */
+export interface RevisionProposalRecord {
+  id: string;
+  projectId: string;
+  chapterId: string;
+  proposalType: RevisionProposalType;
+  origin: RevisionProposalOrigin;
+  workItemId: string | null;
+  submissionId: string | null;
+  authorActorId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  baseContent: string;
+  proposedContent: string;
+  changeSummary: string | null;
+  notes: string | null;
+  status: RevisionProposalStatus;
+  reviewedByActorId: string | null;
+  reviewedAt: string | null;
+  reviewReason: string | null;
+  gitOperationId: string | null;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
