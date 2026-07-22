@@ -59,7 +59,12 @@ import {
   DEFAULT_ACCEPTANCE_CRITERIA,
   DEFAULT_CONFLICT_ACCEPTANCE_CRITERIA,
 } from "@authorbot/repo-coordinator";
-import { parseChapterMarkdown, parseProseMarkdown, scanSafety } from "@authorbot/markdown";
+import {
+  parseChapterMarkdown,
+  parseProseMarkdown,
+  scanSafety,
+  stripBlockMarkers,
+} from "@authorbot/markdown";
 import type { WorkItemType } from "@authorbot/schemas";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
@@ -401,6 +406,19 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         // batch aborted on a NOT NULL violation instead, which carries no
         // information about who won and used to surface as a 500.
         repos.leases.claimStatement(lease),
+        ...(submissionType === "chapter_replacement"
+          ? [
+              repos.leaseDocumentSnapshots.insertStatement({
+                leaseId: lease.id,
+                projectId: guard.project.id,
+                chapterId: chapter.id,
+                baseRevision: chapter.revision,
+                baseContentHash: contentHash,
+                source,
+                createdAt: timestamp,
+              }),
+            ]
+          : []),
         workItemCas(workItem.id, claimable.priorLeaseExpired ? "leased" : "ready", "leased", timestamp),
         // The claim audit event doubles as the durable record of the lease's
         // task-bundle base (module docs) - target_id is the lease id.
@@ -1011,6 +1029,144 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       const timestamp = now();
       const submissionId = uuidv7(clock.now());
       const correlationId = c.get("correlationId");
+
+      if (command.type === "chapter_replacement") {
+        const snapshot = await repos.leaseDocumentSnapshots.getByLeaseId(lease.id);
+        if (
+          snapshot === null ||
+          snapshot.projectId !== guard.project.id ||
+          snapshot.chapterId !== workItem.chapterId ||
+          snapshot.baseRevision !== command.baseRevision ||
+          snapshot.baseContentHash !== command.baseContentHash
+        ) {
+          return problem(c, "state-conflict", {
+            detail: "the lease's exact chapter base snapshot is unavailable; release and reclaim",
+          });
+        }
+
+        const proposalId = uuidv7(clock.now());
+        const responseBody = {
+          submissionId,
+          proposalId,
+          operationId: null,
+          correlationId,
+          status: "pending_review",
+        };
+        const batch: SqlStatement[] = [
+          repos.submissions.insertStatement({
+            id: submissionId,
+            projectId: guard.project.id,
+            workItemId: workItem.id,
+            leaseId: lease.id,
+            actorId: a.actor.id,
+            type: command.type,
+            baseRevision: command.baseRevision,
+            baseContentHash: command.baseContentHash,
+            content: command.content,
+            summary: command.summary ?? null,
+            notes: command.notes ?? null,
+            state: "received",
+            gitOperationId: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+          repos.revisionProposals.insertStatement({
+            id: proposalId,
+            projectId: guard.project.id,
+            chapterId: workItem.chapterId,
+            proposalType: "chapter_replacement",
+            origin: "work_submission",
+            workItemId: workItem.id,
+            submissionId,
+            authorActorId: a.actor.id,
+            baseRevision: command.baseRevision,
+            baseContentHash: command.baseContentHash,
+            baseContent: stripBlockMarkers(chapterBodyOf(snapshot.source)).trim(),
+            proposedContent: command.content,
+            changeSummary: command.summary ?? null,
+            notes: command.notes ?? null,
+            status: "pending_review",
+            reviewedByActorId: null,
+            reviewedAt: null,
+            reviewReason: null,
+            gitOperationId: null,
+            resultingRevision: null,
+            commitSha: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+          // Review-required work stops at the existing `submitted` lifecycle
+          // state until a maintainer approves the immutable proposal.
+          workItemCas(workItem.id, "leased", "submitted", timestamp),
+          repos.leases.consumeForSubmissionStatement(
+            lease.id,
+            lease.tokenHash,
+            timestamp,
+            timestamp,
+          ),
+          repos.leaseDocumentSnapshots.deleteStatement(lease.id),
+          auditStatement({
+            projectId: guard.project.id,
+            actorId: a.actor.id,
+            action: "revision_proposal.create",
+            targetType: "revision_proposal",
+            targetId: proposalId,
+            correlationId,
+            metadata: {
+              workItemId: workItem.id,
+              submissionId,
+              type: command.type,
+              leaseId: lease.id,
+            },
+          }),
+          appendEventStatement(guard.project.id, "revision_proposal_created", {
+            proposalId,
+            submissionId,
+            workItemId: workItem.id,
+            chapterId: workItem.chapterId,
+            correlationId,
+          }),
+          appendEventStatement(guard.project.id, "submission_received", {
+            submissionId,
+            proposalId,
+            operationId: null,
+            workItemId: workItem.id,
+            type: command.type,
+            correlationId,
+          }),
+          ...ctx.claimStatements(c, 202, responseBody),
+        ];
+        try {
+          await deps.db.batch(batch);
+        } catch (error) {
+          if (isConstraintError(error)) {
+            const freshLease = await repos.leases.getById(lease.id);
+            if (freshLease !== null && freshLease.tokenHash !== lease.tokenHash) {
+              return problem(c, "lease-token-invalid", {
+                detail: "lease token was replaced before the submission committed",
+              });
+            }
+            if (freshLease !== null && isLeaseExpired(freshLease, clock.now())) {
+              await lazilyExpire(freshLease);
+              return problem(c, "lease-expired", { detail: "lease has expired" });
+            }
+            if (freshLease !== null) {
+              const freshActive = checkLeaseActive(freshLease, clock.now());
+              if (!freshActive.allowed) {
+                return problem(c, "lease-inactive", { detail: freshActive.message });
+              }
+            }
+            const fresh = await repos.workItems.getById(workItem.id);
+            return problem(c, "state-conflict", {
+              detail: `work item in status "${fresh?.status ?? "unknown"}" cannot accept a submission`,
+            });
+          }
+          throw error;
+        }
+        await ctx.notifyMutation(guard.project.id);
+        return c.json(responseBody, 202);
+      }
+
       const command202 = ctx.commandStatements({
         project: guard.project,
         correlationId,
@@ -1142,6 +1298,14 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
     }
     return null;
   };
+
+  /** A chapter file's prose, with the frontmatter block removed. */
+  function chapterBodyOf(source: string): string {
+    const normalized = source.replace(/\r\n/g, "\n");
+    if (!normalized.startsWith("---\n")) return normalized;
+    const close = normalized.indexOf("\n---\n", 3);
+    return close === -1 ? normalized : normalized.slice(close + 5);
+  }
 }
 
 /**

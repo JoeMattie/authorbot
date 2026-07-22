@@ -351,7 +351,7 @@ describe("apply pipeline: happy path (exit criterion 3)", () => {
     }
   });
 
-  it("chapter_replacement applies at base == current, reusing ids for unchanged blocks", async () => {
+  it("chapter_replacement creates an immutable proposal without changing the chapter", async () => {
     const harness = await makePhase4Harness();
     try {
       const ctx = await claimed(harness, { type: "revise_chapter" });
@@ -364,15 +364,65 @@ describe("apply pipeline: happy path (exit criterion 3)", () => {
       ].join("\n");
       const accepted = await submit(ctx, { type: "chapter_replacement", content: newBody });
       expect(accepted.status).toBe(202);
+      expect(accepted.body["status"]).toBe("pending_review");
+      expect(accepted.body["operationId"]).toBeNull();
+      const proposalId = accepted.body["proposalId"] as string;
+      const submissionId = accepted.body["submissionId"] as string;
+
+      // Submission receipt is review-only: no Git write, no revision bump.
       const chapterFile = harness.repoFiles.get(CHAPTER_PATH)!;
-      expect(chapterFile).toContain("revision: 4");
-      expect(chapterFile).toContain("A third paragraph arrives.");
-      // Byte-identical blocks keep their marker ids (§5).
+      expect(chapterFile).toContain("revision: 3");
+      expect(chapterFile).not.toContain("A third paragraph arrives.");
       expect(chapterFile).toContain(`id="${BLOCK_ID_1}"`);
       expect(chapterFile).toContain(`id="${BLOCK_ID_2}"`);
       const chapter = await harness.repos.chapters.getById(CHAPTER_ID);
-      expect(chapter?.revision).toBe(4);
-      expect(chapter?.blockIds).toHaveLength(3);
+      expect(chapter?.revision).toBe(3);
+      expect(harness.writer.commits).toHaveLength(0);
+
+      const proposal = await harness.repos.revisionProposals.getById(proposalId);
+      expect(proposal).toMatchObject({
+        id: proposalId,
+        origin: "work_submission",
+        proposalType: "chapter_replacement",
+        workItemId: ctx.workItemId,
+        submissionId,
+        baseRevision: 3,
+        proposedContent: newBody,
+        status: "pending_review",
+      });
+      expect(proposal?.baseContent).toContain("The drift appeared on the ridge at dawn.");
+      expect(proposal?.baseContent).not.toContain("authorbot:block");
+      expect((await harness.repos.submissions.getById(submissionId))?.state).toBe("received");
+      expect((await harness.repos.workItems.getById(ctx.workItemId))?.status).toBe("submitted");
+      expect(await harness.repos.leaseDocumentSnapshots.getByLeaseId(ctx.leaseId)).toBeNull();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps the lease's original review base when the repository moves before submission", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const ctx = await claimed(harness, { type: "revise_chapter" });
+      const moved = ctx.source
+        .replace("revision: 3", "revision: 4")
+        .replace(BLOCK_2_TEXT, "The town now speaks of it openly.");
+      await externalEdit(harness, moved, 4);
+      const proposed = `${BLOCK_2_TEXT}\n\nA replacement ending.`;
+
+      const accepted = await submit(ctx, {
+        type: "chapter_replacement",
+        content: proposed,
+      });
+      expect(accepted.status).toBe(202);
+      const proposal = await harness.repos.revisionProposals.getById(
+        accepted.body["proposalId"] as string,
+      );
+      expect(proposal?.baseRevision).toBe(3);
+      expect(proposal?.baseContent).toContain("The drift appeared on the ridge at dawn.");
+      expect(proposal?.baseContent).not.toContain("The town now speaks of it openly.");
+      expect(harness.repoFiles.get(CHAPTER_PATH)).toBe(moved);
+      expect(harness.writer.commits).toHaveLength(0);
     } finally {
       harness.close();
     }
