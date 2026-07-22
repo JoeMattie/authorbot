@@ -59,6 +59,69 @@ function makeGitOperation(seeded: Seeded): GitOperationRecord {
 }
 
 describe("revision proposal persistence", () => {
+  it("retains and consumes the exact whole-chapter lease snapshot", async () => {
+    const s = await seedBasics();
+    const annotationId = uuidv7();
+    const workItemId = uuidv7();
+    const leaseId = uuidv7();
+    await s.repos.annotations.insert({
+      id: annotationId,
+      projectId: s.project.id,
+      chapterId: s.chapter.id,
+      kind: "suggestion",
+      scope: "chapter",
+      chapterRevision: s.chapter.revision,
+      target: null,
+      authorActorId: s.actor.id,
+      body: "Revise the full chapter.",
+      status: "work_item_created",
+      gitOperationId: null,
+      supersededBy: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await s.repos.workItems.insert({
+      id: workItemId,
+      projectId: s.project.id,
+      type: "revise_chapter",
+      status: "leased",
+      sourceAnnotationId: annotationId,
+      chapterId: s.chapter.id,
+      baseRevision: s.chapter.revision,
+      target: null,
+      priority: "normal",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await s.repos.leases.claim({
+      id: leaseId,
+      projectId: s.project.id,
+      workItemId,
+      actorId: s.actor.id,
+      tokenHash: "0".repeat(64),
+      issuedAt: NOW,
+      expiresAt: "2026-07-19T18:30:00Z",
+      maxExpiresAt: "2026-07-19T22:00:00Z",
+      renewalCount: 0,
+      releasedAt: null,
+      revokedAt: null,
+    });
+    const snapshot = {
+      leaseId,
+      projectId: s.project.id,
+      chapterId: s.chapter.id,
+      baseRevision: s.chapter.revision,
+      baseContentHash: "sha256:base",
+      source: "---\ntitle: Signal\n---\n\nBefore.\n",
+      createdAt: NOW,
+    };
+    await s.repos.leaseDocumentSnapshots.insert(snapshot);
+    expect(await s.repos.leaseDocumentSnapshots.getByLeaseId(leaseId)).toEqual(snapshot);
+    expect(await s.repos.leaseDocumentSnapshots.delete(leaseId)).toBe(true);
+    expect(await s.repos.leaseDocumentSnapshots.getByLeaseId(leaseId)).toBeNull();
+    s.db.close();
+  });
+
   it("inserts, reads, filters, pages, and resolves work/submission identities", async () => {
     const s = await seedBasics();
     const workItemId = uuidv7();

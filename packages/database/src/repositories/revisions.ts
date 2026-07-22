@@ -1,10 +1,56 @@
 /** Persistence for immutable chapter/summary proposals (migration 0011). */
 import type { SqlDatabase, SqlRow, SqlStatement, SqlValue } from "../sql.js";
 import type {
+  LeaseDocumentSnapshotRecord,
   RevisionProposalRecord,
   RevisionProposalStatus,
 } from "../records.js";
 import type { ListPage } from "./content.js";
+
+export class LeaseDocumentSnapshotsRepository {
+  constructor(private readonly db: SqlDatabase) {}
+
+  insertStatement(record: LeaseDocumentSnapshotRecord): SqlStatement {
+    return this.db
+      .prepare(
+        `INSERT INTO lease_document_snapshots
+           (lease_id, project_id, chapter_id, base_revision,
+            base_content_hash, source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        record.leaseId,
+        record.projectId,
+        record.chapterId,
+        record.baseRevision,
+        record.baseContentHash,
+        record.source,
+        record.createdAt,
+      );
+  }
+
+  async insert(record: LeaseDocumentSnapshotRecord): Promise<void> {
+    await this.insertStatement(record).run();
+  }
+
+  async getByLeaseId(leaseId: string): Promise<LeaseDocumentSnapshotRecord | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM lease_document_snapshots WHERE lease_id = ?`)
+      .bind(leaseId)
+      .first();
+    return row ? mapLeaseDocumentSnapshot(row) : null;
+  }
+
+  deleteStatement(leaseId: string): SqlStatement {
+    return this.db
+      .prepare(`DELETE FROM lease_document_snapshots WHERE lease_id = ?`)
+      .bind(leaseId);
+  }
+
+  async delete(leaseId: string): Promise<boolean> {
+    return (await this.deleteStatement(leaseId).run()).changes > 0;
+  }
+}
 
 export interface RevisionProposalListOptions extends ListPage {
   status?: RevisionProposalStatus;
@@ -255,5 +301,17 @@ function mapRevisionProposal(row: SqlRow): RevisionProposalRecord {
     commitSha: row["commit_sha"] === null ? null : String(row["commit_sha"]),
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
+  };
+}
+
+function mapLeaseDocumentSnapshot(row: SqlRow): LeaseDocumentSnapshotRecord {
+  return {
+    leaseId: String(row["lease_id"]),
+    projectId: String(row["project_id"]),
+    chapterId: String(row["chapter_id"]),
+    baseRevision: Number(row["base_revision"]),
+    baseContentHash: String(row["base_content_hash"]),
+    source: String(row["source"]),
+    createdAt: String(row["created_at"]),
   };
 }

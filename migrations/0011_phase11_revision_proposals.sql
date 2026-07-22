@@ -2,6 +2,23 @@
 -- maintainer review lifecycle. This is an expand-only migration: the Worker
 -- already deployed before this migration does not know this table exists.
 
+-- A whole-chapter claimant receives the exact source it is revising. Retain
+-- that snapshot until submission so a proposal can still show its real base
+-- after the repository head moves. It is removed once copied into the
+-- immutable proposal; abandoned lease snapshots can be purged with leases.
+CREATE TABLE lease_document_snapshots (
+  lease_id              TEXT PRIMARY KEY REFERENCES leases (id) ON DELETE CASCADE,
+  project_id            TEXT NOT NULL REFERENCES projects (id),
+  chapter_id            TEXT NOT NULL,
+  base_revision         INTEGER NOT NULL CHECK (base_revision >= 1),
+  base_content_hash     TEXT NOT NULL,
+  source                TEXT NOT NULL,
+  created_at            TEXT NOT NULL
+);
+
+CREATE INDEX idx_lease_document_snapshots_project
+  ON lease_document_snapshots (project_id, created_at);
+
 CREATE TABLE revision_proposals (
   id                    TEXT PRIMARY KEY,
   project_id            TEXT NOT NULL REFERENCES projects (id),

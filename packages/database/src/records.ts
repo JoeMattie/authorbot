@@ -600,6 +600,17 @@ export interface RateLimitCounterRecord {
 // Phase 11: review-gated chapter and summary revisions (migration 0011)
 // ---------------------------------------------------------------------------
 
+/** Exact chapter source delivered in a whole-chapter lease task bundle. */
+export interface LeaseDocumentSnapshotRecord {
+  leaseId: string;
+  projectId: string;
+  chapterId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  source: string;
+  createdAt: string;
+}
+
 /** The content surface replaced by a revision proposal. */
 export type RevisionProposalType = "chapter_replacement" | "chapter_summary";
 

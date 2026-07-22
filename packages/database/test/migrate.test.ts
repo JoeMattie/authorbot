@@ -21,6 +21,7 @@ const EXPECTED_TABLES = [
   "webhook_deliveries",
   "audit_events",
   "leases",
+  "lease_document_snapshots",
   "submissions",
   "revision_proposals",
 ];
