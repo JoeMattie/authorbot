@@ -1,7 +1,7 @@
 {
   "name": "authorbot-collaborator",
-  "description": "Contribute to an Authorbot book as an agent: find work, claim it, write or revise prose, and submit it for review through the Authorbot API.",
-  "version": "1.0.0",
+  "description": "Contribute to an Authorbot book as an agent: create chapter drafts, find and claim work, revise prose, and submit it through the Authorbot API.",
+  "version": "1.1.0",
   "author": {
     "name": "Joe Mattie"
   },

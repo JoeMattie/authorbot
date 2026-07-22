@@ -98,7 +98,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
   }
 
   async function compose(context: ChapterComposeContext): Promise<ChapterComposeOutcome> {
-    const { payload, branch, actorRef } = context;
+    const { payload, branch, actorRef, actorName } = context;
     const intent = payload.intent as ChapterWriteIntent;
 
     if (payload.action === "create") {
@@ -133,7 +133,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
         revision: fm.data.revision + 1,
         ...(intent.title === undefined ? {} : { title: intent.title }),
         ...(intent.summary === undefined ? {} : { summary: intent.summary }),
-        authors: withAuthor(fm.data.authors, actorRef),
+        authors: withAuthor(fm.data.authors, actorRef, actorName),
       };
       // Body unchanged (a title/summary-only revise) keeps the committed body
       // byte-for-byte, markers included - re-running the replacement would be
@@ -173,7 +173,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
     context: ChapterComposeContext,
     intent: ChapterWriteIntent,
   ): Promise<ChapterComposeOutcome> {
-    const { payload, branch, actorRef } = context;
+    const { payload, branch, actorRef, actorName } = context;
     if (typeof intent.title !== "string" || typeof intent.body !== "string") {
       throw new Error("chapter create intent requires a title and a body");
     }
@@ -181,7 +181,13 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
     if (existing.some((row) => row.id === payload.chapterId)) {
       throw new Error(`chapter ${payload.chapterId} already exists`);
     }
-    const order = (await maxOrder(branch, existing)) + ORDER_STEP;
+    const unknownOrder = existing.find((row) => row.order === null);
+    if (unknownOrder !== undefined) {
+      throw new Error(
+        `chapter ${unknownOrder.id} has no projected order; refresh the repository projection`,
+      );
+    }
+    const order = Math.max(0, ...existing.map((row) => row.order as number)) + ORDER_STEP;
     const directory = chapterDirectory(existing);
     const taken = new Set(existing.map((row) => row.slug));
 
@@ -222,7 +228,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
       order,
       status: "draft",
       revision: 1,
-      authors: [{ actor: actorRef }],
+      authors: [chapterAuthor(actorRef, actorName)],
       ...(intent.summary === undefined ? {} : { summary: intent.summary }),
     });
     const head = renderFrontmatter(frontmatter);
@@ -254,34 +260,13 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
       content,
       slug: fm.slug,
       title: fm.title,
+      order: fm.order,
       status: fm.status,
       revision: fm.revision,
       contentHash: `sha256:${await sha256Hex(content)}`,
       blockIds: parsed.blocks.markers.filter((m) => m.valid).map((m) => m.id),
       message,
     };
-  }
-
-  /**
-   * Highest `order` among committed chapters. Read from the repository rather
-   * than the projection because the projection has no `order` column - the
-   * files are the only place the number lives. One read per chapter, on a
-   * path an author takes by hand a few times a book.
-   */
-  async function maxOrder(
-    branch: string,
-    existing: readonly { path: string }[],
-  ): Promise<number> {
-    let highest = 0;
-    for (const row of existing) {
-      const source = await readFile(branch, row.path);
-      if (source === null) continue;
-      const fm = chapterFrontmatterSchema.safeParse(parseChapterMarkdown(source).frontmatter);
-      if (fm.success && fm.data.order > highest) {
-        highest = fm.data.order;
-      }
-    }
-    return highest;
   }
 
   return { compose };
@@ -405,12 +390,25 @@ function chapterDirectory(existing: readonly { path: string }[]): string {
 
 /** Append the actor to `authors` when new, preserving existing order. */
 function withAuthor(
-  authors: readonly { actor: string }[],
+  authors: ReadonlyArray<ChapterFrontmatter["authors"][number]>,
   actorRef: string,
-): { actor: string }[] {
-  return authors.some((author) => author.actor === actorRef)
-    ? [...authors]
-    : [...authors, { actor: actorRef }];
+  actorName?: string,
+): ChapterFrontmatter["authors"] {
+  const known = authors.some((author) => author.actor === actorRef);
+  return known
+    ? authors.map((author) =>
+        author.actor === actorRef && actorName !== undefined
+          ? { ...author, name: actorName }
+          : { ...author },
+      )
+    : [...authors, chapterAuthor(actorRef, actorName)];
+}
+
+function chapterAuthor(
+  actorRef: string,
+  actorName?: string,
+): ChapterFrontmatter["authors"][number] {
+  return { actor: actorRef, ...(actorName === undefined ? {} : { name: actorName }) };
 }
 
 /**

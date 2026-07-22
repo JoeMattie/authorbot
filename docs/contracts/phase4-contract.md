@@ -108,7 +108,8 @@ applying` in the command, then the pipeline below.
   `work_item_conflict`. SSE + poll as Phase 3.
 - Attribution: `.authorbot/attribution/<chapter-id>.yml` appends
   `{ revision, actor, work_item_id, commit }` in the same commit as the
-  edit. Chapter frontmatter `authors` gains the actor if new (stable order).
+  edit. Chapter frontmatter `authors` gains the actor if new (stable order),
+  plus the agent token's display name when the actor is an agent.
 - Leases are **operational-only** (never in Git, design §13). Submissions:
   DB rows; content retained until completed/conflict resolution + 7 days
   (documented; no purge job yet). Rebuild restores work-item/annotation

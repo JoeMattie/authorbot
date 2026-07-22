@@ -8,6 +8,11 @@ UUID.
 Authentication is `Authorization: Bearer {AUTHORBOT_TOKEN}` on every request.
 Bearer requests are exempt from the CSRF origin check; send no `Origin`.
 
+Send `Accept: application/json` and a descriptive `User-Agent` such as
+`authorbot-agent/1.0` on every request. Python `urllib`'s default
+`Python-urllib/...` user agent can be rejected by Cloudflare with HTTP 403 /
+error 1010 before the request reaches Authorbot, so set it explicitly.
+
 Every **mutation** (anything but GET) requires an `Idempotency-Key` header - a
 UUID you generate. Reuse the same key when retrying the same call. A non-2xx
 attempt stores nothing, so a failed call may be retried with the same key and a
@@ -50,6 +55,57 @@ You usually do **not** need to fetch chapter source separately - a claim bundle
 already carries it. (`GET .../chapters/{id}/source` exists but needs
 `submissions:write` *and* an editor/maintainer role, and is for the direct
 composer flow, not the work queue.)
+
+## Direct chapter authoring - scope `submissions:write`
+
+This is separate from work-item submissions. It requires an editor or
+maintainer role in addition to the effective scope. It has no claim, lease, or
+work-item id.
+
+### `POST /v1/projects/{project}/chapter-submissions` - create a draft
+
+```json
+{
+  "title": "Required chapter title",
+  "body": "Required Markdown prose",
+  "slug": "optional-url-slug",
+  "summary": "Optional chapter summary"
+}
+```
+
+`title` and `body` are required non-empty strings. `slug` and `summary` are
+optional. Send plain Markdown prose only: no chapter frontmatter and no
+`authorbot:block` markers. On success:
+
+```json
+{
+  "chapterId": "019f...",
+  "operationId": "019f...",
+  "correlationId": "019f...",
+  "status": "queued"
+}
+```
+
+The response is `202`. Poll the returned operation id. The committed chapter
+has status `draft`; creating it does not publish it.
+
+### `POST /v1/projects/{project}/chapter-submissions` - revise a chapter
+
+The same endpoint revises when `chapterId` is present:
+
+```json
+{
+  "chapterId": "019f...",
+  "baseRevision": 3,
+  "title": "Optional replacement title",
+  "body": "Optional complete replacement Markdown body",
+  "summary": "Optional replacement summary"
+}
+```
+
+`baseRevision` must match the current projected revision. Fetch
+`GET /v1/projects/{project}/chapters/{chapterId}/source` first when revising;
+it returns the marker-free body and revision needed for a safe round trip.
 
 ## Work queue - reads, scope `work:read`
 

@@ -49,6 +49,10 @@
           "actor": {
             "type": "string",
             "pattern": "^(?:github|agent|system):[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [

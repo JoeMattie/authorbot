@@ -587,6 +587,11 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
         status: fm.status as SiteChapter["status"],
         revision: fm.revision,
         authors: fm.authors.map((author) => author.actor),
+        authorLabels: fm.authors.map((author) => {
+          const [kind, identifier = author.actor] = author.actor.split(":", 2);
+          const label = author.name ?? identifier;
+          return `${label}${kind === "agent" ? " (agent)" : ""}`;
+        }),
         path: routePath,
         href: `${basePath}${routePath}/`,
         html: chapter.html,

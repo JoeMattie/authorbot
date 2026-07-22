@@ -179,6 +179,8 @@ export interface ChapterProjectionRecord {
   path: string;
   slug: string;
   title: string;
+  /** Frontmatter order; null only during migration before the next rebuild. */
+  order: number | null;
   status: ChapterStatus;
   revision: number;
   contentHash: string;

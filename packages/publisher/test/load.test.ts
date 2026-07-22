@@ -34,6 +34,8 @@ interface ChapterSpec {
   title?: string;
   /** File name override (defaults to `<slug>.md`). */
   file?: string;
+  author?: string;
+  authorName?: string;
 }
 
 async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
@@ -64,7 +66,8 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
         `status: ${chapter.status}`,
         "revision: 1",
         "authors:",
-        "  - actor: github:someone",
+        `  - actor: ${chapter.author ?? "github:someone"}`,
+        ...(chapter.authorName === undefined ? [] : [`    name: ${chapter.authorName}`]),
         "---",
         "",
         `<!-- authorbot:block id="${BLOCK}" -->`,
@@ -77,6 +80,24 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
 }
 
 describe("loadSiteModel - chapter selection and ordering", () => {
+  it("uses a captured agent token name for the public byline", async () => {
+    const repo = await makeRepo([
+      {
+        id: CH[0],
+        slug: "agent-draft",
+        order: 10,
+        status: "published",
+        author: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
+        authorName: "continuity-reader",
+      },
+    ]);
+    const { model } = await loadSiteModel({ repoPath: repo });
+    expect(model.chapters[0]?.authors).toEqual([
+      "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
+    ]);
+    expect(model.chapters[0]?.authorLabels).toEqual(["continuity-reader (agent)"]);
+  });
+
   it("includes only published chapters by default, sorted by order", async () => {
     const repo = await makeRepo([
       { id: CH[0], slug: "third", order: 30, status: "published" },

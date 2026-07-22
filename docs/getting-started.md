@@ -136,6 +136,9 @@ The first paragraph begins here.
 The second paragraph follows.
 ```
 
+Authorbot may add `name` beside an agent author. The actor reference remains
+the durable attribution identity; the name is what the published byline shows.
+
 Validate before you commit anything:
 
 ```sh

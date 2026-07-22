@@ -40,6 +40,20 @@ describe("applyChapterFrontmatterUpdate", () => {
     expect(content.endsWith(`---\n\n${body}`)).toBe(true);
   });
 
+  it("stores an agent token name without weakening the durable actor reference", () => {
+    const source = chapterSourceFixture(CHAPTER_ID, 2);
+    const { frontmatter, content } = applyChapterFrontmatterUpdate(source, {
+      revision: 3,
+      author: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
+      authorName: "continuity-reader",
+    });
+    expect(frontmatter.authors.at(-1)).toEqual({
+      actor: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
+      name: "continuity-reader",
+    });
+    expect(content).toContain("name: continuity-reader");
+  });
+
   it("preserves YAML comments and untouched scalars", () => {
     const source = chapterSourceFixture(CHAPTER_ID, 2).replace(
       "title: Signal",

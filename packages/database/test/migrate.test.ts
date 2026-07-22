@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -64,6 +64,68 @@ describe("migration runner", () => {
       .all<{ name: string; applied_at: string }>();
     expect(rows.map((r) => r.name)).toContain("0001_phase2.sql");
     expect(rows.every((r) => typeof r.applied_at === "string")).toBe(true);
+    db.close();
+  });
+
+  it("backfills chapter order at ten-point spacing for an existing book", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "authorbot-order-migration-"));
+    const files = await listMigrationFiles(MIGRATIONS_DIR);
+    for (const name of files.filter((name) => name < "0008_")) {
+      await copyFile(join(MIGRATIONS_DIR, name), join(dir, name));
+    }
+    const db = openSqliteDatabase(":memory:");
+    await applyMigrations(db, dir);
+    await db
+      .prepare(
+        `INSERT INTO projects
+           (id, slug, repo, default_branch, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        "project",
+        "book",
+        "owner/book",
+        "main",
+        "active",
+        "2026-07-21T00:00:00Z",
+        "2026-07-21T00:00:00Z",
+      )
+      .run();
+    const insert = (id: string, path: string, slug: string) =>
+      db
+        .prepare(
+          `INSERT INTO chapters
+             (id, project_id, path, slug, title, status, revision, content_hash,
+              head_commit, last_published_commit, block_ids, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, '[]', ?)`,
+        )
+        .bind(
+          id,
+          "project",
+          path,
+          slug,
+          slug,
+          "published",
+          1,
+          `sha256:${id}`,
+          "2026-07-21T00:00:00Z",
+        )
+        .run();
+    await insert("b", "chapters/002-second.md", "second");
+    await insert("a", "chapters/001-first.md", "first");
+
+    await copyFile(
+      join(MIGRATIONS_DIR, "0008_chapter_order.sql"),
+      join(dir, "0008_chapter_order.sql"),
+    );
+    await applyMigrations(db, dir);
+    const rows = await db
+      .prepare(`SELECT path, chapter_order FROM chapters ORDER BY path`)
+      .all<{ path: string; chapter_order: number }>();
+    expect(rows).toEqual([
+      { path: "chapters/001-first.md", chapter_order: 10 },
+      { path: "chapters/002-second.md", chapter_order: 20 },
+    ]);
     db.close();
   });
 

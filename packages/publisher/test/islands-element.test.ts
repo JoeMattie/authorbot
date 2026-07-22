@@ -362,6 +362,133 @@ describe("authorbot-collab element", () => {
     expect(document.activeElement).toBe(rebuilt);
   });
 
+  it("clears and closes the note composer before its POST finishes", async () => {
+    let finishPost: ((response: Response) => void) | undefined;
+    const pendingPost = new Promise<Response>((resolve) => {
+      finishPost = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+              scopes: ["chapters:read", "annotations:read", "annotations:write"],
+            }),
+          } as Response;
+        }
+        if (init?.method === "POST" && url.includes("/chapters/") && url.endsWith("/annotations")) {
+          return pendingPost;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [], nextCursor: null }),
+        } as Response;
+      }),
+    );
+
+    mount();
+    await expect.poll(() => document.querySelector(".ab-annotate")).toBeTruthy();
+    (document.querySelector(".ab-annotate") as HTMLButtonElement).click();
+    const form = document.querySelector(".ab-composer") as HTMLFormElement;
+    const textarea = form.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "Close this composer immediately.";
+    textarea.dispatchEvent(new Event("input"));
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    // The fetch promise is deliberately unresolved. Closing cannot depend on
+    // the round trip or operation polling.
+    expect(document.querySelector(".ab-composer")).toBeNull();
+    finishPost?.({
+      ok: true,
+      status: 202,
+      json: async () => ({ annotationId: "ann-new", operationId: "op-new" }),
+    } as Response);
+    await expect.poll(() => document.querySelector(".ab-card")?.textContent).toContain(
+      "Close this composer immediately.",
+    );
+  });
+
+  it("clears and closes the reply form before its POST finishes", async () => {
+    let finishPost: ((response: Response) => void) | undefined;
+    const pendingPost = new Promise<Response>((resolve) => {
+      finishPost = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+              scopes: ["chapters:read", "annotations:read", "annotations:write"],
+            }),
+          } as Response;
+        }
+        if (init?.method === "POST" && url.endsWith("/annotations/ann-r/replies")) {
+          return pendingPost;
+        }
+        if (url.includes(`/chapters/${CHAPTER_ID}/annotations`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: [{
+                id: "ann-r",
+                chapterId: CHAPTER_ID,
+                kind: "comment",
+                scope: "block",
+                chapterRevision: 3,
+                target: { blockId: BLOCK_ID },
+                authorActorId: "actor-1",
+                body: "Existing note",
+                status: "open",
+                gitOperationId: null,
+                createdAt: "2026-07-19T00:00:00Z",
+              }],
+              nextCursor: null,
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [], nextCursor: null }),
+        } as Response;
+      }),
+    );
+
+    mount();
+    await expect.poll(() => document.querySelector(".ab-card")).toBeTruthy();
+    const reply = [...document.querySelectorAll<HTMLButtonElement>(".ab-card button")].find(
+      (button) => button.textContent === "Reply",
+    ) as HTMLButtonElement;
+    reply.click();
+    const form = document.querySelector(".ab-reply-form") as HTMLFormElement;
+    const textarea = form.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "Close this reply immediately.";
+    textarea.dispatchEvent(new Event("input"));
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(document.querySelector(".ab-reply-form")).toBeNull();
+    finishPost?.({
+      ok: true,
+      status: 202,
+      json: async () => ({ replyId: "reply-new", operationId: "op-reply" }),
+    } as Response);
+    await expect.poll(() => document.querySelector(".ab-reply")?.textContent).toContain(
+      "Close this reply immediately.",
+    );
+  });
+
   it("keeps polling through a transient conflict state instead of settling failed (§2.5)", async () => {
     vi.useFakeTimers();
     let operationCalls = 0;

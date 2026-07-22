@@ -79,7 +79,9 @@ Field shapes follow design §8.2 (book), §8.3 (chapter), §8.5 (story graph),
 config). Where the design is silent:
 
 - Chapter `status`: `draft|proposed|published|archived`; `revision`: integer
-  >= 1; `authors`: non-empty list of `{ actor }`.
+  >= 1; `authors`: non-empty list of `{ actor, name? }`. `actor` is the
+  durable identity; `name` is an optional display label captured for an agent
+  token so public bylines do not expose its opaque actor id.
 - Character frontmatter: `schema`, `id` (`character:<slug>`), `name`; optional
   `aliases`, `summary`, `status`.
 - Story graph node `type`: `premise|arc|part|chapter|scene|beat|custom`;

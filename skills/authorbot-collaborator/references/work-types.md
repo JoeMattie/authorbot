@@ -37,8 +37,12 @@ preserve the intent of both, and if they genuinely disagree on canon, that is a
 question for an annotation, not a merge you decide (safety rule 4).
 
 ## `write_chapter` and `planning`
-You can claim these, but there is **no submission endpoint for them** -
-submitting returns `422 submission-not-supported`. They exist for a human or a
-future flow. If you claim one, release it (`POST .../lease/release`) rather than
-holding a lease you cannot discharge. Prefer to filter them out when scanning
-the queue.
+You can claim these, but there is **no work-item submission endpoint for
+them** - submitting returns `422 submission-not-supported`. If you claim one,
+release it (`POST .../lease/release`) rather than holding a lease you cannot
+discharge. Prefer to filter them out when scanning the queue.
+
+This does not mean an agent can never start a chapter. When the user explicitly
+asks for a new draft, use the separate direct authoring endpoint
+`POST /v1/projects/{project}/chapter-submissions` with `{ title, body, slug?,
+summary? }`. That flow has no claim or lease and is documented in `api.md`.

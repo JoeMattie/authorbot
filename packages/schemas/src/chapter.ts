@@ -30,7 +30,15 @@ export const chapterFrontmatterSchema = z.strictObject({
   status: chapterStatusSchema,
   revision: z.number().int().min(1),
   published_at: timestampSchema.optional(),
-  authors: z.array(z.strictObject({ actor: actorRefSchema })).min(1),
+  authors: z
+    .array(
+      z.strictObject({
+        actor: actorRefSchema,
+        /** Display label captured when the actor is an agent token. */
+        name: z.string().min(1).optional(),
+      }),
+    )
+    .min(1),
   summary: z.string().optional(),
   timeline_refs: z.array(nodeIdOf("event")).optional(),
   character_refs: z.array(nodeIdOf("character")).optional(),

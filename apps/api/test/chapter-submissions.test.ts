@@ -28,6 +28,7 @@ import {
   mintToken,
 } from "./helpers.js";
 import {
+  CHAPTER_PATH,
   CHAPTER_SOURCE,
   makePhase4Harness,
   type Phase4Harness,
@@ -153,6 +154,29 @@ describe("create (contract §3.5)", () => {
       parseChapterMarkdown(second.source).frontmatter,
     );
     expect(secondFm.order).toBe(30);
+  });
+
+  /**
+   * Regression: finding the last order used to read every existing chapter
+   * from GitHub. Each read walks the ref, commit and tree, so a modest book
+   * exhausted a Worker's external-subrequest allowance before it could write
+   * the new draft. Order now comes from the D1 projection; the only source
+   * probe here should be for the proposed new path.
+   */
+  it("does not reread existing chapter files to assign the next order", async () => {
+    const reads: string[] = [];
+    const originalRead = harness.writer.readFile.bind(harness.writer);
+    harness.writer.readFile = async (branch, path) => {
+      reads.push(path);
+      return originalRead(branch, path);
+    };
+
+    const created = await createChapter({ title: "Projected Order", body: PROSE });
+    const fm = chapterFrontmatterSchema.parse(parseChapterMarkdown(created.source).frontmatter);
+
+    expect(fm.order).toBe(20);
+    expect(reads).not.toContain(CHAPTER_PATH);
+    expect(reads).toContain(created.path);
   });
 
   it("derives a kebab-case, path-safe slug from the title", () => {
@@ -526,6 +550,14 @@ describe("authorization matrix (contract §3.5)", () => {
       },
     );
     expect(response.status).toBe(202);
+    const accepted = (await response.json()) as { chapterId: string };
+    await harness.mirror.drain(harness.projectId);
+    const chapter = await harness.repos.chapters.getById(accepted.chapterId);
+    const source = harness.repoFiles.get(chapter?.path ?? "") ?? "";
+    const fm = chapterFrontmatterSchema.parse(parseChapterMarkdown(source).frontmatter);
+    expect(fm.authors).toEqual([
+      expect.objectContaining({ name: "author-agent" }),
+    ]);
   });
 });
 

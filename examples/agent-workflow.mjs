@@ -67,7 +67,7 @@ function fail(message) {
 }
 
 function headers(mutation) {
-  const base = { accept: "application/json" };
+  const base = { accept: "application/json", "user-agent": "authorbot-agent/1.0" };
   if (bearer !== null) {
     base.authorization = `Bearer ${bearer}`;
   }
@@ -116,7 +116,12 @@ function problemLine(result) {
 async function devLogin(login, role) {
   const response = await fetch(`${api}/v1/dev/login`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json", origin: api },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "authorbot-agent/1.0",
+      origin: api,
+    },
     body: JSON.stringify({ login, role }),
   });
   if (!response.ok) {

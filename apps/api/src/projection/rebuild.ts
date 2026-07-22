@@ -245,6 +245,7 @@ export async function rebuildProjection(
         path: chapter.path,
         slug: chapter.frontmatter.slug,
         title: chapter.frontmatter.title,
+        order: chapter.frontmatter.order,
         status: chapter.frontmatter.status,
         revision: chapter.frontmatter.revision,
         contentHash: chapter.contentHash,
