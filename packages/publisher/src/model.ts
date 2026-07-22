@@ -93,6 +93,8 @@ export interface SiteCharacter {
   summary?: string;
   status?: string;
   href: string;
+  /** Repository-relative canonical character document, for authorized editing. */
+  sourcePath: string;
   /** Sanitized, pre-rendered character body HTML. */
   html: string;
   /** Included chapters whose `character_refs` mention this character. */
@@ -151,6 +153,11 @@ export interface SiteModel {
   timeline: { calendar?: string; events: TimelineRow[] } | null;
   /** Characters sorted by name. */
   characters: SiteCharacter[];
+  /** Canonical repository paths used by the authorized planning editors. */
+  planningDocuments: {
+    outlinePath: string;
+    timelinePath: string;
+  };
   /** Collaboration-islands config, or null for a script-free build. */
   collab: SiteCollab | null;
 }

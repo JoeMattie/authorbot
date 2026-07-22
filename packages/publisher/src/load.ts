@@ -320,6 +320,7 @@ async function loadCharacters(
       name: record.name,
       aliases: record.aliases ?? [],
       href: `${basePath}story/characters/${slug}/`,
+      sourcePath: rel,
       html: renderAstToHtml(parsed.ast, { rawHtmlAllowed }),
       chapters: [],
     };
@@ -683,6 +684,7 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
     outline,
     timeline,
     characters: characters.map((entry) => entry.character),
+    planningDocuments: { outlinePath, timelinePath },
     collab: resolveCollab(book, options),
   };
   if (book.license !== undefined) {
