@@ -1031,6 +1031,12 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       const correlationId = c.get("correlationId");
 
       if (command.type === "chapter_replacement") {
+        const chapter = await repos.chapters.getById(workItem.chapterId);
+        if (chapter === null || chapter.projectId !== guard.project.id) {
+          return problem(c, "state-conflict", {
+            detail: "the work item's chapter is no longer in the project projection",
+          });
+        }
         const snapshot = await repos.leaseDocumentSnapshots.getByLeaseId(lease.id);
         if (
           snapshot === null ||
