@@ -17,7 +17,7 @@
 import { CollabApi, type Me, type TaskBundle, type WorkItem } from "./api.js";
 import { el, srOnly } from "./dom.js";
 import { tallyOrEmpty, tallySummary } from "./vote-view.js";
-import { ClaimPanel, typeLabel, type ChapterRef } from "./work-claim.js";
+import { ClaimPanel, typeLabel, workTypeIcon, type ChapterRef } from "./work-claim.js";
 import {
   clearClaim,
   leaseStatus,
@@ -156,6 +156,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
     }
     this.cursor = result.value.nextCursor;
     this.moreWrap.hidden = this.cursor === null;
+    this.syncGlobalCount();
     this.status.hidden = this.count > 0;
     if (this.count === 0) {
       this.status.hidden = false;
@@ -212,6 +213,14 @@ export class AuthorbotWorkQueue extends HTMLElement {
     this.live.textContent = message;
   }
 
+  /** Keep the primary-nav Work badge honest as the API-backed queue changes. */
+  private syncGlobalCount(): void {
+    for (const badge of document.querySelectorAll<HTMLElement>("[data-work-count]")) {
+      badge.textContent = String(this.count);
+      badge.hidden = this.count === 0;
+    }
+  }
+
   private openPanel(claim: StoredClaim, restored: boolean): void {
     this.panel?.show(claim, { restored });
     this.panel?.root.scrollIntoView({ block: "start", behavior: "auto" });
@@ -223,28 +232,65 @@ export class AuthorbotWorkQueue extends HTMLElement {
     const chapter = this.cfg.chapters.get(item.chapterId);
 
     const head = el("div", "ab-work-head");
-    head.append(el("span", "ab-chip", typeLabel(item.type)));
+    const type = el("span", "ab-work-type");
+    type.append(workTypeIcon(item.type), document.createTextNode(typeLabel(item.type)));
+    head.append(type, el("span", "ab-work-status-pill ab-work-status-ready", "Ready"));
+    if (item.priority === "high") {
+      head.append(el("span", "ab-work-priority", "High priority"));
+    }
+    head.append(el("span", "ab-work-head-spacer"));
     if (chapter !== undefined) {
       const link = el("a", "ab-work-chapter", chapter.title);
       link.href = chapter.href;
-      head.append(link);
+      head.append(
+        link,
+        document.createTextNode(" · rev "),
+        el("span", "ab-work-base", String(item.baseRevision)),
+      );
     } else {
-      head.append(el("span", "ab-work-chapter", `Chapter ${item.chapterId}`));
+      head.append(
+        el("span", "ab-work-chapter", `Chapter ${item.chapterId}`),
+        document.createTextNode(" · rev "),
+        el("span", "ab-work-base", String(item.baseRevision)),
+      );
     }
     li.append(head);
 
-    const quote = item.target?.textQuote?.exact;
-    if (typeof quote === "string" && quote.length > 0) {
-      li.append(el("blockquote", "ab-quote", quote.length > 160 ? `${quote.slice(0, 159)}…` : quote));
-    }
+    li.append(
+      el(
+        "p",
+        "ab-work-context",
+        "This approved task is ready for an editor. Claim it to review the full context and acceptance criteria.",
+      ),
+    );
 
-    const meta = el("p", "ab-work-meta");
-    meta.append(
-      el("span", "ab-work-base", `Base revision ${item.baseRevision}`),
+    const source = el("p", "ab-work-source");
+    source.append(
+      document.createTextNode("Source: approved suggestion · created "),
+      document.createTextNode(formatCreatedAt(item.createdAt)),
       document.createTextNode(" · "),
       el("span", "ab-work-support", tallySummary(tallyOrEmpty(item.support))),
     );
-    li.append(meta);
+    li.append(source);
+
+    const quote = item.target?.textQuote?.exact;
+    if (typeof quote === "string" && quote.length > 0) {
+      const change = el("section", "ab-work-change");
+      change.append(el("h3", undefined, "Passage to revise"));
+      change.append(el("blockquote", "ab-quote", quote.length > 240 ? `${quote.slice(0, 239)}…` : quote));
+      li.append(change);
+    }
+
+    const criteria = el("section", "ab-work-criteria-preview");
+    criteria.append(el("h3", undefined, "Acceptance criteria"));
+    criteria.append(
+      el(
+        "p",
+        undefined,
+        "The complete checklist is included in the task bundle after you claim this work.",
+      ),
+    );
+    li.append(criteria);
 
     li.append(this.buildClaimAction(item));
     li.append(srOnly(`Ready work item: ${typeLabel(item.type)} on ${chapter?.title ?? item.chapterId}`));
@@ -286,7 +332,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
       );
       return wrap;
     }
-    const button = el("button", "ab-btn ab-primary ab-claim-btn", "Claim");
+    const button = el("button", "ab-btn ab-primary ab-claim-btn", "Claim this work");
     button.type = "button";
     button.setAttribute("aria-label", `Claim ${typeLabel(item.type)} work item`);
     const error = el("p", "ab-error ab-claim-error");
@@ -323,10 +369,15 @@ export class AuthorbotWorkQueue extends HTMLElement {
     // between claiming and submitting must not strand the lease.
     saveClaim(sessionStorageOrNull(), this.cfg.project, claim);
     const bundle = result.value;
-    this.announce(`Claimed. ${typeLabel(bundle.workItem.type)} - your lease is running.`);
+    this.announce(`Claimed. ${typeLabel(bundle.workItem.type)}, your lease is running.`);
     this.openPanel(claim, false);
     await this.reload();
   }
+}
+
+function formatCreatedAt(value: string): string {
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? value : new Date(timestamp).toISOString().slice(0, 10);
 }
 
 /**

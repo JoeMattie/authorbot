@@ -1,65 +1,89 @@
 ---
+import Icon from "../../components/Icon.astro";
 import Base from "../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
 
 const timeline = site.timeline;
+const locationName = (slug: string): string =>
+  slug
+    .split("-")
+    .filter(Boolean)
+    .map((part, index) => index === 0 ? part[0]?.toUpperCase() + part.slice(1) : part)
+    .join(" ");
 ---
 
-<Base title={`Timeline · ${site.book.title}`}>
-  <h1>Timeline</h1>
-  {
-    timeline === null ? (
-      <p>This book has no timeline.</p>
-    ) : (
-      <>
-        {timeline.calendar && <p class="summary">Calendar: {timeline.calendar}</p>}
-        <div class="table-scroll" role="region" aria-label="Timeline" tabindex="0">
-          <table class="timeline">
-            <thead>
-              <tr>
-                <th scope="col">Time</th>
-                <th scope="col">Event</th>
-                <th scope="col">Participants</th>
-                <th scope="col">Locations</th>
-                <th scope="col">Chapters</th>
-              </tr>
-            </thead>
-            <tbody>
-              {timeline.events.map((event) => (
-                <tr>
-                  <td>{event.displayTime}</td>
-                  <th scope="row">{event.title}</th>
-                  <td>
-                    {event.participants.map((participant, i) => (
-                      <>
-                        {i > 0 && ", "}
-                        {participant.href ? (
-                          <a href={participant.href}>{participant.name}</a>
-                        ) : (
-                          participant.name
-                        )}
-                      </>
-                    ))}
-                  </td>
-                  <td>{event.locations.join(", ")}</td>
-                  <td>
-                    {event.chapters.map((chapter, i) => (
-                      <>
-                        {i > 0 && ", "}
-                        {chapter.href ? (
-                          <a href={chapter.href}>{chapter.title}</a>
-                        ) : (
-                          chapter.title
-                        )}
-                      </>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>
-    )
-  }
+<Base title={`Timeline · ${site.book.title}`} activeNav="timeline">
+  <div class="story-page story-timeline-page">
+    <header class="story-page-header">
+      <p class="story-eyebrow">Timeline{timeline?.calendar ? ` · ${timeline.calendar}` : ""}</p>
+      <h1>When things happen</h1>
+      <p class="story-intro">
+        Story time, not writing time. Each event lists who was there, where, the chapter it
+        belongs to, and the facts it pins down.
+      </p>
+    </header>
+    {
+      timeline === null || timeline.events.length === 0 ? (
+        <p class="story-empty">This book has no timeline yet.</p>
+      ) : (
+        <ol class="story-timeline">
+          {timeline.events.map((event) => (
+            <li class="story-timeline-event">
+              <p class="story-timeline-time">{event.displayTime}</p>
+              <article class="story-timeline-card">
+                <h2>{event.title}</h2>
+                <div class="story-timeline-meta">
+                  {event.participants.length > 0 && (
+                    <span>
+                      <Icon name="users" size={14} />
+                      <span>
+                        {event.participants.map((participant, index) => (
+                          <>
+                            {index > 0 && ", "}
+                            {participant.href ? (
+                              <a href={participant.href}>{participant.name}</a>
+                            ) : (
+                              participant.name
+                            )}
+                          </>
+                        ))}
+                      </span>
+                    </span>
+                  )}
+                  {event.locations.length > 0 && (
+                    <span>
+                      <Icon name="map-pin" size={14} />
+                      <span>{event.locations.map(locationName).join(", ")}</span>
+                    </span>
+                  )}
+                  {event.chapters.length > 0 && (
+                    <span>
+                      <Icon name="book-open" size={14} />
+                      <span>
+                        {event.chapters.map((chapter, index) => (
+                          <>
+                            {index > 0 && ", "}
+                            {chapter.href ? (
+                              <a href={chapter.href}>{chapter.title}</a>
+                            ) : (
+                              chapter.title
+                            )}
+                          </>
+                        ))}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                {event.facts.length > 0 && (
+                  <ul class="story-timeline-facts">
+                    {event.facts.map((fact) => <li>{fact}</li>)}
+                  </ul>
+                )}
+              </article>
+            </li>
+          ))}
+        </ol>
+      )
+    }
+  </div>
 </Base>

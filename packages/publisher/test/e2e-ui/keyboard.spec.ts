@@ -31,6 +31,14 @@ test("keyboard-only annotation creation", async ({ page }) => {
     }
   }
   expect(reachedAnnotate).toBe(true);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const rect = (document.activeElement as HTMLElement).getBoundingClientRect();
+        return rect.bottom > 57 && rect.top < window.innerHeight;
+      }),
+    )
+    .toBe(true);
 
   // Enter opens the block composer with focus in the textarea (§16.6).
   await page.keyboard.press("Enter");
@@ -49,4 +57,17 @@ test("keyboard-only annotation creation", async ({ page }) => {
   await expect(card).toBeFocused();
   await expect(card).toHaveAttribute("aria-label", /^Comment by kb-kai /u);
   await expect(card.locator(".ab-status-open")).toBeVisible();
+});
+
+test("touch readers can discover the per-block annotation affordance", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true });
+  const page = await context.newPage();
+  await page.goto(chapterUrl("baseline"));
+  await devLogin(page, "touch-tess", "contributor");
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const annotate = page.locator(".ab-annotate").first();
+  await expect(annotate).toBeVisible();
+  await expect(annotate).toHaveCSS("opacity", "1");
+  await context.close();
 });

@@ -15,11 +15,11 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await devLogin(page, "mara-e2e", "contributor");
 
   // Select text inside the first block → the selection toolbar offers
-  // Comment / Suggest change (contract §2.2).
+  // Comment / Suggest an edit (contract §2.2).
   await selectInFirstBlock(page, 5, 40);
   const selTool = page.locator(".ab-seltool");
   await expect(selTool).toBeVisible();
-  await selTool.getByRole("button", { name: "Suggest change" }).click();
+  await selTool.getByRole("button", { name: "Suggest an edit" }).click();
 
   // Composer: quote captured from the selection, body, post.
   const composer = page.locator(".ab-composer");
@@ -34,15 +34,15 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await expect(card.locator(".ab-status-open")).toBeVisible();
   await expect(card).toHaveAttribute("aria-label", /^Suggestion by mara-e2e on “/u);
 
-  // Anchored to the right block: the card's top aligns with its anchor
-  // block's top (single card → no collision offset), and focusing the card
-  // highlights the block (contract §2.1).
+  // The exact selected text is highlighted and wired to its card in the
+  // sticky notes rail. Focusing the active card still exposes the broader
+  // block outline for keyboard and low-vision readers.
   const firstBlock = page.locator('main .prose [id^="b-"]').first();
-  const blockBox = await firstBlock.boundingBox();
-  const cardBox = await card.boundingBox();
-  expect(blockBox).not.toBeNull();
-  expect(cardBox).not.toBeNull();
-  expect(Math.abs((cardBox?.y ?? 0) - (blockBox?.y ?? 0))).toBeLessThanOrEqual(12);
+  const highlight = firstBlock.locator(".ab-inline-highlight");
+  await expect(highlight).toHaveText("rift appeared on a Tuesday, in the");
+  await expect(card).toBeVisible();
+  await highlight.click();
+  await expect(card).toHaveClass(/ab-active/);
   await card.focus();
   await expect(firstBlock).toHaveClass(/ab-target/);
 

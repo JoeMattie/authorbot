@@ -1,16 +1,25 @@
 ---
-import Base from "../../layouts/Base.astro";
 import Outline from "../../components/Outline.astro";
+import Base from "../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
 ---
 
-<Base title={`Story outline · ${site.book.title}`}>
-  <h1>Story outline</h1>
-  {
-    site.outline === null || site.outline.length === 0 ? (
-      <p>This book has no outline.</p>
-    ) : (
-      <Outline nodes={site.outline} />
-    )
-  }
+<Base title={`Story outline · ${site.book.title}`} activeNav="outline">
+  <div class="story-page story-outline-page">
+    <header class="story-page-header">
+      <p class="story-eyebrow">Story outline · snowflake</p>
+      <h1>How the book is built</h1>
+      <p class="story-intro">
+        Premise to parts to chapters to scenes. Each scene carries its goal, the conflict
+        that resists it, and the outcome it leaves behind.
+      </p>
+    </header>
+    {
+      site.outline === null || site.outline.length === 0 ? (
+        <p class="story-empty">This book has no outline yet.</p>
+      ) : (
+        <Outline nodes={site.outline} />
+      )
+    }
+  </div>
 </Base>

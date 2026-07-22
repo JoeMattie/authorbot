@@ -46,6 +46,12 @@ export interface OutlineNode {
   chapterHref?: string;
   /** Chapter status shown on chapter nodes when known. */
   status?: string;
+  /** Scene planning fields, when the story graph provides them. */
+  goal?: string;
+  conflict?: string;
+  outcome?: string;
+  /** Relationships whose source and target are both visible in this build. */
+  relationships: { type: string; targetTitle: string }[];
   children: OutlineNode[];
 }
 
@@ -72,6 +78,7 @@ export interface TimelineRow {
   /** Location slugs (Phase 1 has no location pages). */
   locations: string[];
   chapters: TimelineChapterRef[];
+  facts: string[];
 }
 
 export interface SiteCharacter {

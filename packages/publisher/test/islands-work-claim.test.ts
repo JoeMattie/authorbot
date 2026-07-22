@@ -136,6 +136,10 @@ const queueRoutes = (items: unknown[], me: unknown = meEditor): Routes => ({
 
 function mount(): AuthorbotWorkQueue {
   document.body.innerHTML = "";
+  const badge = document.createElement("span");
+  badge.dataset.workCount = "";
+  badge.hidden = true;
+  document.body.append(badge);
   const element = document.createElement("authorbot-work-queue") as AuthorbotWorkQueue;
   element.dataset.apiBase = API;
   element.dataset.project = PROJECT;
@@ -172,8 +176,37 @@ describe("work queue claim affordance (contract §7)", () => {
     stubFetch(queueRoutes([workItem()]));
     mount();
     await expect.poll(() => claimButton()).toBeTruthy();
-    expect(claimButton().textContent).toBe("Claim");
+    expect(claimButton().textContent).toBe("Claim this work");
     expect(document.querySelector(".work-fallback")).toBeNull();
+  });
+
+  it("renders the redesigned ready card and syncs the global Work badge", async () => {
+    stubFetch(queueRoutes([workItem(), workItem({ id: "work-2", priority: "high" })]));
+    mount();
+
+    await expect.poll(() => document.querySelectorAll(".ab-work-item").length).toBe(2);
+    const first = document.querySelector<HTMLElement>(".ab-work-item") as HTMLElement;
+    expect(first.querySelector(".ab-work-type")?.textContent).toBe("Revise passage");
+    expect(first.querySelector(".ab-work-status-ready")?.textContent).toBe("Ready");
+    expect(first.querySelector(".ab-work-change h3")?.textContent).toBe("Passage to revise");
+    expect(first.querySelector(".ab-work-criteria-preview")?.textContent).toContain(
+      "included in the task bundle",
+    );
+    const badge = document.querySelector<HTMLElement>("[data-work-count]") as HTMLElement;
+    expect(badge.textContent).toBe("2");
+    expect(badge.hidden).toBe(false);
+    expect(document.querySelector(".ab-work-priority")?.textContent).toBe("High priority");
+  });
+
+  it("keeps the global Work badge hidden for an empty queue", async () => {
+    stubFetch(queueRoutes([]));
+    mount();
+    await expect.poll(() => document.querySelector(".ab-work-status")?.textContent).toBe(
+      "No work items are ready.",
+    );
+    const badge = document.querySelector<HTMLElement>("[data-work-count]") as HTMLElement;
+    expect(badge.textContent).toBe("0");
+    expect(badge.hidden).toBe(true);
   });
 
   it("shows an honest hint instead of a dead button without work:claim", async () => {
@@ -236,7 +269,9 @@ describe("edit view (contract §7, design §16.4)", () => {
     stubFetch(claimRoutes());
     await claimIt();
 
-    expect(panel().querySelector(".ab-claim-title")?.textContent).toBe("Your task: Revise range");
+    expect(panel().querySelector(".ab-claim-title")?.textContent).toBe("Revise passage");
+    expect(panel().querySelector(".ab-work-status-claimed")?.textContent).toBe("Claimed by you");
+    expect(panel().querySelector(".ab-lease-held")?.textContent).toBe("You hold the lease");
     expect(panel().querySelector(".ab-claim-request")?.textContent).toBe("Tighten this clause.");
     expect(panel().querySelector(".ab-claim-summary")?.textContent).toBe("The baseline chapter.");
     expect([...panel().querySelectorAll(".ab-claim-criteria li")].map((li) => li.textContent)).toEqual([

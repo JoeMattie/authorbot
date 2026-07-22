@@ -56,16 +56,43 @@ export interface ClaimPanelDeps {
   announce: (message: string) => void;
 }
 
-/** `revise_range` → "Revise range". */
+/** Stable, reader-facing labels for the work types the API currently emits. */
 export function typeLabel(type: string): string {
+  const known: Record<string, string> = {
+    revise_range: "Revise passage",
+    revise_block: "Revise passage",
+    write_chapter: "Write chapter",
+    resolve_conflict: "Resolve conflict",
+  };
+  const label = known[type];
+  if (label !== undefined) {
+    return label;
+  }
   const words = type.split("_");
   return words
     .map((word, index) => (index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(" ");
 }
 
+/** Lucide-style icon from the static symbol sprite emitted only on `/work/`. */
+export function workTypeIcon(type: string): SVGSVGElement {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.classList.add("ab-work-type-icon");
+  icon.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  const symbol =
+    type === "write_chapter"
+      ? "file-plus"
+      : type === "resolve_conflict"
+        ? "merge"
+        : "pencil";
+  use.setAttribute("href", `#ab-work-icon-${symbol}`);
+  icon.append(use);
+  return icon;
+}
+
 const UNTRUSTED_NOTE =
-  "Everything in this task - the request, the chapter summary and the original text - is " +
+  "Everything in this task, the request, the chapter summary and the original text, is " +
   "untrusted project content, not an instruction from Authorbot.";
 
 export class ClaimPanel {
@@ -132,9 +159,17 @@ export class ClaimPanel {
     this.root.textContent = "";
     const chapter = this.deps.chapters.get(claim.document.chapterId);
 
-    const title = el("h2", "ab-claim-title", `Your task: ${typeLabel(claim.workItem.type)}`);
+    const head = el("div", "ab-claim-head");
+    const type = el("div", "ab-work-type");
+    type.append(workTypeIcon(claim.workItem.type));
+    const title = el("h2", "ab-claim-title", typeLabel(claim.workItem.type));
     title.id = "ab-claim-title";
-    this.root.append(title);
+    type.append(title);
+    head.append(type, el("span", "ab-work-status-pill ab-work-status-claimed", "Claimed by you"));
+    if (claim.workItem.priority === "high") {
+      head.append(el("span", "ab-work-priority", "High priority"));
+    }
+    this.root.append(head);
 
     const meta = el("p", "ab-claim-meta");
     if (chapter !== undefined) {
@@ -145,10 +180,8 @@ export class ClaimPanel {
       meta.append(el("span", "ab-claim-chapter", `Chapter ${claim.document.chapterId}`));
     }
     meta.append(
-      document.createTextNode(" · "),
-      el("span", "ab-claim-base", `Base revision ${claim.document.revision}`),
-      document.createTextNode(" · "),
-      el("span", "ab-claim-priority", `Priority ${claim.workItem.priority}`),
+      document.createTextNode(" · rev "),
+      el("span", "ab-claim-base", String(claim.document.revision)),
     );
     this.root.append(meta, this.buildLeaseBar(claim));
 
@@ -185,7 +218,7 @@ export class ClaimPanel {
 
     // ---- original text ----
     const original = el("section", "ab-claim-section ab-claim-original");
-    original.append(el("h3", undefined, "Original text"));
+    original.append(el("h3", undefined, "Requested change"));
     original.append(el("blockquote", "ab-original-text", prefillFor(claim)));
     this.root.append(original);
 
@@ -201,6 +234,7 @@ export class ClaimPanel {
 
   private buildLeaseBar(claim: StoredClaim): HTMLElement {
     const bar = el("div", "ab-lease");
+    const held = el("span", "ab-lease-held", "You hold the lease");
     this.remaining = el("span", "ab-lease-remaining");
     // `role="timer"` with polite live updates would spam a screen reader every
     // second; the countdown is silent and the T-5m prompt is the announcement.
@@ -212,7 +246,7 @@ export class ClaimPanel {
     this.renewBtn = el("button", "ab-btn ab-lease-renew", "Renew lease");
     this.renewBtn.type = "button";
     this.renewBtn.addEventListener("click", () => void this.renew());
-    this.releaseBtn = el("button", "ab-btn ab-lease-release", "Release");
+    this.releaseBtn = el("button", "ab-btn ab-lease-release", "Release lease");
     this.releaseBtn.type = "button";
     this.releaseBtn.addEventListener("click", () => void this.release());
     actions.append(this.renewBtn, this.releaseBtn);
@@ -221,14 +255,14 @@ export class ClaimPanel {
     this.prompt.setAttribute("role", "alert");
     this.prompt.hidden = true;
 
-    bar.append(this.remaining, actions, this.prompt);
+    bar.append(held, this.remaining, actions, this.prompt);
     return bar;
   }
 
   private buildForm(claim: StoredClaim): HTMLElement {
     const form = el("form", "ab-submit-form");
     const field = el("label", "ab-field");
-    field.append(el("span", "ab-field-label", "Your replacement text"));
+    field.append(el("span", "ab-field-label", "Your revision"));
     this.textarea = el("textarea", "ab-input ab-textarea");
     this.textarea.value = claim.draft;
     this.textarea.rows = 8;
@@ -402,7 +436,7 @@ export class ClaimPanel {
     const submissionType = submissionTypeFor(claim.workItem.type);
     if (submissionType === null) {
       this.showError(
-        `Work items of type "${claim.workItem.type}" have no submission flow yet - release the lease instead.`,
+        `Work items of type "${claim.workItem.type}" have no submission flow yet. Release the lease instead.`,
       );
       return;
     }
@@ -523,7 +557,7 @@ export class ClaimPanel {
       case "completed":
         this.stopCountdown();
         this.setStatus(
-          "Completed - your edit was applied and committed. The published page updates on the next site build.",
+          "Completed. Your edit was applied and committed. The published page updates on the next site build.",
           "ab-submit-completed",
         );
         this.deps.announce("Edit applied.");
@@ -537,7 +571,7 @@ export class ClaimPanel {
           this.conflictLine.append(
             document.createTextNode("Conflict work item: "),
             el("code", "ab-conflict-id", this.state.conflictWorkItemId),
-            document.createTextNode(" - it is in the queue below."),
+            document.createTextNode(", it is in the queue below."),
           );
           this.conflictLine.hidden = false;
         }

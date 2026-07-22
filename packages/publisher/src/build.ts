@@ -101,6 +101,8 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
    */
   const entries = [
     { input: "src/islands/index.ts", js: "authorbot-collab.js" },
+    { input: "src/islands/account-entry.ts", js: "authorbot-account.js" },
+    { input: "src/islands/settings.ts", js: "authorbot-settings.js" },
     { input: "src/islands/access.ts", js: "authorbot-access.js" },
   ] as const;
 
@@ -133,6 +135,8 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
   for (const [source, target] of [
     ["collab.css", "authorbot-collab.css"],
     ["access.css", "authorbot-access.css"],
+    ["settings.css", "authorbot-settings.css"],
+    ["work.css", "authorbot-work.css"],
   ] as const) {
     await copyFile(path.join(siteRoot, "src/islands", source), path.join(assetDir, target));
   }

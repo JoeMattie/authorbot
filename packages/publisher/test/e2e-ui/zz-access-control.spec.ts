@@ -40,12 +40,27 @@ const OUTSIDER = "phase7-outsider";
 const QUEUED_COMMENT =
   "E2E queued comment: this passage needs a citation before it can stand.";
 
-/** Sign in as this book's maintainer and land on the access surface, loaded. */
-async function openAccess(page: Page, login = MAINTAINER): Promise<void> {
+type AccessSection = "policy" | "collaborators" | "emergency" | "moderation" | "activity";
+
+/** Open one focused section of the settings console. */
+async function openSection(page: Page, section: AccessSection): Promise<void> {
+  await expect(page.locator(".ab-access-body")).toBeAttached({ timeout: 30_000 });
+  await page.locator(`[data-settings-target="${section}"]`).click();
+  await expect(page.locator(`[data-console-section="${section}"]`)).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
+/** Sign in as this book's maintainer and land on the requested access surface. */
+async function openAccess(
+  page: Page,
+  section: AccessSection,
+  login = MAINTAINER,
+): Promise<void> {
   await page.goto(chapterUrl(CHAPTER));
   await devLogin(page, login, "maintainer");
   await page.goto(`${siteUrl()}/settings/`);
-  await expect(page.locator(".ab-access-body")).toBeVisible({ timeout: 30_000 });
+  await openSection(page, section);
 }
 
 /** Post a comment straight at the API and return the raw response. */
@@ -97,6 +112,7 @@ async function accessState(cookie: string): Promise<Record<string, unknown>> {
 async function setPolicy(page: Page, policy: string, cookie: string): Promise<void> {
   await expect(async () => {
     await page.reload();
+    await openSection(page, "policy");
     await expect(page.locator(".ab-policy-pending")).toHaveCount(0);
     await expect(page.locator(".ab-policy-apply")).toBeVisible();
   }).toPass({ timeout: 60_000 });
@@ -151,7 +167,7 @@ test.afterAll(async () => {
 
 test("a maintainer changes the annotation policy and the change takes effect", async ({ page }) => {
   const maintainerCookie = await loginCookie(MAINTAINER, "maintainer");
-  await openAccess(page);
+  await openAccess(page, "policy");
 
   // All four modes are offered at once, as the progression they are, each with
   // what it actually means - and `locked` says the book stays the author's,
@@ -159,7 +175,8 @@ test("a maintainer changes the annotation policy and the change takes effect", a
   const policy = page.locator(".ab-access-policy");
   await expect(policy.locator("input.ab-policy-radio")).toHaveCount(4);
   const policyText = await policy.innerText();
-  expect(policyText).toMatch(/Author only/);
+  expect(policyText).toMatch(/Locked/);
+  expect(policyText).toMatch(/Only maintainers may write/);
   expect(policyText).toMatch(/keep their membership/i);
   expect(policyText.toLowerCase()).not.toContain("turn off");
   // Anonymous writing is unavailable in every mode, `open` included.
@@ -177,6 +194,7 @@ test("a maintainer changes the annotation policy and the change takes effect", a
 
   // And the interface now shows the queue the mode produces.
   await page.reload();
+  await openSection(page, "moderation");
   await expect(page.locator(".ab-access-moderation")).toBeVisible({ timeout: 30_000 });
 });
 
@@ -187,7 +205,7 @@ test("a maintainer changes the annotation policy and the change takes effect", a
 test("the approval queue shows a pending comment, and approving it makes it public", async ({
   page,
 }) => {
-  await openAccess(page);
+  await openAccess(page, "moderation");
   const card = page.locator(".ab-pending", { hasText: QUEUED_COMMENT });
   await expect(card).toBeVisible({ timeout: 30_000 });
 
@@ -223,6 +241,7 @@ test("the approval queue shows a pending comment, and approving it makes it publ
 
   // The queue is now empty, and it says so rather than rendering an empty list.
   await page.reload();
+  await openSection(page, "moderation");
   await expect(page.locator(".ab-pending", { hasText: QUEUED_COMMENT })).toHaveCount(0);
 });
 
@@ -233,7 +252,7 @@ test("the approval queue shows a pending comment, and approving it makes it publ
 test("removing a collaborator is confirmed with the consequence stated", async ({ page }) => {
   // Give the book someone to remove.
   await loginCookie(DEPARTING, "contributor");
-  await openAccess(page);
+  await openAccess(page, "collaborators");
 
   const row = page.locator(".ab-collaborator", { hasText: DEPARTING });
   await expect(row).toBeVisible({ timeout: 30_000 });
@@ -265,6 +284,7 @@ test("removing a collaborator is confirmed with the consequence stated", async (
   await confirm.locator("button.ab-confirm-cancel").click();
   await expect(row.locator(".ab-access-confirm")).toHaveCount(0);
   await page.reload();
+  await openSection(page, "collaborators");
   await expect(page.locator(".ab-collaborator", { hasText: DEPARTING })).toBeVisible({
     timeout: 30_000,
   });
@@ -282,11 +302,13 @@ test("removing a collaborator is confirmed with the consequence stated", async (
   });
   await expect(page.locator(".ab-access-status")).toContainText(/not erasing them/i);
   await page.reload();
+  await openSection(page, "collaborators");
   await expect(page.locator(".ab-collaborator", { hasText: DEPARTING })).toHaveCount(0, {
     timeout: 30_000,
   });
 
   // Removal is recorded, and the activity log says so in words.
+  await openSection(page, "activity");
   await expect(page.locator(".ab-audit-list")).toContainText(/removed a collaborator/i);
 });
 
@@ -296,7 +318,7 @@ test("removing a collaborator is confirmed with the consequence stated", async (
 
 test("freeze visibly stops writes while the reading site still serves", async ({ page }) => {
   const maintainerCookie = await loginCookie(MAINTAINER, "maintainer");
-  await openAccess(page);
+  await openAccess(page, "emergency");
 
   // Freeze is presented as an emergency control, and it is described honestly:
   // it stops the author too, and it leaves readers alone.
@@ -308,17 +330,21 @@ test("freeze visibly stops writes while the reading site still serves", async ({
   await expect(page.locator(".ab-access-agents")).toBeVisible();
   await expect(page.locator(".ab-access-freeze")).toBeVisible();
 
-  // A reason is required before the button will do anything.
-  await expect(page.locator("button.ab-access-freeze-btn")).toBeDisabled();
-  await page.locator("#ab-freeze-reason").fill("E2E: checking the emergency stop");
-  await expect(page.locator("button.ab-access-freeze-btn")).toBeEnabled();
+  // A reason and explicit acknowledgement are required in the confirmation.
   await page.locator("button.ab-access-freeze-btn").click();
+  const freezeConfirm = page.getByRole("dialog", { name: "Freeze this book?" });
+  await expect(freezeConfirm).toBeVisible();
+  await freezeConfirm.locator("#ab-freeze-reason").fill("E2E: checking the emergency stop");
+  await expect(freezeConfirm.locator("button.ab-confirm-go")).toBeDisabled();
+  await freezeConfirm.locator("input.ab-confirm-check").check();
+  await freezeConfirm.locator("button.ab-confirm-go").click();
   await expect(page.locator("p.ab-access-error")).toBeHidden();
   await expect(page.locator(".ab-access-status")).toContainText(/frozen/i, { timeout: 30_000 });
 
   // The state is visible, not merely reported once: a reload still says so, and
   // the reason a maintainer gave is shown to whoever reads it next.
   await page.reload();
+  await openSection(page, "emergency");
   await expect(page.locator(".ab-access-is-frozen")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".ab-access-freeze")).toContainText(
     "E2E: checking the emergency stop",

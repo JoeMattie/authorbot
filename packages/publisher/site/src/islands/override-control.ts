@@ -60,7 +60,7 @@ export interface OverrideControlDeps {
 export const MIN_REASON_LENGTH = 3;
 export const MAX_REASON_LENGTH = 2000;
 
-const EM_DASH = "-";
+const NOT_REPORTED = "Not reported";
 
 /**
  * Both overrides apply to an OPEN suggestion. A `pending_git` annotation is
@@ -87,7 +87,7 @@ function reasonLabel(action: OverrideAction): string {
 
 /** A role-aware count the API may not have supplied yet. */
 function countText(value: number | undefined): string {
-  return typeof value === "number" ? String(value) : EM_DASH;
+  return typeof value === "number" ? String(value) : NOT_REPORTED;
 }
 
 export class OverrideControl {
@@ -180,8 +180,8 @@ export class OverrideControl {
     // here is the support it is overriding.
     this.tallyLine.textContent =
       this.action === null
-        ? `Overriding the project’s rule - this suggestion has ${summary}.`
-        : `${verb(this.action)} overrides the project’s rule - this suggestion has ${summary}.`;
+        ? `Overriding the project’s rule. This suggestion has ${summary}.`
+        : `${verb(this.action)} overrides the project’s rule. This suggestion has ${summary}.`;
     this.maintainerLine.textContent = `Maintainer approvals: ${countText(tally.maintainerApprovals)}`;
     this.humanMaintainerLine.textContent =
       `Human maintainer approvals: ${countText(tally.humanMaintainerApprovals)}`;
@@ -267,7 +267,7 @@ export class OverrideControl {
     const reason = this.reason.value.trim();
     if (reason.length < MIN_REASON_LENGTH) {
       this.showError(
-        `Give a reason of at least ${MIN_REASON_LENGTH} characters - it is recorded on the override.`,
+        `Give a reason of at least ${MIN_REASON_LENGTH} characters. It is recorded on the override.`,
       );
       this.reason.focus();
       return;

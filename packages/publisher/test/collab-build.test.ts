@@ -128,8 +128,12 @@ describe("api-url-less build (script-free regression)", () => {
     expect(collabFiles.filter((file) => !plainFiles.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
       path.join("_astro", "authorbot-access.js"),
+      path.join("_astro", "authorbot-account.js"),
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("_astro", "authorbot-settings.css"),
+      path.join("_astro", "authorbot-settings.js"),
+      path.join("_astro", "authorbot-work.css"),
       path.join("settings", "index.html"),
       path.join("work", "index.html"),
       path.join("write", "index.html"),
@@ -171,13 +175,16 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
-          // The header account strip: sign in, sign out, Settings, Work. An
-          // island like any other, on every page that already loads the
-          // bundle - which is why the story pages, which do not, are still
-          // byte-identical without stripping anything.
+          .replace(/<div[^>]*data-collab-only="chapter-tools"[^>]*>\s*<\/div>/, "")
+          // Capability-conditioned nav chrome joins the account island on
+          // collab pages: Work is absent when there is no API, and the divider
+          // exists only when there is an account strip to separate.
           .replace(/<authorbot-account[^>]*>\s*<\/authorbot-account>/, "")
+          .replace(/<li data-collab-nav="work">[\s\S]*?<\/li>/, "")
+          .replace(/<span[^>]*data-collab-nav="divider"[^>]*><\/span>/, "")
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
+          .replace(/<script type="module" src="[^"]*authorbot-account\.js"><\/script>/, "")
           .replace(/>\s+</g, "> <");
         plain = plain
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
@@ -213,12 +220,11 @@ describe("collab-enabled build", () => {
     expect(page).toContain("<authorbot-account");
   });
 
-  it("keeps the account strip off the story pages, which stay script-free", async () => {
-    // Rendering it there would drag the whole islands bundle onto read-only
-    // pages to show one link. The sibling test asserts those pages ship no
-    // script at all; this is the other half of that bargain.
+  it("puts the account strip on story pages without loading collaboration UI", async () => {
     const page = await readFile(path.join(outCollab, "story/index.html"), "utf8");
-    expect(page).not.toContain("<authorbot-account");
+    expect(page).toContain("<authorbot-account");
+    expect(page).toContain('<script type="module" src="/_astro/authorbot-account.js">');
+    expect(page).not.toContain("authorbot-collab.js");
   });
 
   it("stamps the mount element with the data the islands need", async () => {
@@ -234,9 +240,7 @@ describe("collab-enabled build", () => {
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
   });
 
-  it("keeps the story pages script-free (islands hydrate only where they do something)", async () => {
-    // The story views are pure reading surfaces with no collaboration
-    // affordance, so they carry no bundle even in a collab build.
+  it("hydrates story identity with only the lightweight account entry", async () => {
     for (const relPath of [
       "story/index.html",
       "story/timeline/index.html",
@@ -244,9 +248,19 @@ describe("collab-enabled build", () => {
       "story/characters/mara-voss/index.html",
     ]) {
       const html = await readFile(path.join(outCollab, relPath), "utf8");
-      expect(html, relPath).not.toContain("<script");
+      expect(html, relPath).toContain("authorbot-account.js");
       expect(html, relPath).not.toContain("authorbot-collab");
+      expect(html, relPath).toContain(
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; ` +
+          `connect-src 'self'; img-src 'self' data:">`,
+      );
     }
+  });
+
+  it("keeps the story-page account entry within a tight gzip budget", async () => {
+    const js = await readFile(path.join(outCollab, "_astro/authorbot-account.js"));
+    expect(gzipSync(js).length).toBeLessThanOrEqual(4 * 1024);
+    expect(js.length).toBeGreaterThan(0);
   });
 
   it("hydrates the home page with private authoring entry points (Phase 6 §3.5)", async () => {
@@ -294,6 +308,7 @@ describe("collab-enabled build", () => {
         `connect-src 'self'; img-src 'self' data:">`,
     );
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-work.css">');
     expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
     // The mount carries the API config and a trusted chapter map.
     const mount = /<authorbot-work-queue[^>]*>/.exec(page)?.[0] ?? "";
@@ -303,6 +318,23 @@ describe("collab-enabled build", () => {
     expect(mount).toContain("019cadfd-8900-7140-98fb-ceff64cada33"); // a chapter id in the map
     // Progressive-enhancement fallback text lives inside the mount.
     expect(page).toContain("The work queue loads here once JavaScript is enabled.");
+    expect(page).toContain("What needs doing");
+    expect(page).toContain("ab-work-icon-pencil");
+    expect(page).not.toMatch(/<[^>]+style=/);
+  });
+
+  it("keeps the work stylesheet off every non-work page", async () => {
+    for (const file of await collectFiles(outCollab)) {
+      if (!file.endsWith(".html") || file.endsWith(path.join("work", "index.html"))) continue;
+      const html = await readFile(file, "utf8");
+      expect(html, file).not.toContain("authorbot-work.css");
+    }
+  });
+
+  it("keeps the page-only work stylesheet inside an 8 KB gzip budget", async () => {
+    const css = await readFile(path.join(outCollab, "_astro/authorbot-work.css"));
+    expect(css.toString("utf8")).toContain(".work-page");
+    expect(gzipSync(css).length).toBeLessThanOrEqual(8 * 1024);
   });
 
   it("plain build emits no /work/ page (script-free regression)", async () => {
@@ -338,7 +370,9 @@ describe("collab-enabled build", () => {
       // Asset hrefs follow the SITE's base path (unset here), not the API
       // base - the two are independent halves of a deployment (ADR-0019 §6).
       expect(settings).toContain('<script type="module" src="/_astro/authorbot-access.js">');
+      expect(settings).toContain('<script type="module" src="/_astro/authorbot-settings.js">');
       expect(settings).toContain('<link rel="stylesheet" href="/_astro/authorbot-access.css">');
+      expect(settings).toContain('<link rel="stylesheet" href="/_astro/authorbot-settings.css">');
       // The mount still carries the API base the islands must call.
       expect(settings).toContain(`<authorbot-access data-api-base="${API_URL}"`);
 
@@ -347,6 +381,8 @@ describe("collab-enabled build", () => {
         if (!file.endsWith(".html") || file.endsWith(path.join("settings", "index.html"))) continue;
         const html = await readFile(file, "utf8");
         expect(html, file).not.toContain("authorbot-access");
+        expect(html, file).not.toContain("authorbot-settings.css");
+        expect(html, file).not.toContain("authorbot-settings.js");
       }
     });
 
@@ -383,6 +419,21 @@ describe("collab-enabled build", () => {
       expect(js).toContain("Removing someone is not erasing them");
       // And `locked` must never be described as switching collaboration off.
       expect(js).toContain("Author only");
+    });
+  });
+
+  describe("Settings console bundle", () => {
+    it("keeps settings behavior and styling on /settings/ only", async () => {
+      const js = await readFile(path.join(outCollab, "_astro/authorbot-settings.js"), "utf8");
+      const css = await readFile(path.join(outCollab, "_astro/authorbot-settings.css"), "utf8");
+      const collabJs = await readFile(path.join(outCollab, "_astro/authorbot-collab.js"), "utf8");
+      expect(js).toContain("authorbot-settings");
+      expect(js).not.toContain("innerHTML");
+      expect(css).toContain("settings-console");
+      expect(collabJs).not.toContain("authorbot-settings");
+      expect(gzipSync(Buffer.from(js)).length + gzipSync(Buffer.from(css)).length).toBeLessThanOrEqual(
+        24 * 1024,
+      );
     });
   });
 });

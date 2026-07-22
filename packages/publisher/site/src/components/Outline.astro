@@ -1,23 +1,56 @@
 ---
-// Recursive outline tree: nodes nested by parent, ordered (Phase 1 contract
-// section 2). Renders itself for children via Astro.self.
+import Icon from "./Icon.astro";
+
 const { nodes } = Astro.props;
 ---
 
-<ul class="outline">
+<ol class="story-outline-tree">
   {
-    nodes.map((node) => (
-      <li>
-        <span class="node-type">{node.type}</span>
-        {node.chapterHref ? (
-          <a href={node.chapterHref}>{node.title ?? node.id}</a>
-        ) : (
-          <span class="node-title">{node.title ?? node.id}</span>
-        )}
-        {node.status && <span class="badge">{node.status}</span>}
-        {node.summary && <p class="summary">{node.summary}</p>}
-        {node.children.length > 0 && <Astro.self nodes={node.children} />}
-      </li>
-    ))
+    nodes.map((node) => {
+      const planningFields = [
+        ["Goal", node.goal, "goal"],
+        ["Conflict", node.conflict, "conflict"],
+        ["Outcome", node.outcome, "outcome"],
+      ].filter((field) => field[1]);
+      return (
+        <li class={`story-outline-node story-outline-node-${node.type}`}>
+          <article class="story-outline-card">
+            <header class="story-outline-card-header">
+              <span class={`story-type-pill story-type-${node.type}`}>{node.type}</span>
+              {node.chapterHref ? (
+                <a class="story-outline-title" href={node.chapterHref}>{node.title ?? node.id}</a>
+              ) : (
+                <span class="story-outline-title">{node.title ?? node.id}</span>
+              )}
+              {node.status && (
+                <span class={`story-status-pill story-status-${node.status}`}>{node.status}</span>
+              )}
+            </header>
+            {node.summary && <p class="story-outline-summary">{node.summary}</p>}
+            {planningFields.length > 0 && (
+              <dl class="story-scene-plan">
+                {planningFields.map(([label, value, tone]) => (
+                  <div>
+                    <dt class={`story-scene-label story-scene-label-${tone}`}>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {node.relationships.length > 0 && (
+              <ul class="story-relationships" aria-label="Story relationships">
+                {node.relationships.map((relationship) => (
+                  <li>
+                    <Icon name="git-branch" size={13} />
+                    <span>{relationship.type} → {relationship.targetTitle}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+          {node.children.length > 0 && <Astro.self nodes={node.children} />}
+        </li>
+      );
+    })
   }
-</ul>
+</ol>

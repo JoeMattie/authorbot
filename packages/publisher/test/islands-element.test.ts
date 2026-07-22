@@ -180,6 +180,10 @@ describe("authorbot-collab element", () => {
     expect(document.querySelector(`#b-${BLOCK_ID}`)?.classList.contains("ab-annotated")).toBe(
       true,
     );
+    const highlight = document.querySelector(".ab-inline-highlight");
+    expect(highlight?.textContent).toBe("drift");
+    expect(highlight?.classList.contains("ab-highlight-suggestion")).toBe(true);
+    expect(highlight?.getAttribute("tabindex")).toBe("0");
   });
 
   it("renders zero collaboration chrome when the API is unreachable (§1)", async () => {
@@ -290,9 +294,9 @@ describe("authorbot-collab element", () => {
     // §2.1 vice-versa: hovering the anchor block highlights its card.
     const block = document.getElementById(`b-${BLOCK_ID}`) as HTMLElement;
     block.dispatchEvent(new Event("mouseenter"));
-    expect(document.querySelector(".ab-card")?.classList.contains("ab-active")).toBe(true);
+    expect(document.querySelector(".ab-card")?.classList.contains("ab-hovered")).toBe(true);
     block.dispatchEvent(new Event("mouseleave"));
-    expect(document.querySelector(".ab-card")?.classList.contains("ab-active")).toBe(false);
+    expect(document.querySelector(".ab-card")?.classList.contains("ab-hovered")).toBe(false);
   });
 
   it("keeps a half-typed reply draft and focus across a background re-render (§4)", async () => {

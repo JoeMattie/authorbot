@@ -1,4 +1,5 @@
 ---
+import Icon from "../../../components/Icon.astro";
 import Base from "../../../layouts/Base.astro";
 import { SITE_CSP } from "../../../lib/csp.js";
 import { site } from "virtual:authorbot-site";
@@ -12,34 +13,49 @@ export function getStaticPaths() {
 
 const { index } = Astro.props;
 const character = site.characters[index];
+const monogram = character.name
+  .replace(/^Dr\.\s+/u, "")
+  .split(/\s+/u)
+  .filter(Boolean)
+  .slice(0, 2)
+  .map((part) => part[0]?.toUpperCase())
+  .join("");
 ---
 
 <Base
   title={`${character.name} · ${site.book.title}`}
   description={character.summary}
   csp={SITE_CSP}
+  activeNav="characters"
 >
-  <article class="character">
-    <header>
-      <h1>{character.name}</h1>
-      {
-        character.aliases.length > 0 && (
-          <p class="meta">Also known as {character.aliases.join(", ")}</p>
-        )
-      }
-      {character.status && <p class="meta">Status: {character.status}</p>}
-      {character.summary && <p class="summary">{character.summary}</p>}
+  <article class="story-page character-detail">
+    <a class="character-back-link" href={`${site.basePath}story/characters/`}>
+      <Icon name="chevron-left" size={16} />
+      All characters
+    </a>
+    <header class="character-detail-header">
+      <span class="character-avatar character-avatar-large" aria-hidden="true">{monogram}</span>
+      <div>
+        <h1>{character.name}</h1>
+        <p class="character-detail-meta">
+          {character.status && (
+            <span class={`story-status-pill story-status-${character.status}`}>{character.status}</span>
+          )}
+          {character.aliases.length > 0 && (
+            <span>also known as {character.aliases.join(", ")}</span>
+          )}
+        </p>
+      </div>
     </header>
-    <div class="prose" set:html={character.html} />
+    {character.summary && <p class="character-detail-summary">{character.summary}</p>}
+    <div class="prose character-prose" set:html={character.html} />
     {
       character.chapters.length > 0 && (
-        <section class="appearances">
+        <section class="character-appearances">
           <h2>Appears in</h2>
           <ul>
             {character.chapters.map((chapter) => (
-              <li>
-                <a href={chapter.href}>{chapter.title}</a>
-              </li>
+              <li><a href={chapter.href}>{chapter.title}</a></li>
             ))}
           </ul>
         </section>

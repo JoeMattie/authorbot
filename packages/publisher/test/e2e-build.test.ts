@@ -250,6 +250,52 @@ describe("buildSite on examples/book-repo", () => {
     expect(character).toContain('href="/chapters/baseline/"');
   });
 
+  it("renders the redesigned story views from repository planning data", async () => {
+    const outline = await readFile(path.join(outDefault, "story/index.html"), "utf8");
+    expect(outline).toContain("How the book is built");
+    expect(outline).toContain("story-outline-node-scene");
+    expect(outline).toContain("Establish the drift as real, small, and periodic.");
+    expect(outline).toContain("Every plausible explanation implicates the instrument");
+    expect(outline).toContain("Mara logs the drift and keeps it to herself.");
+    // Both relationships point into the excluded draft subtree, so neither
+    // its title nor its relationship copy may leak into a public build.
+    expect(outline).not.toContain("foreshadows");
+    expect(outline).not.toContain("leads to");
+
+    const draftOutline = await readFile(path.join(outDrafts, "story/index.html"), "utf8");
+    expect(draftOutline).toContain("foreshadows");
+    expect(draftOutline).toContain("Eleven notches");
+    expect(draftOutline).toContain("leads to");
+    expect(draftOutline).toContain("The Window");
+
+    const timeline = await readFile(
+      path.join(outDefault, "story/timeline/index.html"),
+      "utf8",
+    );
+    expect(timeline).toContain("When things happen");
+    expect(timeline).toContain("story-timeline-card");
+    expect(timeline).toContain("The residual arc repeats every seventy-one minutes.");
+    expect(timeline).toContain("Instrument bay");
+
+    const characters = await readFile(
+      path.join(outDefault, "story/characters/index.html"),
+      "utf8",
+    );
+    expect(characters).toContain("Who is in the room");
+    expect(characters).toContain("character-card");
+    expect(characters).toContain(">MV<");
+    expect(characters).toContain("2 chapters");
+
+    const mara = await readFile(
+      path.join(outDefault, "story/characters/mara-voss/index.html"),
+      "utf8",
+    );
+    expect(mara).toContain("All characters");
+    expect(mara).toContain("character-avatar-large");
+    expect(mara).toContain("also known as M.V.");
+    expect(mara).toContain("character-appearances");
+  });
+
   it("renders the GFM table and strikethrough on the character page", async () => {
     const page = await readFile(
       path.join(outDefault, "story/characters/mara-voss/index.html"),
