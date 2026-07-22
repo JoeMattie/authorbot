@@ -26,3 +26,4 @@ history.
 | `phase8-contract.md` | 8 | The collaborator skill for agent fleets |
 | `phase9-contract.md` | 9 | Documentation and the project site |
 | `phase10-contract.md` | 10 | Reading presentation settings |
+| `phase11-contract.md` | 11 | Editorial revision workflow, chapter history, and threads |

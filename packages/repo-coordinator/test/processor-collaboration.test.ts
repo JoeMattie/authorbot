@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import {
+  annotationFilePath,
   createProcessor,
   decisionFilePath,
   LocalGitAdapter,
@@ -14,6 +15,7 @@ import {
 import {
   enqueueDecisionCreate,
   enqueueDecisionUpdate,
+  enqueueAnnotationCreate,
   enqueueWorkItemUpdate,
   git,
   initGitRepo,
@@ -62,7 +64,11 @@ describe("decision + work item as one crossing", () => {
       .filter(Boolean)
       .sort();
     expect(changed).toEqual(
-      [decisionFilePath(crossing.decisionId), workItemFilePath(crossing.workItemId)].sort(),
+      [
+        annotationFilePath(crossing.annotationId),
+        decisionFilePath(crossing.decisionId),
+        workItemFilePath(crossing.workItemId),
+      ].sort(),
     );
 
     // Trailers name both the annotation and the work item (design §14.3).
@@ -87,6 +93,9 @@ describe("decision + work item as one crossing", () => {
     const workItem = parseWorkItemArtifact(workItemContent);
     expect(workItem.record.status).toBe("ready");
     expect(workItem.sections.originalText).toContain("interferometer");
+    expect(
+      await readFile(join(repo.dir, annotationFilePath(crossing.annotationId)), "utf8"),
+    ).toContain("status: work_item_created");
 
     const op = await seed.repos.gitOperations.getById(crossing.operationId);
     expect(op?.state).toBe("committed");
@@ -124,6 +133,41 @@ describe("decision + work item as one crossing", () => {
       "utf8",
     );
     expect(parseWorkItemArtifact(workItemContent).record.created_by).toBe(seed.actorRef);
+  });
+
+  it("commits a reasonless promoted comment with truthful work copy", async () => {
+    const annotation = await enqueueAnnotationCreate(seed, {
+      kind: "comment",
+      body: "Resolve the loose ending before publication.",
+    });
+    const crossing = await enqueueDecisionCreate(seed, {
+      annotationId: annotation.annotationId,
+      decision: {
+        ruleVersion: 0,
+        result: "overridden",
+        rule: "maintainer_override",
+        overrideReason: null,
+        metrics: {},
+      },
+      payloadExtra: { actorId: seed.actorId, createdByActorId: seed.actorId },
+    });
+
+    await processor.drain(seed.projectId);
+
+    const decisionContent = await readFile(
+      join(repo.dir, decisionFilePath(crossing.decisionId)),
+      "utf8",
+    );
+    expect(parse(decisionContent)).not.toHaveProperty("override_reason");
+
+    const workItemContent = await readFile(
+      join(repo.dir, workItemFilePath(crossing.workItemId)),
+      "utf8",
+    );
+    const workItem = parseWorkItemArtifact(workItemContent);
+    expect(workItem.sections.context).toBe("Resolve the loose ending before publication.");
+    expect(workItem.sections.requestedChange).toContain("Address the note in annotation");
+    expect(workItem.sections.requestedChange).not.toContain("suggestion");
   });
 });
 
@@ -183,16 +227,18 @@ describe("work_item.update re-render", () => {
 });
 
 describe("decision without a work item", () => {
-  it("commits only the decision file (e.g. a rejected suggestion)", async () => {
+  it("commits the decision and transitioned annotation (e.g. a rejected suggestion)", async () => {
     const crossing = await enqueueDecisionCreate(seed, {
       workItem: false,
-      decision: { result: "rejected", actionType: "reject", metrics: {} },
+      decision: { result: "rejected", actionType: "reject_suggestion", metrics: {} },
     });
     const { outcomes } = await processor.drain(seed.projectId);
     expect(outcomes[0]?.result).toBe("committed");
     const changedFiles = (await git(repo.dir, "show", "--name-only", "--format=", "HEAD"))
       .split("\n")
       .filter(Boolean);
-    expect(changedFiles).toEqual([decisionFilePath(crossing.decisionId)]);
+    expect(changedFiles.sort()).toEqual(
+      [annotationFilePath(crossing.annotationId), decisionFilePath(crossing.decisionId)].sort(),
+    );
   });
 });

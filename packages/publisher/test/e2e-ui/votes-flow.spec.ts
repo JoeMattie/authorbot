@@ -1,9 +1,9 @@
 /**
  * Phase 3 contract §7 / §7.7: three dev actors (distinct sessions) vote a
- * suggestion over the default threshold → the "Queued as work item" badge
- * appears on an already-open page without a reload (live event feed, with the
- * poll fallback the dev bridge forces) → the `/work/` page lists the ready
- * item. Plus: a signed-out reader sees tallies but no controls, and a
+ * suggestion over the default threshold → its accepted card appears on an
+ * already-open page without a reload (live event feed, with the poll fallback
+ * the dev bridge forces) → the `/work/` page lists the ready item. Plus: an
+ * open suggestion still gives a signed-out reader tallies but no controls, and a
  * keyboard-only voting round trip.
  *
  * Default rule (design §25): approvals ≥ 3, net ≥ 2, human_approvals ≥ 1 -
@@ -65,13 +65,12 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
   const carol = await loginCookie("vote-carol", "maintainer");
   await voteViaApi(carol, annotationId, "approve");
 
-  // Alice's still-open page shows the badge with NO reload - delivered by the
-  // event feed (SSE, or its poll fallback). Generous timeout: the poll
-  // fallback engages after the stream's open timeout.
-  await expect(card.locator(".ab-badge", { hasText: "Queued as work item" })).toBeVisible({
-    timeout: 25_000,
-  });
-  await expect(card.locator(".ab-vote-tally")).toContainText("3 approve");
+  // Alice's still-open page settles with NO reload, delivered by the event
+  // feed (SSE, or its poll fallback). The accepted card no longer carries the
+  // vote/queue chrome.
+  await expect(card).toHaveClass(/ab-promoted/, { timeout: 25_000 });
+  await expect(card.locator(".ab-accepted-badge")).toHaveText("Accepted");
+  await expect(card.locator(".ab-votes")).toHaveCount(0);
 
   // /work/ lists the ready item (work:read is editor+, so use a maintainer).
   const ctxM = await browser.newContext();
@@ -92,12 +91,22 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
 });
 
 test("signed-out reader sees the tally but has no enabled controls (§7)", async ({ browser }) => {
+  const body = `${SUGGESTION_BODY} Signed-out case.`;
+  const seed = await loginCookie("seed-public-suggestion", "contributor");
+  const seeded = await seedAnnotationViaApi({
+    login: "seed-public-suggestion",
+    body,
+    kind: "suggestion",
+    chapterSlug: "baseline",
+  });
+  await waitForAnnotationOpen(seeded.annotationId, seed);
+
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   await page.goto(chapterUrl("baseline"));
 
   // show_public_annotations: the suggestion renders for the anonymous reader.
-  const card = page.locator(".ab-card", { hasText: SUGGESTION_BODY }).first();
+  const card = page.locator(".ab-card", { hasText: body }).first();
   await expect(card).toBeVisible();
   await card.locator(".ab-card-head").click();
   await expect(card).toHaveClass(/ab-active/);
@@ -114,12 +123,22 @@ test("signed-out reader sees the tally but has no enabled controls (§7)", async
 });
 
 test("keyboard-only voting round trip", async ({ browser }) => {
+  const body = `${SUGGESTION_BODY} Keyboard case.`;
+  const seed = await loginCookie("seed-keyboard-suggestion", "contributor");
+  const seeded = await seedAnnotationViaApi({
+    login: "seed-keyboard-suggestion",
+    body,
+    kind: "suggestion",
+    chapterSlug: "baseline",
+  });
+  await waitForAnnotationOpen(seeded.annotationId, seed);
+
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "kb-voter", "contributor");
 
-  const card = page.locator(".ab-card", { hasText: SUGGESTION_BODY }).first();
+  const card = page.locator(".ab-card", { hasText: body }).first();
   await expect(card).toBeVisible();
   await card.locator(".ab-card-head").click();
   await expect(card).toHaveClass(/ab-active/);

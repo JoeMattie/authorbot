@@ -1,12 +1,10 @@
 /**
- * Phase 6 contract §3.6 "Force-promote", end to end: a maintainer promotes a
+ * Phase 11 one-click promotion, end to end: a maintainer promotes a
  * suggestion that has NOT met the voting rule, and a work item exists against
  * a tally the UI showed them first.
  *
- * The tally assertion is the substance. The override's whole justification is
- * that the maintainer sees what they are overriding - for a solo author "the
- * thresholds only start mattering when other people arrive", which is only
- * safe if bypassing them is deliberate and visible rather than a quiet button.
+ * The open card shows its current support, while the settled card collapses to
+ * the accepted diff and no longer carries governance controls.
  */
 import { expect, test } from "@playwright/test";
 import {
@@ -19,8 +17,6 @@ import {
 } from "./helpers.js";
 
 const SUGGESTION = "E2E override: this sentence could carry the drift more plainly.";
-const REASON = "Promoting this myself: it is my book and the fix is obviously right.";
-
 test("a maintainer promotes a suggestion to work against a visible tally", async ({ page }) => {
   // A suggestion with ONE approval - well short of the default rule (three
   // approvals, net ≥ 2, a human, and a human maintainer).
@@ -52,18 +48,8 @@ test("a maintainer promotes a suggestion to work against a visible tally", async
     override.locator('.ab-override-role[data-count="human-maintainer-approvals"]'),
   ).toContainText("0");
 
-  // Promoting requires a reason - an empty one is refused client-side, so the
-  // override cannot be a single careless click.
+  // Promotion is the maintainer's explicit one-click acceptance into Work.
   await override.locator('.ab-override-btn[data-override="promote"]').click();
-  const form = override.locator(".ab-override-form");
-  await expect(form).toBeVisible();
-  await override.locator(".ab-override-confirm").click();
-  await expect(override.locator(".ab-override-error")).toContainText(/reason/i);
-
-  await override.locator("textarea.ab-override-reason").fill(REASON);
-  await override.locator(".ab-override-confirm").click();
-  // Surface a refused override as itself, rather than as a work-item timeout.
-  await expect(override.locator(".ab-override-error")).toBeHidden();
 
   // A work item exists, created from this suggestion despite the tally.
   // Read it as a maintainer: the work queue is editor-and-above.
@@ -72,11 +58,13 @@ test("a maintainer promotes a suggestion to work against a visible tally", async
   expect(workItem.sourceAnnotationId).toBe(seeded.annotationId);
   expect(workItem.status).toBe("ready");
 
-  // And the card catches up to say so (the element refetches after an
-  // override rather than guessing the new state).
-  await expect(card.locator(".ab-badge")).toContainText("Queued as work item", {
-    timeout: 30_000,
-  });
+  // The optimistic response settles the card immediately. The old queue/tally
+  // chrome is gone; only the accepted diff remains.
+  await expect(card).toHaveClass(/ab-promoted/, { timeout: 30_000 });
+  await expect(card.locator(".ab-accepted-badge")).toHaveText("Accepted");
+  await expect(card.locator(".ab-suggestion-diff")).toBeVisible();
+  await expect(card.locator(".ab-votes")).toHaveCount(0);
+  await expect(card.locator(".ab-override")).toHaveCount(0);
 });
 
 test("a contributor is not offered the override", async ({ page }) => {

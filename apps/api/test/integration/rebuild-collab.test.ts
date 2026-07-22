@@ -5,6 +5,8 @@
  * produced by a live threshold crossing, committed to Git, then rebuilt into a
  * brand-new database.
  */
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { openSqliteDatabase } from "@authorbot/database";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -98,6 +100,25 @@ describe("Phase 3 rebuild restores decisions and work items (§7.5)", () => {
     const workItemId = workItem?.id ?? "";
     const ruleVersion = decision?.ruleVersion ?? 0;
 
+    const annotationPath = join(
+      repo.workTreePath,
+      ".authorbot",
+      "annotations",
+      annotationId,
+      "annotation.md",
+    );
+    const committedAnnotation = await readFile(annotationPath, "utf8");
+    expect(committedAnnotation).toContain("status: work_item_created");
+    // Simulate a repository written by a pre-0.1.32 Worker, which committed
+    // the create_work_item decision but left this artifact open. Rebuild must
+    // derive the settled status from the durable decision so an upgrade fixes
+    // existing books as well as new promotions.
+    await writeFile(
+      annotationPath,
+      committedAnnotation.replace("status: work_item_created", "status: open"),
+      "utf8",
+    );
+
     // ---- FRESH DB, projection rebuilt from the committed artifacts ----------
     const fresh = await makeIntegrationApp({
       db: openSqliteDatabase(":memory:"),
@@ -123,6 +144,9 @@ describe("Phase 3 rebuild restores decisions and work items (§7.5)", () => {
       expect(rebuiltWorkItem?.status).toBe("ready");
       expect(rebuiltWorkItem?.type).toBe("revise_range");
       expect(rebuiltWorkItem?.sourceAnnotationId).toBe(annotationId);
+      expect((await fresh.repos.annotations.getById(annotationId))?.status).toBe(
+        "work_item_created",
+      );
 
       const maintainer = await devLogin(fresh, "restorer", "maintainer");
       const listed = await fresh.app.request(

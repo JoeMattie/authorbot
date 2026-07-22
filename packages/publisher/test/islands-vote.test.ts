@@ -253,7 +253,7 @@ describe("suggestion vote control (element)", () => {
     expect(calledVote).toBe(true);
   });
 
-  it("renders the queued badge from an embedded decision (contract §6)", async () => {
+  it("renders an embedded work decision as a settled accepted card", async () => {
     stubFetch({
       [`${API}/v1/me`]: { status: 200, body: meVoter },
       ...annotationsRoute([
@@ -265,9 +265,11 @@ describe("suggestion vote control (element)", () => {
       ]),
     });
     mount();
-    await expect.poll(() => document.querySelector(".ab-badge")).toBeTruthy();
-    expect(document.querySelector(".ab-badge")?.textContent).toBe("Queued as work item");
-    // The crossed suggestion stays visible so the badge persists.
+    await expect.poll(() => document.querySelector(".ab-accepted-badge")).toBeTruthy();
+    expect(document.querySelector(".ab-accepted-badge")?.textContent).toBe("Accepted");
+    expect(document.querySelector(".ab-card")?.classList.contains("ab-promoted")).toBe(true);
+    expect(document.querySelector(".ab-votes")).toBeNull();
+    // The crossed suggestion stays visible as its compact accepted diff.
     expect(document.querySelectorAll(".ab-card").length).toBe(1);
   });
 

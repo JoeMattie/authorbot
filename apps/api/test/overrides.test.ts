@@ -1,7 +1,8 @@
 /**
  * Phase 3 contract §4: maintainer overrides - reject, reopen, force-create,
- * cancel. Maintainer-only, reason-required, audited; force-create respects
- * the `(source_annotation_id, action_type, rule_version 0)` uniqueness key.
+ * cancel. Maintainer-only and audited; promotion is one-click while reject,
+ * reopen, and cancel remain reason-required. Force-create respects the
+ * `(source_annotation_id, action_type, rule_version 0)` uniqueness key.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -70,19 +71,56 @@ describe("maintainer overrides", () => {
     expect((await h.repos.annotations.getById(id))?.status).toBe("open");
   });
 
-  it("force-creates a work item bypassing the rule (rule_version 0)", async () => {
+  it("promotes a suggestion without a reason (rule_version 0)", async () => {
+    const id = await createOpenSuggestion(h, contributor);
+    const res = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${id}/force-create-work-item`,
+      jsonRequest("POST", {}, { Cookie: maintainer }),
+    );
+    expect(res.status).toBe(201);
+    const decision = await h.repos.decisions.getByKey(id, "create_work_item", 0);
+    expect(decision?.ruleVersion).toBe(0);
+    expect(decision?.overrideReason).toBeNull();
+    const workItems = await h.repos.workItems.listBySourceAnnotation(id);
+    expect(workItems).toHaveLength(1);
+    expect((await h.repos.annotations.getById(id))?.status).toBe("work_item_created");
+    const audit = (await h.repos.auditEvents.listByProject(h.projectId)).find(
+      (event) => event.action === "work_item.force_create",
+    );
+    expect(audit?.metadata).toMatchObject({
+      decisionId: decision?.id,
+      workItemId: workItems[0]?.id,
+    });
+    expect(audit?.metadata).not.toHaveProperty("reason");
+  });
+
+  it("promotes a chapter comment to chapter work", async () => {
+    const id = await createOpenSuggestion(h, contributor, {
+      kind: "comment",
+      scope: "chapter",
+      target: undefined,
+      body: "Resolve the loose ending before publication.",
+    });
+    const res = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${id}/force-create-work-item`,
+      jsonRequest("POST", {}, { Cookie: maintainer }),
+    );
+    expect(res.status).toBe(201);
+    const [workItem] = await h.repos.workItems.listBySourceAnnotation(id);
+    expect(workItem).toMatchObject({ type: "revise_chapter", target: null, status: "ready" });
+    expect((await h.repos.annotations.getById(id))?.status).toBe("work_item_created");
+  });
+
+  it("keeps accepting and recording a legacy promotion reason", async () => {
     const id = await createOpenSuggestion(h, contributor);
     const res = await h.app.request(
       `/v1/projects/${h.projectId}/annotations/${id}/force-create-work-item`,
       jsonRequest("POST", { reason: "editorial call" }, { Cookie: maintainer }),
     );
     expect(res.status).toBe(201);
-    const decision = await h.repos.decisions.getByKey(id, "create_work_item", 0);
-    expect(decision?.ruleVersion).toBe(0);
-    expect(decision?.overrideReason).toBe("editorial call");
-    const workItems = await h.repos.workItems.listBySourceAnnotation(id);
-    expect(workItems).toHaveLength(1);
-    expect((await h.repos.annotations.getById(id))?.status).toBe("work_item_created");
+    expect(
+      (await h.repos.decisions.getByKey(id, "create_work_item", 0))?.overrideReason,
+    ).toBe("editorial call");
   });
 
   it("force-create is idempotent on the uniqueness key (second call 409s)", async () => {

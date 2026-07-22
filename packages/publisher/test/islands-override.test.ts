@@ -3,13 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotCollab } from "../site/src/islands/collab-element.js";
 import type { Annotation } from "../site/src/islands/api.js";
 
-/**
- * Phase 6 contract §3.6 "Force-promote": the maintainer overrides ("Promote to
- * work" and reject) surfaced on an open suggestion - maintainer-only, each
- * requiring a reason, each shown beside the tally (including the amendment's
- * role-aware maintainer / human-maintainer approval counts) that the override
- * bypasses.
- */
+/** Phase 11 slice 1: one-click comment/suggestion promotion, reason-required
+ * suggestion rejection, and the settled accepted-card presentation. */
 
 const CHAPTER_ID = "019cadfd-8900-7140-98fb-ceff64cada33";
 const BLOCK_ID = "019cadfe-7360-7049-a30b-1f5898a5020a";
@@ -55,7 +50,8 @@ const suggestion = (over: Partial<Annotation> = {}): Annotation => ({
   ...over,
 });
 
-// ---- harness ----------------------------------------------------------------
+const comment = (over: Partial<Annotation> = {}): Annotation =>
+  suggestion({ kind: "comment", body: "Resolve this loose end.", ...over });
 
 interface Route {
   status: number;
@@ -79,8 +75,6 @@ function stubFetch(routes: RouteMap): ReturnType<typeof vi.fn> {
       method: init?.method ?? "GET",
       body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
     });
-    // Longest matching prefix wins, so `/annotations/ann-1/reject` is not
-    // swallowed by the `/annotations` list route.
     const found = Object.entries(routes)
       .filter(([prefix]) => url.startsWith(prefix))
       .sort((a, b) => b[0].length - a[0].length)[0];
@@ -114,15 +108,26 @@ function mount(): AuthorbotCollab {
   return element;
 }
 
-const meWithRole = (role: string) => ({
+const DEFAULT_SCOPES = [
+  "chapters:read",
+  "annotations:read",
+  "annotations:write",
+  "votes:write",
+  "work:claim",
+];
+
+const meWithRole = (role: string, scopes = DEFAULT_SCOPES) => ({
   actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
-  scopes: ["chapters:read", "annotations:read", "annotations:write", "votes:write"],
+  scopes,
   memberships: [{ role }],
 });
 
 function baseRoutes(items: Annotation[], extra: RouteMap = {}): RouteMap {
   return {
-    [`${API}/v1/projects/${PROJECT}/members`]: { status: 200, body: { items: [], nextCursor: null } },
+    [`${API}/v1/projects/${PROJECT}/members`]: {
+      status: 200,
+      body: { items: [], nextCursor: null },
+    },
     [`${API}/v1/projects/${PROJECT}/chapters/${CHAPTER_ID}/annotations`]: {
       status: 200,
       body: { items, nextCursor: null },
@@ -139,8 +144,12 @@ async function mountAs(
   role: string,
   items: Annotation[],
   extra: RouteMap = {},
+  scopes = DEFAULT_SCOPES,
 ): Promise<AuthorbotCollab> {
-  stubFetch({ [`${API}/v1/me`]: { status: 200, body: meWithRole(role) }, ...baseRoutes(items, extra) });
+  stubFetch({
+    [`${API}/v1/me`]: { status: 200, body: meWithRole(role, scopes) },
+    ...baseRoutes(items, extra),
+  });
   const element = mount();
   await expect.poll(() => document.querySelector(".ab-card")).toBeTruthy();
   return element;
@@ -151,9 +160,20 @@ const rejectBtn = () => document.querySelector<HTMLButtonElement>('[data-overrid
 const confirmBtn = () => document.querySelector<HTMLButtonElement>('[data-override="confirm"]');
 const reasonBox = () => document.querySelector<HTMLTextAreaElement>(".ab-override-reason");
 const errorNode = () => document.querySelector<HTMLElement>(".ab-override-error");
-
 const overrideCall = (suffix: string): Call | undefined =>
   calls.find((call) => call.url.endsWith(suffix) && call.method === "POST");
+
+const promotedResponse: Route = {
+  status: 201,
+  body: {
+    annotationId: "ann-1",
+    status: "work_item_created",
+    decisionId: "dec-1",
+    workItemId: "wi-1",
+    operationIds: ["op-1"],
+    correlationId: "corr-1",
+  },
+};
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -165,25 +185,29 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-// ---- who sees it ------------------------------------------------------------
-
-describe("override surface visibility", () => {
-  it("offers Promote to work + reject to a maintainer on an open suggestion", async () => {
+describe("promotion surface", () => {
+  it("offers one-click promotion and separate rejection on an open suggestion", async () => {
     await mountAs("maintainer", [suggestion()]);
-    expect(document.querySelector(".ab-override")).not.toBeNull();
     expect(promoteBtn()?.textContent).toBe("Promote to work");
-    expect(rejectBtn()?.textContent).toBe("Reject suggestion");
-    // Real, keyboard-reachable buttons - never a disabled affordance.
-    expect(promoteBtn()?.tagName).toBe("BUTTON");
     expect(promoteBtn()?.disabled).toBe(false);
-    expect(rejectBtn()?.disabled).toBe(false);
+    expect(rejectBtn()?.textContent).toBe("Reject suggestion");
+    expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(true);
   });
 
-  it("shows a contributor and an editor nothing at all", async () => {
+  it("offers a comment only Promote to work, with no vote or rejection UI", async () => {
+    await mountAs("maintainer", [comment()]);
+    expect(promoteBtn()?.textContent).toBe("Promote to work");
+    expect(rejectBtn()?.hidden).toBe(true);
+    expect(document.querySelector(".ab-votes")).toBeNull();
+    expect(document.querySelector<HTMLElement>(".ab-override-roles")?.hidden).toBe(true);
+    expect(document.querySelector(".ab-override-tally")?.textContent).toBe(
+      "Turn this note into tracked work.",
+    );
+  });
+
+  it("shows non-maintainers no maintainer actions", async () => {
     await mountAs("contributor", [suggestion()]);
     expect(document.querySelector(".ab-override")).toBeNull();
-    expect(promoteBtn()).toBeNull();
-    expect(rejectBtn()).toBeNull();
 
     vi.unstubAllGlobals();
     calls.length = 0;
@@ -191,23 +215,29 @@ describe("override surface visibility", () => {
     expect(document.querySelector(".ab-override")).toBeNull();
   });
 
-  it("does not offer the actions for a pending_git annotation (still committing)", async () => {
-    await mountAs("maintainer", [
-      suggestion({ status: "pending_git", gitOperationId: null }),
+  it("gates promotion and rejection on their actual scopes", async () => {
+    await mountAs("maintainer", [suggestion()], {}, [
+      "chapters:read",
+      "annotations:read",
+      "annotations:write",
     ]);
-    expect(document.querySelector(".ab-override")).toBeNull();
+    expect(promoteBtn()?.hidden).toBe(true);
+    expect(rejectBtn()?.hidden).toBe(false);
   });
 
-  it("does not offer the actions once the suggestion already became work", async () => {
+  it("offers no actions while syncing or after promotion", async () => {
+    await mountAs("maintainer", [suggestion({ status: "pending_git" })]);
+    expect(document.querySelector(".ab-override")).toBeNull();
+
+    vi.unstubAllGlobals();
+    calls.length = 0;
     await mountAs("maintainer", [suggestion({ status: "work_item_created" })]);
     expect(document.querySelector(".ab-override")).toBeNull();
   });
 });
 
-// ---- the tally being overridden --------------------------------------------
-
-describe("the tally shown beside the actions", () => {
-  it("shows the aggregate summary and the role-aware approval counts", async () => {
+describe("open suggestion context", () => {
+  it("shows the tally and role-aware approval counts before promotion", async () => {
     await mountAs("maintainer", [
       suggestion({
         votes: tally({
@@ -221,101 +251,82 @@ describe("the tally shown beside the actions", () => {
         }),
       }),
     ]);
-    const line = document.querySelector(".ab-override-tally")?.textContent ?? "";
-    expect(line).toContain("2 approve, 1 reject, 0 abstain");
-    expect(line).toContain("net +1, 3 voters");
-    expect(line).toContain("rule"); // the framing: this overrides the rule
-    const roles = [...document.querySelectorAll(".ab-override-role")].map((n) => n.textContent);
-    expect(roles).toEqual(["Maintainer approvals: 1", "Human maintainer approvals: 0"]);
-  });
-
-  it("shows a plain fallback for role counts an older API did not supply", async () => {
-    await mountAs("maintainer", [suggestion({ votes: tally({ approvals: 1, netScore: 1, distinctVoters: 1 }) })]);
-    const roles = [...document.querySelectorAll(".ab-override-role")].map((n) => n.textContent);
-    expect(roles).toEqual([
-      "Maintainer approvals: Not reported",
-      "Human maintainer approvals: Not reported",
+    expect(document.querySelector(".ab-override-tally")?.textContent).toContain(
+      "2 approve, 1 reject, 0 abstain (net +1, 3 voters)",
+    );
+    expect([...document.querySelectorAll(".ab-override-role")].map((node) => node.textContent)).toEqual([
+      "Maintainer approvals: 1",
+      "Human maintainer approvals: 0",
     ]);
   });
-
-  it("names the action in the framing once a form is open", async () => {
-    await mountAs("maintainer", [suggestion()]);
-    promoteBtn()?.click();
-    expect(document.querySelector(".ab-override-tally")?.textContent).toContain("Promoting overrides");
-    document.querySelector<HTMLButtonElement>('[data-override="cancel"]')?.click();
-    rejectBtn()?.click();
-    expect(document.querySelector(".ab-override-tally")?.textContent).toContain("Rejecting overrides");
-  });
 });
 
-// ---- the required reason ----------------------------------------------------
-
-describe("the required reason", () => {
-  it("opens an empty, labelled reason form with a confirm naming the action", async () => {
-    await mountAs("maintainer", [suggestion()]);
-    expect(reasonBox()).not.toBeNull();
-    expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(true);
+describe("one-click promotion", () => {
+  it("POSTs {} and immediately settles a suggestion into a green diff card", async () => {
+    await mountAs("maintainer", [suggestion()], {
+      [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: promotedResponse,
+    });
 
     promoteBtn()?.click();
-    expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(false);
-    expect(reasonBox()?.value).toBe(""); // never pre-filled
-    const label = reasonBox()?.closest("label")?.querySelector(".ab-field-label");
-    expect(label?.textContent).toContain("Why promote");
-    expect(confirmBtn()?.textContent).toBe("Promote to work"); // not "OK"
+
+    await expect.poll(() => overrideCall("/force-create-work-item")).toBeTruthy();
+    expect(overrideCall("/force-create-work-item")?.body).toEqual({});
+    await expect.poll(() => document.querySelector(".ab-card")?.classList.contains("ab-promoted")).toBe(
+      true,
+    );
+    const card = document.querySelector(".ab-card") as HTMLElement;
+    expect(card.querySelector(".ab-accepted-badge")?.textContent).toBe("Accepted");
+    expect(card.querySelector(".ab-card-status")).toBeNull();
+    expect(card.querySelector(".ab-suggestion-diff")).not.toBeNull();
+    expect(card.querySelector(".ab-votes")).toBeNull();
+    expect(card.querySelector(".ab-override")).toBeNull();
+    expect(card.textContent).not.toContain("Queued as work item");
+    expect(card.textContent).not.toContain("work_item_created");
+    expect(card.textContent).not.toContain("Maintainer approvals");
+    expect(document.querySelector('[role="status"]')?.textContent).toContain("Promoted to work");
   });
 
-  it("sends nothing and explains when the reason is empty or too short", async () => {
-    await mountAs("maintainer", [suggestion()]);
+  it("settles a promoted comment into a green note card", async () => {
+    await mountAs("maintainer", [comment()], {
+      [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: promotedResponse,
+    });
     promoteBtn()?.click();
-    confirmBtn()?.click();
-    await expect.poll(() => errorNode()?.hidden).toBe(false);
-    expect(errorNode()?.textContent).toContain("at least 3 characters");
-    expect(overrideCall("/force-create-work-item")).toBeUndefined();
-
-    const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "ab";
-    box.dispatchEvent(new Event("input"));
-    confirmBtn()?.click();
-    await expect.poll(() => errorNode()?.textContent).toContain("at least 3 characters");
-    expect(overrideCall("/force-create-work-item")).toBeUndefined();
+    await expect.poll(() => document.querySelector(".ab-card")?.classList.contains("ab-promoted")).toBe(
+      true,
+    );
+    const card = document.querySelector(".ab-card") as HTMLElement;
+    expect(card.querySelector(".ab-body")?.textContent).toBe("Resolve this loose end.");
+    expect(card.querySelector(".ab-accepted-badge")?.textContent).toBe("Accepted");
+    expect(card.querySelector(".ab-actions")).toBeNull();
   });
-});
 
-// ---- the two overrides ------------------------------------------------------
-
-describe("performing an override", () => {
-  it("promotes: POSTs {reason} to force-create-work-item, accepts 201, announces", async () => {
+  it("surfaces promotion failures without opening a reason form", async () => {
+    const detail = "a work item already exists for this annotation";
     await mountAs("maintainer", [suggestion()], {
       [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: {
-        status: 201,
-        body: {
-          annotationId: "ann-1",
-          status: "work_item_created",
-          decisionId: "dec-1",
-          workItemId: "wi-1",
-          operationIds: ["op-1"],
-          correlationId: "corr-1",
-        },
+        status: 409,
+        body: { title: "Conflict", detail },
       },
     });
     promoteBtn()?.click();
-    const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "  Solo book: promoting my own edit.  ";
-    box.dispatchEvent(new Event("input"));
-    confirmBtn()?.click();
+    await expect.poll(() => errorNode()?.textContent).toBe(detail);
+    expect(errorNode()?.hidden).toBe(false);
+    expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(true);
+  });
+});
 
-    await expect.poll(() => overrideCall("/force-create-work-item")).toBeTruthy();
-    const call = overrideCall("/force-create-work-item") as Call;
-    expect(call.method).toBe("POST");
-    // Exactly {reason}, trimmed - nothing else is sent.
-    expect(call.body).toEqual({ reason: "Solo book: promoting my own edit." });
-    await expect.poll(() => document.querySelector('[role="status"]')?.textContent).toContain(
-      "Promoted to work",
-    );
-    expect(errorNode()?.hidden).toBe(true);
+describe("reason-required rejection", () => {
+  it("opens its own empty form and refuses a short reason", async () => {
+    await mountAs("maintainer", [suggestion()]);
+    rejectBtn()?.click();
+    expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(false);
+    expect(reasonBox()?.value).toBe("");
+    confirmBtn()?.click();
+    await expect.poll(() => errorNode()?.textContent).toContain("at least 3 characters");
+    expect(overrideCall("/annotations/ann-1/reject")).toBeUndefined();
   });
 
-  it("rejects: POSTs {reason} to reject and accepts 200", async () => {
+  it("POSTs the trimmed reason and announces rejection", async () => {
     await mountAs("maintainer", [suggestion()], {
       [`${API}/v1/projects/${PROJECT}/annotations/ann-1/reject`]: {
         status: 200,
@@ -330,108 +341,47 @@ describe("performing an override", () => {
     });
     rejectBtn()?.click();
     const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "Out of scope for this book.";
+    box.value = "  Out of scope for this book.  ";
     box.dispatchEvent(new Event("input"));
     confirmBtn()?.click();
 
     await expect.poll(() => overrideCall("/annotations/ann-1/reject")).toBeTruthy();
-    const call = overrideCall("/annotations/ann-1/reject") as Call;
-    expect(call.method).toBe("POST");
-    expect(call.body).toEqual({ reason: "Out of scope for this book." });
+    expect(overrideCall("/annotations/ann-1/reject")?.body).toEqual({
+      reason: "Out of scope for this book.",
+    });
     await expect.poll(() => document.querySelector('[role="status"]')?.textContent).toContain(
       "rejected",
     );
   });
 
-  it("surfaces a 403 problem detail verbatim", async () => {
-    const detail = "only a maintainer may perform overrides";
-    await mountAs("maintainer", [suggestion()], {
-      [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: {
-        status: 403,
-        body: { title: "Forbidden", detail },
-      },
-    });
-    promoteBtn()?.click();
-    const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "Because I say so.";
-    box.dispatchEvent(new Event("input"));
-    confirmBtn()?.click();
-    await expect.poll(() => errorNode()?.textContent).toBe(detail);
-    expect(errorNode()?.getAttribute("role")).toBe("alert");
-    expect(errorNode()?.hidden).toBe(false);
-  });
-
-  it("surfaces a 409 problem detail verbatim", async () => {
-    const detail = "a work item already exists for this suggestion";
-    await mountAs("maintainer", [suggestion()], {
-      [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: {
-        status: 409,
-        body: { title: "Conflict", detail },
-      },
-    });
-    promoteBtn()?.click();
-    const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "Promote it anyway.";
-    box.dispatchEvent(new Event("input"));
-    confirmBtn()?.click();
-    await expect.poll(() => errorNode()?.textContent).toBe(detail);
-  });
-});
-
-// ---- draft survival ---------------------------------------------------------
-
-describe("draft survival across a background re-render", () => {
-  it("keeps an in-progress reason (and focus) when every card is rebuilt", async () => {
+  it("keeps a half-typed rejection reason and focus across a re-render", async () => {
     const element = await mountAs("maintainer", [suggestion()]);
-    promoteBtn()?.click();
+    rejectBtn()?.click();
     const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "Half-typed override reason";
+    box.value = "Half-typed rejection reason";
     box.dispatchEvent(new Event("input"));
     box.focus();
-    expect(document.activeElement).toBe(box);
 
-    // The background refresh path: a settled poll rebuilds every card.
     (element as unknown as { renderAll(): void }).renderAll();
 
     const rebuilt = reasonBox() as HTMLTextAreaElement;
-    expect(rebuilt).not.toBe(box); // genuinely rebuilt
-    expect(rebuilt.value).toBe("Half-typed override reason");
-    expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(false);
-    expect(document.activeElement).toBe(rebuilt);
-  });
-
-  it("keeps focus on a focused override button across a re-render", async () => {
-    const element = await mountAs("maintainer", [suggestion()]);
-    const reject = rejectBtn() as HTMLButtonElement;
-    reject.focus();
-    (element as unknown as { renderAll(): void }).renderAll();
-    const rebuilt = rejectBtn();
-    expect(rebuilt).not.toBe(reject);
+    expect(rebuilt).not.toBe(box);
+    expect(rebuilt.value).toBe("Half-typed rejection reason");
     expect(document.activeElement).toBe(rebuilt);
   });
 });
 
-// ---- XSS --------------------------------------------------------------------
-
-describe("untrusted strings are text, never markup", () => {
-  it("renders an API detail and an annotation body as text", async () => {
+describe("untrusted strings", () => {
+  it("renders API detail and annotation body as text, never markup", async () => {
     await mountAs("maintainer", [suggestion({ body: XSS })], {
       [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: {
         status: 409,
         body: { title: "Conflict", detail: XSS },
       },
     });
-    // The untrusted annotation body reached the DOM as text.
     expect(document.querySelector(".ab-body")?.textContent).toBe(XSS);
-
     promoteBtn()?.click();
-    const box = reasonBox() as HTMLTextAreaElement;
-    box.value = "Trying it.";
-    box.dispatchEvent(new Event("input"));
-    confirmBtn()?.click();
     await expect.poll(() => errorNode()?.textContent).toBe(XSS);
-
-    // No element was ever created from either string.
     expect(document.querySelector("script")).toBeNull();
     expect(document.querySelector("img")).toBeNull();
     expect(document.body.querySelectorAll("[onerror]").length).toBe(0);

@@ -1057,16 +1057,18 @@ paths:
     post:
       operationId: forceCreateWorkItem
       tags: [annotations]
-      summary: Maintainer override - force-create a work item bypassing the rule.
+      summary: Promote an annotation to a work item, bypassing the rule.
       description: |
-        Maintainer-only. Creates a `ready` work item for a suggestion without a
-        satisfied rule, recorded as an override decision on the same uniqueness
-        key `(sourceAnnotationId, create_work_item, rule_version 0)` - a second
-        call returns 409. The annotation transitions to `work_item_created`.
+        Maintainer-only. Creates a `ready` work item for an open comment or
+        suggestion without a satisfied rule, recorded as an override decision
+        on the same uniqueness key `(sourceAnnotationId, create_work_item,
+        rule_version 0)` - a second call returns 409. The annotation transitions
+        to `work_item_created`. No rationale is required; legacy callers may
+        still supply one.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
-        $ref: "#/components/requestBodies/OverrideReason"
+        $ref: "#/components/requestBodies/PromotionBody"
       responses:
         "201":
           description: Work item force-created.
@@ -2880,6 +2882,19 @@ components:
         after authorization.
 
   requestBodies:
+    PromotionBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              reason:
+                type: string
+                minLength: 3
+                maxLength: 2000
+                description: Optional legacy rationale retained on the decision.
     OverrideReason:
       required: true
       content:

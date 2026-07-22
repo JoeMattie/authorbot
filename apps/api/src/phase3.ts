@@ -777,9 +777,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
           });
           // The override decision is the durable Git record (contract §4:
           // "recorded as decisions with override_reason"). Its `decision.create`
-          // row renders the decision YAML (no work item → decision only). The
-          // annotation status change is DB-side; the decision artifact carries
-          // the rejection/reopen for rebuild.
+          // row renders both the decision YAML and the annotation's transitioned
+          // status so a rebuild restores the same settled state.
           const decisionCommand = ctx.commandStatements({
             project: guard.project,
             correlationId,
@@ -873,7 +872,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       if (!parsed.success) {
         return problem(c, "validation-failed", { issues: issueList(parsed.error) });
       }
-      const reason = parsed.data.reason;
+      const reason = parsed.data.reason ?? null;
 
       return serialize(guard.project.id, async () => {
         const annotation = await findAnnotation(c, guard.project);
@@ -902,7 +901,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         const existingCreate = await repos.decisions.getWorkItemCreation(annotation.id);
         if (existingCreate !== null) {
           return problem(c, "state-conflict", {
-            detail: "a work item already exists for this suggestion",
+            detail: "a work item already exists for this annotation",
           });
         }
 
@@ -941,7 +940,11 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
               targetType: "annotation",
               targetId: annotation.id,
               correlationId,
-              metadata: { reason, decisionId: creation.decisionId, workItemId: creation.workItemId },
+              metadata: {
+                ...(reason === null ? {} : { reason }),
+                decisionId: creation.decisionId,
+                workItemId: creation.workItemId,
+              },
             }),
             ...ctx.claimStatements(c, 201, responseBody),
           ]);
@@ -953,13 +956,13 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             const raced = await repos.decisions.getWorkItemCreation(annotation.id);
             if (raced !== null) {
               return problem(c, "state-conflict", {
-                detail: "a work item already exists for this suggestion",
+                detail: "a work item already exists for this annotation",
               });
             }
             const fresh = await repos.annotations.getById(annotation.id);
             if (fresh !== null && fresh.status !== "open") {
               return problem(c, "state-conflict", {
-                detail: `the suggestion is no longer open (status "${fresh.status}")`,
+                detail: `the annotation is no longer open (status "${fresh.status}")`,
               });
             }
           }

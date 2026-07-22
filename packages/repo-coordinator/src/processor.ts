@@ -132,12 +132,12 @@ export interface AnnotationWithdrawPayload {
  * Payload for `decision.create` (Phase 3 contract §4) and `decision.update`
  * outbox rows.
  *
- * `decision.create` renders the decision YAML and - when the decision row
- * carries a `workItemId` - the linked work-item Markdown **in the same
- * commit** (one crossing = one logical mutation = one commit). This covers
- * rule crossings, force-creates, and work-item cancellations (whose override
- * decision also references the work item, re-rendering it with its new
- * status).
+ * `decision.create` renders the decision YAML and the source annotation's
+ * transitioned status, plus - when the decision row carries a `workItemId` -
+ * the linked work-item Markdown **in the same commit** (one crossing = one
+ * logical mutation = one commit). This covers rule crossings, force-creates,
+ * rejects, reopens, and work-item cancellations (whose override decision also
+ * references the work item, re-rendering it with its new status).
  *
  * `decision.update` re-renders the decision YAML alone - the
  * `support_changed` mark/clear path (design §11.3); no new decision row
@@ -892,10 +892,47 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         kind === "decision.create"
           ? `Record decision ${decision.id}`
           : `Update decision ${decision.id}`;
+      // A decision.create is also the durable annotation transition. Without
+      // this re-render, a projection rebuild would restore the old `open`
+      // annotation artifact and resurrect voting and promotion controls even
+      // though the decision and work item were already committed.
+      if (kind === "decision.create") {
+        const annotation = await mustAnnotation(decision.sourceAnnotationId);
+        const authorRef = await actorRef(annotation.authorActorId);
+        let transitionedStatus: Exclude<AnnotationRecord["status"], "pending_git">;
+        if (decision.actionType === "create_work_item") {
+          transitionedStatus = "work_item_created";
+        } else if (decision.actionType === "reject_suggestion") {
+          transitionedStatus = "rejected";
+        } else if (decision.actionType === "reopen_suggestion") {
+          transitionedStatus = "open";
+        } else {
+          if (annotation.status === "pending_git") {
+            throw new Error(
+              `decision ${decision.id}: cannot mirror pending annotation ${annotation.id}`,
+            );
+          }
+          transitionedStatus = annotation.status;
+        }
+        files.push(
+          renderAnnotationArtifact({
+            id: annotation.id,
+            kind: annotation.kind,
+            scope: annotation.scope,
+            chapterId: annotation.chapterId,
+            chapterRevision: annotation.chapterRevision,
+            author: authorRef,
+            status: transitionedStatus,
+            createdAt: annotation.createdAt,
+            ...(annotation.target === null ? {} : { target: annotation.target }),
+            body: annotation.body,
+          }),
+        );
+      }
       // One crossing = one commit: the create row also renders the linked
-      // work item so both artifacts land as one logical mutation (task/
-      // contract §4). Cancel decisions re-render the item with its new
-      // status the same way.
+      // work item so all three artifacts land as one logical mutation (task/
+      // contract §4). Cancel decisions re-render the item with its new status
+      // the same way.
       if (kind === "decision.create" && decision.workItemId !== null) {
         const workItem = await mustWorkItem(decision.workItemId);
         files.push(await renderWorkItemFile(workItem, payload.createdByActorId));
@@ -1579,11 +1616,13 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       createdAt: workItem.createdAt,
       context: annotation.body,
       originalText: quoteExact(workItem.target),
-      // The voted proposal is the annotation body, which the contract pins
-      // to the Context section; Requested change references it rather than
-      // duplicating the prose (design §13: "without pretending it is
-      // already the final prose").
-      requestedChange: `Apply the change proposed in suggestion ${workItem.sourceAnnotationId} (see Context).`,
+      // The annotation body is context, not already-final prose. Suggestions
+      // ask the claimant to apply the proposed change; comments are editorial
+      // notes and must not be mislabeled as suggestions in the durable task.
+      requestedChange:
+        annotation.kind === "suggestion"
+          ? `Apply the change proposed in suggestion ${workItem.sourceAnnotationId} (see Context).`
+          : `Address the note in annotation ${workItem.sourceAnnotationId} (see Context).`,
       ...(overrides.completion === undefined ? {} : { completion: overrides.completion }),
     });
   }
