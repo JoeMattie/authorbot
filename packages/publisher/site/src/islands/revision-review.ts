@@ -1,0 +1,426 @@
+/** Maintainer revision queue and document-neutral diff review surface. */
+import { isMaintainer, type Me, type RevisionProposalSummary } from "./api.js";
+import { el } from "./dom.js";
+import type { ProjectStore } from "./project-store.js";
+import { loadProjectStore } from "./project-store-loader.js";
+import {
+  isRevisionProposalDetail,
+  revisionActionCopy,
+  revisionDocument,
+  revisionStatusLabel,
+  revisionWarning,
+  workTypeLabel,
+} from "./revision-review-model.js";
+import { renderRevisionDiff, type RevisionDiffHandle } from "./revision-diff.js";
+
+interface RevisionReviewConfig {
+  apiBase: string;
+  project: string;
+  base: string;
+}
+
+function parseConfig(host: HTMLElement): RevisionReviewConfig | null {
+  const { apiBase, project, base } = host.dataset;
+  if (apiBase === undefined || project === undefined || base === undefined) return null;
+  return { apiBase, project, base };
+}
+
+function canReadRevisions(me: Me | null): boolean {
+  return me?.scopes.includes("revisions:read") === true;
+}
+
+function canReviewRevisions(me: Me | null): boolean {
+  return isMaintainer(me) && me?.scopes.includes("revisions:review") === true;
+}
+
+function dateLabel(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString();
+}
+
+export class AuthorbotRevisionReview extends HTMLElement {
+  private store!: ProjectStore;
+  private cfg!: RevisionReviewConfig;
+  private started = false;
+  private mountGeneration = 0;
+  private unsubscribe: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
+  private selectedProposalId: string | null = null;
+  private diffHandle: RevisionDiffHandle | null = null;
+  private list!: HTMLUListElement;
+  private listStatus!: HTMLParagraphElement;
+  private detail!: HTMLElement;
+  private live!: HTMLParagraphElement;
+  private scaffolded = false;
+
+  connectedCallback(): void {
+    if (this.started) return;
+    this.started = true;
+    const generation = ++this.mountGeneration;
+    const cfg = parseConfig(this);
+    if (cfg === null) return;
+    this.cfg = cfg;
+    void this.connectStore(cfg, generation);
+  }
+
+  disconnectedCallback(): void {
+    this.started = false;
+    this.mountGeneration += 1;
+    this.diffHandle?.destroy();
+    this.diffHandle = null;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.releaseConnection?.();
+    this.releaseConnection = null;
+  }
+
+  private isCurrent(generation = this.mountGeneration): boolean {
+    return this.started && this.isConnected && generation === this.mountGeneration;
+  }
+
+  private async connectStore(
+    cfg: RevisionReviewConfig,
+    generation: number,
+  ): Promise<void> {
+    let store: ProjectStore;
+    try {
+      store = await loadProjectStore(cfg);
+    } catch {
+      return; // Keep the server-rendered progressive-enhancement fallback.
+    }
+    if (!this.isCurrent(generation)) return;
+    this.store = store;
+    await store.getState().ensureSession();
+    if (!this.isCurrent(generation)) return;
+    if (store.getState().sessionStatus !== "ready") return;
+    this.scaffold();
+    this.unsubscribe = store.subscribe(() => this.sync());
+    this.sync();
+    if (canReadRevisions(store.getState().session)) {
+      await store.getState().ensureRevisionProposals();
+      if (!this.isCurrent(generation)) return;
+      this.releaseConnection = store.getState().retainConnection();
+      this.sync();
+    }
+  }
+
+  private scaffold(): void {
+    this.textContent = "";
+    const layout = el("div", "ab-revision-layout");
+    const queue = el("aside", "ab-revision-queue");
+    queue.setAttribute("aria-label", "Revision proposals");
+    queue.append(el("h2", undefined, "Pending revisions"));
+    this.listStatus = el("p", "ab-revision-list-status", "Loading revisions…");
+    this.listStatus.setAttribute("role", "status");
+    this.list = el("ul", "ab-revision-list");
+    queue.append(this.listStatus, this.list);
+    this.detail = el("section", "ab-revision-detail");
+    this.detail.setAttribute("aria-label", "Revision detail");
+    this.detail.append(
+      el("p", "ab-revision-empty", "Choose a revision to review its complete diff."),
+    );
+    layout.append(queue, this.detail);
+    this.live = el("p", "ab-sr");
+    this.live.setAttribute("role", "status");
+    this.live.setAttribute("aria-live", "polite");
+    this.append(layout, this.live);
+    this.scaffolded = true;
+  }
+
+  private sync(): void {
+    if (!this.scaffolded || !this.isCurrent()) return;
+    const state = this.store.getState();
+    const me = state.session;
+    if (state.sessionStatus === "error") {
+      this.showUnavailable("Revision review is unavailable. Sign in again to continue.");
+      return;
+    }
+    if (state.sessionStatus !== "ready") return;
+    if (me === null) {
+      this.showUnavailable("Sign in as a maintainer to review revisions.");
+      return;
+    }
+    if (!canReadRevisions(me)) {
+      this.showUnavailable("Your credential cannot read revision proposals.");
+      return;
+    }
+    this.renderList();
+    this.ensureSelection();
+    this.renderDetail(me);
+  }
+
+  private showUnavailable(message: string): void {
+    this.list.textContent = "";
+    this.listStatus.hidden = false;
+    this.listStatus.textContent = message;
+    this.diffHandle?.destroy();
+    this.diffHandle = null;
+    this.detail.replaceChildren(el("p", "ab-revision-empty", message));
+  }
+
+  private renderList(): void {
+    const state = this.store.getState();
+    this.list.textContent = "";
+    if (state.revisionProposalsStatus === "loading" || state.revisionProposalsStatus === "idle") {
+      this.listStatus.hidden = false;
+      this.listStatus.textContent = "Loading revisions…";
+      return;
+    }
+    if (state.revisionProposalsStatus === "error") {
+      this.listStatus.hidden = false;
+      this.listStatus.textContent =
+        `Revision queue unavailable: ${state.revisionProposalsError ?? "request failed"}`;
+      return;
+    }
+    if (state.revisionProposalIds.length === 0) {
+      this.listStatus.hidden = false;
+      this.listStatus.textContent = "No revisions are waiting for review.";
+      return;
+    }
+    this.listStatus.hidden = true;
+    for (const proposalId of state.revisionProposalIds) {
+      const proposal = state.revisionProposalsById[proposalId];
+      if (proposal === undefined) continue;
+      const targetDocument = revisionDocument(proposal);
+      const item = el("li", "ab-revision-list-item");
+      const button = el("button", "ab-revision-list-button");
+      button.type = "button";
+      button.dataset.proposalId = proposal.id;
+      button.setAttribute(
+        "aria-current",
+        proposal.id === this.selectedProposalId ? "true" : "false",
+      );
+      button.append(
+        el("span", "ab-revision-list-label", targetDocument.label),
+        el(
+          "span",
+          "ab-revision-list-summary",
+          proposal.changeSummary?.trim() || "Whole-document revision",
+        ),
+        el(
+          "span",
+          "ab-revision-list-byline",
+          `By ${proposal.author?.displayName ?? "Unknown contributor"}`,
+        ),
+        el("span", `ab-revision-status ab-revision-status-${proposal.status}`, revisionStatusLabel(proposal.status)),
+      );
+      button.addEventListener("click", () => {
+        this.selectedProposalId = proposal.id;
+        this.renderList();
+        this.renderDetail(this.store.getState().session);
+        void this.store.getState().ensureRevisionProposal(proposal.id);
+      });
+      item.append(button);
+      this.list.append(item);
+    }
+  }
+
+  private ensureSelection(): void {
+    const state = this.store.getState();
+    if (
+      this.selectedProposalId === null ||
+      !state.revisionProposalIds.includes(this.selectedProposalId)
+    ) {
+      this.selectedProposalId = state.revisionProposalIds[0] ?? null;
+    }
+    if (this.selectedProposalId !== null) {
+      const detailStatus = state.revisionProposalDetailStatusById[this.selectedProposalId];
+      // `loadRevisionProposal` publishes "loading" before it installs its
+      // request promise. Do not synchronously re-enter it from this store
+      // subscriber while that notification is being delivered.
+      if (detailStatus === undefined || detailStatus === "idle") {
+        void state.ensureRevisionProposal(this.selectedProposalId);
+      }
+    }
+  }
+
+  private renderDetail(me: Me | null): void {
+    this.diffHandle?.destroy();
+    this.diffHandle = null;
+    const proposalId = this.selectedProposalId;
+    if (proposalId === null) {
+      this.detail.replaceChildren(
+        el("p", "ab-revision-empty", "No revision is selected."),
+      );
+      return;
+    }
+    const state = this.store.getState();
+    const proposal = state.revisionProposalsById[proposalId];
+    const detailStatus = state.revisionProposalDetailStatusById[proposalId];
+    if (detailStatus === "error") {
+      this.detail.replaceChildren(
+        el(
+          "p",
+          "ab-revision-error",
+          `Revision could not be loaded: ${state.revisionProposalDetailErrorById[proposalId] ?? "request failed"}`,
+        ),
+      );
+      return;
+    }
+    if (proposal === undefined || !isRevisionProposalDetail(proposal)) {
+      this.detail.replaceChildren(el("p", "ab-revision-empty", "Loading revision diff…"));
+      return;
+    }
+
+    const targetDocument = revisionDocument(proposal);
+    const header = el("header", "ab-revision-detail-header");
+    const headingWrap = el("div");
+    headingWrap.append(
+      el("p", "ab-revision-kicker", `${targetDocument.kind} revision`),
+      el("h2", undefined, targetDocument.label),
+    );
+    header.append(
+      headingWrap,
+      el(
+        "span",
+        `ab-revision-status ab-revision-status-${proposal.status}`,
+        revisionStatusLabel(proposal.status),
+      ),
+    );
+
+    const meta = el("dl", "ab-revision-meta");
+    this.meta(meta, "Proposed by", proposal.author?.displayName ?? "Unknown contributor");
+    this.meta(meta, "Created", dateLabel(proposal.createdAt));
+    this.meta(meta, "Base revision", String(proposal.baseRevision));
+    this.meta(
+      meta,
+      "Current revision",
+      targetDocument.currentRevision === null
+        ? "Unavailable"
+        : String(targetDocument.currentRevision),
+    );
+    if (proposal.workItem != null) {
+      const workLink = el("a", "ab-revision-work", `Work · ${workTypeLabel(proposal.workItem.type)}`);
+      workLink.href = `${this.cfg.base}work/`;
+      const term = el("dt", undefined, "Source");
+      const description = el("dd");
+      description.append(workLink, document.createTextNode(` · ${proposal.workItem.status}`));
+      meta.append(term, description);
+    }
+    if (targetDocument.path !== "") {
+      this.meta(meta, "Repository path", targetDocument.path);
+    }
+
+    const body = el("div", "ab-revision-detail-body");
+    body.append(header, meta);
+    if (proposal.changeSummary?.trim()) {
+      body.append(this.copyBlock("Change summary", proposal.changeSummary));
+    }
+    if (proposal.notes?.trim()) body.append(this.copyBlock("Contributor notes", proposal.notes));
+    const warning = revisionWarning(proposal);
+    if (warning !== null) {
+      const warningNode = el(
+        "p",
+        `ab-revision-warning ab-revision-warning-${warning.tone}`,
+        warning.message,
+      );
+      warningNode.setAttribute("role", "alert");
+      body.append(warningNode);
+    }
+    if (proposal.diff.computationLimited) {
+      body.append(
+        el(
+          "p",
+          "ab-revision-diff-note",
+          "The visual diff reached its computation limit. The complete before and after snapshots remain available below.",
+        ),
+      );
+    }
+    const diffHost = el("div", "ab-revision-comparison");
+    body.append(diffHost);
+    this.diffHandle = renderRevisionDiff(diffHost, {
+      unifiedDiff: proposal.diff.unifiedDiff,
+      before: proposal.baseContent,
+      after: proposal.proposedContent,
+      label: `Revision comparison for ${targetDocument.label}`,
+    });
+
+    if (proposal.status === "pending_review") {
+      body.append(this.actions(proposal, me));
+    } else if (proposal.status === "applying") {
+      body.append(
+        el(
+          "p",
+          "ab-revision-result ab-revision-result-applying",
+          "Approved. The validated Git write is in progress; the published page updates after deployment.",
+        ),
+      );
+    } else if (proposal.status === "rejected") {
+      body.append(
+        el(
+          "p",
+          "ab-revision-result ab-revision-result-rejected",
+          "Rejected. The current document was not changed.",
+        ),
+      );
+    }
+    this.detail.replaceChildren(body);
+  }
+
+  private meta(list: HTMLDListElement, label: string, value: string): void {
+    list.append(el("dt", undefined, label), el("dd", undefined, value));
+  }
+
+  private copyBlock(label: string, value: string): HTMLElement {
+    const section = el("section", "ab-revision-copy");
+    section.append(el("h3", undefined, label), el("p", undefined, value));
+    return section;
+  }
+
+  private actions(proposal: RevisionProposalSummary, me: Me | null): HTMLElement {
+    const section = el("section", "ab-revision-actions");
+    section.setAttribute("aria-label", "Review decision");
+    if (!canReviewRevisions(me)) {
+      section.append(
+        el("p", "ab-revision-permission", "A maintainer with revision review permission must decide this proposal."),
+      );
+      return section;
+    }
+    const copy = revisionActionCopy(proposal);
+    section.append(el("p", "ab-revision-action-copy", copy.explanation));
+    const noteLabel = el("label", "ab-revision-reason-label", "Rejection note (optional)");
+    const note = el("textarea", "ab-revision-reason");
+    note.rows = 2;
+    note.placeholder = "Why this version should not be applied";
+    noteLabel.append(note);
+    const buttons = el("div", "ab-revision-buttons");
+    const approve = el("button", "ab-btn ab-primary ab-revision-approve", copy.approveLabel);
+    approve.type = "button";
+    const reject = el("button", "ab-btn ab-danger ab-revision-reject", "Reject");
+    reject.type = "button";
+    approve.addEventListener("click", () => {
+      void this.decide(proposal.id, "approve", undefined);
+    });
+    reject.addEventListener("click", () => {
+      void this.decide(proposal.id, "reject", note.value);
+    });
+    buttons.append(approve, reject);
+    section.append(noteLabel, buttons);
+    return section;
+  }
+
+  private async decide(
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ): Promise<void> {
+    const buttons = this.detail.querySelectorAll<HTMLButtonElement>(".ab-revision-buttons button");
+    for (const button of buttons) button.disabled = true;
+    this.live.textContent = decision === "approve" ? "Applying revision…" : "Rejecting revision…";
+    const result = await this.store.getState().reviewRevision(proposalId, decision, reason);
+    if (!this.isCurrent()) return;
+    if (!result.ok) {
+      this.live.textContent = `Revision ${decision} failed: ${result.message}`;
+      this.sync();
+      const error = el("p", "ab-revision-error", result.message);
+      error.setAttribute("role", "alert");
+      this.detail.prepend(error);
+      return;
+    }
+    this.live.textContent =
+      decision === "approve"
+        ? "Revision approved and queued for validated application."
+        : "Revision rejected. The current document was not changed.";
+    this.sync();
+  }
+}

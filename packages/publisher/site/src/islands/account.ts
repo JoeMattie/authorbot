@@ -233,6 +233,9 @@ export class AuthorbotAccount extends HTMLElement {
     // now lives in the primary navigation, so repeating it here would give
     // every signed-in desktop user two links to the same page.
     if (role === "maintainer") {
+      if (me.scopes.includes("revisions:read")) {
+        strip.append(this.link(`${this.cfg.base}revisions/`, "Reviews"));
+      }
       strip.append(this.link(`${this.cfg.base}settings/`, "Settings"));
     }
 

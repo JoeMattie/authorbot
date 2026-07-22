@@ -118,8 +118,8 @@ describe("api-url-less build (script-free regression)", () => {
     const plainFiles = rel(outPlain, await collectFiles(outPlain));
     const collabFiles = rel(outCollab, await collectFiles(outCollab));
     // The collab build adds exactly the island assets plus the pages that
-    // exist only when an API base is configured: /work/ (Phase 3 contract §6)
-    // and, from Phase 6, /settings/ (§3.6) and /write/ (§3.5). Each is gated
+    // exist only when an API base is configured: /work/ (Phase 3 contract §6),
+    // /settings/ (§3.6), /write/ (§3.5), and /revisions/ (Phase 11 §5). Each is gated
     // by `getStaticPaths` returning nothing without collab, which is what
     // keeps the api-url-less build byte-identical rather than merely similar.
     //
@@ -129,15 +129,18 @@ describe("api-url-less build (script-free regression)", () => {
     const lazyAssets = additions.filter((file) => file.startsWith(path.join("_astro", "assets")));
     expect(lazyAssets.some((file) => file.includes("project-store-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("revision-review-"))).toBe(true);
     expect(additions.filter((file) => !lazyAssets.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
       path.join("_astro", "authorbot-access.js"),
       path.join("_astro", "authorbot-account.js"),
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("_astro", "authorbot-revisions.css"),
       path.join("_astro", "authorbot-settings.css"),
       path.join("_astro", "authorbot-settings.js"),
       path.join("_astro", "authorbot-work.css"),
+      path.join("revisions", "index.html"),
       path.join("settings", "index.html"),
       path.join("work", "index.html"),
       path.join("write", "index.html"),
@@ -274,8 +277,10 @@ describe("collab-enabled build", () => {
   it("resolves each retryable lazy chunk beside the stable entries", async () => {
     const assets = await readdir(path.join(outCollab, "_astro", "assets"));
     const projectStore = assets.find((file) => file.startsWith("project-store-"));
+    const revisionReview = assets.find((file) => file.startsWith("revision-review-"));
     const workQueue = assets.find((file) => file.startsWith("work-queue-"));
     expect(projectStore).toBeDefined();
+    expect(revisionReview).toBeDefined();
     expect(workQueue).toBeDefined();
 
     const account = await readFile(
@@ -300,6 +305,7 @@ describe("collab-enabled build", () => {
     expect(account).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(account).not.toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/revision-review-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
   });
 
@@ -415,6 +421,27 @@ describe("collab-enabled build", () => {
 
   it("plain build emits no /work/ page (script-free regression)", async () => {
     await expect(stat(path.join(outPlain, "work/index.html"))).rejects.toThrow();
+  });
+
+  it("emits a page-only /revisions/ review surface for collaboration builds", async () => {
+    const page = await readFile(path.join(outCollab, "revisions/index.html"), "utf8");
+    expect(page).toContain("<authorbot-revision-review");
+    expect(page).toContain(`data-api-base="${API_URL}"`);
+    expect(page).toContain('data-project="hollow-creek-anomaly"');
+    expect(page).toContain('data-base="/"');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-revisions.css">');
+    expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
+    expect(page).toContain("Compare the complete before and after text");
+    expect(page).not.toMatch(/<[^>]+style=/);
+    await expect(stat(path.join(outPlain, "revisions/index.html"))).rejects.toThrow();
+
+    for (const file of await collectFiles(outCollab)) {
+      if (!file.endsWith(".html") || file.endsWith(path.join("revisions", "index.html"))) {
+        continue;
+      }
+      expect(await readFile(file, "utf8"), file).not.toContain("authorbot-revisions.css");
+    }
   });
 
   it("ships the bundle within the 35 KB gzipped budget (contract §1)", async () => {

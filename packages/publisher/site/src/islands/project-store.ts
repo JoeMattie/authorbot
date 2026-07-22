@@ -27,6 +27,9 @@ import {
   type OverrideResult,
   type Reply,
   type ReplyAccepted,
+  type RevisionProposalDetail,
+  type RevisionProposalSummary,
+  type RevisionReviewResult,
   type SubmissionAccepted,
   type SubmitBody,
   type TaskBundle,
@@ -53,6 +56,9 @@ export interface ProjectStoreApi {
   workItems?(cursor?: string): Promise<
     ApiResult<{ items: WorkItem[]; nextCursor: string | null }>
   >;
+  revisionProposals?: CollabApi["revisionProposals"];
+  revisionProposal?: CollabApi["revisionProposal"];
+  reviewRevisionProposal?: CollabApi["reviewRevisionProposal"];
   operation?(operationId: string): Promise<Operation | null>;
   eventsUrl?(): string;
   pollEvents?(after: number): Promise<
@@ -130,6 +136,7 @@ interface OperationContext {
   mutationId?: string;
   fingerprint?: string;
   refreshWork?: boolean;
+  revisionProposalId?: string;
   settlementAttempts?: number;
 }
 
@@ -156,6 +163,12 @@ export interface ProjectStoreState {
   workItemIds: readonly string[];
   workItemsStatus: ResourceStatus;
   workItemsError: string | null;
+  revisionProposalsById: Readonly<Record<string, RevisionProposalSummary>>;
+  revisionProposalIds: readonly string[];
+  revisionProposalsStatus: ResourceStatus;
+  revisionProposalsError: string | null;
+  revisionProposalDetailStatusById: Readonly<Record<string, ResourceStatus>>;
+  revisionProposalDetailErrorById: Readonly<Record<string, string | null>>;
   operationsById: Readonly<Record<string, Operation>>;
   pendingMutations: Readonly<Record<string, PendingMutation>>;
   connection: ConnectionState;
@@ -177,6 +190,10 @@ export interface ProjectStoreState {
   refreshReplies(annotationId: string): Promise<void>;
   ensureWorkItems(): Promise<void>;
   refreshWorkItems(): Promise<void>;
+  ensureRevisionProposals(): Promise<void>;
+  refreshRevisionProposals(): Promise<void>;
+  ensureRevisionProposal(proposalId: string): Promise<void>;
+  refreshRevisionProposal(proposalId: string): Promise<void>;
   refreshOperation(operationId: string): Promise<Operation | null>;
   /**
    * Retain the one project feed. The returned release function is idempotent;
@@ -197,6 +214,11 @@ export interface ProjectStoreState {
   setVote(annotationId: string, value: VoteValue | null): Promise<StoreActionResult<VoteResult>>;
   promoteAnnotation(annotationId: string): Promise<StoreActionResult<OverrideResult>>;
   rejectAnnotation(annotationId: string, reason: string): Promise<StoreActionResult<OverrideResult>>;
+  reviewRevision(
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ): Promise<StoreActionResult<RevisionReviewResult>>;
   claimWork(workItemId: string): Promise<StoreActionResult<SafeTaskBundle>>;
   recoverClaim(bundle: SafeTaskBundle): Promise<StoreActionResult<SafeTaskBundle>>;
   /** Drop a local capability without sending a server mutation. */
@@ -221,6 +243,7 @@ export type ProjectStore = StoreApi<ProjectStoreState>;
 const CONNECTION_RETRY_BASE_MS = 500;
 const CONNECTION_RETRY_MAX_MS = 30_000;
 const MAX_WORK_ITEM_PAGES = 10;
+const MAX_REVISION_PROPOSAL_PAGES = 10;
 const MAX_OPERATION_SETTLEMENT_RETRIES = 4;
 
 export function createProjectStore(
@@ -236,6 +259,10 @@ export function createProjectStore(
   const replyQueuedRequests = new Map<string, Promise<void>>();
   let workItemsRequest: Promise<void> | null = null;
   let workItemsQueuedRequest: Promise<void> | null = null;
+  let revisionProposalsRequest: Promise<void> | null = null;
+  let revisionProposalsQueuedRequest: Promise<void> | null = null;
+  const revisionProposalRequests = new Map<string, Promise<void>>();
+  const revisionProposalQueuedRequests = new Map<string, Promise<void>>();
   let connectionUsers = 0;
   let events: CollabEvents | null = null;
   let startingEvents: Promise<void> | null = null;
@@ -335,6 +362,8 @@ export function createProjectStore(
     annotations: string[];
     replies: string[];
     work: boolean;
+    revisions: boolean;
+    revisionDetails: string[];
     connection: boolean;
   } => {
     const state = store.getState();
@@ -343,6 +372,8 @@ export function createProjectStore(
       annotations: Object.keys(state.annotationStatusByChapter),
       replies: Object.keys(state.replyStatusByAnnotation),
       work: state.workItemsStatus !== "idle",
+      revisions: state.revisionProposalsStatus !== "idle",
+      revisionDetails: Object.keys(state.revisionProposalDetailStatusById),
       connection: connectionUsers > 0,
     };
     const claimInvalidationsByWorkItem = {
@@ -357,6 +388,8 @@ export function createProjectStore(
     annotationQueuedRequests.clear();
     replyQueuedRequests.clear();
     workItemsQueuedRequest = null;
+    revisionProposalsQueuedRequest = null;
+    revisionProposalQueuedRequests.clear();
     clearConnectionRetry();
     authoritativeReady = false;
     transportConnected = false;
@@ -386,6 +419,12 @@ export function createProjectStore(
       workItemIds: [],
       workItemsStatus: "idle",
       workItemsError: null,
+      revisionProposalsById: {},
+      revisionProposalIds: [],
+      revisionProposalsStatus: "idle",
+      revisionProposalsError: null,
+      revisionProposalDetailStatusById: {},
+      revisionProposalDetailErrorById: {},
       operationsById: {},
       pendingMutations: {},
       activeClaimsByWorkItem: {},
@@ -573,6 +612,7 @@ export function createProjectStore(
     chapterId: string | null,
     annotationId: string | null,
     refreshWork: boolean,
+    revisionProposalId?: string,
   ): Promise<{ attempted: boolean; ok: boolean }> => {
     const jobs: Promise<unknown>[] = [];
     const checks: Array<() => boolean> = [];
@@ -596,6 +636,19 @@ export function createProjectStore(
     if (refreshWork && store.getState().workItemsStatus !== "idle") {
       jobs.push(loadWorkItems(true));
       checks.push(() => store.getState().workItemsStatus === "ready");
+    }
+    if (revisionProposalId !== undefined) {
+      if (store.getState().revisionProposalsStatus !== "idle") {
+        jobs.push(loadRevisionProposals(true));
+        checks.push(() => store.getState().revisionProposalsStatus === "ready");
+      }
+      if (store.getState().revisionProposalDetailStatusById[revisionProposalId] !== undefined) {
+        jobs.push(loadRevisionProposal(revisionProposalId, true));
+        checks.push(
+          () =>
+            store.getState().revisionProposalDetailStatusById[revisionProposalId] === "ready",
+        );
+      }
     }
     const results = await Promise.allSettled(jobs);
     return {
@@ -623,6 +676,7 @@ export function createProjectStore(
       context.chapterId,
       context.replyAnnotationId ?? context.annotationId ?? null,
       context.refreshWork === true || context.kind === "submission.apply",
+      context.revisionProposalId,
     );
     if (generation !== authorizationGeneration) return;
     if (refreshed.attempted && !refreshed.ok) {
@@ -737,6 +791,10 @@ export function createProjectStore(
           for (const chapterId of reload.annotations) jobs.push(loadAnnotations(chapterId, true));
           for (const annotationId of reload.replies) jobs.push(loadReplies(annotationId, true));
           if (reload.work) jobs.push(loadWorkItems(true));
+          if (reload.revisions) jobs.push(loadRevisionProposals(true));
+          for (const proposalId of reload.revisionDetails) {
+            jobs.push(loadRevisionProposal(proposalId, true));
+          }
           await Promise.allSettled(jobs);
           if (reload.connection && connectionUsers > 0) {
             const pendingStart = startingEvents;
@@ -1111,6 +1169,182 @@ export function createProjectStore(
     return workItemsRequest;
   };
 
+  const loadRevisionProposals = (force: boolean): Promise<void> => {
+    const current = store.getState();
+    if (!force && current.revisionProposalsStatus === "ready") {
+      return Promise.resolve();
+    }
+    if (revisionProposalsRequest !== null) {
+      const currentRequest = revisionProposalsRequest;
+      if (!force) return currentRequest;
+      if (revisionProposalsQueuedRequest !== null) return revisionProposalsQueuedRequest;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const refresh = (): Promise<void> => {
+        if (revisionProposalsQueuedRequest === queued) revisionProposalsQueuedRequest = null;
+        return generation === authorizationGeneration
+          ? loadRevisionProposals(true)
+          : Promise.resolve();
+      };
+      queued = currentRequest.then(refresh, refresh);
+      revisionProposalsQueuedRequest = queued;
+      return queued;
+    }
+    const read = api.revisionProposals;
+    if (read === undefined) {
+      store.setState({
+        revisionProposalsStatus: "error",
+        revisionProposalsError: "revision review is unavailable in this deployment",
+      });
+      return Promise.resolve();
+    }
+    store.setState({ revisionProposalsStatus: "loading", revisionProposalsError: null });
+    const generation = authorizationGeneration;
+    revisionProposalsRequest = (async () => {
+      const items: RevisionProposalSummary[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      let complete = false;
+      for (let page = 0; page < MAX_REVISION_PROPOSAL_PAGES; page += 1) {
+        const result = await read.call(api, cursor);
+        if (generation !== authorizationGeneration) return;
+        if (!result.ok) {
+          store.setState({
+            revisionProposalsStatus: "error",
+            revisionProposalsError: result.message,
+          });
+          return;
+        }
+        items.push(...result.value.items);
+        const next = result.value.nextCursor;
+        if (next === null) {
+          complete = true;
+          break;
+        }
+        if (seen.has(next)) {
+          store.setState({
+            revisionProposalsStatus: "error",
+            revisionProposalsError: "revision queue pagination returned a repeated cursor",
+          });
+          return;
+        }
+        seen.add(next);
+        cursor = next;
+      }
+      if (!complete) {
+        store.setState({
+          revisionProposalsStatus: "error",
+          revisionProposalsError:
+            `revision queue exceeded ${MAX_REVISION_PROPOSAL_PAGES} pages`,
+        });
+        return;
+      }
+      const previous = store.getState().revisionProposalsById;
+      const revisionProposalsById: Record<string, RevisionProposalSummary> = {};
+      for (const item of items) {
+        // Preserve an already-loaded detail snapshot while refreshing its
+        // authoritative summary/status from the bounded queue read.
+        revisionProposalsById[item.id] = { ...previous[item.id], ...item };
+      }
+      store.setState({
+        revisionProposalsById,
+        revisionProposalIds: items.map((item) => item.id),
+        revisionProposalsStatus: "ready",
+        revisionProposalsError: null,
+      });
+    })().finally(() => {
+      revisionProposalsRequest = null;
+    });
+    return revisionProposalsRequest;
+  };
+
+  const loadRevisionProposal = (proposalId: string, force: boolean): Promise<void> => {
+    const state = store.getState();
+    if (!force && state.revisionProposalDetailStatusById[proposalId] === "ready") {
+      return Promise.resolve();
+    }
+    const active = revisionProposalRequests.get(proposalId);
+    if (active !== undefined) {
+      if (!force) return active;
+      const queuedActive = revisionProposalQueuedRequests.get(proposalId);
+      if (queuedActive !== undefined) return queuedActive;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const refresh = (): Promise<void> => {
+        if (revisionProposalQueuedRequests.get(proposalId) === queued) {
+          revisionProposalQueuedRequests.delete(proposalId);
+        }
+        return generation === authorizationGeneration
+          ? loadRevisionProposal(proposalId, true)
+          : Promise.resolve();
+      };
+      queued = active.then(refresh, refresh);
+      revisionProposalQueuedRequests.set(proposalId, queued);
+      return queued;
+    }
+    const read = api.revisionProposal;
+    if (read === undefined) {
+      store.setState({
+        revisionProposalDetailStatusById: {
+          ...state.revisionProposalDetailStatusById,
+          [proposalId]: "error",
+        },
+        revisionProposalDetailErrorById: {
+          ...state.revisionProposalDetailErrorById,
+          [proposalId]: "revision review is unavailable in this deployment",
+        },
+      });
+      return Promise.resolve();
+    }
+    store.setState({
+      revisionProposalDetailStatusById: {
+        ...state.revisionProposalDetailStatusById,
+        [proposalId]: "loading",
+      },
+      revisionProposalDetailErrorById: {
+        ...state.revisionProposalDetailErrorById,
+        [proposalId]: null,
+      },
+    });
+    const generation = authorizationGeneration;
+    const request = (async () => {
+      const result = await read.call(api, proposalId);
+      if (generation !== authorizationGeneration) return;
+      const current = store.getState();
+      if (!result.ok) {
+        store.setState({
+          revisionProposalDetailStatusById: {
+            ...current.revisionProposalDetailStatusById,
+            [proposalId]: "error",
+          },
+          revisionProposalDetailErrorById: {
+            ...current.revisionProposalDetailErrorById,
+            [proposalId]: result.message,
+          },
+        });
+        return;
+      }
+      store.setState({
+        revisionProposalsById: {
+          ...current.revisionProposalsById,
+          [proposalId]: result.value,
+        },
+        revisionProposalDetailStatusById: {
+          ...current.revisionProposalDetailStatusById,
+          [proposalId]: "ready",
+        },
+        revisionProposalDetailErrorById: {
+          ...current.revisionProposalDetailErrorById,
+          [proposalId]: null,
+        },
+      });
+    })().finally(() => {
+      revisionProposalRequests.delete(proposalId);
+    });
+    revisionProposalRequests.set(proposalId, request);
+    return request;
+  };
+
   const recoverAuthoritative = (): Promise<boolean> => {
     if (recoveryRequest !== null) {
       return recoveryRequest;
@@ -1126,6 +1360,7 @@ export function createProjectStore(
       const requireSession = state.sessionStatus !== "idle";
       const requireChapters = state.chaptersStatus !== "idle";
       const requireWorkItems = state.workItemsStatus !== "idle";
+      const requireRevisionProposals = state.revisionProposalsStatus !== "idle";
       const requiredChapters = Object.entries(state.annotationStatusByChapter)
         .filter(([, status]) => status !== "idle")
         .map(([chapterId]) => chapterId);
@@ -1135,11 +1370,17 @@ export function createProjectStore(
       if (requireSession) jobs.push(loadSession(true));
       if (requireChapters) jobs.push(loadChapters(true));
       if (requireWorkItems) jobs.push(loadWorkItems(true));
+      if (requireRevisionProposals) jobs.push(loadRevisionProposals(true));
       for (const [chapterId, status] of Object.entries(state.annotationStatusByChapter)) {
         if (status !== "idle") jobs.push(loadAnnotations(chapterId, true));
       }
       for (const [annotationId, status] of Object.entries(state.replyStatusByAnnotation)) {
         if (status !== "idle") jobs.push(loadReplies(annotationId, true));
+      }
+      for (const [proposalId, status] of Object.entries(
+        state.revisionProposalDetailStatusById,
+      )) {
+        if (status !== "idle") jobs.push(loadRevisionProposal(proposalId, true));
       }
       const settled = await Promise.allSettled(jobs);
       if (generation !== authorizationGeneration) return false;
@@ -1148,6 +1389,14 @@ export function createProjectStore(
       if (requireSession && fresh.sessionStatus !== "ready") failed.push("session");
       if (requireChapters && fresh.chaptersStatus !== "ready") failed.push("chapters");
       if (requireWorkItems && fresh.workItemsStatus !== "ready") failed.push("Work");
+      if (requireRevisionProposals && fresh.revisionProposalsStatus !== "ready") {
+        failed.push("revision proposals");
+      }
+      for (const proposalId of Object.keys(state.revisionProposalDetailStatusById)) {
+        if (fresh.revisionProposalDetailStatusById[proposalId] !== "ready") {
+          failed.push(`revision ${proposalId}`);
+        }
+      }
       if (
         requiredChapters.some(
           (chapterId) => fresh.annotationStatusByChapter[chapterId] !== "ready",
@@ -1250,6 +1499,12 @@ export function createProjectStore(
       typeof event.payload["submissionId"] === "string"
         ? event.payload["submissionId"]
         : null;
+    const revisionProposalId =
+      typeof event.payload["revisionProposalId"] === "string"
+        ? event.payload["revisionProposalId"]
+        : typeof event.payload["proposalId"] === "string"
+          ? event.payload["proposalId"]
+          : null;
     if (workItemId !== null && event.type === "lease_renewed") {
       const claim = store.getState().activeClaimsByWorkItem[workItemId];
       const expiresAt = event.payload["expiresAt"];
@@ -1382,6 +1637,18 @@ export function createProjectStore(
     }
     if (store.getState().workItemsStatus !== "idle") void loadWorkItems(true);
     if (store.getState().chaptersStatus !== "idle") void loadChapters(true);
+    if (
+      (revisionProposalId !== null || event.type.startsWith("revision_proposal_")) &&
+      store.getState().revisionProposalsStatus !== "idle"
+    ) {
+      void loadRevisionProposals(true);
+    }
+    if (
+      revisionProposalId !== null &&
+      store.getState().revisionProposalDetailStatusById[revisionProposalId] !== undefined
+    ) {
+      void loadRevisionProposal(revisionProposalId, true);
+    }
   };
 
   const startEvents = (): Promise<void> => {
@@ -2520,6 +2787,81 @@ export function createProjectStore(
     return { ok: true, value: result.value };
   };
 
+  const reviewRevision = async (
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ): Promise<StoreActionResult<RevisionReviewResult>> => {
+    const write = api.reviewRevisionProposal;
+    if (write === undefined) return unsupported("revision review");
+    const before = store.getState().revisionProposalsById[proposalId];
+    if (before === undefined) {
+      return {
+        ok: false,
+        kind: "rejected",
+        status: 404,
+        message: "revision proposal is not loaded",
+      };
+    }
+    const generation = authorizationGeneration;
+    const optimisticStatus = decision === "approve" ? "applying" : "rejected";
+    store.setState({
+      revisionProposalsById: {
+        ...store.getState().revisionProposalsById,
+        [proposalId]: { ...before, status: optimisticStatus },
+      },
+    });
+    const fingerprint = commandFingerprint(
+      "revision.review",
+      proposalId,
+      decision,
+      reason?.trim() ?? "",
+    );
+    const key = retainedKeyFor(fingerprint);
+    const result = await replayOnce(() =>
+      write.call(api, proposalId, decision, reason, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      store.setState({
+        revisionProposalsById: {
+          ...store.getState().revisionProposalsById,
+          [proposalId]: before,
+        },
+      });
+      if (!shouldReplay(result)) settleCommand(fingerprint);
+      if (result.status === 409) {
+        void loadRevisionProposals(true);
+        void loadRevisionProposal(proposalId, true);
+      }
+      return actionFailure(result);
+    }
+    settleCommand(fingerprint);
+    const current = store.getState().revisionProposalsById[proposalId] ?? before;
+    store.setState({
+      revisionProposalsById: {
+        ...store.getState().revisionProposalsById,
+        [proposalId]: {
+          ...current,
+          status: result.value.status || optimisticStatus,
+          ...(result.value.operationId === undefined
+            ? {}
+            : { gitOperationId: result.value.operationId }),
+        },
+      },
+    });
+    if (result.value.operationId !== undefined) {
+      await registerOperationContext(result.value.operationId, {
+        kind: "revision.apply",
+        chapterId: before.chapterId,
+        workItemId: before.workItemId,
+        refreshWork: before.workItemId !== null,
+        revisionProposalId: proposalId,
+      });
+    }
+    return { ok: true, value: result.value };
+  };
+
   store = createStore<ProjectStoreState>()(() => ({
     project: { ...config },
     session: null,
@@ -2542,6 +2884,12 @@ export function createProjectStore(
     workItemIds: [],
     workItemsStatus: "idle",
     workItemsError: null,
+    revisionProposalsById: {},
+    revisionProposalIds: [],
+    revisionProposalsStatus: "idle",
+    revisionProposalsError: null,
+    revisionProposalDetailStatusById: {},
+    revisionProposalDetailErrorById: {},
     operationsById: {},
     pendingMutations: {},
     activeClaimsByWorkItem: {},
@@ -2563,6 +2911,10 @@ export function createProjectStore(
     refreshReplies: (annotationId) => loadReplies(annotationId, true),
     ensureWorkItems: () => loadWorkItems(false),
     refreshWorkItems: () => loadWorkItems(true),
+    ensureRevisionProposals: () => loadRevisionProposals(false),
+    refreshRevisionProposals: () => loadRevisionProposals(true),
+    ensureRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, false),
+    refreshRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, true),
     refreshOperation: async (operationId) => {
       const generation = authorizationGeneration;
       const operation = (await api.operation?.(operationId)) ?? null;
@@ -2611,6 +2963,7 @@ export function createProjectStore(
     promoteAnnotation: (annotationId) => overrideAnnotation(annotationId, "promote"),
     rejectAnnotation: (annotationId, reason) =>
       overrideAnnotation(annotationId, "reject", reason),
+    reviewRevision,
     claimWork,
     recoverClaim,
     forgetClaim: (workItemId) => clearLocalClaim(workItemId),

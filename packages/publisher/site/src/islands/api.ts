@@ -437,6 +437,95 @@ export interface ChapterAccepted {
   status: string;
 }
 
+// ---- Phase 11 §5: revision proposal review --------------------------------
+
+/**
+ * Repository document named by a proposal. Chapter proposals use `chapter`;
+ * the deliberately open kind also supports Outline, Timeline, and Character
+ * documents without teaching the review surface a second workflow later.
+ */
+export interface RevisionProposalTarget {
+  kind: string;
+  id: string;
+  path: string;
+  label: string;
+}
+
+export interface RevisionProposalActor {
+  id: string;
+  displayName: string;
+  type: string | null;
+}
+
+export interface RevisionProposalWork {
+  id: string;
+  type: string;
+  status: string;
+}
+
+/** Compatibility metadata returned while chapter proposals are the only kind. */
+export interface RevisionProposalChapter {
+  id: string;
+  title: string;
+  slug?: string;
+  path?: string;
+  revision: number;
+}
+
+/** Bounded list row: immutable prose snapshots are detail-only. */
+export interface RevisionProposalSummary {
+  id: string;
+  projectId: string;
+  chapterId: string | null;
+  proposalType: string;
+  origin: string;
+  workItemId: string | null;
+  submissionId: string | null;
+  authorActorId: string;
+  baseRevision: number;
+  changeSummary: string | null;
+  notes: string | null;
+  status: string;
+  reviewedByActorId: string | null;
+  reviewedAt: string | null;
+  reviewReason: string | null;
+  /** New generic name; older proposal routes expose the same value as operationId. */
+  gitOperationId?: string | null;
+  operationId?: string | null;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Null for non-versioned/future document types or an unavailable projection. */
+  currentRevision?: number | null;
+  currentContentHash?: string | null;
+  /** API-computed base revision/hash mismatch, including same-revision external edits. */
+  conflictWarning?: boolean;
+  target?: RevisionProposalTarget | null;
+  author?: RevisionProposalActor | null;
+  workItem?: RevisionProposalWork | null;
+  chapter?: RevisionProposalChapter | null;
+}
+
+/** Authorized review payload; snapshots remain complete when diffing is capped. */
+export interface RevisionProposalDetail extends RevisionProposalSummary {
+  baseContentHash: string;
+  baseContent: string;
+  proposedContent: string;
+  diff: {
+    unifiedDiff: string | null;
+    computationLimited: boolean;
+  };
+}
+
+/** Approve queues Git; reject settles synchronously without an operation. */
+export interface RevisionReviewResult {
+  proposalId: string;
+  status: string;
+  correlationId: string;
+  operationId?: string;
+}
+
 // ---- Phase 6 §3.6: settings ------------------------------------------------
 
 /** One governance rule as the settings document carries it (no `version`). */
@@ -1217,6 +1306,101 @@ export class CollabApi {
       ),
       [202],
       { mutation: true, subject: `chapter ${action}` },
+    );
+  }
+
+  // ---- Phase 11 §5: revision proposal review ------------------------------
+
+  /** One bounded page of proposal summaries; immutable snapshots stay detail-only. */
+  async revisionProposals(
+    cursor?: string,
+  ): Promise<ApiResult<{ items: RevisionProposalSummary[]; nextCursor: string | null }>> {
+    const query = new URLSearchParams({ status: "pending_review", limit: "50" });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    return this.jsonResult<{ items: RevisionProposalSummary[]; nextCursor: string | null }>(
+      (async () => this.get(this.projectUrl(`/revision-proposals?${query.toString()}`)))(),
+      [200],
+    );
+  }
+
+  /** Full before/after snapshots plus the API's CPU-bounded unified diff. */
+  async revisionProposal(proposalId: string): Promise<ApiResult<RevisionProposalDetail>> {
+    const detail = await this.jsonResult<
+      Omit<RevisionProposalDetail, "diff"> & { diff?: RevisionProposalDetail["diff"] }
+    >(
+      (async () =>
+        this.get(this.projectUrl(`/revision-proposals/${encodeURIComponent(proposalId)}`)))(),
+      [200],
+    );
+    if (!detail.ok) return detail;
+    if (detail.value.diff !== undefined) {
+      return { ok: true, value: detail.value as RevisionProposalDetail };
+    }
+    // The first deploy kept CPU-bounded diff generation on a sibling route.
+    // Normalize it here so the shared store and view retain one stable detail
+    // interface while newer APIs may embed `diff` directly.
+    const rendered = await this.jsonResult<{
+      proposal: RevisionProposalSummary;
+      author?: RevisionProposalActor | null;
+      baseContent: string;
+      proposedContent: string;
+      unifiedDiff: string | null;
+      computationLimited: boolean;
+    }>(
+      (async () =>
+        this.get(
+          this.projectUrl(`/revision-proposals/${encodeURIComponent(proposalId)}/diff`),
+        ))(),
+      [200],
+    );
+    if (!rendered.ok) return rendered;
+    return {
+      ok: true,
+      value: {
+        ...detail.value,
+        ...rendered.value.proposal,
+        author: rendered.value.author ?? detail.value.author ?? null,
+        target: rendered.value.proposal.target ?? detail.value.target ?? null,
+        workItem: rendered.value.proposal.workItem ?? detail.value.workItem ?? null,
+        chapter: rendered.value.proposal.chapter ?? detail.value.chapter ?? null,
+        currentRevision:
+          rendered.value.proposal.currentRevision ?? detail.value.currentRevision ?? null,
+        gitOperationId:
+          rendered.value.proposal.gitOperationId ??
+          rendered.value.proposal.operationId ??
+          detail.value.gitOperationId ??
+          detail.value.operationId ??
+          null,
+        baseContent: rendered.value.baseContent,
+        proposedContent: rendered.value.proposedContent,
+        diff: {
+          unifiedDiff: rendered.value.unifiedDiff,
+          computationLimited: rendered.value.computationLimited,
+        },
+      },
+    };
+  }
+
+  /**
+   * Approve is the one-click validated apply command. Rejection may carry a
+   * note, but an empty note is deliberately `{}` and never blocks the action.
+   */
+  async reviewRevisionProposal(
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<RevisionReviewResult>> {
+    return this.jsonResult<RevisionReviewResult>(
+      this.post(
+        this.projectUrl(
+          `/revision-proposals/${encodeURIComponent(proposalId)}/${decision}`,
+        ),
+        reason === undefined || reason.trim() === "" ? {} : { reason: reason.trim() },
+        options,
+      ),
+      decision === "approve" ? [202] : [200],
+      { mutation: true, subject: `revision ${decision}` },
     );
   }
 

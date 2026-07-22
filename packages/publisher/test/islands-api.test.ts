@@ -293,3 +293,90 @@ describe("CollabApi mutation transport", () => {
     ]);
   });
 });
+
+describe("CollabApi revision review transport", () => {
+  it("uses the bounded list/detail routes and the exact approve/reject contracts", async () => {
+    const proposalId = "proposal-1";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/revision-proposals?")) {
+        return json({ items: [], nextCursor: null }, 200);
+      }
+      if (url.endsWith("/diff")) {
+        return json(
+          {
+            proposal: { id: proposalId, currentRevision: 4 },
+            author: null,
+            baseContent: "Before",
+            proposedContent: "After",
+            unifiedDiff: null,
+            computationLimited: true,
+          },
+          200,
+        );
+      }
+      if ((init?.method ?? "GET") === "GET") {
+        return json({ id: proposalId, baseContent: "Before", proposedContent: "After" }, 200);
+      }
+      if (url.endsWith("/approve")) {
+        return json(
+          {
+            proposalId,
+            status: "applying",
+            correlationId: "correlation-approve",
+            operationId: "operation-approve",
+          },
+          202,
+        );
+      }
+      return json(
+        { proposalId, status: "rejected", correlationId: "correlation-reject" },
+        200,
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = api();
+
+    await client.revisionProposals("next page");
+    await client.revisionProposal(proposalId);
+    const approved = await client.reviewRevisionProposal(
+      proposalId,
+      "approve",
+      undefined,
+      { idempotencyKey: "approve-key" },
+    );
+    const rejected = await client.reviewRevisionProposal(
+      proposalId,
+      "reject",
+      "  Keep the current ending.  ",
+      { idempotencyKey: "reject-key" },
+    );
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/revision-proposals?status=pending_review&limit=50&cursor=next+page`,
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}`,
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}/diff`,
+    );
+    expect(fetchMock.mock.calls.slice(3).map((call) => String(call[0]))).toEqual([
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}/approve`,
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}/reject`,
+    ]);
+    expect(JSON.parse(String((fetchMock.mock.calls[3]?.[1] as RequestInit).body))).toEqual({});
+    expect(JSON.parse(String((fetchMock.mock.calls[4]?.[1] as RequestInit).body))).toEqual({
+      reason: "Keep the current ending.",
+    });
+    expect(fetchMock.mock.calls.slice(3).map((call) => keyFrom(call))).toEqual([
+      "approve-key",
+      "reject-key",
+    ]);
+    expect(approved).toMatchObject({
+      ok: true,
+      value: { status: "applying", operationId: "operation-approve" },
+    });
+    expect(rejected).toMatchObject({ ok: true, value: { status: "rejected" } });
+  });
+});

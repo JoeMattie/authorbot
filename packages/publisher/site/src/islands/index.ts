@@ -46,3 +46,17 @@ if (document.querySelector("authorbot-work-queue") !== null) {
       // permanent chunk failure must stay handled and leave that copy intact.
     });
 }
+
+// The diff queue is maintainer-only and substantially larger than the reader
+// islands. Load it only on /revisions/, preserving the chapter bundle budget.
+if (document.querySelector("authorbot-revision-review") !== null) {
+  void loadLazyModule(() => import("./revision-review.js"))
+    .then(({ AuthorbotRevisionReview }) => {
+      if (customElements.get("authorbot-revision-review") === undefined) {
+        customElements.define("authorbot-revision-review", AuthorbotRevisionReview);
+      }
+    })
+    .catch(() => {
+      // The mount's fallback remains visible after a terminal chunk failure.
+    });
+}
