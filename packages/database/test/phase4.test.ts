@@ -245,6 +245,205 @@ describe("lease renew - conditional UPDATE (contract §2)", () => {
   });
 });
 
+describe("lease token recovery - live compare-and-swap (contract §2)", () => {
+  it("atomically replaces the expected hash on a live lease", async () => {
+    const s = await seedWithWorkItem();
+    const lease = makeLease(s, s.workItem.id);
+    await s.repos.leases.claim(lease);
+
+    await s.db.batch([
+      s.repos.leases.rotateTokenCasStatement(
+        lease.id,
+        lease.tokenHash,
+        lease.expiresAt,
+        lease.renewalCount,
+        "replacement-token-hash",
+        NOW,
+      ),
+    ]);
+
+    expect((await s.repos.leases.getById(lease.id))?.tokenHash).toBe(
+      "replacement-token-hash",
+    );
+  });
+
+  it("aborts the whole batch for a stale expected hash or inactive lease", async () => {
+    const attempt = async (
+      leaseOverrides: Partial<LeaseRecord>,
+      expectedTokenHash: string | null = null,
+    ): Promise<void> => {
+      const s = await seedWithWorkItem();
+      const lease = makeLease(s, s.workItem.id, leaseOverrides);
+      await s.repos.leases.claim(lease);
+
+      let caught: unknown;
+      try {
+        await s.db.batch([
+          s.repos.leases.rotateTokenCasStatement(
+            lease.id,
+            expectedTokenHash ?? lease.tokenHash,
+            lease.expiresAt,
+            lease.renewalCount,
+            "must-not-land",
+            NOW,
+          ),
+          s.repos.auditEvents.insertStatement({
+            id: uuidv7(),
+            projectId: s.project.id,
+            actorId: s.actor.id,
+            action: "lease.recover.test-sentinel",
+            targetType: "lease",
+            targetId: lease.id,
+            correlationId: uuidv7(),
+            metadata: null,
+            createdAt: NOW,
+          }),
+        ]);
+      } catch (error) {
+        caught = error;
+      }
+      expect(isConstraintError(caught)).toBe(true);
+      expect((await s.repos.leases.getById(lease.id))?.tokenHash).toBe(lease.tokenHash);
+      expect(
+        (await s.repos.auditEvents.listByProject(s.project.id)).filter(
+          (event) => event.action === "lease.recover.test-sentinel",
+        ),
+      ).toEqual([]);
+    };
+
+    await attempt({}, "not-the-current-hash");
+    await attempt({ expiresAt: NOW });
+    await attempt({ releasedAt: LATER });
+  });
+
+  it("aborts when a renewal changed the expected response snapshot", async () => {
+    const s = await seedWithWorkItem();
+    const lease = makeLease(s, s.workItem.id);
+    await s.repos.leases.claim(lease);
+    expect(
+      await s.repos.leases.renew(lease.id, RENEWED, NOW),
+    ).toBe(1);
+
+    let caught: unknown;
+    try {
+      await s.db.batch([
+        s.repos.leases.rotateTokenCasStatement(
+          lease.id,
+          lease.tokenHash,
+          lease.expiresAt,
+          lease.renewalCount,
+          "must-not-land",
+          NOW,
+        ),
+      ]);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isConstraintError(caught)).toBe(true);
+    const after = await s.repos.leases.getById(lease.id);
+    expect(after?.tokenHash).toBe(lease.tokenHash);
+    expect(after?.expiresAt).toBe(RENEWED);
+    expect(after?.renewalCount).toBe(1);
+  });
+
+  it("makes an already-authorized renewal abort if recovery rotated the token first", async () => {
+    const s = await seedWithWorkItem();
+    const lease = makeLease(s, s.workItem.id);
+    await s.repos.leases.claim(lease);
+    const replacementHash = "f".repeat(64);
+
+    // The renewal handler verified plaintext against `lease.tokenHash`, then a
+    // recovery in another isolate won before the renewal batch committed.
+    await s.db.batch([
+      s.repos.leases.rotateTokenCasStatement(
+        lease.id,
+        lease.tokenHash,
+        lease.expiresAt,
+        lease.renewalCount,
+        replacementHash,
+        NOW,
+      ),
+    ]);
+
+    let caught: unknown;
+    try {
+      await s.db.batch([
+        s.repos.leases.renewCasStatement(
+          lease.id,
+          lease.tokenHash,
+          RENEWED,
+          NOW,
+        ),
+        s.repos.auditEvents.insertStatement({
+          id: uuidv7(),
+          projectId: s.project.id,
+          actorId: s.actor.id,
+          action: "lease.renew.test-sentinel",
+          targetType: "lease",
+          targetId: lease.id,
+          correlationId: uuidv7(),
+          metadata: null,
+          createdAt: NOW,
+        }),
+      ]);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isConstraintError(caught)).toBe(true);
+    const after = await s.repos.leases.getById(lease.id);
+    expect(after?.tokenHash).toBe(replacementHash);
+    expect(after?.expiresAt).toBe(lease.expiresAt);
+    expect(after?.renewalCount).toBe(0);
+    expect(
+      (await s.repos.auditEvents.listByProject(s.project.id)).filter(
+        (event) => event.action === "lease.renew.test-sentinel",
+      ),
+    ).toEqual([]);
+  });
+
+  it("makes an already-authorized submission consume abort after token recovery", async () => {
+    const s = await seedWithWorkItem();
+    const lease = makeLease(s, s.workItem.id);
+    await s.repos.leases.claim(lease);
+    await s.repos.workItems.updateStatus(s.workItem.id, "leased", NOW);
+    const replacementHash = "f".repeat(64);
+
+    await s.db.batch([
+      s.repos.leases.rotateTokenCasStatement(
+        lease.id,
+        lease.tokenHash,
+        lease.expiresAt,
+        lease.renewalCount,
+        replacementHash,
+        NOW,
+      ),
+    ]);
+
+    let caught: unknown;
+    try {
+      await s.db.batch([
+        s.repos.leases.consumeForSubmissionStatement(
+          lease.id,
+          lease.tokenHash,
+          LATER,
+          NOW,
+        ),
+        s.repos.workItems.updateStatusStatement(s.workItem.id, "applying", LATER),
+      ]);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isConstraintError(caught)).toBe(true);
+    const after = await s.repos.leases.getById(lease.id);
+    expect(after?.tokenHash).toBe(replacementHash);
+    expect(after?.releasedAt).toBeNull();
+    expect((await s.repos.workItems.getById(s.workItem.id))?.status).toBe("leased");
+  });
+});
+
 describe("lease release and expire - conditional UPDATEs (contract §2)", () => {
   it("release ends an active lease once: 1 then 0", async () => {
     const s = await seedWithWorkItem();

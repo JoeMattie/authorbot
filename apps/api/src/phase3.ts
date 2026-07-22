@@ -16,6 +16,7 @@ import {
   isConstraintError,
   type AnnotationRecord,
   type DecisionRecord,
+  type EventRecord,
   type ProjectRecord,
   type Repositories,
   type SqlStatement,
@@ -114,9 +115,9 @@ export interface Phase3Context {
  * Decision summary for the "Queued as work item" badge and the member
  * decision views. `overrideReason` is maintainer-authored free text and is
  * member-only (contract §2 threat model: member data on public books); it is
- * omitted when `includeOverrideReason` is false - the anonymous public-read
- * path passes false so a signed-out reader never sees the maintainer's private
- * rationale, only the public result/support fields.
+ * omitted when `includeOverrideReason` is false. The public-only path passes
+ * false so anonymous readers and authenticated nonmembers never see the
+ * maintainer's private rationale, only the public result/support fields.
  */
 export function decisionSummaryJson(
   d: DecisionRecord,
@@ -163,20 +164,21 @@ export function workItemJson(w: WorkItemRecord): Record<string, unknown> {
 export async function annotationCollabJson(
   repos: Repositories,
   annotation: AnnotationRecord,
-  viewerActorId: string | null,
+  memberActorId: string | null,
 ): Promise<Record<string, unknown>> {
   const tally = await repos.votes.tally(annotation.id);
   const decisions = await repos.decisions.listByAnnotation(annotation.id);
   const decision = decisions.find((d) => d.actionType === "create_work_item") ?? null;
-  // Anonymous (public-book) readers never see the maintainer's override reason.
-  const isMember = viewerActorId !== null;
+  // Anonymous readers and authenticated non-members never see member-only
+  // decision prose or a per-voter projection.
+  const isMember = memberActorId !== null;
   const base: Record<string, unknown> = {
     ...annotationJson(annotation),
     votes: tallyJson(tally),
     decision: decision === null ? null : decisionSummaryJson(decision, isMember),
   };
   if (isMember) {
-    const mine = await repos.votes.getCurrent(annotation.id, viewerActorId);
+    const mine = await repos.votes.getCurrent(annotation.id, memberActorId);
     base["myVote"] = mine?.value ?? null;
   }
   return base;
@@ -184,6 +186,166 @@ export async function annotationCollabJson(
 
 /** Statuses a suggestion may be voted on (sticky semantics keep votes legal after crossing). */
 const VOTABLE_STATUSES = new Set(["open", "work_item_created"]);
+
+/**
+ * Phase 3's public collaboration vocabulary. The event endpoint may be read
+ * in public-only mode by anonymous readers and authenticated nonmembers when
+ * public annotations are enabled, but later phases append operational and
+ * control-plane rows to the same table. Those rows can carry lease metadata,
+ * draft chapter metadata, or maintainer-authored reasons and must remain
+ * member-only.
+ */
+const PUBLIC_READER_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "annotation_created",
+  "vote_aggregate",
+  "decision_created",
+  "decision_support_changed",
+  "work_item_created",
+  "operation_completed",
+]);
+
+/** Work-item kinds created by public annotation governance, never Phase 4 conflicts. */
+const PUBLIC_READER_WORK_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "revise_range",
+  "revise_block",
+  "revise_chapter",
+]);
+
+/**
+ * `operation_completed` is emitted by the shared Git outbox, including later
+ * chapter and settings writes. Public readers need completion notifications
+ * for committed annotations/replies, but must not learn that a private prose
+ * or control-plane operation exists.
+ */
+const PUBLIC_READER_OPERATION_KINDS: ReadonlySet<string> = new Set([
+  "annotation.create",
+  "reply.create",
+  "annotation.withdraw",
+]);
+
+function publicReaderEventPayload(event: {
+  type: string;
+  payload: unknown;
+}): Record<string, unknown> | null {
+  if (!PUBLIC_READER_EVENT_TYPES.has(event.type)) {
+    return null;
+  }
+  if (typeof event.payload !== "object" || event.payload === null) {
+    return null;
+  }
+  const payload = event.payload as Record<string, unknown>;
+  if (event.type === "work_item_created") {
+    // `resolve_conflict` reuses this Phase 3 event name from the private
+    // submission pipeline. Only the three annotation-governance work types
+    // are public.
+    const type = payload["type"];
+    if (typeof type !== "string" || !PUBLIC_READER_WORK_ITEM_TYPES.has(type)) {
+      return null;
+    }
+  }
+  if (event.type === "decision_created") {
+    // Reject/reopen and create-work-item decisions affect the public
+    // annotation projection. Cancelling a private Work item does not.
+    const result = payload["result"];
+    const override = payload["override"];
+    if (!(
+      result === "create_work_item" ||
+      (result === "rejected" && override === "reject") ||
+      (result === "overridden" && override === "reopen")
+    )) {
+      return null;
+    }
+  }
+  if (event.type === "operation_completed") {
+    // Decision and Work outbox kinds contain both public and private
+    // subtypes, but completion rows do not carry enough origin metadata to
+    // distinguish them. Fail closed until they do.
+    const kind = payload["kind"];
+    if (typeof kind !== "string" || !PUBLIC_READER_OPERATION_KINDS.has(kind)) {
+      return null;
+    }
+  }
+
+  // Never forward the stored payload object itself. Event rows are shared by
+  // public collaboration and later private workflows; projecting the reviewed
+  // fields here means an additive internal field cannot silently cross the
+  // public boundary merely because its event type/subtype was already allowed.
+  const projected: Record<string, unknown> = {};
+  const copyString = (key: string): void => {
+    if (typeof payload[key] === "string") projected[key] = payload[key];
+  };
+  const copyNumber = (key: string): void => {
+    if (typeof payload[key] === "number" && Number.isFinite(payload[key])) {
+      projected[key] = payload[key];
+    }
+  };
+  const copyBoolean = (key: string): void => {
+    if (typeof payload[key] === "boolean") projected[key] = payload[key];
+  };
+
+  switch (event.type) {
+    case "annotation_created":
+      for (const key of ["annotationId", "chapterId", "kind", "scope"]) copyString(key);
+      copyBoolean("moderated");
+      break;
+    case "vote_aggregate": {
+      copyString("annotationId");
+      copyString("chapterId");
+      const rawVotes = payload["votes"];
+      if (typeof rawVotes === "object" && rawVotes !== null) {
+        const votePayload = rawVotes as Record<string, unknown>;
+        const votes: Record<string, number> = {};
+        for (const key of [
+          "approvals",
+          "rejections",
+          "abstentions",
+          "netScore",
+          "distinctVoters",
+          "humanApprovals",
+          "agentApprovals",
+          "maintainerApprovals",
+          "humanMaintainerApprovals",
+        ]) {
+          const value = votePayload[key];
+          if (typeof value === "number" && Number.isFinite(value)) votes[key] = value;
+        }
+        projected["votes"] = votes;
+      }
+      break;
+    }
+    case "decision_created":
+      for (const key of [
+        "decisionId",
+        "annotationId",
+        "result",
+        "rule",
+        "workItemId",
+        "override",
+      ]) {
+        copyString(key);
+      }
+      copyNumber("ruleVersion");
+      break;
+    case "decision_support_changed":
+      for (const key of ["decisionId", "annotationId", "transition"]) copyString(key);
+      copyBoolean("supportChanged");
+      break;
+    case "work_item_created":
+      for (const key of ["workItemId", "annotationId", "chapterId", "type"]) copyString(key);
+      copyNumber("baseRevision");
+      break;
+    case "operation_completed":
+      copyString("operationId");
+      copyString("kind");
+      break;
+  }
+  return projected;
+}
+
+function projectPublicReaderEvent(event: EventRecord): EventRecord | null {
+  const payload = publicReaderEventPayload(event);
+  return payload === null ? null : { ...event, payload };
+}
 
 export function registerPhase3Routes(ctx: Phase3Context): void {
   const { app, deps, repos, clock, services, auth, maybeAuth, idem, serialize, now } = ctx;
@@ -1150,25 +1312,55 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       }
       return value;
     };
-    const afterParam = parseCursor(c.req.query("after"));
-    if (afterParam instanceof Response) {
-      return afterParam;
-    }
     const lastEventId = parseCursor(c.req.header("last-event-id"));
     if (lastEventId instanceof Response) {
       return lastEventId;
     }
+    // A native EventSource reconnect reuses its original URL while adding a
+    // newer Last-Event-ID header. The header must win over that stale `after`
+    // query. When it is present, do not even reject an obsolete query cursor:
+    // the reconnect cursor is the only one that participates in the request.
+    const afterParam =
+      lastEventId === null ? parseCursor(c.req.query("after")) : null;
+    if (afterParam instanceof Response) {
+      return afterParam;
+    }
+    const requestAuth = c.get("auth");
+    // Open and approval-gated books admit signed-in non-members to annotation
+    // reads. A credential alone therefore does not authorize the operational
+    // feed: only a current project membership does.
+    const publicOnly = requestAuth === undefined || requestAuth.membership === null;
 
     if (c.req.query("poll") === "1") {
-      // JSON fallback for simple agents (§26.1). Same rows as the stream.
-      const after = afterParam ?? lastEventId ?? 0;
+      // JSON fallback for simple agents (§26.1). Public-only readers
+      // (anonymous readers and authenticated nonmembers) see only the reviewed
+      // Phase 3 collaboration vocabulary. `latestId` still follows the
+      // unfiltered page so member-only rows cannot wedge their cursor.
+      const after = lastEventId ?? afterParam ?? 0;
       const limit = ctx.parseLimit(c);
       if (limit instanceof Response) {
         return limit;
       }
       const items = await repos.events.listAfter(project.id, after, limit);
       const latest = items.length > 0 ? (items[items.length - 1]?.id ?? after) : after;
-      return c.json({ items: items.map(eventJson), latestId: latest });
+      const visible = publicOnly
+        ? items.flatMap((event) => {
+            const projected = projectPublicReaderEvent(event);
+            return projected === null ? [] : [projected];
+          })
+        : items;
+      return c.json({ items: visible.map(eventJson), latestId: latest });
+    }
+
+    if (publicOnly) {
+      // EventSource receives every SSE frame over the wire even when the page
+      // has not registered a listener for that event name. Refuse public-only
+      // streaming rather than risk sending a newly added private payload; the
+      // browser client treats the failed initial stream as a signal to use the
+      // filtered JSON poll path above.
+      return problem(c, "forbidden", {
+        detail: "public event streaming is unavailable; use the filtered poll endpoint",
+      });
     }
 
     // SSE. Without a cursor the stream starts at the current head (clients
@@ -1189,7 +1381,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       refusal.headers.set("Retry-After", "5");
       return refusal;
     }
-    const initialCursor = afterParam ?? lastEventId ?? (await repos.events.latestId(project.id));
+    const initialCursor = lastEventId ?? afterParam ?? (await repos.events.latestId(project.id));
     const headers = new Headers();
     const correlationId = c.get("correlationId");
     if (correlationId !== undefined) {

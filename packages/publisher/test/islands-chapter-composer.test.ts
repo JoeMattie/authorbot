@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotChapterComposer } from "../site/src/islands/chapter-composer.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
 import { AuthorbotNewChapter } from "../site/src/islands/new-chapter-button.js";
 import {
   chapterComposerReduce,
@@ -153,6 +154,7 @@ function type(field: HTMLInputElement | HTMLTextAreaElement, value: string): voi
 }
 
 beforeEach(() => {
+  resetProjectStoresForTests();
   requests = [];
   window.sessionStorage.clear();
   vi.useRealTimers();
@@ -202,6 +204,52 @@ describe("chapter composer state (pure reducer)", () => {
 });
 
 describe("chapter composer element (contract §3.5)", () => {
+  it("drops the superseded startup when reconnected during the session read", async () => {
+    const sourceUrl = `${API}/v1/projects/${PROJECT}/chapters/${CHAPTER_ID}/source`;
+    let resolveSession!: (value: Response) => void;
+    const pendingSession = new Promise<Response>((resolve) => {
+      resolveSession = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push({ url, method: "GET", body: undefined });
+      if (url === `${API}/v1/me`) return pendingSession;
+      if (url === sourceUrl) {
+        return new Response(
+          JSON.stringify({
+            chapterId: CHAPTER_ID,
+            title: "Only once",
+            summary: null,
+            revision: 3,
+            status: "draft",
+            body: "One current mount.",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const element = mount({
+      "data-chapter-id": CHAPTER_ID,
+      "data-chapter-title": "Only once",
+      "data-chapter-status": "draft",
+    });
+
+    await expect.poll(() => fetchMock.mock.calls.length).toBe(1);
+    element.remove();
+    document.body.append(element);
+    resolveSession(
+      new Response(JSON.stringify(meEditor), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect.poll(() => element.querySelector("textarea.ab-chapter-text")).toBeTruthy();
+    expect(requests.filter((request) => request.url === sourceUrl)).toHaveLength(1);
+  });
+
   it("leaves the static fallback alone when the API is unreachable", async () => {
     vi.stubGlobal(
       "fetch",
@@ -249,6 +297,9 @@ describe("chapter composer element (contract §3.5)", () => {
     await expect.poll(() => document.querySelector(".ab-chapter-form")).toBeTruthy();
     expect(publishBtn()).toBeNull();
 
+    // A second mount here represents a fresh page load with a different
+    // session. Browser navigation recreates the in-memory project store.
+    resetProjectStoresForTests();
     stubFetch(
       createRoutes(meMaintainer, {
         [`${API}/v1/projects/${PROJECT}/chapters/${CHAPTER_ID}/publish`]: {

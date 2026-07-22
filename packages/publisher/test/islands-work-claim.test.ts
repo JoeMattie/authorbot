@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotWorkQueue } from "../site/src/islands/work-queue.js";
-import { claimStorageKey, loadClaim } from "../site/src/islands/work-state.js";
+import {
+  claimStorageKey,
+  loadClaim,
+  toStoredClaim,
+} from "../site/src/islands/work-state.js";
 import type { TaskBundle } from "../site/src/islands/api.js";
+import {
+  getProjectStore,
+  resetProjectStoresForTests,
+} from "../site/src/islands/project-store.js";
 
 /**
  * Phase 4 contract §7, at the element level: the Claim affordance appears only
@@ -92,7 +100,7 @@ interface Route {
 
 type Routes = Record<string, Route | (() => Route)>;
 
-let requests: { url: string; method: string; body: unknown }[] = [];
+let requests: { url: string; method: string; body: unknown; headers: Headers }[] = [];
 
 function stubFetch(routes: Routes): void {
   vi.stubGlobal(
@@ -103,6 +111,7 @@ function stubFetch(routes: Routes): void {
         url,
         method: init?.method ?? "GET",
         body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+        headers: new Headers(init?.headers),
       });
       const key = Object.keys(routes)
         .filter((prefix) => url.startsWith(prefix))
@@ -161,6 +170,7 @@ const claimButton = (): HTMLButtonElement =>
 const panel = (): HTMLElement => document.querySelector(".ab-claim") as HTMLElement;
 
 beforeEach(() => {
+  resetProjectStoresForTests();
   requests = [];
   window.sessionStorage.clear();
 });
@@ -172,6 +182,46 @@ afterEach(() => {
 });
 
 describe("work queue claim affordance (contract §7)", () => {
+  it("does not let a superseded mount retain the project feed", async () => {
+    let resolveSession!: (value: Response) => void;
+    const pendingSession = new Promise<Response>((resolve) => {
+      resolveSession = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/v1/me")) return pendingSession;
+      if (url.includes("/work-items?status=ready")) {
+        return new Response(JSON.stringify({ items: [], nextCursor: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    const release = vi.fn();
+    const retain = vi
+      .spyOn(store.getState(), "retainConnection")
+      .mockReturnValue(release);
+    const element = mount();
+
+    await expect.poll(() => fetchMock.mock.calls.length).toBe(1);
+    element.remove();
+    document.body.append(element);
+    resolveSession(
+      new Response(JSON.stringify(meEditor), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect.poll(() => element.querySelector(".ab-work-list")).toBeTruthy();
+    await expect.poll(() => retain.mock.calls.length).toBe(1);
+    element.remove();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("offers Claim to an actor with work:claim", async () => {
     stubFetch(queueRoutes([workItem()]));
     mount();
@@ -203,6 +253,32 @@ describe("work queue claim affordance (contract §7)", () => {
     mount();
     await expect.poll(() => document.querySelector(".ab-work-status")?.textContent).toBe(
       "No work items are ready.",
+    );
+    const badge = document.querySelector<HTMLElement>("[data-work-count]") as HTMLElement;
+    expect(badge.textContent).toBe("0");
+    expect(badge.hidden).toBe(true);
+  });
+
+  it("clears private rows and claim controls when the browser credential changes", async () => {
+    let currentMe: unknown = meEditor;
+    stubFetch({
+      [`${API}/v1/me`]: () => ({ status: 200, body: currentMe }),
+      [`${API}/v1/projects/${PROJECT}/work-items`]: () =>
+        currentMe === meEditor
+          ? { status: 200, body: { items: [workItem()], nextCursor: null } }
+          : { status: 403, body: { detail: "work:read required" } },
+    });
+    mount();
+    await expect.poll(() => document.querySelectorAll(".ab-work-item").length).toBe(1);
+    expect(claimButton()).toBeTruthy();
+
+    currentMe = meReader;
+    await getProjectStore({ apiBase: API, project: PROJECT }).getState().refreshSession(true);
+
+    await expect.poll(() => document.querySelectorAll(".ab-work-item").length).toBe(0);
+    expect(document.querySelector(".ab-claim-btn")).toBeNull();
+    expect(document.querySelector(".ab-work-status")?.textContent).toBe(
+      "Your role cannot view the work queue.",
     );
     const badge = document.querySelector<HTMLElement>("[data-work-count]") as HTMLElement;
     expect(badge.textContent).toBe("0");
@@ -255,6 +331,21 @@ describe("edit view (contract §7, design §16.4)", () => {
   const claimRoutes = (extra: Routes = {}): Routes => ({
     ...queueRoutes([workItem()]),
     [`${API}/v1/projects/${PROJECT}/work-items/${WORK_ITEM_ID}/claim`]: { status: 201, body: bundle() },
+    [`${API}/v1/projects/${PROJECT}/work-items/${WORK_ITEM_ID}/lease/recover`]: {
+      status: 200,
+      body: {
+        workItemId: WORK_ITEM_ID,
+        lease: {
+          id: LEASE_ID,
+          token: "rotated-token-never-persisted",
+          expiresAt: "2026-07-19T19:00:00.000Z",
+          maxExpiresAt: "2026-07-19T22:00:00.000Z",
+          renewalCount: 0,
+          renewalPromptAt: "2026-07-19T18:55:00.000Z",
+        },
+        correlationId: "corr-recover",
+      },
+    },
     ...extra,
   });
 
@@ -286,8 +377,42 @@ describe("edit view (contract §7, design §16.4)", () => {
     // The lease token appears nowhere in the rendered DOM.
     expect(document.body.textContent).not.toContain(TOKEN);
     expect(document.body.innerHTML).not.toContain(TOKEN);
-    // …but it is held for the session so a refresh can resume.
-    expect(loadClaim(window.sessionStorage, PROJECT)?.lease.token).toBe(TOKEN);
+    // The persisted refresh state contains no capability material.
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).not.toContain(TOKEN);
+  });
+
+  it("makes an open claim read-only when the signed-in credential changes", async () => {
+    let currentMe: unknown = meEditor;
+    stubFetch(
+      claimRoutes({
+        [`${API}/v1/me`]: () => ({ status: 200, body: currentMe }),
+      }),
+    );
+    await claimIt();
+    const textarea = panel().querySelector("textarea") as HTMLTextAreaElement;
+    const summary = panel().querySelector('input[name="summary"]') as HTMLInputElement;
+    textarea.value = "A private draft that must stop with the old credential.";
+    textarea.dispatchEvent(new Event("input"));
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).not.toBeNull();
+
+    currentMe = meReader;
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    await store.getState().refreshSession(true);
+
+    expect(store.getState().activeClaimsByWorkItem[WORK_ITEM_ID]).toBeUndefined();
+    expect(store.getState().claimInvalidationsByWorkItem[WORK_ITEM_ID]).toContain(
+      "signed-in credential changed",
+    );
+    expect(textarea.readOnly).toBe(true);
+    expect(summary.readOnly).toBe(true);
+    expect((panel().querySelector(".ab-lease-renew") as HTMLButtonElement).disabled).toBe(true);
+    expect((panel().querySelector(".ab-lease-release") as HTMLButtonElement).disabled).toBe(true);
+    expect((panel().querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(panel().querySelector(".ab-submit-expired")?.textContent).toContain(
+      "lease can no longer be used here",
+    );
+    expect(panel().querySelector(".ab-submit-expired")?.textContent).toContain("read-only");
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).toBeNull();
   });
 
   it("shows the remaining-lease indicator and prompts at T-5m", async () => {
@@ -368,8 +493,40 @@ describe("edit view (contract §7, design §16.4)", () => {
     mount();
     await expect.poll(() => panel()?.hidden).toBe(false);
     expect((panel().querySelector("textarea") as HTMLTextAreaElement).value).toBe("vanished on a Tuesday");
-    // No second claim was issued - the lease is the stored one.
+    // No second claim was issued. The same credential rotated the saved
+    // lease id into a fresh in-memory token instead.
     expect(requests.filter((request) => request.url.endsWith("/claim")).length).toBe(0);
+    expect(requests.filter((request) => request.url.endsWith("/lease/recover"))).toHaveLength(1);
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).not.toContain(
+      "rotated-token-never-persisted",
+    );
+  });
+
+  it("scrubs a legacy token even when credential-bound recovery fails", async () => {
+    const legacy = {
+      ...toStoredClaim(bundle(), "draft from the old release"),
+      lease: { ...bundle().lease },
+    };
+    window.sessionStorage.setItem(claimStorageKey(PROJECT), JSON.stringify(legacy));
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).toContain(TOKEN);
+    stubFetch(
+      claimRoutes({
+        [`${API}/v1/projects/${PROJECT}/work-items/${WORK_ITEM_ID}/lease/recover`]: {
+          status: 403,
+          body: { detail: "the saved credential cannot recover this lease" },
+        },
+      }),
+    );
+
+    mount();
+
+    await expect.poll(() => document.querySelector(".ab-work-status")?.textContent).toContain(
+      "could not be recovered",
+    );
+    const raw = window.sessionStorage.getItem(claimStorageKey(PROJECT));
+    expect(raw).not.toContain(TOKEN);
+    expect(JSON.parse(raw ?? "null")?.lease).not.toHaveProperty("token");
+    expect(loadClaim(window.sessionStorage, PROJECT)?.draft).toBe("draft from the old release");
   });
 
   it("drops an expired stored claim rather than offering a dead lease", async () => {
@@ -444,6 +601,109 @@ describe("submission ladder (contract §4-§5, §7)", () => {
     expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).toBeNull();
   });
 
+  it("does not turn its own event-before-response submission into an external lease loss", async () => {
+    let polls = 0;
+    stubFetch(
+      submitRoutes(() => {
+        polls += 1;
+        return polls < 2
+          ? { status: 200, body: { id: OPERATION_ID, state: "queued", error: null } }
+          : {
+              status: 200,
+              body: {
+                id: OPERATION_ID,
+                state: "committed",
+                error: null,
+                commitSha: "abc123",
+              },
+            };
+      }),
+    );
+    await claimAndSubmit("vanished on a Tuesday");
+
+    const submission = requests.find((request) => request.url.endsWith("/submissions"));
+    const correlationId = submission?.headers.get("x-correlation-id");
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/u);
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    store.getState().reconcileEvent({
+      id: 90,
+      type: "submission_received",
+      payload: {
+        workItemId: WORK_ITEM_ID,
+        submissionId: "sub-1",
+        operationId: OPERATION_ID,
+        correlationId,
+      },
+    });
+    store.getState().reconcileEvent({
+      id: 91,
+      type: "work_item_completed",
+      payload: { workItemId: WORK_ITEM_ID, submissionId: "sub-1" },
+    });
+
+    expect(panel().querySelector(".ab-submit-expired")).toBeNull();
+    expect(store.getState().claimInvalidationsByWorkItem[WORK_ITEM_ID]).toBeUndefined();
+    await expect
+      .poll(() => document.querySelector(".ab-submit-completed")?.textContent, {
+        timeout: 10_000,
+      })
+      .toContain("Completed");
+    expect(panel().textContent).not.toContain("another session");
+    expect(panel().textContent).not.toContain("draft is now read-only");
+  });
+
+  it("settles from its own accepted event after both submission responses are lost", async () => {
+    const routes = submitRoutes(() => ({
+      status: 200,
+      body: {
+        id: OPERATION_ID,
+        state: "committed",
+        error: null,
+        commitSha: "abc123",
+      },
+    }));
+    routes[`${API}/v1/projects/${PROJECT}/work-items/${WORK_ITEM_ID}/submissions`] = {
+      status: 503,
+      body: { detail: "the accepted response was lost at the gateway" },
+    };
+    stubFetch(routes);
+    await claimAndSubmit("vanished on a Tuesday");
+
+    await expect
+      .poll(() => requests.filter((request) => request.url.endsWith("/submissions")).length)
+      .toBe(2);
+    await expect.poll(() => panel().querySelector(".ab-error")?.textContent).toContain(
+      "accepted response was lost",
+    );
+    const submission = requests.find((request) => request.url.endsWith("/submissions"));
+    const correlationId = submission?.headers.get("x-correlation-id");
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    store.getState().reconcileEvent({
+      id: 92,
+      type: "submission_received",
+      payload: {
+        workItemId: WORK_ITEM_ID,
+        submissionId: "sub-lost-response",
+        operationId: OPERATION_ID,
+        correlationId,
+      },
+    });
+    store.getState().reconcileEvent({
+      id: 93,
+      type: "work_item_completed",
+      payload: { workItemId: WORK_ITEM_ID, submissionId: "sub-lost-response" },
+    });
+
+    await expect
+      .poll(() => panel().querySelector(".ab-submit-completed")?.textContent, {
+        timeout: 10_000,
+      })
+      .toContain("Completed");
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).toBeNull();
+    expect(store.getState().activeClaimsByWorkItem[WORK_ITEM_ID]).toBeUndefined();
+    expect(store.getState().claimInvalidationsByWorkItem[WORK_ITEM_ID]).toBeUndefined();
+  });
+
   it("surfaces a conflict honestly and links the conflict work item", async () => {
     stubFetch(
       submitRoutes(() => ({
@@ -497,10 +757,9 @@ describe("submission ladder (contract §4-§5, §7)", () => {
 });
 
 /**
- * Claims are stored per PROJECT and the lease token comes back exactly once,
- * so a second claim in the same tab silently overwrote the first token (and
- * the in-progress draft), leaving the first item stuck `leased` until expiry
- * with no way to renew or submit it from this UI.
+ * Claims are stored per PROJECT, so a second claim in the same tab would still
+ * overwrite the first in-progress draft even though capability material now
+ * stays in memory only.
  */
 describe("one claim at a time per tab (contract §7 draft preservation)", () => {
   const SECOND_ITEM_ID = "0190f301-7045-7b2d-9d91-95b3c8228b99";
@@ -526,15 +785,16 @@ describe("one claim at a time per tab (contract §7 draft preservation)", () => 
     await expect.poll(() => panel().hidden).toBe(false);
 
     const stored = loadClaim(window.sessionStorage, PROJECT);
-    expect(stored?.lease.token).toBe(TOKEN);
+    expect(stored?.workItemId).toBe(WORK_ITEM_ID);
 
     // Every remaining row must now offer a hint, not a live Claim button.
     await expect.poll(() => document.querySelectorAll(".ab-claim-btn").length).toBe(0);
     const hints = [...document.querySelectorAll(".ab-work-hint")].map((n) => n.textContent ?? "");
     expect(hints.some((h) => h.includes("already have a work item claimed"))).toBe(true);
 
-    // The first lease's token - the only copy - survives.
-    expect(loadClaim(window.sessionStorage, PROJECT)?.lease.token).toBe(TOKEN);
+    // The first draft metadata survives without persisting its token.
+    expect(loadClaim(window.sessionStorage, PROJECT)?.workItemId).toBe(WORK_ITEM_ID);
+    expect(window.sessionStorage.getItem(claimStorageKey(PROJECT))).not.toContain(TOKEN);
     expect(
       requests.filter((r) => r.url.includes(`${SECOND_ITEM_ID}/claim`)),
     ).toHaveLength(0);

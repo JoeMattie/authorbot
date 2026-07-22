@@ -111,6 +111,33 @@ async function rivalClaim(
   return leaseId;
 }
 
+/**
+ * Rotate only the capability hash, as the atomic core of a recovery committed
+ * by another isolate. Calling the real route here would re-enter this test
+ * process's serializer while the losing command still owns it.
+ */
+async function rivalRecoveryRotation(
+  harness: Phase4Harness,
+  leaseId: string,
+): Promise<string> {
+  const lease = await harness.repos.leases.getById(leaseId);
+  if (lease === null) {
+    throw new Error("cannot rotate a missing lease");
+  }
+  const replacementHash = "f".repeat(64);
+  await harness.repos.leases
+    .rotateTokenCasStatement(
+      lease.id,
+      lease.tokenHash,
+      lease.expiresAt,
+      lease.renewalCount,
+      replacementHash,
+      harness.clock.now().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    )
+    .run();
+  return replacementHash;
+}
+
 describe("claim races across isolates (contract §2, §8.1)", () => {
   it("the loser of a cross-isolate claim race gets 409 lease-held, never 500", async () => {
     const harness = await makePhase4Harness();
@@ -263,6 +290,59 @@ describe("expiry atomicity (contract §2, §8.2)", () => {
   });
 });
 
+describe("recovery races across isolates (contract §2, §8.2)", () => {
+  it("rejects recovery when a concurrent renewal changes its response snapshot", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "holder", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie }, workItemId);
+      const leaseId = leaseOf(claimed.body).id;
+      const before = await harness.repos.leases.getById(leaseId);
+      expect(before).not.toBeNull();
+      const renewedExpiresAt = new Date(
+        Date.parse(before?.expiresAt ?? "") + 30 * MINUTE,
+      ).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+      // Another isolate renews after recovery has built its response but
+      // before token rotation and idempotency storage commit.
+      interleaveBeforeBatch(harness, async () => {
+        await harness.repos.leases
+          .renewCasStatement(
+            leaseId,
+            before?.tokenHash ?? "missing",
+            renewedExpiresAt,
+            harness.clock.now().toISOString().replace(/\.\d{3}Z$/, "Z"),
+          )
+          .run();
+      });
+
+      const response = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${workItemId}/lease/recover`,
+        jsonRequest(
+          "POST",
+          { leaseId },
+          { Cookie: cookie, "Idempotency-Key": uuidv7() },
+        ),
+      );
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("state-conflict");
+
+      const after = await harness.repos.leases.getById(leaseId);
+      expect(after?.expiresAt).toBe(renewedExpiresAt);
+      expect(after?.renewalCount).toBe(1);
+      expect(after?.tokenHash).toBe(before?.tokenHash);
+      expect(await eventTypes(harness)).not.toContain("lease_recovered");
+      const audits = await harness.db
+        .prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE action = 'lease.recover'`)
+        .first();
+      expect(Number(audits?.["n"])).toBe(0);
+    } finally {
+      harness.close();
+    }
+  });
+});
+
 describe("renew races across isolates (contract §2, §8.2)", () => {
   it("a renewal that loses the race is rejected - no false 200, event, or audit row", async () => {
     const harness = await makePhase4Harness();
@@ -288,6 +368,44 @@ describe("renew races across isolates (contract §2, §8.2)", () => {
       // The renewal did not happen, so nothing may claim it did.
       const lease = await harness.repos.leases.getById(leaseId);
       expect(lease?.renewalCount).toBe(0);
+      expect(await eventTypes(harness)).not.toContain("lease_renewed");
+      const audits = await harness.db
+        .prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE action = 'lease.renew'`)
+        .first();
+      expect(Number(audits?.["n"])).toBe(0);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("recovery invalidates an old-token renewal that was already past verification", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "holder", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie }, workItemId);
+      const { id: leaseId, token } = leaseOf(claimed.body);
+      const before = await harness.repos.leases.getById(leaseId);
+      expect(before).not.toBeNull();
+
+      // This handler has already verified `token` against the old hash when
+      // the rival recovery rotates it immediately before the renew batch.
+      let replacementHash = "";
+      interleaveBeforeBatch(harness, async () => {
+        replacementHash = await rivalRecoveryRotation(harness, leaseId);
+      });
+
+      const response = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${workItemId}/lease/renew`,
+        jsonRequest("POST", { leaseId, leaseToken: token }, { Cookie: cookie }),
+      );
+      expect(response.status).toBe(403);
+      expect(((await response.json()) as { code: string }).code).toBe("lease-token-invalid");
+
+      const after = await harness.repos.leases.getById(leaseId);
+      expect(after?.tokenHash).toBe(replacementHash);
+      expect(after?.expiresAt).toBe(before?.expiresAt);
+      expect(after?.renewalCount).toBe(0);
       expect(await eventTypes(harness)).not.toContain("lease_renewed");
       const audits = await harness.db
         .prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE action = 'lease.renew'`)
@@ -350,6 +468,64 @@ describe("submission races across isolates (contract §4, §8.2)", () => {
       const active = await harness.repos.leases.getActiveByWorkItem(workItemId);
       expect(active?.id).toBe(rivalLeaseId);
       expect((await harness.repos.workItems.getById(workItemId))?.status).toBe("leased");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("recovery invalidates an old-token submission that was already past verification", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "author", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie }, workItemId);
+      const bundle = claimed.body;
+      const { id: leaseId, token } = leaseOf(bundle);
+      const document = bundle["document"] as { revision: number; contentHash: string };
+
+      // Recovery wins after this handler verifies the old plaintext but before
+      // its submission/operation/outbox batch reaches D1.
+      let replacementHash = "";
+      interleaveBeforeBatch(harness, async () => {
+        replacementHash = await rivalRecoveryRotation(harness, leaseId);
+      });
+
+      const response = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${workItemId}/submissions`,
+        jsonRequest(
+          "POST",
+          {
+            leaseId,
+            leaseToken: token,
+            type: "range_replacement",
+            baseRevision: document.revision,
+            baseContentHash: document.contentHash,
+            content: "drifted in over",
+          },
+          { Cookie: cookie, "Idempotency-Key": uuidv7() },
+        ),
+      );
+      expect(response.status).toBe(403);
+      expect(((await response.json()) as { code: string }).code).toBe("lease-token-invalid");
+
+      // The token rotation survives, while every part of the stale submission
+      // batch rolls back atomically.
+      const active = await harness.repos.leases.getActiveByWorkItem(workItemId);
+      expect(active?.id).toBe(leaseId);
+      expect(active?.tokenHash).toBe(replacementHash);
+      expect(active?.releasedAt).toBeNull();
+      expect((await harness.repos.workItems.getById(workItemId))?.status).toBe("leased");
+      const submissions = await harness.db.prepare(`SELECT COUNT(*) AS n FROM submissions`).first();
+      expect(Number(submissions?.["n"])).toBe(0);
+      const outbox = await harness.db
+        .prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'submission.apply'`)
+        .first();
+      expect(Number(outbox?.["n"])).toBe(0);
+      expect(await eventTypes(harness)).not.toContain("submission_received");
+      const audits = await harness.db
+        .prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE action = 'submission.create'`)
+        .first();
+      expect(Number(audits?.["n"])).toBe(0);
     } finally {
       harness.close();
     }

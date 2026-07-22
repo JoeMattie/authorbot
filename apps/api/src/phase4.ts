@@ -1,7 +1,7 @@
 /**
- * Phase 4 routes (Phase 4 contract §2-§4): lease claim/renew/release with
- * lazy expiry, the §15.3 task bundle, and the submission command feeding the
- * §5 apply pipeline (`submission.apply` outbox rows drained by the
+ * Phase 4 routes (Phase 4 contract §2-§4): lease claim/recover/renew/release
+ * with lazy expiry, the §15.3 task bundle, and the submission command feeding
+ * the §5 apply pipeline (`submission.apply` outbox rows drained by the
  * repo-coordinator processor with the injected `submission-applier.ts`).
  *
  * Concurrency: every command runs in the SAME per-project serial queue as the
@@ -10,9 +10,10 @@
  * exactly one 201 (contract §2), and work-item status changes use the
  * NULL-abort compare-and-swap so a raced batch rolls back atomically.
  *
- * Lease tokens: minted here, returned exactly once in the claim bundle
- * (idempotent replays store a redacted body), stored as SHA-256 hashes only,
- * compared in constant time, never logged.
+ * Lease tokens: minted here, returned exactly once per claim or
+ * credential-bound recovery issuance (idempotent replays store a redacted
+ * body), stored as SHA-256 hashes only, compared in constant time, never
+ * logged.
  *
  * Documented ambiguity resolutions:
  * - The task bundle's `document` is the chapter AT CLAIM TIME (current
@@ -63,7 +64,13 @@ import type { WorkItemType } from "@authorbot/schemas";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
-import { readRepositoryText, type AppDeps, type AppEnv, type Clock } from "./deps.js";
+import {
+  readRepositoryText,
+  type AppDeps,
+  type AppEnv,
+  type AuthContext,
+  type Clock,
+} from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import {
   expireLeaseForWorkItemStatements,
@@ -108,7 +115,7 @@ export interface Phase4Context {
   now(): string;
 }
 
-/** Redaction hook for the claim idempotency middleware (token returned once). */
+/** Redaction hook for claim/recovery idempotency (each token returned once). */
 export function redactClaimBundle(body: unknown): unknown {
   if (typeof body === "object" && body !== null && "lease" in body) {
     const bundle = body as Record<string, unknown>;
@@ -126,9 +133,27 @@ const renewCommandSchema = z.strictObject({
   leaseToken: z.string().min(1),
 });
 
+const recoverCommandSchema = z.strictObject({
+  leaseId: z.string().min(1),
+});
+
 const releaseCommandSchema = z.strictObject({
   leaseId: z.string().min(1).optional(),
 });
+
+/**
+ * A non-reversible binding to the exact credential that claimed a lease.
+ * Session and agent-token row ids are not plaintext secrets, but hashing the
+ * typed id keeps even those operational identifiers out of readable audit
+ * metadata. The lease-token plaintext is never an input here.
+ */
+async function recoveryBindingOf(auth: AuthContext): Promise<string | null> {
+  const credentialId = auth.kind === "session" ? auth.sessionId : auth.tokenId;
+  if (credentialId === undefined) {
+    return null;
+  }
+  return sha256Hex(`authorbot:lease-recovery:${auth.kind}:${credentialId}`);
+}
 
 export function registerPhase4Routes(ctx: Phase4Context): void {
   const { app, deps, repos, clock, services, auth, idem, claimIdem, serialize, now } = ctx;
@@ -209,6 +234,32 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
     return read.outcome === "found" ? read.source : null;
   };
 
+  /** Immutable metadata written atomically with a claim (keyed by lease id). */
+  const claimAuditMetadata = async (
+    projectId: string,
+    leaseId: string,
+  ): Promise<Record<string, unknown> | null> => {
+    const row = await deps.db
+      .prepare(
+        `SELECT metadata FROM audit_events
+         WHERE project_id = ? AND action = 'work_item.claim' AND target_id = ?
+         ORDER BY id LIMIT 1`,
+      )
+      .bind(projectId, leaseId)
+      .first();
+    if (!row || typeof row["metadata"] !== "string") {
+      return null;
+    }
+    try {
+      const metadata = JSON.parse(row["metadata"]) as unknown;
+      return typeof metadata === "object" && metadata !== null
+        ? (metadata as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
   // ---- claim (contract §2, §3) ---------------------------------------------
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/claim", auth, claimIdem, async (c) => {
@@ -217,6 +268,10 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       return guard.response;
     }
     const a = authOf(c);
+    const recoveryBinding = await recoveryBindingOf(a);
+    if (recoveryBinding === null) {
+      return problem(c, "internal", { detail: "authenticated credential has no stable binding" });
+    }
 
     /**
      * Sentinel for "a rival command won a compare-and-swap under us, but the
@@ -358,6 +413,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
             workItemId: workItem.id,
             baseRevision: chapter.revision,
             baseContentHash: contentHash,
+            recoveryBinding,
           },
         }),
         appendEventStatement(guard.project.id, "work_item_leased", {
@@ -427,6 +483,195 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
     });
   });
 
+  // ---- recover token (Phase 11 slice 2B: memory-only browser secrets) ------
+
+  interface RecoveryPreflight {
+    project: ProjectRecord;
+    actor: AuthContext;
+    workItem: WorkItemRecord;
+    lease: LeaseRecord;
+  }
+
+  const recoveryPreflights = new WeakMap<Request, RecoveryPreflight>();
+
+  /**
+   * Recovery authorization must run before idempotency lookup. Idempotency
+   * rows are actor-scoped, while recovery is deliberately bound to one exact
+   * session/token credential; letting the middleware replay first would let a
+   * second session for the same actor bypass both the current scope check and
+   * the credential binding (albeit with the token redacted).
+   */
+  const authorizeRecoveryBeforeReplay: MiddlewareHandler<AppEnv> = async (c, next) => {
+    const guard = await requireProjectScope(c, services, "work:claim");
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const body = await ctx.readJson(c);
+    if (body instanceof Response) {
+      return body;
+    }
+    const parsed = recoverCommandSchema.safeParse(body);
+    if (!parsed.success) {
+      return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+    }
+    const actor = authOf(c);
+    const presentedBinding = await recoveryBindingOf(actor);
+    if (presentedBinding === null) {
+      return problem(c, "internal", { detail: "authenticated credential has no stable binding" });
+    }
+    const workItem = await findWorkItem(c, guard.project);
+    if (workItem instanceof Response) {
+      return workItem;
+    }
+    const lease = await repos.leases.getById(parsed.data.leaseId);
+    if (
+      lease === null ||
+      lease.workItemId !== workItem.id ||
+      lease.projectId !== guard.project.id
+    ) {
+      return problem(c, "not-found", { detail: "unknown lease" });
+    }
+    if (lease.actorId !== actor.actor.id) {
+      return problem(c, "forbidden", {
+        detail: "only the current lease holder may recover its token",
+      });
+    }
+    const claimMetadata = await claimAuditMetadata(guard.project.id, lease.id);
+    const storedBinding = claimMetadata?.["recoveryBinding"];
+    if (typeof storedBinding !== "string") {
+      return problem(c, "state-conflict", {
+        detail:
+          "this lease predates credential-bound recovery; release it and claim the work again",
+      });
+    }
+    if (storedBinding !== presentedBinding) {
+      return problem(c, "forbidden", {
+        detail: "only the credential that claimed this lease may recover its token",
+      });
+    }
+
+    recoveryPreflights.set(c.req.raw, {
+      project: guard.project,
+      actor,
+      workItem,
+      lease,
+    });
+    try {
+      await next();
+    } finally {
+      recoveryPreflights.delete(c.req.raw);
+    }
+  };
+
+  app.post(
+    "/v1/projects/:projectId/work-items/:workItemId/lease/recover",
+    auth,
+    authorizeRecoveryBeforeReplay,
+    claimIdem,
+    async (c) => {
+      const preflight = recoveryPreflights.get(c.req.raw);
+      if (preflight === undefined) {
+        return problem(c, "internal", { detail: "lease recovery authorization was not evaluated" });
+      }
+      const { project, actor: a, workItem, lease } = preflight;
+
+      return serialize(project.id, async () => {
+        // Recovery cannot revive or extend a lease. Expiration is enforced
+        // before minting, with the same lazy-expiry side effect as renewal.
+        if (isLeaseExpired(lease, clock.now())) {
+          await lazilyExpire(lease);
+          return problem(c, "lease-expired", { detail: "lease has expired" });
+        }
+        const active = checkLeaseActive(lease, clock.now());
+        if (!active.allowed) {
+          return problem(c, "lease-inactive", { detail: active.message });
+        }
+        if (workItem.status !== "leased") {
+          return problem(c, "state-conflict", {
+            detail: `work item in status "${workItem.status}" has no recoverable lease`,
+          });
+        }
+
+        const replacement = await mintLeaseToken();
+        const timestamp = now();
+        const responseBody = {
+          workItemId: workItem.id,
+          lease: {
+            id: lease.id,
+            token: replacement.token,
+            expiresAt: lease.expiresAt,
+            maxExpiresAt: lease.maxExpiresAt,
+            renewalCount: lease.renewalCount,
+            renewalPromptAt: renewalPromptAt(lease, leaseConfig),
+          },
+          correlationId: c.get("correlationId"),
+        };
+
+        try {
+          await deps.db.batch([
+            repos.leases.rotateTokenCasStatement(
+              lease.id,
+              lease.tokenHash,
+              lease.expiresAt,
+              lease.renewalCount,
+              replacement.tokenHash,
+              timestamp,
+            ),
+            auditStatement({
+              projectId: project.id,
+              actorId: a.actor.id,
+              action: "lease.recover",
+              targetType: "lease",
+              targetId: lease.id,
+              correlationId: c.get("correlationId"),
+              metadata: { workItemId: workItem.id },
+            }),
+            appendEventStatement(project.id, "lease_recovered", {
+              leaseId: lease.id,
+              workItemId: workItem.id,
+              correlationId: c.get("correlationId"),
+            }),
+            ...ctx.claimStatements(c, 200, responseBody),
+          ]);
+        } catch (error) {
+          if (!isConstraintError(error)) {
+            throw error;
+          }
+
+          // A concurrent replay of this exact request may have won on the
+          // idempotency key. Let the middleware return its stored, redacted
+          // response instead of mislabelling that success as a token race.
+          const key = c.req.header("idempotency-key");
+          if (
+            key !== undefined &&
+            (await repos.idempotencyKeys.get(project.id, a.actor.id, key)) !== null
+          ) {
+            throw error;
+          }
+
+          const fresh = await repos.leases.getById(lease.id);
+          if (fresh === null) {
+            return problem(c, "not-found", { detail: "unknown lease" });
+          }
+          if (isLeaseExpired(fresh, clock.now())) {
+            await lazilyExpire(fresh);
+            return problem(c, "lease-expired", { detail: "lease has expired" });
+          }
+          const freshActive = checkLeaseActive(fresh, clock.now());
+          if (!freshActive.allowed) {
+            return problem(c, "lease-inactive", { detail: freshActive.message });
+          }
+          return problem(c, "state-conflict", {
+            detail:
+              "lease changed before recovery committed; retry from authoritative state",
+          });
+        }
+
+        return c.json(responseBody, 200);
+      });
+    },
+  );
+
   // ---- renew (contract §2) --------------------------------------------------
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/lease/renew", auth, idem, async (c) => {
@@ -489,14 +734,16 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       try {
         await deps.db.batch([
           // NULL-abort CAS, not a bare conditional UPDATE: the checks above
-          // read the lease, and a release/revoke/expiry committed by another
-          // isolate in between would otherwise leave the guarded UPDATE
-          // matching 0 rows while this handler still returned 200 with a new
-          // expiry, bumped `renewalCount`, an audit row, a `lease_renewed`
-          // event, and a stored idempotent replay - a lease the server will
-          // reject, with a countdown telling the holder otherwise. The abort
-          // makes the whole batch atomic with the liveness check.
-          repos.leases.renewCasStatement(lease.id, renewable.expiresAt, timestamp),
+          // read the lease, and a release/revoke/expiry OR recovery-token
+          // rotation committed by another isolate in between would otherwise
+          // leave this handler returning 200 for a stale capability. The abort
+          // makes the whole batch atomic with the liveness and token checks.
+          repos.leases.renewCasStatement(
+            lease.id,
+            lease.tokenHash,
+            renewable.expiresAt,
+            timestamp,
+          ),
           auditStatement({
             projectId: guard.project.id,
             actorId: lease.actorId,
@@ -509,7 +756,10 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
           appendEventStatement(guard.project.id, "lease_renewed", {
             leaseId: lease.id,
             workItemId: workItem.id,
-            expiresAt: renewable.expiresAt,
+            expiresAt: responseBody.expiresAt,
+            maxExpiresAt: responseBody.maxExpiresAt,
+            renewalCount: responseBody.renewalCount,
+            renewalPromptAt: responseBody.renewalPromptAt,
           }),
           ...ctx.claimStatements(c, 200, responseBody),
         ]);
@@ -517,11 +767,16 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         if (!isConstraintError(error)) {
           throw error;
         }
-        // Re-read to name the reason honestly (contract §2/§8.2: expired,
-        // released, revoked, and max-total renewals are all rejected).
+        // Re-read to name the reason honestly (contract §2/§8.2: replaced
+        // token, expired, released, revoked, and max-total are all rejected).
         const fresh = await repos.leases.getById(lease.id);
         if (fresh === null) {
           return problem(c, "not-found", { detail: "unknown lease" });
+        }
+        if (fresh.tokenHash !== lease.tokenHash) {
+          return problem(c, "lease-token-invalid", {
+            detail: "lease token was replaced before the renewal committed",
+          });
         }
         if (isLeaseExpired(fresh, clock.now())) {
           await lazilyExpire(fresh);
@@ -707,7 +962,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         );
       }
       // 8. baseRevision + baseContentHash match the lease's bundle.
-      const bundleBase = await claimBundleBase(lease.id);
+      const bundleBase = await claimBundleBase(guard.project.id, lease.id);
       if (bundleBase === null) {
         return problem(c, "state-conflict", { detail: "lease has no recorded task bundle" });
       }
@@ -793,7 +1048,8 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         // §9.5 edges collapse to one stored status inside this atomic batch.
         workItemCas(workItem.id, "leased", "applying", timestamp),
         // The accepted submission consumes the lease (module docs) - as a
-        // NULL-abort CAS requiring the lease to still be LIVE at write time.
+        // NULL-abort CAS requiring the lease to still be LIVE and retain the
+        // token hash verified above at write time.
         // The work-item CAS alone is not enough: it proves only that the item
         // is `leased`, not that THIS lease holds it. Between the liveness
         // check above and this batch another isolate can expire this lease
@@ -801,24 +1057,36 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         // again - the CAS would pass, this release would silently change 0
         // rows, and an expired lease's edit would be applied while the fresh
         // holder's lease stayed active against a completed item.
-        repos.leases.consumeForSubmissionStatement(lease.id, timestamp, timestamp),
+        repos.leases.consumeForSubmissionStatement(
+          lease.id,
+          lease.tokenHash,
+          timestamp,
+          timestamp,
+        ),
         ...command202.statements.slice(1),
         appendEventStatement(guard.project.id, "submission_received", {
           submissionId,
+          operationId: command202.operationId,
           workItemId: workItem.id,
           type: command.type,
+          correlationId,
         }),
         ...ctx.claimStatements(c, 202, responseBody),
       ];
       try {
         await deps.db.batch(batch);
       } catch (error) {
-        // The work-item CAS aborted: a rival command (cancel/expiry sweep in
-        // another isolate) moved the item off `leased` after our read.
+        // A work-item or lease CAS aborted: another isolate changed the item,
+        // ended the lease, or rotated its token after our read.
         if (isConstraintError(error)) {
           // Either CAS may have aborted. Report whichever precondition
           // actually broke, and never surface contention as a 500.
           const freshLease = await repos.leases.getById(lease.id);
+          if (freshLease !== null && freshLease.tokenHash !== lease.tokenHash) {
+            return problem(c, "lease-token-invalid", {
+              detail: "lease token was replaced before the submission committed",
+            });
+          }
           if (freshLease !== null && isLeaseExpired(freshLease, clock.now())) {
             await lazilyExpire(freshLease);
             return problem(c, "lease-expired", { detail: "lease has expired" });
@@ -846,28 +1114,21 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
    * event (target_id = lease id) - "the lease's bundle" of contract §4.
    */
   const claimBundleBase = async (
+    projectId: string,
     leaseId: string,
   ): Promise<{ baseRevision: number; baseContentHash: string } | null> => {
-    const row = await deps.db
-      .prepare(
-        `SELECT metadata FROM audit_events
-         WHERE action = 'work_item.claim' AND target_id = ? ORDER BY id LIMIT 1`,
-      )
-      .bind(leaseId)
-      .first();
-    if (!row || typeof row["metadata"] !== "string") {
+    const metadata = await claimAuditMetadata(projectId, leaseId);
+    if (metadata === null) {
       return null;
     }
-    try {
-      const metadata = JSON.parse(row["metadata"]) as {
-        baseRevision?: unknown;
-        baseContentHash?: unknown;
+    if (
+      typeof metadata["baseRevision"] === "number" &&
+      typeof metadata["baseContentHash"] === "string"
+    ) {
+      return {
+        baseRevision: metadata["baseRevision"],
+        baseContentHash: metadata["baseContentHash"],
       };
-      if (typeof metadata.baseRevision === "number" && typeof metadata.baseContentHash === "string") {
-        return { baseRevision: metadata.baseRevision, baseContentHash: metadata.baseContentHash };
-      }
-    } catch {
-      /* fall through */
     }
     return null;
   };

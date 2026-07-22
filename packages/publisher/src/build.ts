@@ -112,6 +112,10 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
         configFile: false,
         logLevel: "warn",
         root: siteRoot,
+        // Lazy chunks must resolve beside the stable entry under `_astro/`.
+        // Vite's default `/` base emits `/assets/...`, which 404s at both the
+        // origin root and every ADR-0019 base-path deployment.
+        base: "./",
         build: {
           outDir: assetDir,
           emptyOutDir: false,

@@ -1399,6 +1399,94 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /v1/projects/{projectId}/work-items/{workItemId}/lease/recover:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/WorkItemId"
+    post:
+      operationId: recoverWorkItemLeaseToken
+      tags: [work]
+      summary: Replace a lost in-memory token for a live lease.
+      description: |
+        Requires the exact authenticated session or agent-token credential
+        that created the lease. The replacement token hash atomically replaces
+        the old hash, so the old plaintext stops authorizing commands when the
+        new plaintext is returned. Recovery does not renew, revive, or extend
+        the lease. A claim issued before credential binding was recorded must
+        be released and claimed again.
+
+        The replacement plaintext appears only in the first successful
+        response. An idempotent replay returns the same lease metadata with
+        `tokenRedacted: true` and no `token`. Current `work:claim` authority
+        and the exact claiming credential are rechecked before any replay is
+        served.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [leaseId]
+              properties:
+                leaseId:
+                  $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Lease token rotated without changing the lease lifetime.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workItemId, lease, correlationId]
+                properties:
+                  workItemId:
+                    $ref: "#/components/schemas/Uuid"
+                  lease:
+                    type: object
+                    required:
+                      [id, expiresAt, maxExpiresAt, renewalCount, renewalPromptAt]
+                    oneOf:
+                      - required: [token]
+                      - required: [tokenRedacted]
+                    properties:
+                      id:
+                        $ref: "#/components/schemas/Uuid"
+                      token:
+                        type: string
+                        description: Opaque replacement secret, returned once; only its hash is stored.
+                      tokenRedacted:
+                        type: boolean
+                        const: true
+                        description: Present and true instead of token on an idempotent replay.
+                      expiresAt:
+                        $ref: "#/components/schemas/Timestamp"
+                      maxExpiresAt:
+                        $ref: "#/components/schemas/Timestamp"
+                      renewalCount:
+                        type: integer
+                        minimum: 0
+                      renewalPromptAt:
+                        $ref: "#/components/schemas/Timestamp"
+                  correlationId:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   /v1/projects/{projectId}/work-items/{workItemId}/lease/release:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -1612,6 +1700,12 @@ paths:
       operationId: streamProjectEvents
       tags: [operations]
       summary: Server-Sent Events feed of project activity (design §15.5).
+      # Authentication is optional only for the public `poll=1` representation;
+      # the implementation still refuses anonymous SSE and non-public books.
+      security:
+        - githubSession: []
+        - agentToken: []
+        - {}
       description: |
         Emits `text/event-stream` frames from a monotonic, cursor-ordered
         `events` table. Event types (Phase 3 contract §5): `annotation_created`,
@@ -1621,8 +1715,18 @@ paths:
         refetch authoritative resources after reconnecting. Resume without loss
         via `Last-Event-ID` (or the `after` query parameter).
 
-        Auth mirrors annotation reads: on a public book the stream is readable
-        by anonymous callers (public events only); otherwise it is member-only.
+        Authenticated project members may use the full stream. Anonymous
+        readers and signed-in non-members admitted by an open or
+        approval-gated annotation policy may use only the `poll=1`
+        representation. It is filtered to explicitly reviewed public
+        collaboration subtypes: conflict Work creation and Work cancellation
+        remain private even though they reuse Phase 3 event names.
+        `operation_completed` is limited to unambiguously public annotation
+        and reply outbox kinds; chapter, submission, decision, Work, and
+        settings operations remain private. Each allowed public row is also
+        projected to explicitly reviewed payload fields, so additive internal
+        fields remain private. Public SSE is refused so later operational event
+        types can never cross the public boundary before an explicit review.
       parameters:
         - name: Last-Event-ID
           in: header
@@ -4324,21 +4428,46 @@ components:
       required: [workItem, lease, document, context, submissionSchema]
       properties:
         workItem:
-          allOf:
-            - $ref: "#/components/schemas/WorkItem"
-          description: The claimed work item, including acceptance criteria.
+          type: object
+          additionalProperties: false
+          description: The compact claimed work item, including acceptance criteria.
+          required: [id, type, acceptanceCriteria, priority]
+          properties:
+            id:
+              $ref: "#/components/schemas/Uuid"
+            type:
+              $ref: "#/components/schemas/WorkItemType"
+            acceptanceCriteria:
+              type: array
+              items:
+                type: string
+            priority:
+              type: string
+              enum: [low, normal, high]
         lease:
-          allOf:
-            - $ref: "#/components/schemas/Lease"
-            - type: object
-              required: [token, renewalPromptAt]
-              properties:
-                token:
-                  type: string
-                  description: Opaque lease secret, returned once; only its hash is stored.
-                renewalPromptAt:
-                  $ref: "#/components/schemas/Timestamp"
-                  description: When a client should offer renewal - expiresAt minus the configured lead time.
+          type: object
+          additionalProperties: false
+          required: [id, expiresAt, maxExpiresAt, renewalPromptAt]
+          oneOf:
+            - required: [token]
+            - required: [tokenRedacted]
+          properties:
+            id:
+              $ref: "#/components/schemas/Uuid"
+            token:
+              type: string
+              description: Opaque lease secret, returned once; only its hash is stored.
+            tokenRedacted:
+              type: boolean
+              const: true
+              description: Present instead of token on an idempotent replay.
+            expiresAt:
+              $ref: "#/components/schemas/Timestamp"
+            maxExpiresAt:
+              $ref: "#/components/schemas/Timestamp"
+            renewalPromptAt:
+              $ref: "#/components/schemas/Timestamp"
+              description: When a client should offer renewal - expiresAt minus the configured lead time.
         document:
           type: object
           required: [chapterId, revision, contentHash, source]
@@ -4495,24 +4624,18 @@ components:
     Event:
       type: object
       description: SSE payload shape (design §15.5). Notification only; refetch authoritative resources.
-      required: [id, type, occurredAt]
+      additionalProperties: false
+      required: [id, type, payload, createdAt]
       properties:
         id:
-          $ref: "#/components/schemas/Uuid"
+          type: integer
+          minimum: 1
         type:
           type: string
-          enum:
-            - annotation.created
-            - annotation.vote_changed
-            - work_item.created
-            - lease.changed
-            - operation.completed
-            - publication.completed
-        projectId:
-          $ref: "#/components/schemas/Uuid"
-        occurredAt:
-          $ref: "#/components/schemas/Timestamp"
-        data:
+          minLength: 1
+        payload:
           type: object
           description: Event-specific reference payload (ids, not full resources).
           additionalProperties: true
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"

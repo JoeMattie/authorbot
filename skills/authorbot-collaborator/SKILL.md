@@ -7,7 +7,7 @@ description: >-
   token) and asks you to draft, revise, critique, or check continuity on it.
 license: MIT
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   homepage: https://github.com/JoeMattie/authorbot
 ---
 

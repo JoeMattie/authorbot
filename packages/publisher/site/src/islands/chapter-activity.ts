@@ -4,7 +4,8 @@
  */
 import type { ChapterActivity } from "./api.js";
 import { el } from "./dom.js";
-import { getProjectStore, type ProjectStore } from "./project-store.js";
+import type { ProjectStore, ProjectStoreState } from "./project-store.js";
+import { loadProjectStore } from "./project-store-loader.js";
 
 interface Config {
   apiBase: string;
@@ -118,36 +119,65 @@ export function createChapterActivityGroup(
 export class AuthorbotChapterActivity extends HTMLElement {
   private store: ProjectStore | null = null;
   private unsubscribe: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
   private started = false;
+  private mountGeneration = 0;
+  private renderedChapters: ProjectStoreState["chaptersById"] | null = null;
 
   connectedCallback(): void {
     if (this.started) {
       return;
     }
     this.started = true;
+    const generation = ++this.mountGeneration;
     const config = parseConfig(this);
     if (config === null) {
       return;
     }
-    this.store = getProjectStore(config);
-    this.unsubscribe = this.store.subscribe(() => this.render());
+    void this.connectStore(config, generation);
+  }
+
+  private async connectStore(config: Config, generation: number): Promise<void> {
+    let store: ProjectStore;
+    try {
+      store = await loadProjectStore(config);
+    } catch {
+      // Leave the server-rendered chapter rows untouched when the shared
+      // projection chunk remains unavailable after its bounded retry.
+      return;
+    }
+    if (!this.isCurrentMount(generation)) return;
+    this.store = store;
+    this.unsubscribe = store.subscribe(() => {
+      if (this.isCurrentMount(generation)) this.render();
+    });
     this.render();
-    void this.load();
+    await this.load(generation, store);
   }
 
   disconnectedCallback(): void {
+    this.started = false;
+    this.mountGeneration += 1;
     this.unsubscribe?.();
     this.unsubscribe = null;
-    this.started = false;
+    this.releaseConnection?.();
+    this.releaseConnection = null;
+    this.renderedChapters = null;
   }
 
-  private async load(): Promise<void> {
-    const store = this.store as ProjectStore;
+  private isCurrentMount(generation: number): boolean {
+    return this.started && this.isConnected && this.mountGeneration === generation;
+  }
+
+  private async load(generation: number, store: ProjectStore): Promise<void> {
     await store.getState().ensureSession();
+    if (!this.isCurrentMount(generation)) return;
     if (store.getState().session === null) {
       return;
     }
     await store.getState().ensureChapters();
+    if (!this.isCurrentMount(generation)) return;
+    this.releaseConnection = store.getState().retainConnection();
   }
 
   private render(): void {
@@ -155,6 +185,8 @@ export class AuthorbotChapterActivity extends HTMLElement {
       return;
     }
     const { chaptersById } = this.store.getState();
+    if (this.renderedChapters === chaptersById) return;
+    this.renderedChapters = chaptersById;
     for (const row of document.querySelectorAll<HTMLElement>("[data-chapter-activity-id]")) {
       const slot = row.querySelector<HTMLElement>("[data-chapter-activity-slot]");
       if (slot === null) {

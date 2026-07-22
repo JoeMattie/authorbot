@@ -11,11 +11,12 @@
  *   `innerHTML` is never used (the build test greps the bundle for it).
  * - Task prose is labelled as untrusted project data in the view itself, so a
  *   human reading a task knows the text is not an instruction from Authorbot.
- * - The lease token lives in memory and in sessionStorage only (see
- *   `work-state.ts`), is never rendered, and is deleted as soon as the lease
- *   ends (release, submit, or expiry).
+ * - The lease token lives only in the shared store's private memory, is never
+ *   rendered or serialized, and is deleted as soon as the lease ends
+ *   (release, submit, or expiry). Session storage retains only safe task
+ *   metadata and the in-progress draft.
  */
-import { CollabApi, parseSubmissionConflict, type SubmitBody } from "./api.js";
+import { parseSubmissionConflict, type SubmissionAccepted } from "./api.js";
 import { el } from "./dom.js";
 import {
   COUNTDOWN_TICK_MS,
@@ -34,6 +35,7 @@ import {
   type StoredClaim,
   type SubmitState,
 } from "./work-state.js";
+import type { ProjectStore, WorkSubmission } from "./project-store.js";
 
 export interface ChapterRef {
   title: string;
@@ -41,7 +43,7 @@ export interface ChapterRef {
 }
 
 export interface ClaimPanelDeps {
-  api: CollabApi;
+  store: ProjectStore;
   project: string;
   storage: Storage | null;
   chapters: Map<string, ChapterRef>;
@@ -102,6 +104,7 @@ export class ClaimPanel {
   private timer: number | null = null;
   private pollTimer: number | null = null;
   private disposed = false;
+  private readonly unsubscribeStore: () => void;
 
   // Live nodes the ticker and the state machine update in place.
   private remaining!: HTMLElement;
@@ -119,6 +122,69 @@ export class ClaimPanel {
     this.root = el("section", "ab-claim");
     this.root.hidden = true;
     this.root.setAttribute("aria-labelledby", "ab-claim-title");
+    this.unsubscribeStore = deps.store.subscribe((state, previous) => {
+      const workItemId = this.claim?.workItemId;
+      if (workItemId === undefined) return;
+      const message = state.claimInvalidationsByWorkItem[workItemId];
+      if (
+        message !== undefined &&
+        message !== previous.claimInvalidationsByWorkItem[workItemId]
+      ) {
+        this.invalidate(message);
+      }
+      const accepted = state.submissionAcceptancesByWorkItem[workItemId];
+      if (
+        accepted !== undefined &&
+        accepted !== previous.submissionAcceptancesByWorkItem[workItemId]
+      ) {
+        this.acceptSubmission(accepted);
+      }
+      const active = state.activeClaimsByWorkItem[workItemId];
+      const previousActive = previous.activeClaimsByWorkItem[workItemId];
+      if (
+        active !== undefined &&
+        active !== previousActive &&
+        (active.lease.expiresAt !== this.claim?.lease.expiresAt ||
+          active.lease.maxExpiresAt !== this.claim?.lease.maxExpiresAt ||
+          active.lease.renewalPromptAt !== this.claim?.lease.renewalPromptAt)
+      ) {
+        this.syncLease(active.lease);
+      }
+    });
+  }
+
+  /** Apply an HTTP- or event-learned lease clock to the visible saved draft. */
+  private syncLease(lease: {
+    id: string;
+    expiresAt: string;
+    maxExpiresAt: string;
+    renewalPromptAt?: string;
+  }): void {
+    if (this.claim === null || this.root.hidden || lease.id !== this.claim.lease.id) return;
+    if (
+      lease.expiresAt === this.claim.lease.expiresAt &&
+      lease.maxExpiresAt === this.claim.lease.maxExpiresAt &&
+      lease.renewalPromptAt === this.claim.lease.renewalPromptAt
+    ) {
+      return;
+    }
+    const { renewalPromptAt: _oldPrompt, ...baseLease } = this.claim.lease;
+    this.claim = {
+      ...this.claim,
+      lease: {
+        ...baseLease,
+        expiresAt: lease.expiresAt,
+        maxExpiresAt: lease.maxExpiresAt,
+        ...(lease.renewalPromptAt === undefined
+          ? {}
+          : { renewalPromptAt: lease.renewalPromptAt }),
+      },
+    };
+    saveClaim(this.deps.storage, this.deps.project, this.claim);
+    this.hideError();
+    this.prompt.hidden = true;
+    this.tick();
+    this.deps.announce("Lease renewed.");
   }
 
   /** Render the edit view for a claim (fresh, or restored after a refresh). */
@@ -139,6 +205,7 @@ export class ClaimPanel {
   /** Tear down timers (element disconnected, or the lease ended). */
   destroy(): void {
     this.disposed = true;
+    this.unsubscribeStore();
     this.stopCountdown();
     if (this.pollTimer !== null) {
       window.clearTimeout(this.pollTimer);
@@ -353,10 +420,12 @@ export class ClaimPanel {
 
   /**
    * The lease ran out while the view was open: stop, tell the truth, and drop
-   * the stored token - the server has already returned the item to `ready`
-   * (lazy expiry / sweep) and the token can no longer submit anything.
+   * the stored claim metadata and in-memory capability. The server has
+   * already returned the item to `ready` (lazy expiry / sweep), and the token
+   * can no longer submit anything.
    */
   private onExpired(): void {
+    const workItemId = this.claim?.workItemId;
     this.stopCountdown();
     this.submitBtn.disabled = true;
     this.renewBtn.disabled = true;
@@ -366,8 +435,26 @@ export class ClaimPanel {
       "ab-submit-expired",
     );
     clearClaim(this.deps.storage, this.deps.project);
+    if (workItemId !== undefined) this.deps.store.getState().forgetClaim(workItemId);
     this.deps.announce("Lease expired.");
     this.deps.onExit("expired");
+  }
+
+  /** Keep an ended or credential-invalid lease visible long enough to rescue the draft. */
+  private invalidate(message: string): void {
+    if (this.claim === null || this.root.hidden) return;
+    this.stopCountdown();
+    this.submitBtn.disabled = true;
+    this.renewBtn.disabled = true;
+    this.releaseBtn.disabled = true;
+    this.textarea.readOnly = true;
+    this.summaryInput.readOnly = true;
+    clearClaim(this.deps.storage, this.deps.project);
+    this.setStatus(
+      `${message} This draft is now read-only; copy it before claiming different work.`,
+      "ab-submit-expired",
+    );
+    this.deps.announce("Lease access ended. The draft remains visible for copying.");
   }
 
   private async renew(): Promise<void> {
@@ -376,9 +463,20 @@ export class ClaimPanel {
     }
     const claim = this.claim;
     this.renewBtn.disabled = true;
-    const result = await this.deps.api.renewLease(claim.workItemId, claim.lease.id, claim.lease.token);
+    const result = await this.deps.store.getState().renewClaim(claim.workItemId);
     this.renewBtn.disabled = false;
     if (!result.ok) {
+      if (
+        this.claim !== null &&
+        (this.claim.lease.expiresAt !== claim.lease.expiresAt ||
+          this.claim.lease.maxExpiresAt !== claim.lease.maxExpiresAt ||
+          this.claim.lease.renewalPromptAt !== claim.lease.renewalPromptAt)
+      ) {
+        // The event feed is authoritative evidence that this renewal landed
+        // even though both same-key HTTP responses were unreadable.
+        this.hideError();
+        return;
+      }
       this.showError(`Renewal failed: ${result.message}`);
       // An expired/inactive lease is terminal - reflect it immediately.
       if (result.status === 409) {
@@ -390,23 +488,12 @@ export class ClaimPanel {
       }
       return;
     }
-    this.claim = {
-      ...claim,
-      lease: {
-        ...claim.lease,
-        expiresAt: result.value.expiresAt,
-        maxExpiresAt: result.value.maxExpiresAt,
-        // Keep the server's prompt instant: its distance from `expiresAt` is
-        // the operator's configured lead time, which the countdown honours
-        // instead of assuming the 5-minute default.
-        renewalPromptAt: result.value.renewalPromptAt,
-      },
-    };
-    saveClaim(this.deps.storage, this.deps.project, this.claim);
-    this.hideError();
-    this.prompt.hidden = true;
-    this.tick();
-    this.deps.announce("Lease renewed.");
+    this.syncLease({
+      id: claim.lease.id,
+      expiresAt: result.value.expiresAt,
+      maxExpiresAt: result.value.maxExpiresAt,
+      renewalPromptAt: result.value.renewalPromptAt,
+    });
   }
 
   private async release(): Promise<void> {
@@ -415,7 +502,7 @@ export class ClaimPanel {
     }
     const claim = this.claim;
     this.releaseBtn.disabled = true;
-    const result = await this.deps.api.releaseLease(claim.workItemId, claim.lease.id);
+    const result = await this.deps.store.getState().releaseClaim(claim.workItemId);
     this.releaseBtn.disabled = false;
     if (!result.ok) {
       this.showError(`Release failed: ${result.message}`);
@@ -465,29 +552,44 @@ export class ClaimPanel {
 
     this.dispatch({ type: "submit" });
     const summary = this.summaryInput.value.trim();
-    const body: SubmitBody = {
-      leaseId: claim.lease.id,
-      leaseToken: claim.lease.token,
-      type: submissionType as SubmitBody["type"],
+    const body: WorkSubmission = {
+      type: submissionType,
       baseRevision: claim.document.revision,
       baseContentHash: claim.document.contentHash,
       content,
       ...(summary === "" ? {} : { summary }),
     };
-    const result = await this.deps.api.submitWork(claim.workItemId, body);
+    const result = await this.deps.store.getState().submitClaim(claim.workItemId, body);
     if (!result.ok) {
       this.dispatch({ type: "rejected", message: result.message });
       return;
     }
-    // The lease is consumed by the accepted submission (contract §4): drop the
-    // token now so a refresh never offers to renew a dead lease.
+    this.acceptSubmission(result.value);
+  }
+
+  /** Settle an acceptance learned from HTTP or this tab's correlated event. */
+  private acceptSubmission(accepted: SubmissionAccepted): void {
+    if (
+      this.state.phase === "syncing" &&
+      this.state.operationId === accepted.operationId
+    ) {
+      return;
+    }
+    if (this.state.phase === "failed" || this.state.phase === "editing") {
+      this.dispatch({ type: "submit" });
+    }
+    if (this.state.phase !== "submitting") {
+      return;
+    }
+    // The lease is consumed by the accepted submission (contract §4): drop
+    // the persisted metadata now so a refresh never offers a dead lease.
     clearClaim(this.deps.storage, this.deps.project);
     this.dispatch({
       type: "accepted",
-      operationId: result.value.operationId,
-      submissionId: result.value.submissionId,
+      operationId: accepted.operationId,
+      submissionId: accepted.submissionId,
     });
-    this.pollOperation(result.value.operationId);
+    this.pollOperation(accepted.operationId);
   }
 
   private pollOperation(operationId: string): void {
@@ -495,7 +597,7 @@ export class ClaimPanel {
       if (this.disposed) {
         return;
       }
-      const operation = await this.deps.api.operation(operationId);
+      const operation = await this.deps.store.getState().refreshOperation(operationId);
       if (operation !== null && (operation.state === "committed" || operation.state === "verified")) {
         // A committed operation carrying the `submission-conflict` problem IS
         // the conflict record (contract §5) - the chapter was not touched.

@@ -13,7 +13,7 @@ Single-file spec, one path item per endpoint, grouped by tag:
 - `chapters` - chapter projections, chapter submissions, story documents
   (outline, timeline, characters).
 - `annotations` - annotations, replies, votes, withdraw, re-anchor.
-- `work` - work items, claim (returns the task bundle), lease renew/release,
+- `work` - work items, claim (returns the task bundle), lease recovery/renew/release,
   work-item submissions.
 - `operations` - Git operation status, the SSE event stream, and the GitHub
   webhook receiver.

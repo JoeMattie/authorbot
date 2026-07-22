@@ -198,11 +198,12 @@ listed ready work items; Phase 4 adds the claim-and-edit flow:
   the operation: the chapter was left untouched and the created
   `resolve_conflict` work item is named in `.ab-conflict-id`.
 
-The lease token (returned exactly once by the claim) is kept in
-**sessionStorage** - per-tab, dropped when the tab closes - so a refresh
-resumes the claim and the draft instead of stranding the lease. It is never
-rendered, never logged, never placed in localStorage or a URL, and is deleted
-the moment the lease is released, submitted, or expires.
+The lease token is kept only in the shared store's private memory. Session
+storage retains non-secret task metadata and the in-progress draft. After a
+refresh, the exact credential that claimed the still-live lease rotates and
+recovers a replacement token; a different login cannot recover it. Tokens are
+never rendered, logged, serialized, placed in browser storage, or put in a
+URL, and the in-memory copy is deleted when the lease ends.
 
 `examples/agent-workflow.mjs` drives the same endpoints from a zero-dependency
 Node script (claim → print bundle → submit → poll → report commit); the

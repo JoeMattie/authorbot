@@ -17,6 +17,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
+import type { BookConfig } from "@authorbot/schemas";
 import type { AppDeps, AppEnv } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
 import type { Hono } from "hono";
@@ -256,5 +257,70 @@ describe("Finding 4: override reason is member-only on public books", () => {
     });
     const memberBody = (await member.json()) as { decision: { overrideReason?: string } | null };
     expect(memberBody.decision?.overrideReason).toBe("bypassing rule per private moderation thread");
+  });
+
+  it("treats an open-policy signed-in non-member as public on list and get", async () => {
+    const maintainer = await devLogin(h, "maeve", "maintainer");
+    const author = await devLogin(h, "author", "contributor");
+    const id = await createOpenSuggestion(h, author);
+    const forced = await h.app.request(
+      forcePath(h, id),
+      jsonRequest(
+        "POST",
+        { reason: "bypassing rule per private moderation thread" },
+        { Cookie: maintainer },
+      ),
+    );
+    expect(forced.status).toBe(201);
+
+    const config: BookConfig = {
+      schema: "authorbot.book/v1",
+      id: "01900000-0000-7000-8000-0000000000bb",
+      title: "Hollow Creek Anomaly",
+      slug: "hollow-creek-anomaly",
+      language: "en",
+      collaboration: { annotation_policy: "open" },
+    };
+    await h.repos.bookConfigs.upsert({
+      projectId: h.projectId,
+      config,
+      status: "committed",
+      gitOperationId: null,
+      sourceCommit: null,
+      createdAt: "2026-07-22T12:00:00Z",
+      updatedAt: "2026-07-22T12:00:00Z",
+    });
+    const stranger = await devLogin(h, "passing-stranger", "contributor");
+    const actor = await h.repos.actors.getByExternalIdentity("github:passing-stranger");
+    const membership = await h.repos.projectMemberships.getByProjectAndActor(
+      h.projectId,
+      actor?.id ?? "missing",
+    );
+    await h.repos.projectMemberships.revoke(
+      membership?.id ?? "missing",
+      "2026-07-22T12:00:00Z",
+    );
+
+    const getResponse = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${id}`,
+      { headers: { Cookie: stranger } },
+    );
+    expect(getResponse.status).toBe(200);
+    const getBody = (await getResponse.json()) as Record<string, unknown>;
+    expect(getBody).not.toHaveProperty("myVote");
+    expect(getBody["decision"]).not.toHaveProperty("overrideReason");
+
+    const listResponse = await h.app.request(
+      `/v1/projects/${h.projectId}/chapters/${getBody["chapterId"] as string}/annotations`,
+      { headers: { Cookie: stranger } },
+    );
+    expect(listResponse.status).toBe(200);
+    const listBody = (await listResponse.json()) as {
+      items: Record<string, unknown>[];
+    };
+    const listed = listBody.items.find((item) => item["id"] === id);
+    expect(listed).toBeDefined();
+    expect(listed).not.toHaveProperty("myVote");
+    expect(listed?.["decision"]).not.toHaveProperty("overrideReason");
   });
 });

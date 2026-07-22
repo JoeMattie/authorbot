@@ -10,7 +10,7 @@ deterministic rebase or an explicit conflict - never a clobber.
 
 ## 1. Scope
 
-**In:** lease lifecycle (claim/renew/release/lazy+swept expiration); the
+**In:** lease lifecycle (claim/recover/renew/release/lazy+swept expiration); the
 §15.3 task bundle; submission types `range_replacement`, `block_replacement`,
 `chapter_replacement`; patch application in `@authorbot/markdown`; the §12.6
 conflict policy with conflict-resolution work items; minimal deterministic
@@ -34,10 +34,25 @@ types above only), rich editor, notifications, rate limits (Phase 6).
 - Claim `POST /work-items/{id}/claim`: serialized compare-and-set - item is
   `ready` (or its lease expired: expire it in the same batch), actor has
   `work:claim` + capability for the type; creates the lease (opaque 256-bit
-  token, returned exactly once), transitions `ready → leased`, emits
-  `work_item_leased`. Two simultaneous claims: exactly one 201; the loser
-  gets 409 `lease-held` with holder-safe info (no token, holder display name
-  only).
+  token, returned exactly once for that issuance), transitions
+  `ready → leased`, emits `work_item_leased`. Two simultaneous claims:
+  exactly one 201; the loser gets 409 `lease-held` with holder-safe info (no
+  token, holder display name only).
+- Recovery `POST .../lease/recover` supports clients that deliberately keep
+  lease secrets in memory. The claim atomically records a non-reversible
+  binding to the exact authenticated session or agent-token credential. Only
+  that credential, still acting as the holder of a live lease, may recover.
+  Recovery mints a replacement plaintext, atomically rotates the stored hash
+  (invalidating the old token), and returns the replacement exactly once. It
+  does not renew, extend, or revive the lease. The mutation requires
+  `Idempotency-Key`; its replay is successful but redacts the token. Current
+  `work:claim` authority and the exact credential binding are checked before
+  idempotency lookup, so a second session for the same actor cannot replay the
+  result. Token rotation also compare-and-swaps the observed expiry and renewal
+  count: a concurrent renew makes recovery retry instead of storing stale lease
+  timing. Claims created before credential binding fail closed and must be
+  released and claimed again. No plaintext credential or lease token is stored
+  or logged.
 - Renew `POST .../lease/renew` (current token required; extends by renewal
   duration, capped at max total; renewing an expired lease → 409). Release
   `POST .../lease/release` (holder or maintainer) → `leased → ready`.
@@ -103,9 +118,12 @@ applying` in the command, then the pipeline below.
 
 ## 6. Events, attribution, rebuild
 
-- New events: `work_item_leased`, `lease_renewed`, `lease_released`,
+- New events: `work_item_leased`, `lease_recovered`, `lease_renewed`, `lease_released`,
   `lease_expired`, `submission_received`, `work_item_completed`,
-  `work_item_conflict`. SSE + poll as Phase 3.
+  `work_item_conflict`. `lease_renewed` carries the authoritative `expiresAt`,
+  `maxExpiresAt`, `renewalCount`, and deployment-configured `renewalPromptAt`,
+  so a client that lost the HTTP response can reconcile without assuming the
+  default prompt lead. SSE + poll as Phase 3.
 - Attribution: `.authorbot/attribution/<chapter-id>.yml` appends
   `{ revision, actor, work_item_id, commit }` in the same commit as the
   edit. Chapter frontmatter `authors` gains the actor if new (stable order),
@@ -135,8 +153,9 @@ applying` in the command, then the pipeline below.
 1. Simultaneous-claim test: N parallel claims → exactly one 201, one active
    lease row, others 409; repeatable ×5.
 2. Stale-lease matrix: expired, released, revoked, wrong-token, and
-   max-total-exceeded renewals all rejected; sweep + lazy expiry both
-   return items to `ready` with events.
+   max-total-exceeded renewals all rejected; recovery is restricted to the
+   exact claiming credential and atomically invalidates the old token; sweep
+   + lazy expiry both return items to `ready` with events.
 3. Full happy path (agent script) and human path (Playwright) complete the
    SAME range_replacement work item type end-to-end: one commit containing
    chapter bump + work-item done + annotation accepted + attribution;
@@ -149,5 +168,5 @@ applying` in the command, then the pipeline below.
 6. Re-anchor: unaffected annotations keep anchors across a revision;
    overlapping ones flagged `needs_reanchor`; recorded with version.
 7. Workspace green; every prior phase's suites, e2e, script-free and
-   fixture regressions intact; OpenAPI synced (claim/renew/release/
+   fixture regressions intact; OpenAPI synced (claim/recover/renew/release/
    submissions implemented; Phase 5 markers remain).

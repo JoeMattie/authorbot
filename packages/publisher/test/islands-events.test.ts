@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { CollabEvents, type EventSourceLike } from "../site/src/islands/events.js";
+import {
+  CollabEvents,
+  FEED_EVENT_TYPES,
+  type CollabEventsStatus,
+  type EventSourceLike,
+} from "../site/src/islands/events.js";
 import type { FeedEvent } from "../site/src/islands/api.js";
 
 /**
@@ -32,16 +37,19 @@ class FakeEventSource implements EventSourceLike {
   emit(event: FeedEvent): void {
     this.listeners.get(event.type)?.({ data: JSON.stringify(event) });
   }
+  emitRaw(type: string, value: unknown): void {
+    this.listeners.get(type)?.({ data: JSON.stringify(value) });
+  }
 }
 
 /** Manual timer harness: fire the scheduled callbacks on demand. */
 function timers() {
-  const scheduled = new Map<number, () => void>();
+  const scheduled = new Map<number, { fn: () => void; ms: number }>();
   let nextId = 1;
   return {
-    setTimer: (fn: () => void): number => {
+    setTimer: (fn: () => void, ms = 0): number => {
       const id = nextId++;
-      scheduled.set(id, fn);
+      scheduled.set(id, { fn, ms });
       return id;
     },
     clearTimer: (id: number): void => {
@@ -50,11 +58,12 @@ function timers() {
     fireAll(): void {
       const batch = [...scheduled.entries()];
       scheduled.clear();
-      for (const [, fn] of batch) {
-        fn();
+      for (const [, entry] of batch) {
+        entry.fn();
       }
     },
     size: (): number => scheduled.size,
+    delays: (): number[] => [...scheduled.values()].map((entry) => entry.ms),
   };
 }
 
@@ -72,23 +81,65 @@ function factory() {
 }
 
 describe("CollabEvents - SSE transport", () => {
-  it("delivers named stream events and tracks the cursor", () => {
+  it("registers every reviewed runtime event and omits reason-bearing events", () => {
     const received: FeedEvent[] = [];
     const t = timers();
     const client = new CollabEvents({
       url: "http://api.test/events",
-      onEvent: (e) => received.push(e),
+      onEvent: (event) => received.push(event),
       eventSourceFactory: factory(),
       setTimer: t.setTimer,
       clearTimer: t.clearTimer,
     });
     client.start();
     const es = FakeEventSource.instances[0]!;
+    expect([...es.listeners.keys()]).toEqual(FEED_EVENT_TYPES);
+    expect(es.listeners.has("work_item_conflict")).toBe(false);
+    expect(es.listeners.has("project_divergence_cleared")).toBe(false);
+    FEED_EVENT_TYPES.forEach((type, index) => es.emit(evt(index + 1, type)));
+    expect(received.map((event) => event.type)).toEqual(FEED_EVENT_TYPES);
+  });
+
+  it("uses the initial cursor in the SSE URL and suppresses duplicate or older IDs", () => {
+    const received: FeedEvent[] = [];
+    const t = timers();
+    const client = new CollabEvents({
+      url: "http://api.test/events",
+      onEvent: (e) => received.push(e),
+      initialCursor: 4,
+      eventSourceFactory: factory(),
+      setTimer: t.setTimer,
+      clearTimer: t.clearTimer,
+    });
+    client.start();
+    const es = FakeEventSource.instances[0]!;
+    expect(es.url).toBe("http://api.test/events?after=4");
     es.open();
     es.emit(evt(5, "vote_aggregate", { annotationId: "a", votes: { approvals: 1 } }));
+    es.emit(evt(5, "vote_aggregate", { annotationId: "duplicate" }));
+    es.emit(evt(3, "annotation_created", { annotationId: "older" }));
     es.emit(evt(6, "work_item_created", { annotationId: "a" }));
     expect(received.map((e) => e.type)).toEqual(["vote_aggregate", "work_item_created"]);
     expect(received[0]?.payload["annotationId"]).toBe("a");
+  });
+
+  it("validates a frame before advancing the cursor", () => {
+    const received: FeedEvent[] = [];
+    const t = timers();
+    const client = new CollabEvents({
+      url: "http://api.test/events",
+      initialCursor: 5,
+      onEvent: (event) => received.push(event),
+      eventSourceFactory: factory(),
+      setTimer: t.setTimer,
+      clearTimer: t.clearTimer,
+    });
+    client.start();
+    const es = FakeEventSource.instances[0]!;
+    es.emitRaw("vote_aggregate", { id: 6, type: "vote_aggregate", payload: null });
+    es.emitRaw("vote_aggregate", { id: 6, type: "decision_created", payload: {} });
+    es.emit(evt(6, "vote_aggregate", { annotationId: "valid" }));
+    expect(received).toEqual([evt(6, "vote_aggregate", { annotationId: "valid" })]);
   });
 
   it("fires onReconnect on a reopen after an error, never on the first open", () => {
@@ -170,9 +221,18 @@ describe("CollabEvents - poll transport", () => {
     const poll = vi.fn(async (after: number) => {
       seen.push(after);
       if (after < 10) {
-        return { ok: true as const, items: [evt(10, "vote_aggregate", { annotationId: "a" })], latestId: 10 };
+        return {
+          ok: true as const,
+          items: [
+            evt(10, "vote_aggregate", { annotationId: "a" }),
+            evt(10, "vote_aggregate", { annotationId: "duplicate" }),
+            evt(9, "annotation_created", { annotationId: "older" }),
+            evt(11, "project_divergence_cleared", { reason: "private" }),
+          ],
+          latestId: 11,
+        };
       }
-      return { ok: true as const, items: [], latestId: 10 };
+      return { ok: true as const, items: [], latestId: after };
     });
     const t = timers();
     const client = new CollabEvents({
@@ -188,28 +248,124 @@ describe("CollabEvents - poll transport", () => {
     await tick();
     expect(seen[0]).toBe(4);
     expect(received.map((e) => e.id)).toEqual([10]);
-    // Next scheduled poll resumes strictly after the delivered id.
+    // The private event is not delivered, but its valid envelope still moves
+    // the cursor so polling does not wedge on it.
     t.fireAll();
     await tick();
-    expect(seen[1]).toBe(10);
+    expect(seen[1]).toBe(11);
   });
 
-  it("stops cleanly when the poll endpoint is unsupported (no busy loop)", async () => {
-    const poll = vi.fn(async () => ({ ok: false as const }));
+  it.each([404, 405] as const)(
+    "stops cleanly when the poll endpoint is permanently unsupported (%s)",
+    async (httpStatus) => {
+      const poll = vi.fn(async () => ({ ok: false as const, status: httpStatus }));
+      const statuses: CollabEventsStatus[] = [];
+      const t = timers();
+      const client = new CollabEvents({
+        url: "http://api.test/events",
+        onEvent: () => {},
+        onStatus: (status) => statuses.push(status),
+        eventSourceFactory: null,
+        poll,
+        setTimer: t.setTimer,
+        clearTimer: t.clearTimer,
+      });
+      client.start();
+      await tick();
+      expect(poll).toHaveBeenCalledTimes(1);
+      // No follow-up poll was scheduled.
+      expect(t.size()).toBe(0);
+      expect(statuses.at(-1)).toMatchObject({ state: "unsupported", status: httpStatus });
+    },
+  );
+
+  it("retries rejected and thrown polls with backoff, then refetches on recovery", async () => {
+    const seen: number[] = [];
+    let attempt = 0;
+    const poll = vi.fn(async (after: number) => {
+      seen.push(after);
+      attempt += 1;
+      if (attempt === 1) {
+        return { ok: false as const, status: 503 };
+      }
+      if (attempt === 2) {
+        throw new Error("network down");
+      }
+      return {
+        ok: true as const,
+        items: [evt(8, "work_item_completed", { workItemId: "w" })],
+        latestId: 8,
+      };
+    });
+    const statuses: CollabEventsStatus[] = [];
+    const reconnects: number[] = [];
     const t = timers();
     const client = new CollabEvents({
       url: "http://api.test/events",
       onEvent: () => {},
+      onReconnect: () => reconnects.push(1),
+      onStatus: (status) => statuses.push(status),
       eventSourceFactory: null,
       poll,
+      initialCursor: 4,
+      pollMs: 100,
+      maxPollBackoffMs: 250,
       setTimer: t.setTimer,
       clearTimer: t.clearTimer,
     });
     client.start();
     await tick();
-    expect(poll).toHaveBeenCalledTimes(1);
-    // No follow-up poll was scheduled.
-    expect(t.size()).toBe(0);
+    expect(t.delays()).toEqual([100]);
+    t.fireAll();
+    await tick();
+    expect(t.delays()).toEqual([200]);
+    t.fireAll();
+    await tick();
+    expect(seen).toEqual([4, 4, 4]);
+    expect(reconnects).toHaveLength(1);
+    expect(statuses.filter((status) => status.state === "retrying")).toMatchObject([
+      { state: "retrying", attempt: 1, retryInMs: 100, status: 503 },
+      { state: "retrying", attempt: 2, retryInMs: 200 },
+    ]);
+    expect(statuses.at(-1)).toMatchObject({ state: "connected", transport: "poll", cursor: 8 });
+  });
+
+  it("does not advance past a malformed polled envelope", async () => {
+    const seen: number[] = [];
+    let attempt = 0;
+    const received: FeedEvent[] = [];
+    const poll = vi.fn(async (after: number) => {
+      seen.push(after);
+      attempt += 1;
+      if (attempt === 1) {
+        return {
+          ok: true as const,
+          items: [{ id: 9, type: "annotation_created", payload: null } as unknown as FeedEvent],
+          latestId: 9,
+        };
+      }
+      return {
+        ok: true as const,
+        items: [evt(9, "annotation_created", { annotationId: "a" })],
+        latestId: 9,
+      };
+    });
+    const t = timers();
+    const client = new CollabEvents({
+      url: "http://api.test/events",
+      onEvent: (event) => received.push(event),
+      eventSourceFactory: null,
+      poll,
+      initialCursor: 3,
+      setTimer: t.setTimer,
+      clearTimer: t.clearTimer,
+    });
+    client.start();
+    await tick();
+    t.fireAll();
+    await tick();
+    expect(seen).toEqual([3, 3]);
+    expect(received.map((event) => event.id)).toEqual([9]);
   });
 
   it("stop() closes the stream and cancels pending timers", async () => {

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotCollab } from "../site/src/islands/collab-element.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
 import type { Annotation } from "../site/src/islands/api.js";
 
 /** Phase 11 slice 1: one-click comment/suggestion promotion, reason-required
@@ -184,6 +185,7 @@ const promotedResponse: Route = {
 };
 
 beforeEach(() => {
+  resetProjectStoresForTests();
   vi.useRealTimers();
   calls.length = 0;
 });
@@ -303,7 +305,9 @@ describe("one-click promotion", () => {
     expect(card.textContent).not.toContain("Queued as work item");
     expect(card.textContent).not.toContain("work_item_created");
     expect(card.textContent).not.toContain("Maintainer approvals");
-    expect(document.querySelector('[role="status"]')?.textContent).toContain("Promoted to work");
+    await expect.poll(() => document.querySelector('[role="status"]')?.textContent).toContain(
+      "Promoted to work",
+    );
   });
 
   it("settles a promoted section comment into a green note card", async () => {

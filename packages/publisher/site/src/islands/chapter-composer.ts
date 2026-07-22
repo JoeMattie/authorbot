@@ -43,6 +43,8 @@ import {
 } from "./chapter-composer-state.js";
 import { MAX_OPERATION_POLLS, pollDelayMs } from "./composer-state.js";
 import { el } from "./dom.js";
+import type { ProjectStore } from "./project-store.js";
+import { loadProjectStore } from "./project-store-loader.js";
 
 interface Config {
   apiBase: string;
@@ -108,9 +110,11 @@ function sessionStorageOrNull(): Storage | null {
 
 export class AuthorbotChapterComposer extends HTMLElement {
   private api!: CollabApi;
+  private store!: ProjectStore;
   private cfg!: Config;
   private started = false;
   private disposed = false;
+  private mountGeneration = 0;
   private me: Me | null = null;
   private state: ChapterComposerState = { ...CHAPTER_IDLE };
   private pollTimer: number | null = null;
@@ -131,30 +135,59 @@ export class AuthorbotChapterComposer extends HTMLElement {
       return;
     }
     this.started = true;
+    this.disposed = false;
+    const generation = ++this.mountGeneration;
     const cfg = parseConfig(this);
     if (cfg === null) {
       return; // misconfigured build: leave the static fallback in place
     }
     this.cfg = cfg;
     this.api = new CollabApi(cfg.apiBase, cfg.project);
-    void this.start();
+    void this.connectStore(cfg, generation);
+  }
+
+  private async connectStore(cfg: Config, generation: number): Promise<void> {
+    let store: ProjectStore;
+    try {
+      store = await loadProjectStore(cfg);
+    } catch {
+      // The static composer fallback is the complete no-JS/error experience.
+      // Keep it in place after the lazy chunk exhausts its retry budget.
+      return;
+    }
+    if (!this.isCurrentMount(generation)) return;
+    this.store = store;
+    await this.start(generation, store);
   }
 
   disconnectedCallback(): void {
+    this.started = false;
     this.disposed = true;
+    this.mountGeneration += 1;
     if (this.pollTimer !== null) {
       window.clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
   }
 
-  private async start(): Promise<void> {
-    const auth = await this.api.meResult();
-    if (!auth.ok) {
+  private isCurrentMount(generation: number): boolean {
+    return (
+      this.started &&
+      !this.disposed &&
+      this.isConnected &&
+      this.mountGeneration === generation
+    );
+  }
+
+  private async start(generation: number, store: ProjectStore): Promise<void> {
+    await store.getState().ensureSession();
+    if (!this.isCurrentMount(generation)) return;
+    const auth = store.getState();
+    if (auth.sessionStatus !== "ready") {
       // Unreachable API: leave the static fallback (progressive enhancement).
       return;
     }
-    this.me = auth.value;
+    this.me = auth.session;
     this.published = this.cfg.chapterStatus === "published";
     if (!canAuthorChapters(this.me) && !this.cfg.standalone) {
       // A secondary mount on a chapter page, for someone who cannot author:
@@ -176,7 +209,7 @@ export class AuthorbotChapterComposer extends HTMLElement {
     if (this.cfg.chapterId === null) {
       this.openCreate();
     } else {
-      await this.openEdit(this.cfg.chapterId);
+      await this.openEdit(this.cfg.chapterId, generation, store);
     }
   }
 
@@ -272,15 +305,21 @@ export class AuthorbotChapterComposer extends HTMLElement {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       void (async () => {
+        const generation = this.mountGeneration;
+        const store = this.store;
+        if (!this.isCurrentMount(generation)) return;
         submit.disabled = true;
         const result = await this.api.devLogin(login.value, role.value);
+        if (!this.isCurrentMount(generation)) return;
         submit.disabled = false;
         if (!result.ok) {
           errorLine.textContent = result.message;
           errorLine.hidden = false;
           return;
         }
-        await this.start();
+        await store.getState().refreshSession(true);
+        if (!this.isCurrentMount(generation)) return;
+        await this.start(generation, store);
       })();
     });
     return form;
@@ -302,11 +341,16 @@ export class AuthorbotChapterComposer extends HTMLElement {
     this.buildForm(stored?.caret ?? null, stored?.focus ?? null);
   }
 
-  private async openEdit(chapterId: string): Promise<void> {
+  private async openEdit(
+    chapterId: string,
+    generation = this.mountGeneration,
+    store = this.store,
+  ): Promise<void> {
+    if (!this.isCurrentMount(generation)) return;
     this.dispatch({ type: "load" });
     this.setStatus("Reading the chapter…");
-    const result: ApiResult<ChapterSource> = await this.api.chapterSource(chapterId);
-    if (this.disposed) {
+    const result: ApiResult<ChapterSource> = await store.getState().readChapterSource(chapterId);
+    if (!this.isCurrentMount(generation)) {
       return;
     }
     this.statusLine.hidden = true;
@@ -466,6 +510,9 @@ export class AuthorbotChapterComposer extends HTMLElement {
   // ---- saving --------------------------------------------------------------
 
   private async save(): Promise<void> {
+    const generation = this.mountGeneration;
+    const store = this.store;
+    if (!this.isCurrentMount(generation)) return;
     const before = this.state;
     this.dispatch({ type: "save" });
     if (this.state.phase === "saving") {
@@ -481,14 +528,14 @@ export class AuthorbotChapterComposer extends HTMLElement {
     const body = draft.body;
     const result: ApiResult<ChapterAccepted> =
       draft.chapterId === null || draft.baseRevision === null
-        ? await this.api.createChapter({ title, body })
-        : await this.api.reviseChapter({
+        ? await store.getState().createChapter({ title, body })
+        : await store.getState().reviseChapter({
             chapterId: draft.chapterId,
             baseRevision: draft.baseRevision,
             title,
             body,
           });
-    if (this.disposed) {
+    if (!this.isCurrentMount(generation)) {
       return;
     }
     if (!result.ok) {
@@ -508,7 +555,7 @@ export class AuthorbotChapterComposer extends HTMLElement {
       chapterId: result.value.chapterId,
     });
     this.renderState();
-    this.pollOperation(result.value.operationId);
+    this.pollOperation(result.value.operationId, generation, store);
   }
 
   private focusInvalid(): void {
@@ -524,6 +571,9 @@ export class AuthorbotChapterComposer extends HTMLElement {
   }
 
   private async publish(action: "publish" | "unpublish"): Promise<void> {
+    const generation = this.mountGeneration;
+    const store = this.store;
+    if (!this.isCurrentMount(generation)) return;
     const chapterId = this.state.draft?.chapterId;
     if (typeof chapterId !== "string") {
       return;
@@ -534,10 +584,8 @@ export class AuthorbotChapterComposer extends HTMLElement {
     }
     this.renderState();
     const result: ApiResult<ChapterAccepted> =
-      action === "publish"
-        ? await this.api.publishChapter(chapterId)
-        : await this.api.unpublishChapter(chapterId);
-    if (this.disposed) {
+      await store.getState().setChapterPublication(chapterId, action === "publish");
+    if (!this.isCurrentMount(generation)) {
       return;
     }
     if (!result.ok) {
@@ -550,19 +598,24 @@ export class AuthorbotChapterComposer extends HTMLElement {
     }
     this.dispatch({ type: "publish-accepted", operationId: result.value.operationId });
     this.renderState();
-    this.pollOperation(result.value.operationId);
+    this.pollOperation(result.value.operationId, generation, store);
   }
 
   // ---- operation polling ---------------------------------------------------
 
-  private pollOperation(operationId: string): void {
+  private pollOperation(
+    operationId: string,
+    generation = this.mountGeneration,
+    store = this.store,
+  ): void {
     const step = async (): Promise<void> => {
-      if (this.disposed) {
+      if (!this.isCurrentMount(generation)) {
         return;
       }
-      const operation = await this.api.operation(operationId);
+      const operation = await store.getState().refreshOperation(operationId);
+      if (!this.isCurrentMount(generation)) return;
       if (operation !== null && (operation.state === "committed" || operation.state === "verified")) {
-        this.onCommitted();
+        this.onCommitted(generation, store);
         return;
       }
       if (operation !== null && operation.state === "failed") {
@@ -582,7 +635,8 @@ export class AuthorbotChapterComposer extends HTMLElement {
     this.pollTimer = window.setTimeout(() => void step(), pollDelayMs(0));
   }
 
-  private onCommitted(): void {
+  private onCommitted(generation: number, store: ProjectStore): void {
+    if (!this.isCurrentMount(generation)) return;
     const pending = this.state.pending;
     this.dispatch({ type: "poll-committed" });
     if (pending === "publish") {
@@ -593,7 +647,7 @@ export class AuthorbotChapterComposer extends HTMLElement {
       // The chapter is safely in the repository: the local copy has done its
       // job (Phase 2b draft-preservation rule ends at "saved").
       clearChapterDraft(sessionStorageOrNull(), this.cfg.project, this.cfg.chapterId);
-      void this.rebase();
+      void this.rebase(generation, store);
     }
     this.renderState();
   }
@@ -603,13 +657,17 @@ export class AuthorbotChapterComposer extends HTMLElement {
    * sitting is not a guaranteed 409. Failure is silent: the honest 409 message
    * is a perfectly good fallback.
    */
-  private async rebase(): Promise<void> {
+  private async rebase(
+    generation = this.mountGeneration,
+    store = this.store,
+  ): Promise<void> {
+    if (!this.isCurrentMount(generation)) return;
     const chapterId = this.state.draft?.chapterId;
     if (typeof chapterId !== "string") {
       return;
     }
-    const result: ApiResult<ChapterSource> = await this.api.chapterSource(chapterId);
-    if (this.disposed || !result.ok) {
+    const result: ApiResult<ChapterSource> = await store.getState().readChapterSource(chapterId);
+    if (!this.isCurrentMount(generation) || !result.ok) {
       return;
     }
     this.dispatch({ type: "rebased", baseRevision: result.value.revision });
