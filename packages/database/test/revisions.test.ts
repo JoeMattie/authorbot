@@ -209,6 +209,46 @@ describe("revision proposal persistence", () => {
     s.db.close();
   });
 
+  it("persists repository-document targets without inventing a chapter revision", async () => {
+    const s = await seedBasics();
+    const outline = makeProposal(s, {
+      chapterId: null,
+      targetKind: "outline",
+      targetId: "outline",
+      targetPath: "story/outline.yml",
+      proposalType: "repository_document",
+      origin: "document_edit",
+      baseRevision: null,
+      baseContentHash: "sha256:outline-before",
+      baseContent: "schema: authorbot.story-graph/v1\nnodes: []\n",
+      proposedContent: "schema: authorbot.story-graph/v1\nnodes: []\nlinks: []\n",
+    });
+    await s.repos.revisionProposals.insert(outline);
+
+    expect(await s.repos.revisionProposals.getById(outline.id)).toEqual(outline);
+    expect(
+      await s.repos.revisionProposals.listByProject(s.project.id, {
+        targetKind: "outline",
+        targetId: "outline",
+      }),
+    ).toEqual([outline]);
+    await expect(
+      s.repos.revisionProposals.insert(
+        makeProposal(s, {
+          chapterId: null,
+          targetKind: "outline",
+          targetId: "outline",
+          targetPath: "story/outline.yml",
+          proposalType: "repository_document",
+          origin: "document_edit",
+          // Planning documents must not pretend to carry chapter revisions.
+          baseRevision: 1,
+        }),
+      ),
+    ).rejects.toThrow(/CHECK constraint failed/);
+    s.db.close();
+  });
+
   it("keeps every proposal payload and identity field immutable after insertion", async () => {
     const s = await seedBasics();
     const otherProject: ProjectRecord = {
