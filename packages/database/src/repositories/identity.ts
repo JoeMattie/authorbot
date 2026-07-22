@@ -9,6 +9,7 @@
 import type { SqlDatabase, SqlRow, SqlStatement } from "../sql.js";
 import type {
   ActorRecord,
+  AgentTokenCapabilityMode,
   AgentTokenRecord,
   HumanSessionRecord,
   MembershipRole,
@@ -22,6 +23,30 @@ function parseScopes(json: unknown): string[] {
     throw new Error("scopes column does not contain a JSON string array");
   }
   return parsed;
+}
+
+function parseCapabilities(json: unknown): string[] | null {
+  if (json === null || json === undefined) {
+    return null;
+  }
+  const parsed: unknown = JSON.parse(String(json));
+  if (!Array.isArray(parsed) || !parsed.every((capability) => typeof capability === "string")) {
+    throw new Error("capabilities_v2 column does not contain a JSON string array");
+  }
+  return parsed;
+}
+
+function parseCapabilityMode(value: unknown): AgentTokenCapabilityMode {
+  // A row returned by the pre-expand schema has no such key. Treating absence
+  // as legacy mirrors the migration default and keeps read fixtures and a
+  // rolling migration conservative.
+  if (value === undefined || value === null || value === "legacy") {
+    return "legacy";
+  }
+  if (value === "canonical") {
+    return "canonical";
+  }
+  throw new Error(`unknown agent-token capability mode "${String(value)}"`);
 }
 
 export class ProjectsRepository {
@@ -403,9 +428,10 @@ export class AgentTokensRepository {
     return this.db
       .prepare(
         `INSERT INTO agent_tokens
-           (id, project_id, actor_id, name, token_hash, scopes, created_by,
-            created_at, expires_at, revoked_at, last_used_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, project_id, actor_id, name, token_hash, scopes,
+            capabilities_v2, capability_mode, created_by, created_at,
+            expires_at, revoked_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
@@ -414,6 +440,10 @@ export class AgentTokensRepository {
         record.name,
         record.tokenHash,
         JSON.stringify(record.scopes),
+        record.capabilitiesV2 === undefined || record.capabilitiesV2 === null
+          ? null
+          : JSON.stringify(record.capabilitiesV2),
+        record.capabilityMode ?? "legacy",
         record.createdBy,
         record.createdAt,
         record.expiresAt,
@@ -456,6 +486,50 @@ export class AgentTokensRepository {
       .bind(projectId)
       .all();
     return rows.map(mapToken);
+  }
+
+  /**
+   * Atomically replace both representations of one token's authority.
+   *
+   * Slice 3A's canonical writer will provide a conservative `scopes` shadow;
+   * the later backfill can populate `capabilitiesV2` while deliberately
+   * leaving `capabilityMode` as `legacy`. Keeping the three columns in one
+   * statement prevents a request from observing a mode paired with the wrong
+   * grant set.
+   */
+  setCapabilityStateStatement(
+    id: string,
+    state: {
+      scopes: readonly string[];
+      capabilitiesV2: readonly string[] | null;
+      capabilityMode: AgentTokenCapabilityMode;
+    },
+  ): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE agent_tokens
+            SET scopes = ?, capabilities_v2 = ?, capability_mode = ?
+          WHERE id = ?`,
+      )
+      .bind(
+        JSON.stringify(state.scopes),
+        state.capabilitiesV2 === null ? null : JSON.stringify(state.capabilitiesV2),
+        state.capabilityMode,
+        id,
+      );
+  }
+
+  /** Returns true when the token existed. */
+  async setCapabilityState(
+    id: string,
+    state: {
+      scopes: readonly string[];
+      capabilitiesV2: readonly string[] | null;
+      capabilityMode: AgentTokenCapabilityMode;
+    },
+  ): Promise<boolean> {
+    const result = await this.setCapabilityStateStatement(id, state).run();
+    return result.changes > 0;
   }
 
   revokeStatement(id: string, revokedAt: string): SqlStatement {
@@ -502,6 +576,8 @@ function mapToken(row: SqlRow): AgentTokenRecord {
     name: String(row["name"]),
     tokenHash: String(row["token_hash"]),
     scopes: parseScopes(row["scopes"]),
+    capabilitiesV2: parseCapabilities(row["capabilities_v2"]),
+    capabilityMode: parseCapabilityMode(row["capability_mode"]),
     createdBy: String(row["created_by"]),
     createdAt: String(row["created_at"]),
     expiresAt: String(row["expires_at"]),

@@ -158,6 +158,14 @@ export interface HumanSessionRecord {
   revokedAt: string | null;
 }
 
+/**
+ * Which agent-token authorization representation is authoritative.
+ *
+ * `legacy` rows continue to use `scopes`; `canonical` rows use the additive
+ * `capabilities_v2` column while retaining `scopes` as a rollback-safe shadow.
+ */
+export type AgentTokenCapabilityMode = "legacy" | "canonical";
+
 export interface AgentTokenRecord {
   id: string;
   projectId: string;
@@ -166,6 +174,19 @@ export interface AgentTokenRecord {
   /** SHA-256 hash of the token. Plaintext is never stored. */
   tokenHash: string;
   scopes: string[];
+  /**
+   * Phase 11 canonical capability grants. NULL on an unconverted legacy row.
+   *
+   * Optional during the expand release so existing token constructors keep
+   * producing legacy rows without a flag-day API change. Repository reads
+   * always populate this field.
+   */
+  capabilitiesV2?: string[] | null;
+  /**
+   * The authoritative authorization representation. Optional inputs default
+   * to `legacy`; repository reads always populate it.
+   */
+  capabilityMode?: AgentTokenCapabilityMode;
   createdBy: string;
   createdAt: string;
   expiresAt: string;

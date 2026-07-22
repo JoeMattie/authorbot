@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AnnotationRecord, ReplyRecord } from "../src/records.js";
+import type { AgentTokenRecord, AnnotationRecord, ReplyRecord } from "../src/records.js";
 import { NOW, seedBasics, uuidv7 } from "./helpers.js";
 
 function annotationFixture(
@@ -22,6 +22,66 @@ function annotationFixture(
 }
 
 describe("repositories", () => {
+  it("round-trips legacy and canonical agent-token capability state", async () => {
+    const { db, repos, project, actor } = await seedBasics();
+    const token = (overrides: Partial<AgentTokenRecord> = {}): AgentTokenRecord => ({
+      id: uuidv7(),
+      projectId: project.id,
+      actorId: actor.id,
+      name: "drafting-agent",
+      tokenHash: uuidv7(),
+      scopes: ["chapters:read", "work:read"],
+      createdBy: actor.id,
+      createdAt: NOW,
+      expiresAt: "2026-08-22T18:00:00Z",
+      revokedAt: null,
+      lastUsedAt: null,
+      ...overrides,
+    });
+
+    // Existing callers omit both new fields. The repository deliberately
+    // writes that input as an unconverted legacy row.
+    const legacy = token();
+    await repos.agentTokens.insert(legacy);
+    expect(await repos.agentTokens.getById(legacy.id)).toMatchObject({
+      scopes: ["chapters:read", "work:read"],
+      capabilitiesV2: null,
+      capabilityMode: "legacy",
+    });
+
+    const canonical = token({
+      capabilitiesV2: ["chapters:read", "comments:read"],
+      capabilityMode: "canonical",
+    });
+    await repos.agentTokens.insert(canonical);
+    expect(await repos.agentTokens.getByTokenHash(canonical.tokenHash)).toMatchObject({
+      scopes: ["chapters:read", "work:read"],
+      capabilitiesV2: ["chapters:read", "comments:read"],
+      capabilityMode: "canonical",
+    });
+
+    expect(
+      await repos.agentTokens.setCapabilityState(legacy.id, {
+        scopes: ["chapters:read"],
+        capabilitiesV2: ["chapters:read", "suggestions:read"],
+        capabilityMode: "canonical",
+      }),
+    ).toBe(true);
+    expect(await repos.agentTokens.getById(legacy.id)).toMatchObject({
+      scopes: ["chapters:read"],
+      capabilitiesV2: ["chapters:read", "suggestions:read"],
+      capabilityMode: "canonical",
+    });
+    expect(
+      await repos.agentTokens.setCapabilityState(uuidv7(), {
+        scopes: [],
+        capabilitiesV2: [],
+        capabilityMode: "canonical",
+      }),
+    ).toBe(false);
+    db.close();
+  });
+
   it("round-trips JSON columns: membership scopes and annotation target", async () => {
     const { db, repos, project, actor, chapter } = await seedBasics();
     await repos.projectMemberships.insert({

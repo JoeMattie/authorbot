@@ -102,6 +102,90 @@ describe("migration runner", () => {
     db.close();
   });
 
+  it("expands agent-token capabilities without changing legacy rows or old-worker inserts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "authorbot-capabilities-expand-"));
+    const files = await listMigrationFiles(MIGRATIONS_DIR);
+    for (const name of files.filter((name) => name < "0010_")) {
+      await copyFile(join(MIGRATIONS_DIR, name), join(dir, name));
+    }
+
+    const db = openSqliteDatabase(":memory:");
+    await applyMigrations(db, dir);
+    const projectId = "01900000-0000-7000-8000-000000000001";
+    const actorId = "01900000-0000-7000-8000-000000000002";
+    await db
+      .prepare(
+        `INSERT INTO projects
+           (id, slug, repo, default_branch, status, created_at, updated_at)
+         VALUES (?, 'book', 'owner/book', 'main', 'active', ?, ?)`,
+      )
+      .bind(projectId, "2026-07-22T00:00:00Z", "2026-07-22T00:00:00Z")
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO actors
+           (id, type, display_name, external_identity, owner_actor_id, status, created_at)
+         VALUES (?, 'agent', 'legacy-agent', 'agent:legacy-agent', NULL, 'active', ?)`,
+      )
+      .bind(actorId, "2026-07-22T00:00:00Z")
+      .run();
+
+    const insertLikePriorWorker = (id: string, hash: string) =>
+      db
+        .prepare(
+          `INSERT INTO agent_tokens
+             (id, project_id, actor_id, name, token_hash, scopes, created_by,
+              created_at, expires_at, revoked_at, last_used_at)
+           VALUES (?, ?, ?, 'legacy-agent', ?, '["chapters:read"]', ?, ?, ?, NULL, NULL)`,
+        )
+        .bind(
+          id,
+          projectId,
+          actorId,
+          hash,
+          actorId,
+          "2026-07-22T00:00:00Z",
+          "2026-08-22T00:00:00Z",
+        )
+        .run();
+
+    const beforeId = "01900000-0000-7000-8000-000000000003";
+    await insertLikePriorWorker(beforeId, "before-expand");
+    await copyFile(
+      join(MIGRATIONS_DIR, "0010_phase11_capabilities_expand.sql"),
+      join(dir, "0010_phase11_capabilities_expand.sql"),
+    );
+    const expanded = await applyMigrations(db, dir);
+    expect(expanded.applied).toEqual(["0010_phase11_capabilities_expand.sql"]);
+
+    const afterId = "01900000-0000-7000-8000-000000000004";
+    await insertLikePriorWorker(afterId, "after-expand");
+    const rows = await db
+      .prepare(
+        `SELECT id, capabilities_v2, capability_mode
+           FROM agent_tokens ORDER BY id`,
+      )
+      .all<{ id: string; capabilities_v2: string | null; capability_mode: string }>();
+    expect(rows).toEqual([
+      { id: beforeId, capabilities_v2: null, capability_mode: "legacy" },
+      { id: afterId, capabilities_v2: null, capability_mode: "legacy" },
+    ]);
+
+    await expect(
+      db
+        .prepare(`UPDATE agent_tokens SET capability_mode = 'unknown' WHERE id = ?`)
+        .bind(beforeId)
+        .run(),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .prepare(`UPDATE agent_tokens SET capability_mode = 'canonical' WHERE id = ?`)
+        .bind(beforeId)
+        .run(),
+    ).rejects.toThrow();
+    db.close();
+  });
+
   it("backfills chapter order at ten-point spacing for an existing book", async () => {
     const dir = await mkdtemp(join(tmpdir(), "authorbot-order-migration-"));
     const files = await listMigrationFiles(MIGRATIONS_DIR);
