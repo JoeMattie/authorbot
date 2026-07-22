@@ -25,8 +25,12 @@ export const EDITORIAL_CAPABILITIES = [
   "work:claim",
   "work:submit",
   "work:cancel",
+  "summaries:write",
   "chapters:write",
   "chapters:publish",
+  "revisions:read",
+  "revisions:write",
+  "revisions:review",
 ] as const;
 export type EditorialCapability = (typeof EDITORIAL_CAPABILITIES)[number];
 
@@ -120,6 +124,7 @@ const CONTRIBUTOR_CAPABILITIES = [
   "comments:vote",
   "suggestions:vote",
   "feedback:withdraw-own",
+  "summaries:write",
 ] as const satisfies readonly EditorialCapability[];
 
 const EDITOR_CAPABILITIES = [
@@ -128,6 +133,8 @@ const EDITOR_CAPABILITIES = [
   "work:claim",
   "work:submit",
   "chapters:write",
+  "revisions:read",
+  "revisions:write",
 ] as const satisfies readonly EditorialCapability[];
 
 const MAINTAINER_CAPABILITIES = EDITORIAL_CAPABILITIES;

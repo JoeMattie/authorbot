@@ -40,6 +40,7 @@ import { registerSettingsRoutes } from "./settings.js";
 import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
 import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
 import { registerChapterSubmissionRoutes } from "./chapter-submissions.js";
+import { registerRevisionProposalRoutes } from "./revision-proposals.js";
 import {
   pendingAnnotationJson,
   registerPhase7Routes,
@@ -2159,6 +2160,24 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     commandStatements,
     readJson,
     notifyMutation,
+  });
+
+  // ---- Phase 11 routes (review-gated chapter and summary revisions) -------
+  registerRevisionProposalRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    claimStatements,
+    commandStatements,
+    readJson,
+    parseLimit,
+    notifyMutation,
+    now,
   });
 
   // ---- Phase 6 routes (book settings + governance, contract §3.6) ---------

@@ -47,6 +47,8 @@ tags:
     description: Annotations, replies, votes, and re-anchoring.
   - name: work
     description: Work items, leases, and submissions (design §12).
+  - name: revisions
+    description: Immutable chapter and summary proposals, diffs, and maintainer review.
   - name: operations
     description: Git operations, event stream, and webhooks.
   - name: access
@@ -490,6 +492,235 @@ paths:
                         oneOf:
                           - $ref: "#/components/schemas/Role"
                           - type: "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/revision-proposals:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listRevisionProposals
+      tags: [revisions]
+      summary: List revision proposal metadata without prose snapshots.
+      description: Requires the exact `revisions:read` capability and project membership.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RevisionProposalStatus"
+        - name: chapterId
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Cursor page of proposal metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RevisionProposal"
+                  nextCursor:
+                    $ref: "#/components/schemas/NextCursor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createRevisionProposal
+      tags: [revisions]
+      summary: Propose a complete chapter-body or chapter-summary replacement.
+      description: >-
+        Requires `revisions:write`; summary proposals additionally require
+        `summaries:write`. `applyImmediately` also requires `revisions:review`
+        and still creates the immutable reviewed proposal before enqueueing the
+        linked write. Legacy scopes never translate to these capabilities.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRevisionProposal"
+      responses:
+        "201":
+          description: Proposal is pending review; no Git write was enqueued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "202":
+          description: Audited apply-immediately proposal is applying.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    get:
+      operationId: getRevisionProposal
+      tags: [revisions]
+      summary: Read one proposal including its immutable before/after snapshots.
+      responses:
+        "200":
+          description: Authorized proposal detail and current-base conflict warning.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/RevisionProposal"
+                  - type: object
+                    required: [baseContent, proposedContent]
+                    properties:
+                      baseContent: { type: string }
+                      proposedContent: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}/diff:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    get:
+      operationId: getRevisionProposalDiff
+      tags: [revisions]
+      summary: Read a bounded standard unified diff plus accessible snapshots.
+      description: Requires `revisions:read`; hostile proposal text is returned only as JSON data.
+      responses:
+        "200":
+          description: Diff and plain before/after fallback.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [proposalId, proposal, target, author, baseContent, proposedContent, unifiedDiff, computationLimited]
+                properties:
+                  proposalId:
+                    $ref: "#/components/schemas/Uuid"
+                  proposal:
+                    $ref: "#/components/schemas/RevisionProposal"
+                  target:
+                    $ref: "#/components/schemas/RevisionProposalTarget"
+                  author:
+                    oneOf:
+                      - $ref: "#/components/schemas/RevisionProposalActor"
+                      - type: "null"
+                  baseContent: { type: string }
+                  proposedContent: { type: string }
+                  unifiedDiff:
+                    oneOf: [{ type: string }, { type: "null" }]
+                  computationLimited: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    post:
+      operationId: approveRevisionProposal
+      tags: [revisions]
+      summary: Review and enqueue one pending proposal atomically.
+      description: >-
+        Requires `revisions:review`. Work proposals move proposal, submission,
+        and work item to applying in the same CAS-protected batch; direct and
+        summary proposals enqueue a linked `chapter.write` operation.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisionReview"
+      responses:
+        "202":
+          description: Proposal is applying.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}/reject:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    post:
+      operationId: rejectRevisionProposal
+      tags: [revisions]
+      summary: Reject one pending proposal atomically.
+      description: >-
+        Requires `revisions:review`. A linked work submission becomes rejected
+        and its work item returns to ready in the same CAS-protected batch.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisionReview"
+      responses:
+        "200":
+          description: Proposal rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3122,6 +3353,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
     AnnotationId:
       name: annotationId
       in: path
@@ -3389,8 +3626,12 @@ components:
         - work:claim
         - work:submit
         - work:cancel
+        - summaries:write
         - chapters:write
         - chapters:publish
+        - revisions:read
+        - revisions:write
+        - revisions:review
 
     EditorialCapabilitySet:
       type: array
@@ -4008,6 +4249,261 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Timestamp"
             - type: "null"
+
+    RevisionProposalType:
+      type: string
+      enum: [chapter_replacement, chapter_summary]
+
+    RevisionProposalOrigin:
+      type: string
+      enum: [work_submission, direct_edit, summary_proposal]
+
+    RevisionProposalStatus:
+      type: string
+      enum: [pending_review, applying, approved, rejected, conflicted, withdrawn]
+
+    RevisionProposalTarget:
+      type: object
+      description: Stable generic target metadata for revision review clients.
+      required: [kind, id, path, label]
+      properties:
+        kind:
+          type: string
+          enum: [chapter]
+        id:
+          $ref: "#/components/schemas/Uuid"
+        path:
+          type: string
+        label:
+          type: string
+
+    RevisionProposalActor:
+      type: object
+      description: Display-safe actor attribution without external identity data.
+      required: [id, displayName, type]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        displayName:
+          type: string
+        type:
+          oneOf:
+            - type: string
+              enum: [human, agent, system]
+            - type: "null"
+
+    RevisionProposalWork:
+      type: object
+      required: [id, type, status]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        type:
+          type: string
+        status:
+          type: string
+
+    RevisionProposalChapter:
+      type: object
+      required: [id, title, slug, path, revision]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        slug:
+          type: string
+        path:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+
+    RevisionProposal:
+      type: object
+      description: Immutable proposal identity and mutable review/apply envelope; snapshots are detail-only.
+      required:
+        - id
+        - projectId
+        - chapterId
+        - proposalType
+        - origin
+        - workItemId
+        - submissionId
+        - authorActorId
+        - baseRevision
+        - baseContentHash
+        - changeSummary
+        - notes
+        - status
+        - reviewedByActorId
+        - reviewedAt
+        - reviewReason
+        - gitOperationId
+        - operationId
+        - resultingRevision
+        - commitSha
+        - createdAt
+        - updatedAt
+        - target
+        - currentRevision
+        - currentContentHash
+        - conflictWarning
+        - author
+        - reviewedBy
+        - workItem
+        - chapter
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        projectId:
+          $ref: "#/components/schemas/Uuid"
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        proposalType:
+          $ref: "#/components/schemas/RevisionProposalType"
+        origin:
+          $ref: "#/components/schemas/RevisionProposalOrigin"
+        workItemId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        submissionId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        authorActorId:
+          $ref: "#/components/schemas/Uuid"
+        baseRevision:
+          type: integer
+          minimum: 1
+        baseContentHash:
+          $ref: "#/components/schemas/ContentHash"
+        changeSummary:
+          oneOf:
+            - type: string
+            - type: "null"
+        notes:
+          oneOf:
+            - type: string
+            - type: "null"
+        status:
+          $ref: "#/components/schemas/RevisionProposalStatus"
+        reviewedByActorId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        reviewedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        reviewReason:
+          oneOf:
+            - type: string
+            - type: "null"
+        gitOperationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        operationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        resultingRevision:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: "null"
+        commitSha:
+          oneOf:
+            - type: string
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
+        target:
+          $ref: "#/components/schemas/RevisionProposalTarget"
+        currentRevision:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: "null"
+        currentContentHash:
+          oneOf:
+            - $ref: "#/components/schemas/ContentHash"
+            - type: "null"
+        conflictWarning:
+          type: boolean
+        author:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalActor"
+            - type: "null"
+        reviewedBy:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalActor"
+            - type: "null"
+        workItem:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalWork"
+            - type: "null"
+        chapter:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalChapter"
+            - type: "null"
+
+    CreateRevisionProposal:
+      type: object
+      additionalProperties: false
+      required:
+        [chapterId, proposalType, baseRevision, baseContentHash, proposedContent]
+      properties:
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        proposalType:
+          $ref: "#/components/schemas/RevisionProposalType"
+        baseRevision:
+          type: integer
+          minimum: 1
+        baseContentHash:
+          $ref: "#/components/schemas/ContentHash"
+        proposedContent:
+          type: string
+          maxLength: 524288
+        changeSummary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        notes:
+          type: string
+          maxLength: 10000
+        applyImmediately:
+          type: boolean
+          default: false
+
+    RevisionReview:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    RevisionProposalCommandResult:
+      type: object
+      required: [proposalId, operationId, correlationId, status]
+      properties:
+        proposalId:
+          $ref: "#/components/schemas/Uuid"
+        operationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        correlationId:
+          type: string
+        status:
+          $ref: "#/components/schemas/RevisionProposalStatus"
 
     ChapterStatus:
       type: string

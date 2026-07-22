@@ -271,6 +271,16 @@ export function registerChapterSubmissionRoutes(ctx: ChapterSubmissionsContext):
       if (chapter === null || chapter.projectId !== guard.project.id) {
         return problem(c, "not-found", { detail: "unknown chapter" });
       }
+      // Published prose always crosses the durable proposal/review boundary.
+      // A maintainer's one-click apply still creates an immutable, reviewed
+      // proposal and linked Git operation; this legacy direct-write route may
+      // not bypass that audit history merely because the caller is powerful.
+      if (chapter.status === "published") {
+        return problem(c, "state-conflict", {
+          detail:
+            "published chapters must be changed through a revision proposal",
+        });
+      }
       // Revision safety, exactly as Phase 4 submissions (contract §3.5).
       if (command.baseRevision !== chapter.revision) {
         return problem(c, "revision-conflict", {

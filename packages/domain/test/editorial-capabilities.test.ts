@@ -33,6 +33,7 @@ const ROLE_MATRIX: Record<Role, readonly EditorialCapability[]> = {
     "comments:vote",
     "suggestions:vote",
     "feedback:withdraw-own",
+    "summaries:write",
   ],
   editor: [
     "chapters:read",
@@ -44,10 +45,13 @@ const ROLE_MATRIX: Record<Role, readonly EditorialCapability[]> = {
     "comments:vote",
     "suggestions:vote",
     "feedback:withdraw-own",
+    "summaries:write",
     "work:read",
     "work:claim",
     "work:submit",
     "chapters:write",
+    "revisions:read",
+    "revisions:write",
   ],
   maintainer: [...EDITORIAL_CAPABILITIES],
 };
@@ -90,7 +94,7 @@ const SHADOW_REQUIREMENTS: Record<
 };
 
 describe("canonical editorial capability vocabulary", () => {
-  it("is the exact independently grantable Phase 11 slice 3 set", () => {
+  it("is the exact independently grantable Phase 11 capability set", () => {
     expect(EDITORIAL_CAPABILITIES).toEqual([
       "chapters:read",
       "comments:read",
@@ -107,8 +111,12 @@ describe("canonical editorial capability vocabulary", () => {
       "work:claim",
       "work:submit",
       "work:cancel",
+      "summaries:write",
       "chapters:write",
       "chapters:publish",
+      "revisions:read",
+      "revisions:write",
+      "revisions:review",
     ]);
   });
 
@@ -258,6 +266,10 @@ describe("legacy scope translation", () => {
       expect(translated).not.toContain("feedback:moderate");
       expect(translated).not.toContain("work:promote");
       expect(translated).not.toContain("work:cancel");
+      expect(translated).not.toContain("summaries:write");
+      expect(translated).not.toContain("revisions:read");
+      expect(translated).not.toContain("revisions:write");
+      expect(translated).not.toContain("revisions:review");
     }
   });
 
