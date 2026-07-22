@@ -130,6 +130,7 @@ describe("api-url-less build (script-free regression)", () => {
     expect(lazyAssets.some((file) => file.includes("project-store-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("revision-review-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("milkdown-manuscript-surface-"))).toBe(true);
     expect(additions.filter((file) => !lazyAssets.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
       path.join("_astro", "authorbot-access.js"),
@@ -192,6 +193,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-account[^>]*>\s*<\/authorbot-account>/, "")
           .replace(/<li data-collab-nav="work">[\s\S]*?<\/li>/, "")
           .replace(/<span[^>]*data-collab-nav="divider"[^>]*><\/span>/, "")
+          .replace(/<authorbot-manuscript-editor[^>]*>\s*<\/authorbot-manuscript-editor>/, "")
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<div class="chapter-authoring">\s*<\/div>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
@@ -279,9 +281,11 @@ describe("collab-enabled build", () => {
     const projectStore = assets.find((file) => file.startsWith("project-store-"));
     const revisionReview = assets.find((file) => file.startsWith("revision-review-"));
     const workQueue = assets.find((file) => file.startsWith("work-queue-"));
+    const manuscript = assets.find((file) => file.startsWith("milkdown-manuscript-surface-"));
     expect(projectStore).toBeDefined();
     expect(revisionReview).toBeDefined();
     expect(workQueue).toBeDefined();
+    expect(manuscript).toBeDefined();
 
     const account = await readFile(
       path.join(outCollab, "_astro", "authorbot-account.js"),
@@ -304,9 +308,18 @@ describe("collab-enabled build", () => {
     // its stable entry and points at the intended split chunk.
     expect(account).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(account).not.toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
+    expect(account).not.toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/revision-review-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
+
+    const manuscriptJs = await readFile(
+      path.join(outCollab, "_astro", "assets", manuscript!),
+      "utf8",
+    );
+    expect(manuscriptJs).toContain("ProseMirror");
+    expect(collab).not.toContain("The chapter cannot enter rich-text mode");
   });
 
   it("hydrates the home page with private authoring entry points (Phase 6 §3.5)", async () => {

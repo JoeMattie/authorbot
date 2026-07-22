@@ -87,6 +87,16 @@ const chapterCharacters = site.characters.filter((character) =>
               </div>
             )}
           </header>
+          {
+            collab && (
+              <authorbot-manuscript-editor
+                data-api-base={collab.apiBase}
+                data-project={collab.projectSlug}
+                data-chapter-id={chapter.id}
+                data-chapter-title={chapter.title}
+              />
+            )
+          }
           <div class="prose" set:html={chapter.html} />
           {
             showFooter && (
@@ -151,14 +161,6 @@ const chapterCharacters = site.characters.filter((character) =>
           data-api-base={collab.apiBase}
           data-project={collab.projectSlug}
           data-href={`${site.basePath}write/`}
-        />
-        <authorbot-chapter-composer
-          data-api-base={collab.apiBase}
-          data-project={collab.projectSlug}
-          data-dev-login={collab.devLogin ? "true" : undefined}
-          data-chapter-id={chapter.id}
-          data-chapter-title={chapter.title}
-          data-chapter-status={chapter.status}
         />
         </div>
       </>

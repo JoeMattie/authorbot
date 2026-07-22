@@ -2,9 +2,10 @@
  * Islands entry (Phase 2b contract §1, Phase 3 contract §6, Phase 6 contract
  * §3.5-§3.6): defines the collaboration custom elements. One bundle serves
  * every island; chapter pages mount `<authorbot-collab>`, the `/work/` page
- * mounts `<authorbot-work-queue>`, `/write/` and chapter pages mount the
- * chapter composer. The settings and access consoles have page-only bundles,
- * keeping their administration code off reader pages.
+ * mounts `<authorbot-work-queue>`, `/write/` mounts the legacy chapter
+ * composer, and chapter pages mount the lightweight in-place editor launcher.
+ * The settings and access consoles have page-only bundles, keeping their
+ * administration code off reader pages.
  * Emitted only for builds given an API base.
  */
 import { AuthorbotAccount } from "./account.js";
@@ -13,6 +14,7 @@ import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
 import { loadLazyModule } from "./lazy-module.js";
+import { AuthorbotManuscriptEditor } from "./manuscript-editor-element.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
 
 const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
@@ -22,6 +24,7 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-chapter-activity", AuthorbotChapterActivity],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
+  ["authorbot-manuscript-editor", AuthorbotManuscriptEditor],
   ["authorbot-new-chapter", AuthorbotNewChapter],
 ];
 

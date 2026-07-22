@@ -51,6 +51,8 @@
   "dependencies": {
     "@authorbot/markdown": "workspace:*",
     "@authorbot/schemas": "workspace:*",
+    "@milkdown/crepe": "7.21.3",
+    "@milkdown/kit": "7.21.3",
     "@types/mdast": "^4.0.0",
     "@types/unist": "^3.0.0",
     "astro": "^5.0.0",
