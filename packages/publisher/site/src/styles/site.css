@@ -716,6 +716,15 @@ h1:first-child,
   text-align: right;
 }
 
+/* The editor is rendered after chapter navigation, outside the reading
+   layout. Give it the reading column's measure instead of letting its 100%
+   textarea resolve against the site-wide, intentionally unbounded main. */
+.chapter-authoring {
+  width: min(100% - 36px, 700px);
+  margin-right: auto;
+  margin-left: auto;
+}
+
 /* Outline tree. */
 .outline {
   list-style: none;

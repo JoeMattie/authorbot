@@ -183,6 +183,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<li data-collab-nav="work">[\s\S]*?<\/li>/, "")
           .replace(/<span[^>]*data-collab-nav="divider"[^>]*><\/span>/, "")
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
+          .replace(/<div class="chapter-authoring">\s*<\/div>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-account\.js"><\/script>/, "")
           .replace(/>\s+</g, "> <");

@@ -116,7 +116,7 @@ const actorLabel = (actor: string) => {
   </nav>
   {
     collab && (
-      <>
+      <div class="chapter-authoring">
         {/* Phase 6 §3.5: the authoring entry point, and the same composer in
             edit mode. `data-chapter-id` is a build-time attribute, never
             visible UI - that is how editing an existing chapter avoids ever
@@ -136,7 +136,7 @@ const actorLabel = (actor: string) => {
           data-chapter-title={chapter.title}
           data-chapter-status={chapter.status}
         />
-      </>
+      </div>
     )
   }
 </Base>
