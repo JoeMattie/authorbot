@@ -274,6 +274,11 @@ export interface ChapterWritePayload {
   action: ChapterWriteAction;
   /** Actor performing the write: commit trailer + attribution credit. */
   actorId: string;
+  /**
+   * Review proposal whose approved content this write applies. Omitted for
+   * the existing direct-authoring path.
+   */
+  revisionProposalId?: string;
   /** Composer-defined author intent (title, body, baseRevision, …). */
   intent: Record<string, unknown>;
 }
@@ -492,8 +497,11 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           return outcome(row, "committed", op.commitSha === null ? {} : { commitSha: op.commitSha });
         }
         case "failed": {
-          await repos.outbox.markFailed(row.id, now());
-          return outcome(row, "failed", op.error === null ? {} : { error: op.error });
+          // A crash/requeue may hand us an operation whose terminal state was
+          // persisted before its owning record was released. Re-run the
+          // guarded cleanup so linked proposals (and apply work) cannot stay
+          // `applying` forever merely because the operation is already failed.
+          return failOperation(row, op, op.error ?? "git operation failed");
         }
         case "conflict": {
           const retry = transitionGitOperation(op, "queued", maxAttempts);
@@ -673,6 +681,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       );
     }
     statements.push(...(await releaseFailedApplyStatements(row, ts, error)));
+    statements.push(...(await releaseFailedChapterWriteStatements(row, ts)));
     statements.push(...(await releaseFailedBookConfigStatements(row, ts)));
     statements.push(repos.outbox.markFailedStatement(row.id, ts));
     await db.batch(statements);
@@ -759,9 +768,25 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     } catch {
       return []; // Malformed payload is what failed us; nothing to release.
     }
+    const proposal = await repos.revisionProposals.getBySubmissionId(payload.submissionId);
+    const proposalMatches =
+      proposal !== null &&
+      proposal.projectId === row.projectId &&
+      proposal.workItemId === payload.workItemId &&
+      proposal.status === "applying" &&
+      proposal.gitOperationId === row.gitOperationId;
+    const proposalStatements =
+      !proposalMatches
+        ? []
+        : [
+            repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+              status: "conflicted",
+              updatedAt: ts,
+            }),
+          ];
     const workItem = await repos.workItems.getById(payload.workItemId);
     if (workItem === null || workItem.status !== "applying") {
-      return [];
+      return proposalStatements;
     }
     return [
       db
@@ -771,6 +796,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         )
         .bind(ts, workItem.id),
       repos.submissions.transitionStateStatement(payload.submissionId, "applying", "conflicted", ts),
+      ...proposalStatements,
       repos.events.appendStatement({
         projectId: row.projectId,
         type: "work_item_conflict",
@@ -780,8 +806,40 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           chapterId: workItem.chapterId,
           conflictWorkItemId: null,
           reason: `the submission could not be applied: ${error}`,
+          ...(proposalMatches ? { revisionProposalId: proposal.id } : {}),
         },
         createdAt: ts,
+      }),
+    ];
+  }
+
+  /** A failed reviewed chapter write must not leave its proposal applying forever. */
+  async function releaseFailedChapterWriteStatements(
+    row: OutboxRecord,
+    ts: string,
+  ): Promise<SqlStatement[]> {
+    if (row.kind !== "chapter.write") return [];
+    let payload: ChapterWritePayload;
+    try {
+      payload = parseChapterWritePayload(row);
+    } catch {
+      return [];
+    }
+    if (payload.revisionProposalId === undefined) return [];
+    const proposal = await repos.revisionProposals.getById(payload.revisionProposalId);
+    if (
+      proposal === null ||
+      proposal.projectId !== row.projectId ||
+      proposal.chapterId !== payload.chapterId ||
+      proposal.status !== "applying" ||
+      proposal.gitOperationId !== row.gitOperationId
+    ) {
+      return [];
+    }
+    return [
+      repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+        status: "conflicted",
+        updatedAt: ts,
       }),
     ];
   }
@@ -1060,6 +1118,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     if (submission.workItemId !== workItem.id) {
       throw new Error(`submission ${submission.id} does not belong to work item ${workItem.id}`);
     }
+    await linkedSubmissionRevisionProposal(row, payload, workItem);
     const annotation = await mustAnnotation(workItem.sourceAnnotationId);
     const submitter = await artifactActor(submission.actorId);
     const submitterRef = submitter.ref;
@@ -1180,6 +1239,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     branch: string,
   ): Promise<CommitPlan> {
     const payload = parseChapterWritePayload(row);
+    await linkedChapterRevisionProposal(row, payload);
     const writerActor = await artifactActor(payload.actorId);
     const writerRef = writerActor.ref;
 
@@ -1249,6 +1309,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     }
     const outcome = composed.outcome;
     const existing = await repos.chapters.getById(payload.chapterId);
+    const proposal = await linkedChapterRevisionProposal(row, payload);
     return [
       repos.chapters.upsertStatement({
         id: payload.chapterId,
@@ -1268,6 +1329,16 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         blockIds: outcome.blockIds,
         updatedAt: ts,
       }),
+      ...(proposal === null
+        ? []
+        : [
+            repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+              status: "approved",
+              resultingRevision: outcome.revision,
+              commitSha,
+              updatedAt: ts,
+            }),
+          ]),
       repos.events.appendStatement({
         projectId: row.projectId,
         type: CHAPTER_EVENT_TYPES[payload.action],
@@ -1278,10 +1349,65 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           status: outcome.status,
           revision: outcome.revision,
           path: outcome.chapterPath,
+          ...(proposal === null ? {} : { revisionProposalId: proposal.id }),
         },
         createdAt: ts,
       }),
     ];
+  }
+
+  /** Resolve and integrity-check an explicitly linked direct/summary proposal. */
+  async function linkedChapterRevisionProposal(
+    row: OutboxRecord,
+    payload: ChapterWritePayload,
+  ) {
+    if (payload.revisionProposalId === undefined) return null;
+    const proposal = await repos.revisionProposals.getById(payload.revisionProposalId);
+    if (proposal === null) {
+      throw new Error(`revision proposal ${payload.revisionProposalId} not found`);
+    }
+    if (proposal.projectId !== row.projectId || proposal.chapterId !== payload.chapterId) {
+      throw new Error(
+        `revision proposal ${proposal.id} does not belong to chapter ${payload.chapterId}`,
+      );
+    }
+    if (proposal.status !== "applying") {
+      throw new Error(`revision proposal ${proposal.id} is ${proposal.status}, not applying`);
+    }
+    if (proposal.gitOperationId !== row.gitOperationId) {
+      throw new Error(
+        `revision proposal ${proposal.id} belongs to git operation ${proposal.gitOperationId}`,
+      );
+    }
+    return proposal;
+  }
+
+  /** Resolve and integrity-check an optional work-submission proposal. */
+  async function linkedSubmissionRevisionProposal(
+    row: OutboxRecord,
+    payload: SubmissionApplyPayload,
+    workItem: WorkItemRecord,
+  ) {
+    const proposal = await repos.revisionProposals.getBySubmissionId(payload.submissionId);
+    if (proposal === null) return null; // legacy Phase 4 submission
+    if (
+      proposal.projectId !== row.projectId ||
+      proposal.workItemId !== workItem.id ||
+      proposal.chapterId !== workItem.chapterId
+    ) {
+      throw new Error(
+        `revision proposal ${proposal.id} does not belong to submission ${payload.submissionId}`,
+      );
+    }
+    if (proposal.status !== "applying") {
+      throw new Error(`revision proposal ${proposal.id} is ${proposal.status}, not applying`);
+    }
+    if (proposal.gitOperationId !== row.gitOperationId) {
+      throw new Error(
+        `revision proposal ${proposal.id} belongs to git operation ${proposal.gitOperationId}`,
+      );
+    }
+    return proposal;
   }
 
   function readComposed(row: OutboxRecord): ComposedChapter | null {
@@ -1452,12 +1578,23 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       throw new Error(`outbox row ${row.id}: committed submission.apply has no resolved outcome`);
     }
     const workItem = await mustWorkItem(payload.workItemId);
+    const proposal = await linkedSubmissionRevisionProposal(row, payload, workItem);
     if (resolved.outcome.result === "applied") {
       const outcome = resolved.outcome;
       const statements: SqlStatement[] = [
         repos.workItems.updateStatusStatement(workItem.id, "completed", ts),
         repos.annotations.updateStatusStatement(workItem.sourceAnnotationId, "accepted", ts),
         repos.submissions.transitionStateStatement(payload.submissionId, "applying", "applied", ts),
+        ...(proposal === null
+          ? []
+          : [
+              repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+                status: "approved",
+                resultingRevision: outcome.newRevision,
+                commitSha,
+                updatedAt: ts,
+              }),
+            ]),
       ];
       const chapter = await repos.chapters.getById(workItem.chapterId);
       if (chapter !== null) {
@@ -1481,6 +1618,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
             submissionId: payload.submissionId,
             chapterId: workItem.chapterId,
             revision: outcome.newRevision,
+            ...(proposal === null ? {} : { revisionProposalId: proposal.id }),
           },
           createdAt: ts,
         }),
@@ -1491,6 +1629,14 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     const statements: SqlStatement[] = [
       repos.workItems.updateStatusStatement(workItem.id, "conflict", ts),
       repos.submissions.transitionStateStatement(payload.submissionId, "applying", "conflicted", ts),
+      ...(proposal === null
+        ? []
+        : [
+            repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+              status: "conflicted",
+              updatedAt: ts,
+            }),
+          ]),
     ];
     // Idempotent insert: a crash-recovery replay must not violate the PK.
     const existing = await repos.workItems.getById(outcome.conflictWorkItem.id);
@@ -1507,6 +1653,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           chapterId: workItem.chapterId,
           conflictWorkItemId: outcome.conflictWorkItem.id,
           reason: outcome.reason,
+          ...(proposal === null ? {} : { revisionProposalId: proposal.id }),
         },
         createdAt: ts,
       }),
@@ -1801,6 +1948,8 @@ function parseChapterWritePayload(row: OutboxRecord): ChapterWritePayload {
     typeof payload !== "object" ||
     typeof payload.chapterId !== "string" ||
     typeof payload.actorId !== "string" ||
+    (payload.revisionProposalId !== undefined &&
+      typeof payload.revisionProposalId !== "string") ||
     typeof payload.action !== "string" ||
     !CHAPTER_WRITE_ACTIONS.has(payload.action) ||
     payload.intent === null ||
