@@ -219,6 +219,7 @@ describe("promotion surface", () => {
     const card = document.querySelector(".ab-card") as HTMLElement;
     const buttons = [...card.querySelectorAll("button")].map((button) => button.textContent);
     expect(buttons).toContain("Promote to work");
+    expect(promoteBtn()?.hidden).toBe(false);
     expect(buttons).toContain("Reply");
     expect(buttons).toContain("Withdraw");
     expect(card.getAttribute("aria-label")).toContain("on this block");

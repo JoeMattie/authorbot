@@ -2,8 +2,10 @@
 
 Subordinate to `AUTHORBOT_PROJECT_DESIGN.md` and additive to the Phase 0-10
 contracts. Where this contract changes an earlier interaction, the change is
-explicit below. The work ships in seven independently releasable slices, in the
-order listed here.
+explicit below. The work is organized into seven ordered slices. Every
+implementation increment must be independently deployable; slice 3 is
+deliberately split into the 3A expand, 3B backfill, and 3C retire releases
+defined in section 4.5.
 
 ## 1. Scope and sequence
 
@@ -16,8 +18,9 @@ order listed here.
    chapter-navigation activity counts.
 3. **Delegate editorial actions safely.** Agent tokens get explicit,
    deny-by-default permissions for the same editorial work a human can do,
-   including comments, suggested edits, replies, votes, Work, and revision
-   review. Identity and project administration remain human-only.
+   including comments, suggested edits, replies, votes, Work, and current
+   chapter actions. Later slices extend the same model to revisions and
+   history. Identity and project administration remain human-only.
 4. **Review whole-chapter revisions.** Approved chapter work accepts a full
    chapter replacement as a proposed revision. It does not change published
    prose until a maintainer reviews the diff and approves it. Rejection keeps
@@ -30,7 +33,7 @@ order listed here.
    Discussion surface, including replies and promotion to Work. It reuses the
    annotation, reply, identity, moderation, and projection machinery rather
    than introducing a second comment system.
-7. **Walk chapter history.** Readers with access to revision history can move
+7. **Walk chapter history.** Authorized editors and maintainers can move
    backward from the current chapter to its original version in an inline,
    diff-augmented time-machine view. Restoring an old version creates a
    reviewable proposal rather than changing published prose directly.
@@ -142,10 +145,16 @@ descriptive accessible names.
   them with the chapter list. The browser must not issue one annotations or Work
   request per chapter. Counts respect the caller's read permissions and never
   reveal the existence of feedback or Work the caller cannot read.
-- Pending-Git, withdrawn, rejected, resolved, superseded, and orphaned feedback
-  is excluded from the open counts. Feedback promoted to Work leaves its open
+- An annotation contributes to an open-feedback count only when
+  `annotation.status === "open"`. Feedback promoted to Work leaves its open
   feedback category and enters the non-terminal-Work count without being
   counted in both categories.
+- A reply counts as open only while its own status and its authorized parent
+  feedback are both `open`. Pending-Git and withdrawn replies do not count;
+  replies under promoted, accepted, resolved, rejected, withdrawn, superseded,
+  orphaned, or needs-reanchor parents do not count. Nested replies count
+  individually. A caller who cannot read the parent kind receives no category
+  field for those replies, rather than a misleading zero.
 - Each visual badge has an accessible category and count. The chapter row also
   exposes one concise screen-reader summary, such as “2 open suggestions, 1
   block comment, 3 replies, 1 active work item.” Color and icon shape are never
@@ -201,8 +210,8 @@ human control-plane permissions and are not mintable agent-token capabilities.
 ### 4.2 Capability matrix
 
 “Suggested edit” in this table means the existing `suggestion` annotation. A
-whole-chapter revision proposal is a separate object covered by the revision
-rows.
+whole-chapter revision proposal is a separate object whose capabilities arrive
+with slice 4.
 
 | Editorial action | Canonical token capability | Human role floor | Additional rule |
 | --- | --- | --- | --- |
@@ -219,15 +228,15 @@ rows.
 | Read Work and lease state | `work:read` | editor | Lease secrets remain visible only to their holder. |
 | Promote an open comment or suggestion to Work | `work:promote` | maintainer | Reuses atomic, reasonless, idempotent promotion. |
 | Claim, renew, or release Work | `work:claim` | editor | Existing type capability and lease checks remain mandatory. |
+| Submit work held under a valid lease | `work:submit` | editor | Keeps lease-holder, base-revision, validation, and conflict checks. |
 | Cancel an eligible work item | `work:cancel` | maintainer | Keeps the existing state-machine check and required audit reason. |
-| Read proposed revisions and review diffs | `revisions:read` | editor | Does not imply access to unrelated repository data. |
-| Submit a claimed or direct-edit revision proposal | `revisions:write` | editor | Requires the applicable lease or direct-edit authority and base identity. |
-| Approve or reject a revision proposal | `revisions:review` | maintainer | Approval still uses the validated Git path and cannot bypass conflicts. |
-| Read chapter version history and selected diffs | `history:read` | reader | Restoring also requires `revisions:write` and creates a proposal. |
+| Create or revise a draft chapter through the current chapter-submission API | `chapters:write` | editor | Published-chapter revisions move to proposals in slice 4. |
+| Publish or unpublish a chapter | `chapters:publish` | maintainer | Remains a distinct, high-impact grant with ordinary deploy safeguards. |
 
 The settings UI may offer named presets such as Critic, Reviewer, Drafter, and
-Revision reviewer, but presets only select visible capabilities from this
-table. They are not stored roles and cannot hide an implied grant.
+Work contributor. Slice 4 may add Revision reviewer after its endpoints ship.
+Presets only select visible capabilities from the applicable table; they are
+not stored roles and cannot hide an implied grant.
 
 ### 4.3 API and agent contract
 
@@ -243,8 +252,11 @@ table. They are not stored roles and cannot hide an implied grant.
   serialize a disallowed kind or its replies. Creating a reply checks both
   `replies:write` and read access to the parent kind.
 - `GET /v1/me` returns the credential's canonical granted capabilities, its
-  current role ceiling, and its effective capabilities separately. Token-list
-  responses expose the same distinction without exposing the credential.
+  current role ceiling, its effective capabilities, and any legacy
+  compatibility mode separately. For a legacy row it also returns a
+  source-tagged `legacyEffectiveActions` list naming every preserved action
+  that is not represented by a canonical grant. Token-list responses expose
+  the same distinction without exposing the credential.
 - Add a human-session-only, maintainer-only token-permission update endpoint.
   Its request replaces the complete capability set, requires idempotency, takes
   effect on the token's next request, and audits the before/after set. It never
@@ -252,17 +264,22 @@ table. They are not stored roles and cannot hide an implied grant.
 - The OpenAPI document, collaborator skill, role guides, API reference,
   examples, and troubleshooting table name each capability and show the exact
   endpoint/body for reading and creating suggested edits, voting on comments
-  and suggestions, replying, promoting, working a lease, submitting a
-  revision, and reviewing one.
+  and suggestions, replying, promoting, working and submitting a lease, and
+  creating, revising, publishing, or unpublishing a chapter. Slice 4 adds
+  revision-proposal capabilities and documentation only when those endpoints
+  exist; slice 7 does the same for history.
 
 ### 4.4 Settings and product behavior
 
 - “Create agent token” groups plain-language checkboxes under Read, Discuss,
-  Work, and Revisions. Every mutating and review capability starts off until a
-  maintainer explicitly selects it or applies a visible preset.
+  Work, and Chapters. Every mutating and review capability starts disabled
+  until a maintainer explicitly selects it or applies a visible preset. The UI
+  exposes only capabilities backed by endpoints in the deployed release;
+  Revisions and History groups arrive with slices 4 and 7.
 - Before creation or update, show an exact “This token can” summary and call out
-  moderation, promotion, cancellation, and revision approval as high-impact
-  grants. There is no one-click hidden “all human powers” default.
+  moderation, promotion, cancellation, chapter publication, and, once shipped,
+  revision approval as high-impact grants. There is no one-click hidden “all
+  human powers” default.
 - Active-token rows show granted capabilities, effective capabilities, and
   capabilities currently inactive because of the role ceiling. A maintainer
   can edit capabilities without rotating the secret, or revoke it immediately.
@@ -272,23 +289,65 @@ table. They are not stored roles and cannot hide an implied grant.
 
 ### 4.5 Upgrade and migration
 
-- Use the next available D1 migration to rewrite stored agent-token capability
-  JSON and refresh stored membership bundles; no book-format migration is
-  required. The application version recognizes both legacy and canonical names
-  throughout the migration window, and the migration is idempotent.
-- Preserve only authority a legacy capability actually exercised:
-  `annotations:read` becomes `comments:read` + `suggestions:read`;
-  `annotations:write` becomes `comments:write` + `suggestions:write` +
-  `replies:write` + `feedback:withdraw-own`; `votes:write` becomes
-  `suggestions:vote`; and `submissions:write` becomes `revisions:write`.
-  Existing chapter and Work read/claim capabilities keep their names.
-- Do not infer the new comment-vote, promotion, cancellation, moderation,
-  revision-read/review, or history capabilities from a legacy umbrella. Those
-  high-impact grants require a maintainer to opt in after upgrade.
-- Strip `tokens:manage`, `members:manage`, and any unknown capability from agent
-  token rows during migration and record an operator-visible audit event. The
-  compatibility window may accept legacy names on requests, but it must return
-  canonical names and must not reactivate stripped control-plane authority.
+No book-format migration is required. The D1 change follows expand/backfill/
+retire across releases because author CI applies a migration before deploying
+its matching Worker. A migration must never leave the still-running prior
+Worker unable to understand active token rows.
+
+1. **Expand release.** Add a nullable `capabilities_v2` column and a
+   `capability_mode` column defaulting to `legacy` on `agent_tokens`. The old
+   Worker ignores both. The matching new Worker reads canonical capabilities
+   for `canonical` rows and translates legacy `scopes` for `legacy` rows.
+   Human role bundles are derived canonically from the role; their stored
+   legacy scopes are not rewritten. New tokens use canonical mode. Explicitly
+   editing an old token shows the compatibility change and converts that token
+   to canonical mode. Canonical writes also maintain a conservative legacy
+   shadow containing only grants whose old meaning cannot exceed the canonical
+   set. A prior Worker during deployment or rollback may deny a newly-granular
+   action, but it must never grant a broader one.
+2. **Backfill release.** Only after the dual-read Worker is deployed, an
+   idempotent migration fills null `capabilities_v2` values from legacy scopes
+   but leaves those rows in legacy mode and leaves their ordinary legacy scopes
+   intact. The deployed expand Worker can serve before, during, and after this
+   migration. The migration removes control-plane and unknown names from the
+   legacy column as an intentional security reduction and records an audit
+   event. Revoked and expired tokens remain revoked or expired.
+3. **Retire releases.** Legacy-mode endpoint semantics remain until the
+   maintainer explicitly converts a token or a documented major-version
+   contract window permits their removal. After all supported rows are
+   canonical, stop the legacy read fallback while continuing the shadow write
+   for one release. A later contract migration may remove the old column or
+   shadow only after the already-deployed Worker no longer reads it. There is
+   no same-release rewrite-and-drop shortcut.
+
+Legacy translation preserves only authority a capability actually exercised:
+`annotations:read` becomes `comments:read` + `suggestions:read`;
+`annotations:write` becomes `comments:write` + `suggestions:write` +
+`replies:write` + `feedback:withdraw-own`; `votes:write` becomes
+`suggestions:vote`; and `submissions:write` becomes `work:submit` +
+`chapters:write` + `chapters:publish`, still capped by the applicable role.
+Existing chapter and Work read/claim capabilities keep their names.
+Translation does not synthesize a prerequisite read capability that was absent
+on the old token. While a row remains in legacy mode, create, reply, and
+withdraw endpoints preserve the old `annotations:write` dependency behavior,
+annotation moderation preserves its old maintainer-role behavior, and Work
+promotion/cancellation preserve the old maintainer + `work:claim` behavior for
+that row only. Canonical rows must name every exact capability and prerequisite.
+API responses, the token UI, and audit events expose legacy mode plainly so
+compatibility is never mistaken for a canonical grant.
+
+Do not add new comment-vote, promotion, cancellation, moderation,
+revision-read/review, or history capabilities as canonical grants from a
+legacy umbrella. Source-tagged legacy effective actions may preserve only the
+promotion, cancellation, and moderation behavior the old token already had;
+those disappear when a maintainer converts the token unless explicitly
+selected. Every genuinely new high-impact grant requires a maintainer to opt
+in after upgrade.
+`tokens:manage`, `members:manage`, and unknown names are excluded from
+`capabilities_v2`, the sanitized legacy row, and the conservative shadow, and
+produce an operator-visible audit event. The compatibility window may accept
+ordinary legacy editorial names on requests, but responses use canonical names
+and stripped control-plane authority can never reactivate.
 
 ### 4.6 Security and test acceptance
 
@@ -306,19 +365,31 @@ table. They are not stored roles and cannot hide an implied grant.
 4. Suggested-edit and reply tests cover kind-specific reads, pagination without
    existence leaks, current-revision validation, unsafe content, withdrawal
    ownership, moderation, rate limits, and Git projection.
-5. Work and revision tests cover promotion, claim/renew/release, submit,
-   read-diff, approve/reject, stale bases, conflicts, replayed idempotency keys,
-   agent pause, project freeze, and revocation during an in-flight action.
-6. Migration tests start with every legacy scope combination and prove no token
-   gains comment voting, moderation, Work control, revision review, history, or
-   administration. A token revoked or expired before migration stays so.
+5. Work and chapter tests cover promotion, claim/renew/release, leased submit,
+   draft create/revise, publish/unpublish, stale bases, conflicts, replayed
+   idempotency keys, agent pause, project freeze, and revocation during an
+   in-flight action.
+6. Migration tests start with every legacy scope combination and exercise the
+   old Worker before the expand deploy, the dual-read Worker before and after
+   backfill, rollback to the expand Worker, and final legacy retirement. They
+   prove no token gains comment voting, moderation, Work control, chapter
+   publication, later-slice capabilities, or administration beyond authority
+   it held before translation. Legacy-only endpoint behavior remains isolated
+   to legacy-mode rows. A token revoked or expired before any step stays so.
 7. UI tests cover keyboard and screen-reader labels, presets, exact permission
    summaries, scope editing, role-capped grants, one-time token display, and
-   optimistic action rollback. OpenAPI synchronization and collaborator-skill
-   examples run in CI.
+   optimistic action rollback. For legacy rows, every preserved compatibility
+   action appears in both the API's source-tagged list and the exact “This token
+   can” summary. OpenAPI synchronization and collaborator-skill examples run in
+   CI.
 
 ## 5. Slice 4 - proposed chapter revisions and diff review
 
+- Add `revisions:read` at the editor role floor, `revisions:write` at the editor
+  floor, and `revisions:review` at the maintainer floor. Agent tokens can hold
+  any of them independently, subject to their role ceiling. None is inferred
+  from a legacy scope, and the Settings Revisions group appears only in the
+  release that registers these routes.
 - Reuse `revise_chapter`, `chapter_replacement`, leases, base revision/hash,
   operation tracking, and the conservative conflict policy.
 - Split submission receipt from application for review-required revisions. A
@@ -333,6 +404,11 @@ table. They are not stored roles and cannot hide an implied grant.
   chapter. Every decision is idempotent and audited.
 - A proposal whose base moved is never silently applied. It must either pass
   the existing deterministic rebase rules or become an explicit conflict.
+- Authorization tests cover each revision capability independently for human
+  sessions and canonical and legacy-mode agent tokens. Diff reads cannot expose
+  a proposal without `revisions:read`, submission requires
+  `revisions:write` plus the applicable lease or direct-edit authority, and
+  approve/reject requires `revisions:review`.
 
 ## 6. Slice 5 - permission-gated in-place chapter editing
 
@@ -361,6 +437,11 @@ table. They are not stored roles and cannot hide an implied grant.
 
 ## 8. Slice 7 - inline chapter history
 
+- Add `history:read` at the editor role floor and expose it in Settings only
+  with this slice. Ordinary reader sessions and tokens cannot access raw
+  chapter history: it may contain unpublished drafts or prose deliberately
+  removed from a later version. Proposal text remains behind `revisions:read`
+  and is not folded into the history dataset.
 - Add a chapter-history entry point beside the reading controls. Opening it
   keeps the manuscript in place and layers a spatial revision timeline around
   it, with a stacked, time-machine-style sense of moving backward through the
@@ -381,10 +462,16 @@ table. They are not stored roles and cannot hide an implied grant.
 - Motion is decorative, respects `prefers-reduced-motion`, and has a complete
   keyboard and screen-reader equivalent. The static manuscript remains usable
   if history loading fails.
+- Authorization tests prove a reader cannot infer or fetch withdrawn,
+  unpublished, or removed historical text. Editors without `history:read` are
+  also denied, and history access alone never grants proposal review.
 
 ## 9. Release discipline
 
-Each slice lands through its own reviewed pull request, includes any required
-book-format migration and upgrade guidance, and cuts a patch release only
-after CI and the release smoke checks pass. Slice 6 starts after slices 1-5 are
-shipped, and slice 7 builds on the shipped store and revision-review model.
+Each independently deployable increment lands through its own reviewed pull
+request, includes any required book-format migration and upgrade guidance, and
+cuts a release only after CI and the release smoke checks pass. Slice 3A and 3B
+must be separate releases in that order. Slice 3C waits for its documented
+rollback and major-version contract window and cannot be folded into either
+earlier release. Slice 6 starts after slices 1-5 are shipped, and slice 7 builds
+on the shipped store and revision-review model.
