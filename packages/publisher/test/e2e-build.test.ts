@@ -258,6 +258,17 @@ describe("buildSite on examples/book-repo", () => {
     expect(outline).toContain("Establish the drift as real, small, and periodic.");
     expect(outline).toContain("Every plausible explanation implicates the instrument");
     expect(outline).toContain("Mara logs the drift and keeps it to herself.");
+    expect(outline).toContain("Chapter summaries");
+    expect(outline).toContain("Generated from current chapter metadata");
+    expect(outline).toContain(
+      "During a routine calibration, Mara Voss finds a small periodic drift",
+    );
+    expect(outline).toContain(
+      "Mara and Theo replace every component that could plausibly lie to them.",
+    );
+    expect(outline).not.toContain(
+      "At higher sampling rates the drift resolves into structure",
+    );
     // Both relationships point into the excluded draft subtree, so neither
     // its title nor its relationship copy may leak into a public build.
     expect(outline).not.toContain("foreshadows");
@@ -268,6 +279,11 @@ describe("buildSite on examples/book-repo", () => {
     expect(draftOutline).toContain("Eleven notches");
     expect(draftOutline).toContain("leads to");
     expect(draftOutline).toContain("The Window");
+    // Draft summaries never enter static generated navigation, even in a local
+    // include-drafts build. An authenticated island may add them from the API.
+    expect(draftOutline).not.toContain(
+      "At higher sampling rates the drift resolves into structure",
+    );
 
     const timeline = await readFile(
       path.join(outDefault, "story/timeline/index.html"),

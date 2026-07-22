@@ -1076,6 +1076,55 @@ a.story-outline-title:hover {
   line-height: 1.6;
 }
 
+.story-chapter-summaries {
+  margin-top: 44px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border-subtle, var(--border));
+}
+
+.story-chapter-summaries h2 {
+  margin: 4px 0 18px;
+  color: var(--text-strong, var(--fg));
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-size: clamp(22px, 4vw, 30px);
+  letter-spacing: -0.025em;
+}
+
+.story-chapter-summaries ol {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.story-chapter-summaries li {
+  padding: 16px 18px;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 9px;
+  background: var(--surface-card, var(--surface));
+}
+
+.story-chapter-summaries a {
+  color: var(--text-strong, var(--fg));
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.story-chapter-summaries a:hover {
+  color: var(--text-link, var(--link));
+}
+
+.story-chapter-summaries p {
+  margin: 6px 0 0;
+  color: var(--text-muted, var(--muted));
+  font-family: var(--font-body, Georgia, serif);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
 .story-scene-plan {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

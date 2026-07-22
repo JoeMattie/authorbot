@@ -2,6 +2,10 @@
 import Outline from "../../components/Outline.astro";
 import Base from "../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
+
+const chapterSummaries = site.chapters.filter(
+  (chapter) => chapter.status === "published" && chapter.summary,
+);
 ---
 
 <Base title={`Story outline · ${site.book.title}`} activeNav="outline">
@@ -21,6 +25,24 @@ import { site } from "virtual:authorbot-site";
         <p class="story-empty">This book has no outline yet.</p>
       ) : (
         <Outline nodes={site.outline} />
+      )
+    }
+    {
+      chapterSummaries.length > 0 && (
+        <section class="story-chapter-summaries" aria-labelledby="chapter-summaries-title">
+          <header>
+            <p class="story-eyebrow">Generated from current chapter metadata</p>
+            <h2 id="chapter-summaries-title">Chapter summaries</h2>
+          </header>
+          <ol>
+            {chapterSummaries.map((chapter) => (
+              <li>
+                <a href={chapter.href}>{chapter.title}</a>
+                <p>{chapter.summary}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
       )
     }
   </div>
