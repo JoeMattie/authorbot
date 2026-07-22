@@ -276,6 +276,80 @@ describe("readTextFile", () => {
   });
 });
 
+describe("bounded file history", () => {
+  it("lists only commits that changed the path and pages newest first", async () => {
+    const fake = await seededFake();
+    const path = "chapters/001-baseline.md";
+    const original = fake.state.getRef(fake.defaultBranch) as string;
+    const secondText = `${exampleFiles[path]}\nSecond version.\n`;
+    const second = await fake.state.commitFiles({
+      branch: fake.defaultBranch,
+      files: { [path]: secondText },
+      message: "Revise baseline once",
+    });
+    await fake.state.commitFiles({
+      branch: fake.defaultBranch,
+      files: { "README.md": "Unrelated.\n" },
+      message: "Unrelated change",
+    });
+    const thirdText = `${secondText}\nThird version.\n`;
+    const third = await fake.state.commitFiles({
+      branch: fake.defaultBranch,
+      files: { [path]: thirdText },
+      message: "Revise baseline twice",
+    });
+    const reader = readerFor(fake);
+
+    const first = await reader.listFileHistory(path, { limit: 2 });
+    expect(first).toMatchObject({ page: 1, hasMore: true });
+    expect(first.entries.map((entry) => entry.commitSha)).toEqual([third, second]);
+    expect(first.entries.map((entry) => entry.message)).toEqual([
+      "Revise baseline twice",
+      "Revise baseline once",
+    ]);
+
+    const next = await reader.listFileHistory(path, { page: 2, limit: 2 });
+    expect(next.entries.map((entry) => entry.commitSha)).toEqual([original]);
+    expect(next.hasMore).toBe(false);
+    expect(fake.countRequests("GET", (requestPath) => requestPath.endsWith("/commits"))).toBe(2);
+  });
+
+  it("reads one selected historical snapshot through the immutable tree cache", async () => {
+    const fake = await seededFake();
+    const path = "chapters/001-baseline.md";
+    const original = fake.state.getRef(fake.defaultBranch) as string;
+    const current = `${exampleFiles[path]}\nA later ending.\n`;
+    const latest = await fake.state.commitFiles({
+      branch: fake.defaultBranch,
+      files: { [path]: current },
+      message: "Revise baseline",
+    });
+    const reader = readerFor(fake);
+
+    await expect(reader.readTextFileAtCommit(path, original)).resolves.toBe(exampleFiles[path]);
+    await expect(reader.readTextFileAtCommit(path, latest)).resolves.toBe(current);
+    const treeReads = fake.countRequests("GET", (requestPath) => requestPath.includes("/git/trees/"));
+    await expect(reader.readTextFileAtCommit(path, original)).resolves.toBe(exampleFiles[path]);
+    expect(fake.countRequests("GET", (requestPath) => requestPath.includes("/git/trees/"))).toBe(
+      treeReads,
+    );
+  });
+
+  it("rejects traversal and non-SHA snapshot selectors before making a request", async () => {
+    const fake = await seededFake();
+    const reader = readerFor(fake);
+    const before = fake.requests.length;
+
+    await expect(reader.listFileHistory("../secret.md")).resolves.toEqual({
+      entries: [],
+      page: 1,
+      hasMore: false,
+    });
+    await expect(reader.readTextFileAtCommit("book.yml", "main")).resolves.toBeNull();
+    expect(fake.requests.length).toBe(before);
+  });
+});
+
 describe("truncated trees", () => {
   it("throws rather than returning a partial snapshot", async () => {
     const fake = await seededFake();

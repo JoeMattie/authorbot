@@ -89,6 +89,8 @@ export {
   type RepoAnnotationSnapshot,
   type RepoChapterSnapshot,
   type RepoDecisionSnapshot,
+  type RepoFileHistoryEntry,
+  type RepoFileHistoryPage,
   type RepoReplySnapshot,
   type RepoWorkItemSnapshot,
 } from "./reader.js";

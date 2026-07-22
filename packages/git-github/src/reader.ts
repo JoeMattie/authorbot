@@ -86,6 +86,24 @@ export interface BookRepoReader {
   readTextFile?(path: string): Promise<string | null>;
 }
 
+/** Bounded metadata for one commit that changed a repository file. */
+export interface RepoFileHistoryEntry {
+  commitSha: string;
+  message: string;
+  authoredAt: string | null;
+  committedAt: string | null;
+  authorName: string | null;
+  authorLogin: string | null;
+  parentShas: string[];
+}
+
+export interface RepoFileHistoryPage {
+  entries: RepoFileHistoryEntry[];
+  page: number;
+  /** A conservative lookahead; an exact-multiple final page may lead to one empty read. */
+  hasMore: boolean;
+}
+
 /**
  * What `GitHubBookRepoReader.readSnapshot` actually returns: the Phase 2
  * snapshot, plus the provenance a Git-backed read can prove and the raw text
@@ -294,6 +312,17 @@ interface BlobResponse {
   encoding?: unknown;
 }
 
+interface CommitListItem {
+  sha?: unknown;
+  commit?: {
+    message?: unknown;
+    author?: { name?: unknown; date?: unknown } | null;
+    committer?: { date?: unknown } | null;
+  } | null;
+  author?: { login?: unknown } | null;
+  parents?: unknown;
+}
+
 // -------------------------------------------------------------------- options
 
 export interface GitHubBookRepoReaderOptions {
@@ -489,6 +518,69 @@ export class GitHubBookRepoReader implements BookRepoReader {
     const entry = entries.get(normalized);
     if (entry === undefined) return null;
     return this.#readBlobText(entry.sha);
+  }
+
+  /**
+   * Raw text of a contained file at one immutable commit. This is intentionally
+   * separate from the head reader: history consumers select one snapshot at a
+   * time and reuse the commit-keyed tree cache instead of rebuilding every
+   * historical tree in one Worker invocation.
+   */
+  async readTextFileAtCommit(path: string, commitSha: string): Promise<string | null> {
+    if (!isContainedRepoPath(path) || !/^[0-9a-f]{40}$/u.test(commitSha)) return null;
+    const normalized = normalizeRepoPath(path);
+    const { entries } = await this.#indexFor(commitSha);
+    const entry = entries.get(normalized);
+    return entry === undefined ? null : this.#readBlobText(entry.sha);
+  }
+
+  /**
+   * One bounded GitHub commits page filtered by an exact file path. Listing
+   * metadata is one request regardless of chapter count; callers fetch only
+   * the selected snapshot through {@link readTextFileAtCommit}.
+   */
+  async listFileHistory(
+    path: string,
+    options: { page?: number; limit?: number } = {},
+  ): Promise<RepoFileHistoryPage> {
+    if (!isContainedRepoPath(path)) {
+      return { entries: [], page: 1, hasMore: false };
+    }
+    const page = Math.max(1, Math.trunc(options.page ?? 1));
+    const limit = Math.max(1, Math.min(50, Math.trunc(options.limit ?? 25)));
+    const url = new URL(`${this.repoPath}/commits`);
+    url.searchParams.set("sha", this.branch);
+    url.searchParams.set("path", normalizeRepoPath(path));
+    url.searchParams.set("per_page", String(limit));
+    url.searchParams.set("page", String(page));
+    const body = await this.#getJson<CommitListItem[]>(
+      url.toString(),
+      `reading history for ${normalizeRepoPath(path)}`,
+    );
+    if (!Array.isArray(body)) {
+      throw new GitHubReadError("missing-object", "commit history response was not a list");
+    }
+    const entries: RepoFileHistoryEntry[] = [];
+    for (const item of body) {
+      const sha = item.sha;
+      if (typeof sha !== "string" || !/^[0-9a-f]{40}$/u.test(sha)) continue;
+      const commit = item.commit;
+      const parents = Array.isArray(item.parents) ? item.parents : [];
+      entries.push({
+        commitSha: sha,
+        message: typeof commit?.message === "string" ? commit.message : "",
+        authoredAt: typeof commit?.author?.date === "string" ? commit.author.date : null,
+        committedAt: typeof commit?.committer?.date === "string" ? commit.committer.date : null,
+        authorName: typeof commit?.author?.name === "string" ? commit.author.name : null,
+        authorLogin: typeof item.author?.login === "string" ? item.author.login : null,
+        parentShas: parents.flatMap((parent) => {
+          if (typeof parent !== "object" || parent === null) return [];
+          const parentSha = (parent as { sha?: unknown }).sha;
+          return typeof parentSha === "string" ? [parentSha] : [];
+        }),
+      });
+    }
+    return { entries, page, hasMore: body.length === limit };
   }
 
   /**
