@@ -180,7 +180,7 @@ describe("authorbot-collab element", () => {
     mount();
     await expect.poll(() => document.querySelectorAll(".ab-annotate").length).toBe(1);
     const button = document.querySelector(".ab-annotate") as HTMLButtonElement;
-    expect(button.textContent).toContain("Annotate this block");
+    expect(button.getAttribute("aria-label")).toBe("Note on this block");
     // Injected UI is marked so the normalizer skips it and sits outside the
     // block element (the block's own text is pristine).
     expect(button.closest("[data-ab-ui]")).toBeTruthy();
@@ -248,10 +248,9 @@ describe("authorbot-collab element", () => {
     const buttons = [...card.querySelectorAll("button")].map((b) => b.textContent);
     expect(buttons).toContain("Withdraw");
     expect(buttons).toContain("Reply");
-    // Signed-in state shown; block marker counts the annotation.
-    await expect.poll(() => document.querySelector(".ab-me")?.textContent).toBe(
-      "Signed in as mara",
-    );
+    // Identity belongs to the shared account control, not the Notes rail.
+    expect(document.querySelector(".ab-authbar .ab-me")).toBeNull();
+    expect((document.querySelector(".ab-authbar") as HTMLElement)?.hidden).toBe(true);
     expect(document.querySelector(".ab-marker-count")?.textContent).toBe("1");
     expect(document.querySelector(`#b-${BLOCK_ID}`)?.classList.contains("ab-annotated")).toBe(
       true,
@@ -307,7 +306,7 @@ describe("authorbot-collab element", () => {
       [`${API}/v1/projects/`]: { status: 200, body: { items: [], nextCursor: null } },
     });
     mount();
-    await expect.poll(() => document.querySelector(".ab-me")).toBeTruthy();
+    await expect.poll(() => document.querySelector(".ab-authbar .ab-hint")).toBeTruthy();
     const pencil = document.querySelector<HTMLButtonElement>(".ab-annotate");
     expect(pencil?.hidden).toBe(true);
   });
@@ -326,7 +325,17 @@ describe("authorbot-collab element", () => {
     expect(document.activeElement?.classList.contains("ab-signin")).toBe(true);
   });
 
-  it("announces block scope, links the drawer toggle to its panel, hides the glyph (§4 ARIA)", async () => {
+  it("announces block scope, mounts mobile notes inline, and previews the block accessibly", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      media: "(min-width: 960px)",
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    })));
     stubFetch({
       [`${API}/v1/me`]: {
         status: 200,
@@ -371,16 +380,24 @@ describe("authorbot-collab element", () => {
     const label = document.querySelector(".ab-card")?.getAttribute("aria-label") ?? "";
     expect(label).toContain("on this block");
     expect(label).not.toContain("on this chapter");
-    // Drawer toggle ↔ panel wiring.
-    const toggle = document.querySelector(".ab-drawer-toggle");
-    expect(toggle?.getAttribute("aria-controls")).toBe("ab-drawer-panel");
-    expect(document.getElementById("ab-drawer-panel")).not.toBeNull();
+    expect(document.querySelector(".ab-drawer")).toBeNull();
+    expect(document.querySelector(`.ab-inline-notes[data-block-id="${BLOCK_ID}"] .ab-card`))
+      .toBe(document.querySelector(".ab-card"));
     // Decorative pencil glyph is hidden from AT.
     expect(
       document.querySelector(".ab-annotate-glyph")?.getAttribute("aria-hidden"),
     ).toBe("true");
-    // §2.1 vice-versa: hovering the anchor block highlights its card.
     const block = document.getElementById(`b-${BLOCK_ID}`) as HTMLElement;
+    const annotate = document.querySelector(".ab-annotate") as HTMLButtonElement;
+    const tooltip = document.getElementById(annotate.getAttribute("aria-describedby") ?? "") as HTMLElement;
+    expect(tooltip.getAttribute("role")).toBe("tooltip");
+    annotate.dispatchEvent(new Event("pointerenter"));
+    expect(tooltip.hidden).toBe(false);
+    expect(block.classList.contains("ab-note-target-preview")).toBe(true);
+    annotate.dispatchEvent(new Event("pointerleave"));
+    expect(tooltip.hidden).toBe(true);
+    expect(block.classList.contains("ab-note-target-preview")).toBe(false);
+    // §2.1 vice-versa: hovering the anchor block highlights its card.
     block.dispatchEvent(new Event("mouseenter"));
     expect(document.querySelector(".ab-card")?.classList.contains("ab-hovered")).toBe(true);
     block.dispatchEvent(new Event("mouseleave"));

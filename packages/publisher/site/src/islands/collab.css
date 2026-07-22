@@ -1650,19 +1650,6 @@ main.ab-enabled {
   font: 400 15px/1.55 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
-/* Collapsed notes retain their attribution and target. Activating a card or
-   its inline mark opens the body, votes, replies, and actions in place. */
-.ab-card:not(.ab-active) > .ab-body,
-.ab-card:not(.ab-active) > .ab-hint,
-.ab-card:not(.ab-active) > .ab-suggestion-diff,
-.ab-card:not(.ab-active) > .ab-votes,
-.ab-card:not(.ab-active) > .ab-override,
-.ab-card:not(.ab-active) > .ab-replies,
-.ab-card:not(.ab-active) > .ab-actions,
-.ab-card:not(.ab-active) > .ab-reply-form {
-  display: none;
-}
-
 .ab-suggestion-diff {
   display: grid;
   gap: 7px;
@@ -1715,14 +1702,6 @@ main.ab-enabled {
 .ab-card.ab-promoted .ab-suggestion-diff {
   border-color: color-mix(in srgb, var(--green-400, #62c889) 48%, transparent);
   background: color-mix(in srgb, var(--green-400, #62c889) 8%, transparent);
-}
-
-.ab-card.ab-promoted:not(.ab-active) > .ab-body {
-  display: block;
-}
-
-.ab-card.ab-promoted:not(.ab-active) > .ab-suggestion-diff {
-  display: grid;
 }
 
 @media (pointer: coarse) {
@@ -2011,5 +1990,157 @@ main.ab-enabled {
   .ab-seltool,
   .ab-composer {
     animation: none;
+  }
+}
+
+/* ==== Chapter notes presentation follow-up ================================ */
+
+/* The block preview is an outline, not a border, so discovering an annotation
+   target never changes manuscript measure or line wrapping. */
+.ab-prose .ab-note-target-preview {
+  background: color-mix(in srgb, var(--blue-500, var(--link)) 8%, transparent);
+  outline: 2px solid var(--blue-500, var(--link));
+  outline-offset: 5px;
+}
+
+.ab-block-ui {
+  z-index: 12;
+}
+
+.ab-note-tooltip {
+  position: absolute;
+  top: 4px;
+  left: calc(100% + 7px);
+  z-index: 20;
+  width: max-content;
+  max-width: 12rem;
+  padding: 5px 8px;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 6px;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.18));
+  color: var(--text-body, var(--fg));
+  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
+  pointer-events: none;
+}
+
+.ab-note-tooltip[hidden],
+.ab-authbar[hidden] {
+  display: none;
+}
+
+/* Navigation remains outside the scrolling list, so Previous and Next are
+   reachable even when one expanded note is taller than the viewport. `auto`
+   creates a scrollbar only when the ordered card stack actually overflows. */
+.chapter-reading-layout.ab-reading-layout > .ab-gutter {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 92px);
+  max-height: calc(100vh - 92px);
+  overflow: visible;
+}
+
+.ab-gutter .ab-rail-head,
+.ab-gutter .ab-authbar {
+  flex: 0 0 auto;
+}
+
+.ab-gutter .ab-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+}
+
+/* Offscreen anchored notes are one actionable line. Full card contents stay
+   mounted so focus restoration and optimistic controls retain their state. */
+.ab-card-summary {
+  display: none;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text-body, var(--fg));
+  font: 600 12px/1.45 var(--font-display, system-ui, sans-serif);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ab-card.ab-note-collapsed {
+  min-height: 38px;
+  padding: 9px 11px;
+}
+
+.ab-card.ab-note-collapsed > :not(.ab-card-summary) {
+  display: none;
+}
+
+.ab-card.ab-note-collapsed > .ab-card-summary {
+  display: block;
+}
+
+.ab-note-collapse {
+  margin-top: 11px;
+}
+
+/* Inline hosts are inert on desktop; the exact same ordered card nodes mount
+   into them at mobile widths. */
+.ab-inline-notes {
+  display: none;
+}
+
+@media (max-width: 959.9px) {
+  /* Mobile has no notes drawer or side panel. Notes participate in manuscript
+     flow with full line breaks and never cover the bottom of the chapter. */
+  main.ab-enabled {
+    padding-bottom: 0;
+  }
+
+  .ab-inline-notes:not(:empty) {
+    display: block;
+    width: 100%;
+    margin: 0 0 1.35rem;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+
+  .ab-inline-notes-whole:not(:empty) {
+    margin: 0 0 1.75rem;
+  }
+
+  .ab-inline-notes-block:not(:empty) {
+    margin-top: -0.55rem;
+  }
+
+  .ab-inline-notes .ab-card-shell,
+  .ab-inline-notes .ab-composer {
+    position: static;
+    width: 100%;
+    margin: 0 0 10px;
+    border: 1px solid var(--border-default, var(--border));
+    border-radius: 10px;
+    background: var(--surface-card, var(--bg));
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.14));
+  }
+
+  .ab-inline-notes .ab-card {
+    padding: 13px 14px;
+    color: var(--text-body, var(--fg));
+  }
+
+  .ab-inline-notes .ab-card.ab-note-collapsed {
+    padding: 10px 12px;
+  }
+
+  .ab-note-tooltip {
+    right: 0;
+    left: auto;
+    transform: translateY(calc(-100% - 6px));
   }
 }
