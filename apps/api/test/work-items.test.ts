@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  CHAPTER_ID,
   createOpenSuggestion,
   devLogin,
   jsonRequest,
@@ -70,6 +71,75 @@ describe("work-queue reads", () => {
       { headers: { Cookie: maintainer } },
     );
     expect(((await cancelled.json()) as { items: { id: string }[] }).items[0]?.id).toBe(w1);
+  });
+
+  it("returns bounded completed stubs with source, chapter, submitter, and commit", async () => {
+    const annotationId = await createOpenSuggestion(h, maintainer);
+    const workItemId = await forceItem(annotationId);
+    const submitter = await h.repos.actors.getByExternalIdentity("github:quill");
+    expect(submitter).not.toBeNull();
+    const now = "2026-07-22T20:00:00.000Z";
+    const operationId = "01910000-0000-7000-8000-000000000001";
+    await h.repos.gitOperations.insert({
+      id: operationId,
+      projectId: h.projectId,
+      correlationId: "01910000-0000-7000-8000-000000000002",
+      expectedHead: null,
+      state: "committed",
+      attempts: 1,
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await h.repos.submissions.insert({
+      id: "01910000-0000-7000-8000-000000000003",
+      projectId: h.projectId,
+      workItemId,
+      leaseId: "01910000-0000-7000-8000-000000000004",
+      actorId: submitter!.id,
+      type: "range_replacement",
+      baseRevision: 3,
+      baseContentHash: `sha256:${"0".repeat(64)}`,
+      content: "Retained prose must not appear in a completed stub.",
+      summary: "Tightened the passage.",
+      notes: null,
+      state: "applied",
+      gitOperationId: operationId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await h.repos.workItems.updateStatus(workItemId, "completed", now);
+
+    const response = await h.app.request(
+      `/v1/projects/${h.projectId}/work-items/completed?limit=1`,
+      { headers: { Cookie: maintainer } },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      items: Array<{
+        id: string;
+        source: { kind: string; body: string } | null;
+        chapter: { id: string; title: string } | null;
+        completedBy: { displayName: string } | null;
+        completedAt: string;
+        commitSha: string | null;
+        content?: string;
+      }>;
+      nextCursor: string | null;
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({
+      id: workItemId,
+      source: { kind: "suggestion" },
+      chapter: { id: CHAPTER_ID, title: "Baseline" },
+      completedBy: { displayName: "quill" },
+      completedAt: now,
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+    });
+    expect(body.items[0]?.source?.body).toBeTruthy();
+    expect(body.items[0]).not.toHaveProperty("content");
+    expect(body.nextCursor).toBe(workItemId);
   });
 
   it("requires work:read (contributor is 403, unknown id 404)", async () => {

@@ -15,6 +15,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import {
   isConstraintError,
   type AnnotationRecord,
+  type CompletedWorkItemSummary,
   type DecisionRecord,
   type EventRecord,
   type ProjectRecord,
@@ -156,6 +157,24 @@ export function workItemJson(w: WorkItemRecord): Record<string, unknown> {
     priority: w.priority,
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
+  };
+}
+
+/** Compact Work-history response. Retained submission prose is never exposed. */
+export function completedWorkItemJson(row: CompletedWorkItemSummary): Record<string, unknown> {
+  return {
+    ...workItemJson(row.workItem),
+    source: row.source,
+    chapter:
+      row.chapter === null
+        ? null
+        : { id: row.workItem.chapterId, title: row.chapter.title, slug: row.chapter.slug },
+    completedBy: row.completedBy,
+    completedAt: row.completedAt,
+    resultingRevision: row.resultingRevision,
+    commitSha: row.commitSha,
+    revisionProposalId: row.revisionProposalId,
+    approvedBy: row.approvedBy,
   };
 }
 
@@ -1309,6 +1328,28 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     return c.json({
       items: serialized,
       nextCursor: items.length === limit ? (items[items.length - 1]?.id ?? null) : null,
+    });
+  });
+
+  app.get("/v1/projects/:projectId/work-items/completed", auth, async (c) => {
+    const guard = await requireProjectScope(c, services, "work:read", {
+      editorial: { capabilities: ["work:read"] },
+    });
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const limit = ctx.parseLimit(c);
+    if (limit instanceof Response) {
+      return limit;
+    }
+    const cursor = c.req.query("cursor");
+    const items = await repos.workItems.listCompletedSummaries(guard.project.id, {
+      limit,
+      ...(cursor === undefined ? {} : { beforeId: cursor }),
+    });
+    return c.json({
+      items: items.map(completedWorkItemJson),
+      nextCursor: items.length === limit ? (items[items.length - 1]?.workItem.id ?? null) : null,
     });
   });
 
