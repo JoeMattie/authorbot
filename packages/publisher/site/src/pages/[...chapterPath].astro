@@ -31,6 +31,7 @@ const collab = site.collab;
 // carries the policy whether or not it also loads the islands (lib/csp.ts).
 const csp = SITE_CSP;
 const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;
+const historyStylesHref = collab ? `${site.basePath}_astro/authorbot-history.css` : undefined;
 const chapterCharacters = site.characters.filter((character) =>
   character.chapters.some((entry) => entry.href === chapter.href),
 );
@@ -42,12 +43,28 @@ const chapterCharacters = site.characters.filter((character) =>
   noindex={chapter.isDraft}
   csp={csp}
   collabStylesHref={collabStylesHref}
+  extraStylesHrefs={historyStylesHref ? [historyStylesHref] : []}
   activeNav="chapters"
 >
   <div class="chapter-page">
-    <a class="chapter-back" href={site.basePath}>
-      <Icon name="chevron-left" size={15} /> All chapters
-    </a>
+    <div class="chapter-reading-controls">
+      <a class="chapter-back" href={site.basePath}>
+        <Icon name="chevron-left" size={15} /> All chapters
+      </a>
+      {
+        collab && (
+          <authorbot-chapter-history
+            data-api-base={collab.apiBase}
+            data-project={collab.projectSlug}
+            data-base={site.basePath}
+            data-chapter-id={chapter.id}
+            data-chapter-title={chapter.title}
+            data-chapter-revision={chapter.revision}
+            data-chapter-status={chapter.status}
+          />
+        )
+      }
+    </div>
     <div class="chapter-reading-layout ab-reading-layout">
       <div class="chapter-reading-column">
         <article class="chapter">

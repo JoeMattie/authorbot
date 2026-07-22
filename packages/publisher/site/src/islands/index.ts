@@ -11,6 +11,7 @@
 import { AuthorbotAccount } from "./account.js";
 import { AuthorbotChapterActivity } from "./chapter-activity.js";
 import { AuthorbotChapterComposer } from "./chapter-composer.js";
+import { AuthorbotChapterHistory } from "./chapter-history-entry.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
 import { loadLazyModule } from "./lazy-module.js";
@@ -23,6 +24,7 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-account", AuthorbotAccount],
   ["authorbot-chapter-activity", AuthorbotChapterActivity],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
+  ["authorbot-chapter-history", AuthorbotChapterHistory],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
   ["authorbot-manuscript-editor", AuthorbotManuscriptEditor],
   ["authorbot-new-chapter", AuthorbotNewChapter],

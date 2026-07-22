@@ -131,12 +131,14 @@ describe("api-url-less build (script-free regression)", () => {
     expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("revision-review-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("milkdown-manuscript-surface-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("chapter-history-panel-"))).toBe(true);
     expect(additions.filter((file) => !lazyAssets.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
       path.join("_astro", "authorbot-access.js"),
       path.join("_astro", "authorbot-account.js"),
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("_astro", "authorbot-history.css"),
       path.join("_astro", "authorbot-planning.css"),
       path.join("_astro", "authorbot-planning.js"),
       path.join("_astro", "authorbot-revisions.css"),
@@ -183,6 +185,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-planning\.css">/, "")
+          .replace(/<link rel="stylesheet" href="[^"]*authorbot-history\.css">/, "")
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
           .replace(
             /<authorbot-planning-document-editor[^>]*>\s*<\/authorbot-planning-document-editor>/,
@@ -191,6 +194,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           .replace(/<authorbot-chapter-activity[^>]*>\s*<\/authorbot-chapter-activity>/, "")
+          .replace(/<authorbot-chapter-history[^>]*>\s*<\/authorbot-chapter-history>/, "")
           .replace(/ data-chapter-activity-id="[^"]*"/g, "")
           .replace(/<span data-chapter-activity-slot hidden><\/span>/g, "")
           .replace(/<div[^>]*data-collab-only="chapter-tools"[^>]*>\s*<\/div>/, "")
@@ -360,6 +364,7 @@ describe("collab-enabled build", () => {
     expect(account).not.toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/revision-review-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/chapter-history-panel-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(planning).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
@@ -426,6 +431,29 @@ describe("collab-enabled build", () => {
     expect(nullResults).toMatch(
       /class="chapter-nav-prev" data-chapter-activity-id="019cadfd-8900-7140-98fb-ceff64cada33"/,
     );
+  });
+
+  it("mounts click-lazy chapter history with a chapter-only stylesheet", async () => {
+    const chapter = await readFile(
+      path.join(outCollab, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(chapter).toContain("<authorbot-chapter-history");
+    expect(chapter).toContain('data-chapter-id="019cadfd-8900-7140-98fb-ceff64cada33"');
+    expect(chapter).toContain(
+      '<link rel="stylesheet" href="/_astro/authorbot-history.css">',
+    );
+
+    const plain = await readFile(
+      path.join(outPlain, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(plain).not.toContain("authorbot-chapter-history");
+    expect(plain).not.toContain("authorbot-history.css");
+
+    const css = await readFile(path.join(outCollab, "_astro/authorbot-history.css"), "utf8");
+    expect(css).toContain("prefers-reduced-motion: reduce");
+    expect(css).toContain("authorbot-chapter-history-panel[hidden]");
   });
 
   it("emits the /write/ and /settings/ pages only for a collab build", async () => {

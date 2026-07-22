@@ -144,6 +144,7 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
     ["settings.css", "authorbot-settings.css"],
     ["work.css", "authorbot-work.css"],
     ["revision-review.css", "authorbot-revisions.css"],
+    ["chapter-history.css", "authorbot-history.css"],
   ] as const) {
     // Source styles keep their section comments for maintainers, while the
     // browser asset drops CSS comments just like the JS bundle drops source

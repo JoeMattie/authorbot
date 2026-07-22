@@ -479,6 +479,64 @@ export interface ChapterAccepted {
   status: string;
 }
 
+// ---- Phase 11 §6: chapter history ----------------------------------------
+
+export type ChapterHistoryComparison = "previous" | "current";
+
+/** One immutable revision row. History lists never carry manuscript text. */
+export interface ChapterHistoryRevision {
+  revision: number;
+  /** Historical list rows may omit this to avoid one Git blob read per row. */
+  contentHash: string | null;
+  commitSha: string | null;
+  createdAt: string;
+  author: RevisionProposalActor | null;
+  changeSummary: string | null;
+  origin: string | null;
+  isCurrent: boolean;
+}
+
+export interface ChapterHistoryCurrent extends ChapterHistoryRevision {
+  status: string;
+}
+
+/** One bounded, newest-first metadata page. */
+export interface ChapterHistoryPage {
+  items: ChapterHistoryRevision[];
+  current: ChapterHistoryCurrent;
+  nextCursor: string | null;
+}
+
+export interface ChapterHistorySnapshot extends ChapterHistoryRevision {
+  /** Detail reads fetch this exact blob, so its digest is authoritative. */
+  contentHash: string;
+  content: string;
+}
+
+export interface ChapterHistoryDiff {
+  fromRevision: number;
+  toRevision: number;
+  unifiedDiff: string | null;
+  computationLimited: boolean;
+}
+
+/** One selected snapshot and exactly one requested comparison. */
+export interface ChapterHistoryDetail {
+  chapterId: string;
+  compare: ChapterHistoryComparison;
+  selected: ChapterHistorySnapshot;
+  comparison: ChapterHistorySnapshot | null;
+  current: ChapterHistoryCurrent;
+  diff: ChapterHistoryDiff | null;
+}
+
+/** Restoring history always creates a reviewable proposal; it never applies. */
+export interface ChapterHistoryRestoreAccepted {
+  proposalId: string;
+  status: "pending_review";
+  correlationId: string;
+}
+
 // ---- Phase 11 §5: revision proposal review --------------------------------
 
 /**
@@ -1381,6 +1439,59 @@ export class CollabApi {
       ),
       [202],
       { mutation: true, subject: `chapter ${action}` },
+    );
+  }
+
+  // ---- Phase 11 §6: chapter history --------------------------------------
+
+  /** Latest 50 immutable revision records, newest first and without prose. */
+  async chapterHistory(chapterId: string): Promise<ApiResult<ChapterHistoryPage>> {
+    const query = new URLSearchParams({ limit: "50" });
+    return this.jsonResult<ChapterHistoryPage>(
+      (async () =>
+        this.get(
+          this.projectUrl(
+            `/chapters/${encodeURIComponent(chapterId)}/history?${query.toString()}`,
+          ),
+        ))(),
+      [200],
+    );
+  }
+
+  /** Selected manuscript snapshot plus either its predecessor or current text. */
+  async chapterHistoryRevision(
+    chapterId: string,
+    revision: number,
+    compare: ChapterHistoryComparison,
+  ): Promise<ApiResult<ChapterHistoryDetail>> {
+    const query = new URLSearchParams({ compare });
+    return this.jsonResult<ChapterHistoryDetail>(
+      (async () =>
+        this.get(
+          this.projectUrl(
+            `/chapters/${encodeURIComponent(chapterId)}/history/${revision}?${query.toString()}`,
+          ),
+        ))(),
+      [200],
+    );
+  }
+
+  /** Create a pending proposal from an immutable historic snapshot. */
+  async restoreChapterRevision(
+    chapterId: string,
+    revision: number,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ChapterHistoryRestoreAccepted>> {
+    return this.jsonResult<ChapterHistoryRestoreAccepted>(
+      this.post(
+        this.projectUrl(
+          `/chapters/${encodeURIComponent(chapterId)}/history/${revision}/restore`,
+        ),
+        {},
+        options,
+      ),
+      [201],
+      { mutation: true, subject: "chapter history restore" },
     );
   }
 
