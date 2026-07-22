@@ -43,6 +43,27 @@ async function assertNoIdsOrMarkers(page: Page, step: string): Promise<void> {
   expect(composed, `${step}: the prose box holds no frontmatter`).not.toMatch(/^---/);
 }
 
+test("the chapter-bottom editor stays within the reading measure", async ({ page }) => {
+  await page.goto(chapterUrl("baseline"));
+  await devLogin(page, "editor-width-e2e", "editor");
+  // The chapter composer is a separate island from the sign-in control. It
+  // reads the new session on navigation, as the production page does.
+  await page.reload();
+
+  const editor = page.locator(".chapter-authoring .ab-chapter-composer");
+  await expect(editor).toBeVisible();
+  const [editorBox, readingBox] = await Promise.all([
+    editor.boundingBox(),
+    page.locator(".chapter-reading-column").boundingBox(),
+  ]);
+
+  expect(editorBox).not.toBeNull();
+  expect(readingBox).not.toBeNull();
+  expect(editorBox?.width).toBeLessThanOrEqual((readingBox?.width ?? 0) + 1);
+  expect(editorBox?.x).toBeGreaterThan(0);
+  expect((editorBox?.x ?? 0) + (editorBox?.width ?? 0)).toBeLessThan(page.viewportSize()!.width);
+});
+
 test("a maintainer writes a new chapter, reviews the draft from home, and publishes it", async ({
   page,
   browser,
