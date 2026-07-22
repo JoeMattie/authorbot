@@ -22,18 +22,30 @@ CREATE INDEX idx_lease_document_snapshots_project
 CREATE TABLE revision_proposals (
   id                    TEXT PRIMARY KEY,
   project_id            TEXT NOT NULL REFERENCES projects (id),
-  chapter_id            TEXT NOT NULL,
+  -- Chapter-backed proposals point at the projected chapter. Repository
+  -- planning documents use the explicit target fields below instead.
+  chapter_id            TEXT,
+  target_kind           TEXT NOT NULL
+    CHECK (target_kind IN ('chapter', 'outline', 'timeline', 'character')),
+  target_id             TEXT NOT NULL,
+  target_path           TEXT NOT NULL,
   proposal_type         TEXT NOT NULL
-    CHECK (proposal_type IN ('chapter_replacement', 'chapter_summary')),
+    CHECK (proposal_type IN (
+      'chapter_replacement', 'chapter_summary', 'repository_document'
+    )),
   origin                TEXT NOT NULL
-    CHECK (origin IN ('work_submission', 'direct_edit', 'summary_proposal')),
+    CHECK (origin IN (
+      'work_submission', 'direct_edit', 'summary_proposal', 'document_edit'
+    )),
   -- Work-backed proposals retain the existing submission and Work identities.
   -- Direct edits and standalone summary proposals deliberately leave both
   -- NULL; approval still uses the same Git/validation path.
   work_item_id          TEXT,
   submission_id         TEXT,
   author_actor_id       TEXT NOT NULL REFERENCES actors (id),
-  base_revision         INTEGER NOT NULL CHECK (base_revision >= 1),
+  -- YAML/Markdown planning files have no embedded numeric revision; their
+  -- immutable base hash is the concurrency identity.
+  base_revision         INTEGER CHECK (base_revision IS NULL OR base_revision >= 1),
   base_content_hash     TEXT NOT NULL,
   -- Snapshots are retained with the proposal so a review never needs one Git
   -- request per diff row and still shows exactly what the author compared.
@@ -60,6 +72,16 @@ CREATE TABLE revision_proposals (
     (origin <> 'work_submission' AND work_item_id IS NULL AND submission_id IS NULL)
   ),
   CHECK (
+    (proposal_type IN ('chapter_replacement', 'chapter_summary')
+      AND chapter_id IS NOT NULL AND target_kind = 'chapter'
+      AND target_id = chapter_id AND base_revision IS NOT NULL)
+    OR
+    (proposal_type = 'repository_document'
+      AND chapter_id IS NULL
+      AND target_kind IN ('outline', 'timeline', 'character')
+      AND base_revision IS NULL)
+  ),
+  CHECK (
     (status = 'pending_review'
       AND reviewed_by_actor_id IS NULL AND reviewed_at IS NULL
       AND review_reason IS NULL AND git_operation_id IS NULL
@@ -78,6 +100,9 @@ CREATE INDEX idx_revision_proposals_project_status
 CREATE INDEX idx_revision_proposals_chapter
   ON revision_proposals (project_id, chapter_id, id);
 
+CREATE INDEX idx_revision_proposals_target
+  ON revision_proposals (project_id, target_kind, target_id, id);
+
 CREATE INDEX idx_revision_proposals_work_item
   ON revision_proposals (work_item_id, id)
   WHERE work_item_id IS NOT NULL;
@@ -88,6 +113,9 @@ CREATE TRIGGER revision_proposals_immutable_payload
 BEFORE UPDATE ON revision_proposals
 WHEN NEW.project_id IS NOT OLD.project_id
   OR NEW.chapter_id IS NOT OLD.chapter_id
+  OR NEW.target_kind IS NOT OLD.target_kind
+  OR NEW.target_id IS NOT OLD.target_id
+  OR NEW.target_path IS NOT OLD.target_path
   OR NEW.proposal_type IS NOT OLD.proposal_type
   OR NEW.origin IS NOT OLD.origin
   OR NEW.work_item_id IS NOT OLD.work_item_id

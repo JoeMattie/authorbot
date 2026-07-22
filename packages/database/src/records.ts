@@ -612,13 +612,20 @@ export interface LeaseDocumentSnapshotRecord {
 }
 
 /** The content surface replaced by a revision proposal. */
-export type RevisionProposalType = "chapter_replacement" | "chapter_summary";
+export type RevisionProposalType =
+  | "chapter_replacement"
+  | "chapter_summary"
+  | "repository_document";
+
+/** Canonical repository surface addressed by a proposal. */
+export type RevisionProposalTargetKind = "chapter" | "outline" | "timeline" | "character";
 
 /** How a proposal entered the shared maintainer-review pipeline. */
 export type RevisionProposalOrigin =
   | "work_submission"
   | "direct_edit"
-  | "summary_proposal";
+  | "summary_proposal"
+  | "document_edit";
 
 /**
  * A proposal begins pending review, may be applied through the Git outbox,
@@ -645,13 +652,19 @@ export type RevisionProposalStatus =
 export interface RevisionProposalRecord {
   id: string;
   projectId: string;
-  chapterId: string;
+  chapterId: string | null;
+  targetKind: RevisionProposalTargetKind;
+  /** Chapter UUID, `outline`, `timeline`, or the character's canonical id. */
+  targetId: string;
+  /** Exact repository-relative file compared and eventually written. */
+  targetPath: string;
   proposalType: RevisionProposalType;
   origin: RevisionProposalOrigin;
   workItemId: string | null;
   submissionId: string | null;
   authorActorId: string;
-  baseRevision: number;
+  /** Null for repository planning documents, which use `baseContentHash`. */
+  baseRevision: number | null;
   baseContentHash: string;
   baseContent: string;
   proposedContent: string;

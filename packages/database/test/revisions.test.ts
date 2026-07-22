@@ -19,6 +19,9 @@ function makeProposal(
     id: uuidv7(),
     projectId: seeded.project.id,
     chapterId: seeded.chapter.id,
+    targetKind: "chapter",
+    targetId: seeded.chapter.id,
+    targetPath: seeded.chapter.path,
     proposalType: "chapter_replacement",
     origin: "direct_edit",
     workItemId: null,
@@ -132,8 +135,11 @@ describe("revision proposal persistence", () => {
       submissionId,
     });
     const directProposal = makeProposal(s);
+    const otherChapterId = uuidv7();
     const otherChapterProposal = makeProposal(s, {
-      chapterId: uuidv7(),
+      chapterId: otherChapterId,
+      targetId: otherChapterId,
+      targetPath: "chapters/other.md",
       proposalType: "chapter_summary",
       origin: "summary_proposal",
     });
@@ -228,6 +234,9 @@ describe("revision proposal persistence", () => {
     const changes: Array<{ sql: string; values: Array<string | number | null> }> = [
       { sql: "project_id = ?", values: [otherProject.id] },
       { sql: "chapter_id = ?", values: [uuidv7()] },
+      { sql: "target_kind = ?", values: ["outline"] },
+      { sql: "target_id = ?", values: ["outline"] },
+      { sql: "target_path = ?", values: ["story/outline.yml"] },
       { sql: "proposal_type = ?", values: ["chapter_summary"] },
       {
         sql: "origin = ?, work_item_id = ?, submission_id = ?",

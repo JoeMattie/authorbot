@@ -206,6 +206,7 @@ describe("migration runner", () => {
         "idx_revision_proposals_chapter",
         "idx_revision_proposals_project_status",
         "idx_revision_proposals_submission",
+        "idx_revision_proposals_target",
         "idx_revision_proposals_work_item",
       ]),
     );

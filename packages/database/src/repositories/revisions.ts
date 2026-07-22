@@ -55,6 +55,8 @@ export class LeaseDocumentSnapshotsRepository {
 export interface RevisionProposalListOptions extends ListPage {
   status?: RevisionProposalStatus;
   chapterId?: string;
+  targetKind?: RevisionProposalRecord["targetKind"];
+  targetId?: string;
 }
 
 export interface RevisionProposalReviewUpdate {
@@ -81,17 +83,21 @@ export class RevisionProposalsRepository {
     return this.db
       .prepare(
         `INSERT INTO revision_proposals
-           (id, project_id, chapter_id, proposal_type, origin, work_item_id,
+           (id, project_id, chapter_id, target_kind, target_id, target_path,
+            proposal_type, origin, work_item_id,
             submission_id, author_actor_id, base_revision, base_content_hash,
             base_content, proposed_content, change_summary, notes, status,
             reviewed_by_actor_id, reviewed_at, review_reason, git_operation_id,
             resulting_revision, commit_sha, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
         record.projectId,
         record.chapterId,
+        record.targetKind,
+        record.targetId,
+        record.targetPath,
         record.proposalType,
         record.origin,
         record.workItemId,
@@ -149,6 +155,14 @@ export class RevisionProposalsRepository {
     if (options?.chapterId !== undefined) {
       conditions.push("chapter_id = ?");
       values.push(options.chapterId);
+    }
+    if (options?.targetKind !== undefined) {
+      conditions.push("target_kind = ?");
+      values.push(options.targetKind);
+    }
+    if (options?.targetId !== undefined) {
+      conditions.push("target_id = ?");
+      values.push(options.targetId);
     }
     values.push(options?.limit ?? 100);
     const rows = await this.db
@@ -308,13 +322,16 @@ function mapRevisionProposal(row: SqlRow): RevisionProposalRecord {
   return {
     id: String(row["id"]),
     projectId: String(row["project_id"]),
-    chapterId: String(row["chapter_id"]),
+    chapterId: row["chapter_id"] === null ? null : String(row["chapter_id"]),
+    targetKind: String(row["target_kind"]) as RevisionProposalRecord["targetKind"],
+    targetId: String(row["target_id"]),
+    targetPath: String(row["target_path"]),
     proposalType: String(row["proposal_type"]) as RevisionProposalRecord["proposalType"],
     origin: String(row["origin"]) as RevisionProposalRecord["origin"],
     workItemId: row["work_item_id"] === null ? null : String(row["work_item_id"]),
     submissionId: row["submission_id"] === null ? null : String(row["submission_id"]),
     authorActorId: String(row["author_actor_id"]),
-    baseRevision: Number(row["base_revision"]),
+    baseRevision: row["base_revision"] === null ? null : Number(row["base_revision"]),
     baseContentHash: String(row["base_content_hash"]),
     baseContent: String(row["base_content"]),
     proposedContent: String(row["proposed_content"]),
