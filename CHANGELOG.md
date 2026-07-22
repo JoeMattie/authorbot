@@ -9,6 +9,12 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.29
+
+- **The chapter edit box stays aligned with the reading column.** It no longer
+  stretches across the full browser width at the bottom of a chapter.
+- No book-format migration or database migration is required for this release.
+
 ## 0.1.28
 
 - **Review draft can read the chapter in deployed books again.** The redesigned
