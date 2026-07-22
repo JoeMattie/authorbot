@@ -16,6 +16,7 @@ const DESIGN_EDGES: ReadonlyArray<[WorkItemStatus, WorkItemStatus]> = [
   ["leased", "ready"],
   ["leased", "submitted"],
   ["leased", "cancelled"],
+  ["submitted", "ready"],
   ["submitted", "applying"],
   ["submitted", "failed"],
   ["applying", "completed"],

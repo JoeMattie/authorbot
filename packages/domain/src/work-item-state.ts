@@ -17,7 +17,9 @@ export const WORK_ITEM_TRANSITIONS: Readonly<
 > = Object.freeze({
   ready: ["leased", "cancelled"],
   leased: ["ready", "submitted", "cancelled"],
-  submitted: ["applying", "failed"],
+  // Phase 11 review-gated chapter revisions can be declined without burning
+  // the Work item. The lease is already consumed, so it returns claimable.
+  submitted: ["ready", "applying", "failed"],
   applying: ["completed", "conflict"],
   conflict: ["ready"],
   completed: [],
