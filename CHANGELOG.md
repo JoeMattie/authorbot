@@ -9,6 +9,17 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.27
+
+- **The reading site and author console have been redesigned together.** The
+  reader now has clearer book navigation, chapter context, responsive story
+  views, and exact inline annotation highlights. Authors get focused Work,
+  Settings, and Access consoles with honest conflict handling, accessible
+  controls, and account-aware navigation.
+- Outline, Timeline, and Characters now expose the book's planning structure
+  directly, including the planning method selected in `book.yml`.
+- No book-format migration or database migration is required for this release.
+
 ## 0.1.26
 
 - Removed every em-dash and en-dash from the tool's output, docs, and code. No
