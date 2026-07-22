@@ -175,6 +175,9 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
+          .replace(/<authorbot-chapter-activity[^>]*>\s*<\/authorbot-chapter-activity>/, "")
+          .replace(/ data-chapter-activity-id="[^"]*"/g, "")
+          .replace(/<span data-chapter-activity-slot hidden><\/span>/g, "")
           .replace(/<div[^>]*data-collab-only="chapter-tools"[^>]*>\s*<\/div>/, "")
           // Capability-conditioned nav chrome joins the account island on
           // collab pages: Work is absent when there is no API, and the divider
@@ -273,6 +276,11 @@ describe("collab-enabled build", () => {
     const html = await readFile(path.join(outCollab, "index.html"), "utf8");
     expect(html).toContain("<authorbot-new-chapter");
     expect(html).toContain("<authorbot-draft-chapters");
+    expect(html).toContain("<authorbot-chapter-activity");
+    expect(html).toContain(
+      'data-chapter-activity-id="019cadfd-8900-7140-98fb-ceff64cada33"',
+    );
+    expect(html).toContain("data-chapter-activity-slot");
     expect(html).toContain('data-href="/write/"');
     expect(html).not.toContain("<authorbot-collab");
     expect(html).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
@@ -282,6 +290,35 @@ describe("collab-enabled build", () => {
     expect(plain).not.toContain("<script");
     expect(plain).not.toContain("authorbot-new-chapter");
     expect(plain).not.toContain("authorbot-draft-chapters");
+    expect(plain).not.toContain("authorbot-chapter-activity");
+    expect(plain).not.toContain("data-chapter-activity-id");
+    expect(plain).not.toContain("data-chapter-activity-slot");
+  });
+
+  it("marks the current chapter and every prev/next row for activity", async () => {
+    const baseline = await readFile(
+      path.join(outCollab, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(baseline).toContain("<authorbot-chapter-activity");
+    // Current chapter header.
+    expect(baseline).toMatch(
+      /<header class="chapter-header" data-chapter-activity-id="019cadfd-8900-7140-98fb-ceff64cada33">/,
+    );
+    // Next-chapter navigation row.
+    expect(baseline).toMatch(
+      /class="chapter-nav-next" data-chapter-activity-id="019d0bc2-a980-734d-b0c1-aa819448d107"/,
+    );
+    expect(baseline.match(/data-chapter-activity-slot/g)?.length).toBeGreaterThanOrEqual(2);
+
+    const nullResults = await readFile(
+      path.join(outCollab, "chapters/null-results/index.html"),
+      "utf8",
+    );
+    // Previous-chapter navigation row on the following chapter.
+    expect(nullResults).toMatch(
+      /class="chapter-nav-prev" data-chapter-activity-id="019cadfd-8900-7140-98fb-ceff64cada33"/,
+    );
   });
 
   it("emits the /write/ and /settings/ pages only for a collab build", async () => {

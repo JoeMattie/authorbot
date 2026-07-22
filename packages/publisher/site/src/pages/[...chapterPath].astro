@@ -59,11 +59,15 @@ const chapterCharacters = site.characters.filter((character) =>
               </p>
             )
           }
-          <header class="chapter-header">
+          <header
+            class="chapter-header"
+            data-chapter-activity-id={collab ? chapter.id : undefined}
+          >
             <p class="chapter-kicker">
               <span>Chapter {String(index + 1).padStart(2, "0")}</span>
               <span class={`status-pill status-${chapter.status}`}>{chapter.status}</span>
               {site.book.showRevision && <span>rev {chapter.revision}</span>}
+              {collab && <span data-chapter-activity-slot hidden></span>}
             </p>
             <h1>{chapter.title}</h1>
             {chapter.summary && <p class="chapter-deck">{chapter.summary}</p>}
@@ -95,24 +99,38 @@ const chapterCharacters = site.characters.filter((character) =>
     </div>
   </div>
   <nav class="chapter-nav" aria-label="Chapter navigation">
-    <span class="chapter-nav-prev">
+    <span
+      class="chapter-nav-prev"
+      data-chapter-activity-id={collab ? prev?.id : undefined}
+    >
       {prev && (
         <a rel="prev" href={prev.href}>
-          ← {prev.title}
+          <span>← {prev.title}</span>
+          {collab && <span data-chapter-activity-slot hidden></span>}
         </a>
       )}
     </span>
-    <span class="chapter-nav-next">
+    <span
+      class="chapter-nav-next"
+      data-chapter-activity-id={collab ? next?.id : undefined}
+    >
       {next && (
         <a rel="next" href={next.href}>
-          {next.title} →
+          <span>{next.title} →</span>
+          {collab && <span data-chapter-activity-slot hidden></span>}
         </a>
       )}
     </span>
   </nav>
   {
     collab && (
-      <div class="chapter-authoring">
+      <>
+        <authorbot-chapter-activity
+          data-api-base={collab.apiBase}
+          data-project={collab.projectSlug}
+          hidden
+        />
+        <div class="chapter-authoring">
         {/* Phase 6 §3.5: the authoring entry point, and the same composer in
             edit mode. `data-chapter-id` is a build-time attribute, never
             visible UI - that is how editing an existing chapter avoids ever
@@ -132,7 +150,8 @@ const chapterCharacters = site.characters.filter((character) =>
           data-chapter-title={chapter.title}
           data-chapter-status={chapter.status}
         />
-      </div>
+        </div>
+      </>
     )
   }
 </Base>

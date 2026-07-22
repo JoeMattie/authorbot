@@ -115,6 +115,20 @@ descriptive accessible names.
 
 ## 3. Slice 2 - shared browser state
 
+Slice 2 ships in two independently releasable increments without weakening the
+exit criteria below:
+
+- **2A, authoritative read and badges:** introduce the project-scoped vanilla
+  store for session and chapter projections, return the batched activity
+  aggregate, and render the chapter activity badges from authoritative reads.
+- **2B, optimistic workflows:** move mutation actions into the store, add
+  optimistic transitions and rollback, reconcile the event feed, and perform
+  authoritative refetches after reconnects or ambiguous failures.
+
+The chapter activity release is slice 2A. Slice 2B remains pending until its
+mutation, rollback, event, and reconnect tests satisfy the full slice 2 exit
+criteria.
+
 - Use a project-scoped store built with `zustand/vanilla`. The site remains
   framework-free; custom elements become small view adapters that subscribe to
   selected state instead of each owning an API client, polling loop, and copy
@@ -145,6 +159,10 @@ descriptive accessible names.
   them with the chapter list. The browser must not issue one annotations or Work
   request per chapter. Counts respect the caller's read permissions and never
   reveal the existence of feedback or Work the caller cannot read.
+- This slice shows activity only to authenticated collaborators. Anonymous
+  readers stay quiet even when public annotations are visible. Any future
+  public rollup must use a separate published-only endpoint so the authenticated
+  chapter list never leaks draft or archived metadata.
 - An annotation contributes to an open-feedback count only when
   `annotation.status === "open"`. Feedback promoted to Work leaves its open
   feedback category and enters the non-terminal-Work count without being
@@ -159,12 +177,13 @@ descriptive accessible names.
   exposes one concise screen-reader summary, such as “2 open suggestions, 1
   block comment, 3 replies, 1 active work item.” Color and icon shape are never
   the only category cues, and an all-zero row stays quiet.
-- The slice 2 store updates affected counts optimistically after create,
-  withdraw, reply, promote, claim, submit, review, and other lifecycle actions.
+- Pending slice 2B, the store updates affected counts optimistically after
+  create, withdraw, reply, promote, claim, submit, review, and other lifecycle
+  actions.
   It reconciles from the mutation response and event feed, then refetches the
   server aggregate after reconnects or ambiguous failures.
 
-### 3.2 Slice 2 exit criteria
+### 3.2 Full slice 2 exit criteria (2A and 2B)
 
 1. One paginated chapter-list read returns all authorized activity counts with
    a constant number of database queries, independent of chapter count.

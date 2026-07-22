@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotAccount } from "../site/src/islands/account.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
 
 if (customElements.get("authorbot-account") === undefined) {
   customElements.define("authorbot-account", AuthorbotAccount);
 }
 
 afterEach(() => {
+  resetProjectStoresForTests();
   vi.unstubAllGlobals();
   document.body.textContent = "";
 });

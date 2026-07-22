@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BuildManifest } from "@authorbot/schemas";
@@ -138,7 +138,16 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
     ["settings.css", "authorbot-settings.css"],
     ["work.css", "authorbot-work.css"],
   ] as const) {
-    await copyFile(path.join(siteRoot, "src/islands", source), path.join(assetDir, target));
+    // Source styles keep their section comments for maintainers, while the
+    // browser asset drops CSS comments just like the JS bundle drops source
+    // comments. This is grammar-safe for these authored stylesheets and keeps
+    // the collaboration payload inside its long-standing gzip budget.
+    const css = await readFile(path.join(siteRoot, "src/islands", source), "utf8");
+    await writeFile(
+      path.join(assetDir, target),
+      css.replace(/\/\*[\s\S]*?\*\//g, ""),
+      "utf8",
+    );
   }
 }
 

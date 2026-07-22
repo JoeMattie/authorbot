@@ -8,6 +8,7 @@
  * Emitted only for builds given an API base.
  */
 import { AuthorbotAccount } from "./account.js";
+import { AuthorbotChapterActivity } from "./chapter-activity.js";
 import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
@@ -19,6 +20,7 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   // The header strip: sign in, sign out, and the way into Settings and Work.
   ["authorbot-account", AuthorbotAccount],
   ["authorbot-work-queue", AuthorbotWorkQueue],
+  ["authorbot-chapter-activity", AuthorbotChapterActivity],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
   ["authorbot-new-chapter", AuthorbotNewChapter],

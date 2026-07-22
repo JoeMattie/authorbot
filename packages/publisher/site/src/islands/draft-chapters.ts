@@ -8,8 +8,10 @@
  * Opening a draft mounts the existing composer, whose source route performs
  * its own editor/maintainer authorization before returning any prose.
  */
-import { CollabApi, isMaintainer, type ChapterProjection } from "./api.js";
+import { isMaintainer, type ChapterProjection } from "./api.js";
+import { createChapterActivityGroup } from "./chapter-activity.js";
 import { el } from "./dom.js";
+import { getProjectStore, type ProjectStore } from "./project-store.js";
 
 interface Config {
   apiBase: string;
@@ -30,7 +32,7 @@ function isUnpublished(chapter: ChapterProjection): boolean {
 }
 
 export class AuthorbotDraftChapters extends HTMLElement {
-  private api!: CollabApi;
+  private store!: ProjectStore;
   private cfg!: Config;
   private started = false;
 
@@ -44,23 +46,24 @@ export class AuthorbotDraftChapters extends HTMLElement {
       return;
     }
     this.cfg = cfg;
-    this.api = new CollabApi(cfg.apiBase, cfg.project);
+    this.store = getProjectStore(cfg);
     void this.start();
   }
 
   private async start(): Promise<void> {
-    const auth = await this.api.meResult();
-    if (!auth.ok || !isMaintainer(auth.value)) {
+    await this.store.getState().ensureSession();
+    if (!isMaintainer(this.store.getState().session)) {
       return;
     }
 
-    const result = await this.api.chapters();
-    if (!result.ok) {
-      this.renderError(result.message);
+    await this.store.getState().ensureChapters();
+    const state = this.store.getState();
+    if (state.chaptersStatus !== "ready") {
+      this.renderError(state.chaptersError ?? "chapter metadata is unavailable");
       return;
     }
 
-    const drafts = result.value
+    const drafts = Object.values(state.chaptersById)
       .filter(isUnpublished)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     if (drafts.length === 0) {
@@ -88,11 +91,21 @@ export class AuthorbotDraftChapters extends HTMLElement {
 
   private draftItem(chapter: ChapterProjection, index: number): HTMLLIElement {
     const item = el("li", "ab-draft-item");
+    item.dataset.chapterActivityId = chapter.id;
     const summary = el("div", "ab-draft-summary");
     const title = el("span", "ab-draft-title", chapter.title);
     const badge = el("span", "ab-chip", chapter.status);
     const revision = el("span", "ab-draft-revision", `Revision ${chapter.revision}`);
-    summary.append(title, badge, revision);
+    const activitySlot = el("span");
+    activitySlot.dataset.chapterActivitySlot = "";
+    const activity = chapter.activity;
+    const activityGroup =
+      activity === undefined ? null : createChapterActivityGroup(activity);
+    activitySlot.hidden = activityGroup === null;
+    if (activityGroup !== null) {
+      activitySlot.append(activityGroup);
+    }
+    summary.append(title, badge, revision, activitySlot);
 
     const review = el("button", "ab-btn ab-draft-review", "Review draft");
     review.type = "button";
