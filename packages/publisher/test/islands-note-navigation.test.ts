@@ -134,7 +134,7 @@ it("disables both navigation buttons for an empty chapter", async () => {
   );
 });
 
-it("mounts mobile notes inline in stable manuscript order and expands without reordering", async () => {
+it("mounts mobile notes inline in stable order and keeps chapter threads in Discussion", async () => {
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
     media: "(min-width: 960px)",
@@ -173,17 +173,19 @@ it("mounts mobile notes inline in stable manuscript order and expands without re
     [...document.querySelectorAll<HTMLElement>(".ab-card")].map(
       (card) => card.dataset.annotationId ?? "",
     );
-  expect(order()).toEqual(["whole", "early", "late", "second"]);
-  expect(document.querySelector(".ab-inline-notes-whole .ab-card")?.getAttribute("data-annotation-id"))
+  expect(order()).toEqual(["early", "late", "second", "whole"]);
+  expect(document.querySelector(".ab-inline-notes-whole .ab-card")).toBeNull();
+  expect(document.querySelector(".ab-discussion-thread")?.getAttribute("data-annotation-id"))
     .toBe("whole");
+  expect(document.querySelector(".ab-rail-count")?.textContent).toBe("1 / 3");
   expect(document.querySelector(".ab-drawer")).toBeNull();
 
   const late = document.querySelector<HTMLElement>('[data-annotation-id="late"]') as HTMLElement;
   expect(late.classList.contains("ab-note-collapsed")).toBe(true);
   late.querySelector<HTMLButtonElement>(".ab-card-summary")?.click();
   expect(late.classList.contains("ab-note-expanded")).toBe(true);
-  expect(order()).toEqual(["whole", "early", "late", "second"]);
+  expect(order()).toEqual(["early", "late", "second", "whole"]);
   late.querySelector<HTMLButtonElement>(".ab-note-collapse")?.click();
   expect(late.classList.contains("ab-note-collapsed")).toBe(true);
-  expect(order()).toEqual(["whole", "early", "late", "second"]);
+  expect(order()).toEqual(["early", "late", "second", "whole"]);
 });

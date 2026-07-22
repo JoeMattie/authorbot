@@ -27,6 +27,13 @@ export interface Me {
   scopes: string[];
   /** Present since Phase 3; absent for an actor with no membership. */
   memberships?: MeMembership[];
+  /** Phase 11's authoritative capability representation for this credential. */
+  capabilityMode?: "human" | "legacy" | "canonical";
+  grantedCapabilities?: string[];
+  roleCapabilityCeiling?: string[];
+  effectiveCapabilities?: string[];
+  /** Preserved high-impact behavior for an unconverted legacy token only. */
+  legacyEffectiveActions?: Array<{ action: string; sourceScopes?: string[] }>;
 }
 
 /** Exact response of the dev-only login route (singular project membership). */
@@ -59,6 +66,41 @@ export function canAuthorChapters(me: Me | null): boolean {
 /** Contract §3.6: settings and the overrides are maintainer-only. */
 export function isMaintainer(me: Me | null): boolean {
   return roleOf(me) === "maintainer";
+}
+
+/**
+ * Browser affordances consume the same exact capability projection as the
+ * API. `legacyScope` is only a rolling-deploy fallback for a Worker that
+ * predates Phase 11 and therefore omitted the canonical fields entirely.
+ */
+export function hasEffectiveCapability(
+  me: Me | null,
+  capability: string,
+  legacyScope?: string,
+): boolean {
+  if (me === null) return false;
+  if (Array.isArray(me.effectiveCapabilities)) {
+    return me.effectiveCapabilities.includes(capability);
+  }
+  return legacyScope !== undefined && me.scopes.includes(legacyScope);
+}
+
+/** High-impact compatibility actions are source-tagged, never inferred. */
+export function hasLegacyEffectiveAction(
+  me: Me | null,
+  action: string,
+  oldWorkerScope?: string,
+): boolean {
+  if (me === null) return false;
+  if (Array.isArray(me.legacyEffectiveActions)) {
+    return me.legacyEffectiveActions.some((entry) => entry.action === action);
+  }
+  // A canonical-capability response with no matching source-tagged action is
+  // an authoritative denial. Only a genuinely old response gets the fallback.
+  if (me.capabilityMode !== undefined || me.effectiveCapabilities !== undefined) {
+    return false;
+  }
+  return oldWorkerScope !== undefined && me.scopes.includes(oldWorkerScope);
 }
 
 export interface AnnotationTarget {

@@ -1,0 +1,321 @@
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthorbotCollab } from "../site/src/islands/collab-element.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
+
+const API = "http://api.test";
+const PROJECT = "hollow-creek-anomaly";
+const CHAPTER = "019cadfd-8900-7140-98fb-ceff64cada33";
+const BLOCK = "019cadfe-7360-7049-a30b-1f5898a5020a";
+
+if (customElements.get("authorbot-collab") === undefined) {
+  customElements.define("authorbot-collab", AuthorbotCollab);
+}
+
+interface Call {
+  url: string;
+  method: string;
+  body: unknown;
+}
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function annotation(
+  id: string,
+  scope: "block" | "chapter" = "chapter",
+  authorActorId = "actor-2",
+) {
+  return {
+    id,
+    chapterId: CHAPTER,
+    kind: "comment" as const,
+    scope,
+    chapterRevision: 3,
+    target: scope === "chapter" ? null : { blockId: BLOCK },
+    authorActorId,
+    body: scope === "chapter" ? `Whole chapter ${id}` : `Block note ${id}`,
+    status: "open",
+    gitOperationId: null,
+    createdAt: `2026-07-20T00:00:${id.padStart(2, "0")}Z`,
+  };
+}
+
+function me(effectiveCapabilities: string[], role = "maintainer") {
+  return {
+    actor: { id: "actor-1", displayName: "Mara", externalIdentity: "github:mara" },
+    memberships: [{ role }],
+    // Deliberately broad legacy fields: canonical effectiveCapabilities must
+    // win when deciding whether an affordance exists.
+    scopes: ["chapters:read", "annotations:read", "annotations:write", "work:claim"],
+    capabilityMode: "human",
+    grantedCapabilities: effectiveCapabilities,
+    roleCapabilityCeiling: effectiveCapabilities,
+    effectiveCapabilities,
+    legacyEffectiveActions: [],
+  };
+}
+
+function mount(): AuthorbotCollab {
+  document.body.innerHTML = `<main id="main"><div class="chapter-page">
+    <div class="chapter-reading-layout ab-reading-layout">
+      <div class="chapter-reading-column"><article class="chapter">
+        <div class="prose"><p id="b-${BLOCK}">The drift appeared on Tuesday.</p></div>
+      </article></div>
+    </div>
+  </div></main>`;
+  const host = document.createElement("authorbot-collab") as AuthorbotCollab;
+  host.dataset.apiBase = API;
+  host.dataset.project = PROJECT;
+  host.dataset.chapterId = CHAPTER;
+  host.dataset.chapterRevision = "3";
+  host.dataset.showPublic = "true";
+  document.querySelector(".chapter-reading-layout")?.append(host);
+  return host;
+}
+
+function stub(options: {
+  session: ReturnType<typeof me>;
+  annotations: Array<ReturnType<typeof annotation>>;
+  replies?: Record<string, unknown[]>;
+  pendingCreate?: Promise<Response>;
+  pendingPromote?: Promise<Response>;
+  calls?: Call[];
+  replyCalls?: string[];
+}): void {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    let body: unknown = undefined;
+    if (typeof init?.body === "string") body = JSON.parse(init.body) as unknown;
+    options.calls?.push({ url, method, body });
+    if (url === `${API}/v1/me`) return json(200, options.session);
+    if (url.includes("/members?")) return json(200, { items: [], nextCursor: null });
+    if (url.includes(`/chapters/${CHAPTER}/annotations?`)) {
+      return json(200, { items: options.annotations, nextCursor: null });
+    }
+    const replyMatch = /\/annotations\/([^/]+)\/replies\?/.exec(url);
+    if (replyMatch !== null && method === "GET") {
+      options.replyCalls?.push(replyMatch[1]!);
+      return json(200, { items: options.replies?.[replyMatch[1]!] ?? [], nextCursor: null });
+    }
+    if (url.endsWith(`/chapters/${CHAPTER}/annotations`) && method === "POST") {
+      return options.pendingCreate ?? json(202, {
+        status: "queued",
+        operationId: "op-create",
+        annotationId: "thread-created",
+        correlationId: "corr-create",
+      });
+    }
+    if (url.endsWith("/force-create-work-item") && method === "POST") {
+      return options.pendingPromote ?? json(201, {
+        annotationId: "thread-1",
+        status: "work_item_created",
+        decisionId: "decision-1",
+        workItemId: "work-1",
+        operationIds: [],
+        correlationId: "corr-promote",
+      });
+    }
+    if (url.includes("/operations/")) {
+      return json(200, {
+        id: "op-create",
+        projectId: PROJECT,
+        correlationId: "corr-create",
+        state: "committed",
+        attempts: 1,
+        error: null,
+        commitSha: "abc123",
+        createdAt: "2026-07-20T00:00:00Z",
+        updatedAt: "2026-07-20T00:00:01Z",
+      });
+    }
+    if (url.includes("/events")) return json(200, { items: [], latestId: 0 });
+    return json(404, { detail: "not found" });
+  }));
+}
+
+beforeEach(() => {
+  resetProjectStoresForTests();
+  vi.useRealTimers();
+  vi.stubGlobal("EventSource", class {
+    onopen: ((event: unknown) => void) | null = null;
+    onerror: ((event: unknown) => void) | null = null;
+    addEventListener(): void {}
+    close(): void {}
+  });
+});
+
+afterEach(() => {
+  document.body.replaceChildren();
+  vi.unstubAllGlobals();
+  resetProjectStoresForTests();
+});
+
+describe("chapter-wide Discussion", () => {
+  it("keeps chapter threads below the manuscript and outside deterministic Notes order", async () => {
+    const nested = [
+      {
+        id: "reply-root",
+        annotationId: "thread-1",
+        parentReplyId: null,
+        authorActorId: "actor-2",
+        body: "Root reply",
+        status: "open",
+        createdAt: "2026-07-20T00:01:00Z",
+      },
+      {
+        id: "reply-child",
+        annotationId: "thread-1",
+        parentReplyId: "reply-root",
+        authorActorId: "actor-1",
+        body: "Nested reply",
+        status: "open",
+        createdAt: "2026-07-20T00:02:00Z",
+      },
+    ];
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "comments:write",
+        "replies:write",
+        "feedback:moderate",
+        "work:promote",
+      ]),
+      annotations: [annotation("thread-1"), annotation("note-1", "block")],
+      replies: { "thread-1": nested },
+    });
+    mount();
+
+    await expect.poll(() => document.querySelectorAll(".ab-card").length).toBe(2);
+    expect(document.querySelector(".ab-gutter [data-annotation-id='thread-1']")).toBeNull();
+    expect(document.querySelector(".ab-gutter [data-annotation-id='note-1']")).toBeTruthy();
+    expect(document.querySelector(".ab-inline-notes-whole .ab-card")).toBeNull();
+    const discussion = document.querySelector(".ab-discussion-boundary") as HTMLElement;
+    expect(discussion.previousElementSibling?.classList.contains("chapter-reading-layout")).toBe(true);
+    expect(discussion.querySelector("[data-annotation-id='thread-1']")).toBeTruthy();
+    expect(discussion.querySelectorAll(".ab-replies .ab-replies .ab-reply")).toHaveLength(1);
+    expect(document.querySelector(".ab-rail-count")?.textContent).toBe("1 / 1");
+  });
+
+  it("uses exact canonical capabilities instead of broad legacy scopes", async () => {
+    stub({
+      session: me(["chapters:read", "comments:read", "suggestions:write"]),
+      annotations: [annotation("thread-1")],
+    });
+    mount();
+    await expect.poll(() => document.querySelector(".ab-discussion-thread")).toBeTruthy();
+
+    expect((document.querySelector(".ab-discussion-start") as HTMLButtonElement).hidden).toBe(true);
+    const thread = document.querySelector(".ab-discussion-thread") as HTMLElement;
+    expect([...thread.querySelectorAll("button")].map((button) => button.textContent))
+      .not.toContain("Reply");
+    expect(thread.querySelector("[data-override='promote']")).toBeNull();
+  });
+
+  it("clears and closes the chapter composer before its request settles", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const pendingCreate = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const calls: Call[] = [];
+    stub({
+      session: me(["chapters:read", "comments:read", "comments:write"]),
+      annotations: [],
+      pendingCreate,
+      calls,
+    });
+    mount();
+    await expect.poll(() => document.querySelector(".ab-discussion-start")).toBeTruthy();
+
+    (document.querySelector(".ab-discussion-start") as HTMLButtonElement).click();
+    const form = document.querySelector(".ab-discussion-composer form") as HTMLFormElement;
+    const textarea = form.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "Does the final beat land?";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    form.requestSubmit();
+
+    expect(document.querySelector(".ab-discussion-composer form")).toBeNull();
+    await expect.poll(() => document.querySelector(".ab-discussion-thread")?.textContent)
+      .toContain("Does the final beat land?");
+    const create = calls.find((call) => call.url.endsWith(`/chapters/${CHAPTER}/annotations`));
+    expect(create?.body).toEqual({
+      kind: "comment",
+      scope: "chapter",
+      chapterRevision: 3,
+      body: "Does the final beat land?",
+    });
+
+    resolveCreate(json(202, {
+      status: "queued",
+      operationId: "op-create",
+      annotationId: "thread-created",
+      correlationId: "corr-create",
+    }));
+    await expect.poll(() => calls.some((call) => call.url.includes("/operations/"))).toBe(true);
+  });
+
+  it("paginates reply hydration and settles one-click chapter promotion immediately", async () => {
+    const threads = Array.from({ length: 25 }, (_, index) => annotation(String(index + 1)));
+    const replyCalls: string[] = [];
+    let resolvePromote!: (response: Response) => void;
+    const pendingPromote = new Promise<Response>((resolve) => {
+      resolvePromote = resolve;
+    });
+    const calls: Call[] = [];
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "comments:write",
+        "replies:write",
+        "feedback:moderate",
+        "work:promote",
+      ]),
+      annotations: threads,
+      replyCalls,
+      pendingPromote,
+      calls,
+    });
+    mount();
+    await expect.poll(() => document.querySelectorAll(".ab-discussion-thread").length).toBe(20);
+    expect([...new Set(replyCalls)]).toHaveLength(20);
+    expect(replyCalls).not.toContain("21");
+    expect(document.querySelector(".ab-discussion-more")?.textContent)
+      .toBe("Load 5 more discussions");
+
+    (document.querySelector(".ab-discussion-more") as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelectorAll(".ab-discussion-thread").length).toBe(25);
+    expect([...new Set(replyCalls)]).toHaveLength(25);
+
+    const firstId = document.querySelector<HTMLElement>(".ab-discussion-thread")
+      ?.dataset.annotationId as string;
+    document.querySelector<HTMLElement>(`[data-annotation-id='${firstId}']`)
+      ?.querySelector<HTMLButtonElement>("[data-override='promote']")
+      ?.click();
+    const currentFirst = (): HTMLElement | null =>
+      document.querySelector(`[data-annotation-id='${firstId}']`);
+    await expect.poll(() => currentFirst()?.classList.contains("ab-promoted")).toBe(true);
+    expect(currentFirst()?.querySelector(".ab-accepted-badge")?.textContent).toBe("Accepted");
+    expect(currentFirst()?.querySelector("[data-override='promote']")).toBeNull();
+    expect(calls.find((call) => call.url.endsWith("/force-create-work-item"))?.body).toEqual({});
+
+    const promoted = threads.find(({ id }) => id === firstId)!;
+    promoted.status = "work_item_created";
+    resolvePromote(json(201, {
+      annotationId: firstId,
+      status: "work_item_created",
+      decisionId: "decision-1",
+      workItemId: "work-1",
+      operationIds: [],
+      correlationId: "corr-promote",
+    }));
+    await expect.poll(() => calls.filter((call) => call.url.includes("/annotations?")).length)
+      .toBeGreaterThan(1);
+  });
+});

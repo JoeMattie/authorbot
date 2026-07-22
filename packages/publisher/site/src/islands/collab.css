@@ -2035,6 +2035,13 @@ authorbot-manuscript-editor:empty {
   border-top: 1px solid var(--border-subtle, var(--border));
 }
 
+.ab-discussion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .ab-discussion-boundary h2 {
   margin: 0 0 8px;
   color: var(--text-strong, var(--fg));
@@ -2047,6 +2054,52 @@ authorbot-manuscript-editor:empty {
   margin: 0 0 12px;
   color: var(--text-muted, var(--muted));
   font: 400 15px/1.65 var(--font-body, "Source Serif 4", Georgia, serif);
+}
+
+.ab-discussion-composer:not(:empty) {
+  margin: 18px 0;
+}
+
+.ab-discussion-composer .ab-composer,
+.ab-discussion-thread {
+  position: static;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ab-discussion-threads {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.ab-discussion-thread {
+  padding: 16px 18px;
+  border-color: var(--border-default, var(--border));
+  border-radius: 10px;
+  background: var(--surface-card, var(--bg));
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.14));
+}
+
+.ab-discussion-thread:focus-visible {
+  outline: 2px solid var(--blue-500, var(--link));
+  outline-offset: 3px;
+}
+
+.ab-discussion-empty {
+  margin: 18px 0 0;
+  color: var(--text-muted, var(--muted));
+  font-size: 0.9rem;
+}
+
+.ab-discussion-empty[hidden],
+.ab-discussion-more[hidden],
+.ab-discussion-start[hidden] {
+  display: none;
+}
+
+.ab-discussion-more {
+  margin-top: 18px;
 }
 
 @keyframes ab-fade-in {
@@ -2063,6 +2116,16 @@ authorbot-manuscript-editor:empty {
 
   .ab-discussion-boundary {
     margin-top: 48px;
+  }
+
+  .ab-discussion-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ab-discussion-start {
+    width: 100%;
+    min-height: 44px;
   }
 
   .ab-drawer {
