@@ -194,6 +194,25 @@ export interface ChapterProjectionRecord {
   updatedAt: string;
 }
 
+/**
+ * Unfiltered collaboration activity for one chapter-list row. The API applies
+ * the caller's read capabilities before serializing these counts, so an
+ * unauthorized category is omitted rather than exposed as a misleading zero.
+ */
+export interface ChapterActivitySummary {
+  openSuggestions: number;
+  openBlockComments: number;
+  openChapterComments: number;
+  openReplies: number;
+  openWorkItems: number;
+}
+
+/** A chapter projection plus the activity aggregate loaded beside it. */
+export interface ChapterSummaryRecord {
+  chapter: ChapterProjectionRecord;
+  activity: ChapterActivitySummary;
+}
+
 export interface AnnotationRecord {
   id: string;
   projectId: string;
