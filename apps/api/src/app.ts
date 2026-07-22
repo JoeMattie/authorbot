@@ -41,6 +41,7 @@ import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
 import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
 import { registerChapterSubmissionRoutes } from "./chapter-submissions.js";
 import { registerRevisionProposalRoutes } from "./revision-proposals.js";
+import { registerChapterHistoryRoutes } from "./chapter-history.js";
 import {
   pendingAnnotationJson,
   registerPhase7Routes,
@@ -2177,6 +2178,20 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     readJson,
     parseLimit,
     notifyMutation,
+    now,
+  });
+
+  registerChapterHistoryRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    claimStatements,
+    parseLimit,
     now,
   });
 

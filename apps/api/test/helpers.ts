@@ -16,6 +16,7 @@ import type {
   AppConfig,
   AppDeps,
   AppEnv,
+  RepositoryHistoryReader,
   RepositorySourceReader,
 } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
@@ -121,6 +122,7 @@ export async function makeHarness(options: {
    */
   projectionRefresher?: ProjectionRefresher;
   repositorySourceReader?: RepositorySourceReader;
+  repositoryHistoryReader?: RepositoryHistoryReader;
 } = {}): Promise<TestHarness> {
   const db = openSqliteDatabase(":memory:");
   await applyMigrations(db, MIGRATIONS_DIR);
@@ -155,6 +157,9 @@ export async function makeHarness(options: {
       : {}),
     ...(options.repositorySourceReader !== undefined
       ? { repositorySourceReader: options.repositorySourceReader }
+      : {}),
+    ...(options.repositoryHistoryReader !== undefined
+      ? { repositoryHistoryReader: options.repositoryHistoryReader }
       : {}),
     onMutationCommitted: async (projectId) => {
       await mutationHook(projectId);

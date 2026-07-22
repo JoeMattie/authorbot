@@ -35,7 +35,8 @@ CREATE TABLE revision_proposals (
     )),
   origin                TEXT NOT NULL
     CHECK (origin IN (
-      'work_submission', 'direct_edit', 'summary_proposal', 'document_edit'
+      'work_submission', 'direct_edit', 'summary_proposal', 'history_restore',
+      'document_edit'
     )),
   -- Work-backed proposals retain the existing submission and Work identities.
   -- Direct edits and standalone summary proposals deliberately leave both

@@ -625,6 +625,7 @@ export type RevisionProposalOrigin =
   | "work_submission"
   | "direct_edit"
   | "summary_proposal"
+  | "history_restore"
   | "document_edit";
 
 /**

@@ -52,6 +52,7 @@ const ROLE_MATRIX: Record<Role, readonly EditorialCapability[]> = {
     "chapters:write",
     "revisions:read",
     "revisions:write",
+    "history:read",
   ],
   maintainer: [...EDITORIAL_CAPABILITIES],
 };
@@ -117,6 +118,7 @@ describe("canonical editorial capability vocabulary", () => {
       "revisions:read",
       "revisions:write",
       "revisions:review",
+      "history:read",
     ]);
   });
 
@@ -135,7 +137,7 @@ describe("canonical editorial capability vocabulary", () => {
   });
 
   it.each([
-    { name: "future capability", input: ["chapters:read", "history:read"] },
+    { name: "future capability", input: ["chapters:read", "future:read"] },
     { name: "control-plane scope", input: ["tokens:manage"] },
     { name: "duplicate", input: ["chapters:read", "chapters:read"] },
     { name: "mixed scalar", input: ["chapters:read", 42] },

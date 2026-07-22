@@ -31,6 +31,7 @@ export const EDITORIAL_CAPABILITIES = [
   "revisions:read",
   "revisions:write",
   "revisions:review",
+  "history:read",
 ] as const;
 export type EditorialCapability = (typeof EDITORIAL_CAPABILITIES)[number];
 
@@ -135,6 +136,7 @@ const EDITOR_CAPABILITIES = [
   "chapters:write",
   "revisions:read",
   "revisions:write",
+  "history:read",
 ] as const satisfies readonly EditorialCapability[];
 
 const MAINTAINER_CAPABILITIES = EDITORIAL_CAPABILITIES;
