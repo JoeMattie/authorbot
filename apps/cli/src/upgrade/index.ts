@@ -30,6 +30,7 @@ export {
   readD1Binding,
   readDefaultBranch,
   readPin,
+  rewriteAuthorbotPins,
   rewritePin,
   stripJsonComments,
   type D1Binding,

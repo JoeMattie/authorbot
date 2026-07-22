@@ -114,10 +114,11 @@ export interface HealthPort {
 export interface LockfilePort {
   /**
    * Regenerate the lockfile from package.json without installing anything.
-   * Returns false when it could not be done (no npm, no network), which is a
-   * reason to warn rather than to abandon an otherwise good upgrade.
+   * A failure is fatal for this upgrade attempt: opening a pull request with a
+   * lockfile that disagrees with package.json knowingly creates a CI failure.
+   * Implementations must preserve the underlying command diagnostic.
    */
-  relock(repoPath: string): Promise<boolean>;
+  relock(repoPath: string): Promise<void>;
 }
 
 export interface UpgradeDeps {
