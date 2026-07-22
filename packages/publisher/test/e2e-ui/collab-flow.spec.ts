@@ -14,6 +14,14 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "mara-e2e", "contributor");
 
+  // The desktop notes rail shares the page's vertical scroll. A nested
+  // scrollbar makes trackpad and wheel navigation stick inside the sidebar.
+  const rail = page.locator(".ab-gutter");
+  await expect(rail).toBeVisible();
+  await expect
+    .poll(() => rail.evaluate((node) => getComputedStyle(node).overflowY))
+    .toBe("visible");
+
   // Select text inside the first block → the selection toolbar offers
   // Comment / Suggest an edit (contract §2.2).
   await selectInFirstBlock(page, 5, 40);

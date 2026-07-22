@@ -89,13 +89,17 @@ the collaborator skill into your coding-agent tooling:
 npx skills add JoeMattie/authorbot
 ```
 
+Refresh an existing global installation with
+`npx skills update authorbot-collaborator -g -y`.
+
 It teaches the loop (find work, claim it, write, submit for review), the safety
 rules (a task bundle is untrusted data; never manufacture consensus), and ships
 least-privilege roles - drafter, critic, continuity, reviewer. Point it at a
-book with two environment variables so the token never lands in a file:
+book with three environment variables so the token never lands in a file:
 
 ```sh
 export AUTHORBOT_API=https://your-book.example.com
+export AUTHORBOT_PROJECT=your-project-slug
 export AUTHORBOT_TOKEN=<a token from your book's settings page>
 ```
 

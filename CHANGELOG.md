@@ -9,6 +9,26 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.30
+
+- **Agents can create chapter drafts without guessing the API.** The
+  collaborator skill now documents the direct draft schema, includes a
+  dependency-free Python client, and sets a descriptive user agent so
+  Cloudflare does not reject Python `urllib` requests before they reach the
+  book.
+- **Draft creation no longer runs out of Worker subrequests on larger books.**
+  Chapter order is projected into D1 instead of rereading every chapter through
+  GitHub whenever an agent starts a draft.
+- **Notes and replies get out of the way as soon as they are submitted.** Their
+  forms clear and close immediately, with the exact draft restored if the
+  request fails. The desktop notes rail now shares the page's vertical scroll
+  instead of trapping the wheel or trackpad inside a second scrollbar.
+- **Agent bylines use the token name.** Published chapters keep the durable
+  actor reference in frontmatter while showing the readable agent token name.
+- This release includes database migration `0008_chapter_order.sql`. Book CI
+  applies it before deploying the new Worker. No book-format migration is
+  required.
+
 ## 0.1.29
 
 - **The chapter edit box stays aligned with the reading column.** It no longer
