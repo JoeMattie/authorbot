@@ -16,12 +16,14 @@ import {
   authorizeAnnotationWithdraw,
   createAnnotationCommandSchema,
   createReplyCommandSchema,
+  isWorkItemTerminal,
   resolveSessionExpiry,
   resolveTokenExpiry,
   roleSchema,
   roleScopes,
   toTimestamp,
   AGENT_TOKEN_PREFIX,
+  WORK_ITEM_STATUSES,
 } from "@authorbot/domain";
 import { apiRoleScopes, mintAgentTokenApiCommandSchema } from "./api-scopes.js";
 import { parseRuleEntries, resolveRuleEntries, type RuleEntry } from "./rules.js";
@@ -107,6 +109,11 @@ const clearDivergenceSchema = z.strictObject({
   /** Re-project the repository as truth (default true). */
   resync: z.boolean().optional(),
 });
+
+/** Derived once from the domain state machine, never maintained as a UI list. */
+const ACTIVE_WORK_ITEM_STATUSES = WORK_ITEM_STATUSES.filter(
+  (status) => !isWorkItemTerminal(status),
+);
 
 /** The app plus the handles tests and the Worker entry need. */
 export interface AuthorbotApi {
@@ -789,11 +796,33 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return limit;
     }
     const cursor = c.req.query("cursor") ?? "";
-    const chapters = (await repos.chapters.listByProject(guard.project.id))
-      .filter((chapter) => chapter.id > cursor)
-      .sort((a, b) => (a.id < b.id ? -1 : 1))
-      .slice(0, limit);
-    return c.json(page(chapters, limit, (ch) => chapterJson(ch)));
+    const summaryPage = await repos.chapters.listSummariesByProject(
+      guard.project.id,
+      ACTIVE_WORK_ITEM_STATUSES,
+      { limit, afterId: cursor },
+    );
+    const requestAuth = authOf(c);
+    const canReadFeedback = requestAuth.scopes.includes("annotations:read");
+    const canReadWork = requestAuth.scopes.includes("work:read");
+    return c.json({
+      items: summaryPage.items.map(({ chapter, activity }) => ({
+        ...chapterJson(chapter),
+        activity: {
+          ...(canReadFeedback
+            ? {
+                openSuggestions: activity.openSuggestions,
+                openBlockComments: activity.openBlockComments,
+                openChapterComments: activity.openChapterComments,
+                openReplies: activity.openCommentReplies + activity.openSuggestionReplies,
+              }
+            : {}),
+          ...(canReadWork ? { openWorkItems: activity.openWorkItems } : {}),
+        },
+      })),
+      nextCursor: summaryPage.hasMore
+        ? (summaryPage.items[summaryPage.items.length - 1]?.chapter.id ?? null)
+        : null,
+    });
   });
 
   app.get("/v1/projects/:projectId/chapters/:chapterId", auth, async (c) => {

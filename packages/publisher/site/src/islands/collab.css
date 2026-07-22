@@ -87,6 +87,86 @@ main.ab-enabled {
   letter-spacing: 0.04em;
 }
 
+/* Chapter-index, current-chapter, and prev/next activity summaries. */
+[data-chapter-activity-slot] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ab-chapter-activity {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  font: 600 10px/1.2 var(--font-display, system-ui, sans-serif);
+}
+
+.ab-chapter-activity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 19px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 999px;
+  background: var(--tint-neutral, var(--surface));
+  color: var(--text-muted, var(--muted));
+  white-space: nowrap;
+}
+
+.ab-chapter-activity-openSuggestions,
+.ab-chapter-activity-openReplies {
+  border-color: color-mix(in srgb, var(--blue-500) 42%, transparent);
+  background: var(--tint-primary);
+  color: var(--on-tint-primary);
+}
+
+.ab-chapter-activity-openBlockComments,
+.ab-chapter-activity-openChapterComments {
+  border-color: color-mix(in srgb, var(--orange-500) 42%, transparent);
+  background: var(--tint-accent);
+  color: var(--on-tint-accent);
+}
+
+.ab-chapter-activity-openWorkItems {
+  border-color: color-mix(in srgb, var(--green-500) 42%, transparent);
+  background: var(--tint-success);
+  color: var(--on-tint-success);
+}
+
+.ab-chapter-activity-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Prev/next labels may carry all five badges. Let both columns shrink and
+   wrap instead of forcing horizontal page overflow on a phone. */
+.chapter-nav > span,
+.chapter-nav a {
+  min-width: 0;
+}
+
+.chapter-nav > span {
+  flex: 1 1 0;
+}
+
+.chapter-nav > span:empty {
+  display: none;
+}
+
+.chapter-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.chapter-nav-next a {
+  align-items: flex-end;
+}
+
 .ab-status-syncing {
   border-style: dashed;
 }

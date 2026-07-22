@@ -8,8 +8,11 @@ import type {
   AnnotationRecord,
   AnnotationRecordStatus,
   ChapterProjectionRecord,
+  ChapterSummaryPageRecord,
+  ChapterSummaryRecord,
   ReplyRecord,
   ReplyRecordStatus,
+  WorkItemStatus,
 } from "../records.js";
 
 export interface ListPage {
@@ -86,6 +89,118 @@ export class ChaptersRepository {
       .bind(projectId)
       .all();
     return rows.map(mapChapter);
+  }
+
+  /**
+   * Cursor-page chapters and their collaboration activity in one database
+   * read. The aggregate is deliberately computed from D1, never from the Git
+   * repository, and its query count is independent of the number of chapters.
+   * One lookahead row distinguishes a full final page from a page with more
+   * results without issuing a second D1 request.
+   *
+   * The API supplies the non-terminal statuses from the domain lifecycle so
+   * this data layer does not grow a second, drifting definition of terminal
+   * Work. Capability filtering happens at serialization time; this method
+   * returns the complete internal aggregate.
+   */
+  async listSummariesByProject(
+    projectId: string,
+    activeWorkItemStatuses: readonly WorkItemStatus[],
+    page?: ListPage,
+  ): Promise<ChapterSummaryPageRecord> {
+    const { limit, afterId } = pageParams(page);
+    const workStatusPredicate =
+      activeWorkItemStatuses.length === 0
+        ? "0"
+        : `w.status IN (${activeWorkItemStatuses.map(() => "?").join(", ")})`;
+    const rows = await this.db
+      .prepare(
+        `WITH selected_chapters AS MATERIALIZED (
+           SELECT *
+             FROM chapters
+            WHERE project_id = ? AND id > ?
+            ORDER BY id
+            LIMIT ?
+         ),
+         annotation_activity AS (
+           SELECT a.chapter_id,
+                  SUM(CASE WHEN a.kind = 'suggestion' THEN 1 ELSE 0 END)
+                    AS open_suggestions,
+                  SUM(CASE
+                        WHEN a.kind = 'comment' AND a.scope IN ('block', 'range') THEN 1
+                        ELSE 0
+                      END) AS open_block_comments,
+                  SUM(CASE
+                        WHEN a.kind = 'comment' AND a.scope = 'chapter' THEN 1
+                        ELSE 0
+                      END) AS open_chapter_comments
+             FROM annotations a
+             JOIN selected_chapters c
+               ON c.id = a.chapter_id AND c.project_id = a.project_id
+            WHERE a.status = 'open'
+            GROUP BY a.chapter_id
+         ),
+         reply_activity AS (
+           SELECT c.id AS chapter_id,
+                  (SELECT COUNT(*)
+                     FROM annotations a
+                       INDEXED BY idx_annotations_project_chapter_activity
+                     JOIN replies r INDEXED BY idx_replies_annotation_status
+                       ON r.annotation_id = a.id
+                      AND r.status = 'open'
+                      AND r.project_id = a.project_id
+                    WHERE a.project_id = c.project_id
+                      AND a.chapter_id = c.id
+                      AND a.status = 'open'
+                      AND a.kind = 'comment') AS open_comment_replies,
+                  (SELECT COUNT(*)
+                     FROM annotations a
+                       INDEXED BY idx_annotations_project_chapter_activity
+                     JOIN replies r INDEXED BY idx_replies_annotation_status
+                       ON r.annotation_id = a.id
+                      AND r.status = 'open'
+                      AND r.project_id = a.project_id
+                    WHERE a.project_id = c.project_id
+                      AND a.chapter_id = c.id
+                      AND a.status = 'open'
+                      AND a.kind = 'suggestion') AS open_suggestion_replies
+             FROM selected_chapters c
+         ),
+         work_activity AS (
+           SELECT w.chapter_id, COUNT(*) AS open_work_items
+             FROM work_items w
+             JOIN selected_chapters c
+               ON c.id = w.chapter_id AND c.project_id = w.project_id
+            WHERE ${workStatusPredicate}
+            GROUP BY w.chapter_id
+         )
+         SELECT c.*,
+                COALESCE(a.open_suggestions, 0) AS activity_open_suggestions,
+                COALESCE(a.open_block_comments, 0) AS activity_open_block_comments,
+                COALESCE(a.open_chapter_comments, 0) AS activity_open_chapter_comments,
+                COALESCE(r.open_comment_replies, 0) AS activity_open_comment_replies,
+                COALESCE(r.open_suggestion_replies, 0) AS activity_open_suggestion_replies,
+                COALESCE(w.open_work_items, 0) AS activity_open_work_items
+           FROM selected_chapters c
+           LEFT JOIN annotation_activity a ON a.chapter_id = c.id
+           LEFT JOIN reply_activity r ON r.chapter_id = c.id
+           LEFT JOIN work_activity w ON w.chapter_id = c.id
+          ORDER BY c.id`,
+      )
+      .bind(projectId, afterId, limit + 1, ...activeWorkItemStatuses)
+      .all();
+    const summaries: ChapterSummaryRecord[] = rows.map((row) => ({
+      chapter: mapChapter(row),
+      activity: {
+        openSuggestions: Number(row["activity_open_suggestions"] ?? 0),
+        openBlockComments: Number(row["activity_open_block_comments"] ?? 0),
+        openChapterComments: Number(row["activity_open_chapter_comments"] ?? 0),
+        openCommentReplies: Number(row["activity_open_comment_replies"] ?? 0),
+        openSuggestionReplies: Number(row["activity_open_suggestion_replies"] ?? 0),
+        openWorkItems: Number(row["activity_open_work_items"] ?? 0),
+      },
+    }));
+    return { items: summaries.slice(0, limit), hasMore: summaries.length > limit };
   }
 
   /** Delete specific rows by id (caller chunks; ids must be non-empty). */

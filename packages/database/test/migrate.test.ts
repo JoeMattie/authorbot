@@ -67,6 +67,41 @@ describe("migration runner", () => {
     db.close();
   });
 
+  it("indexes every chapter-activity aggregate access path", async () => {
+    const db = openSqliteDatabase(":memory:");
+    const result = await applyMigrations(db, MIGRATIONS_DIR);
+    expect(result.applied).toContain("0009_chapter_activity.sql");
+
+    const indexColumns = async (name: string): Promise<string[]> => {
+      const rows = await db
+        .prepare(`PRAGMA index_info('${name}')`)
+        .all<{ name: string }>();
+      return rows.map((row) => row.name);
+    };
+    expect(await indexColumns("idx_chapters_project_id")).toEqual([
+      "project_id",
+      "id",
+    ]);
+    expect(await indexColumns("idx_annotations_project_chapter_activity")).toEqual([
+      "project_id",
+      "chapter_id",
+      "status",
+      "kind",
+      "scope",
+    ]);
+    expect(await indexColumns("idx_replies_annotation_status")).toEqual([
+      "annotation_id",
+      "status",
+      "project_id",
+    ]);
+    expect(await indexColumns("idx_work_items_project_chapter_status")).toEqual([
+      "project_id",
+      "chapter_id",
+      "status",
+    ]);
+    db.close();
+  });
+
   it("backfills chapter order at ten-point spacing for an existing book", async () => {
     const dir = await mkdtemp(join(tmpdir(), "authorbot-order-migration-"));
     const files = await listMigrationFiles(MIGRATIONS_DIR);

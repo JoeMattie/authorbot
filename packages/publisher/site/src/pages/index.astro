@@ -68,7 +68,7 @@ const logline =
       ) : (
         <ol class="chapter-index">
           {site.chapters.map((chapter, index) => (
-            <li>
+            <li data-chapter-activity-id={collab ? chapter.id : undefined}>
               <a href={chapter.href}>
                 <span class="chapter-order">{String(index + 1).padStart(2, "0")}</span>
                 <span class="chapter-index-copy">
@@ -76,6 +76,7 @@ const logline =
                     <strong>{chapter.title}</strong>
                     <span class={`status-pill status-${chapter.status}`}>{chapter.status}</span>
                     <span class="chapter-revision">rev {chapter.revision}</span>
+                    {collab && <span data-chapter-activity-slot hidden></span>}
                   </span>
                   {chapter.summary && <span class="chapter-summary">{chapter.summary}</span>}
                   {chapter.authors.length > 0 && (
@@ -92,5 +93,14 @@ const logline =
       )
     }
   </div>
+  {
+    collab && (
+      <authorbot-chapter-activity
+        data-api-base={collab.apiBase}
+        data-project={collab.projectSlug}
+        hidden
+      />
+    )
+  }
   {collab && <script is:inline type="module" src={src} />}
 </Base>

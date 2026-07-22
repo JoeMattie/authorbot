@@ -304,6 +304,21 @@ export interface ChapterSource {
 }
 
 /**
+ * Authorized open activity returned beside one chapter projection.
+ *
+ * Every field is independently optional: the server omits categories the
+ * caller cannot read. Consumers must distinguish an omitted field from a
+ * visible zero, even though both stay visually quiet in the chapter rail.
+ */
+export interface ChapterActivity {
+  openSuggestions?: number;
+  openBlockComments?: number;
+  openChapterComments?: number;
+  openReplies?: number;
+  openWorkItems?: number;
+}
+
+/**
  * One chapter projection from `GET .../chapters`.
  *
  * This is metadata only: unpublished prose stays behind the separately
@@ -318,6 +333,8 @@ export interface ChapterProjection {
   status: "draft" | "proposed" | "published" | "archived";
   revision: number;
   updatedAt: string;
+  /** Absent on older deployments; fields are omitted when unauthorized. */
+  activity?: ChapterActivity;
 }
 
 /** 202 body of a chapter create/revise/publish/unpublish (contract §3.5). */

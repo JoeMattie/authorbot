@@ -25,6 +25,7 @@
  */
 import { CollabApi, isMaintainer, roleOf, type Me } from "./api.js";
 import { el } from "./dom.js";
+import { getProjectStore, type ProjectStore } from "./project-store.js";
 
 interface Config {
   apiBase: string;
@@ -44,6 +45,7 @@ function parseConfig(host: HTMLElement): Config | null {
 
 export class AuthorbotAccount extends HTMLElement {
   private api!: CollabApi;
+  private store!: ProjectStore;
   private cfg!: Config;
   private started = false;
 
@@ -58,6 +60,7 @@ export class AuthorbotAccount extends HTMLElement {
     }
     this.cfg = cfg;
     this.api = new CollabApi(cfg.apiBase, cfg.project);
+    this.store = getProjectStore(cfg);
     window.addEventListener("resize", this.onResize);
     window.requestAnimationFrame(() => this.revealActiveNavigation());
     void this.start();
@@ -85,14 +88,15 @@ export class AuthorbotAccount extends HTMLElement {
   }
 
   private async start(): Promise<void> {
-    const probe = await this.api.meResult();
-    if (!probe.ok) {
+    await this.store.getState().ensureSession();
+    const state = this.store.getState();
+    if (state.sessionStatus !== "ready") {
       // API unreachable: no chrome at all, rather than controls that fail.
       return;
     }
-    this.render(probe.value);
+    this.render(state.session);
     window.requestAnimationFrame(() => this.revealActiveNavigation());
-    if (probe.value?.scopes.includes("work:read") === true) {
+    if (state.session?.scopes.includes("work:read") === true) {
       await this.syncGlobalWorkCount();
       window.requestAnimationFrame(() => this.revealActiveNavigation());
     }

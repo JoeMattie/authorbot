@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotChapterComposer } from "../site/src/islands/chapter-composer.js";
 import { AuthorbotDraftChapters } from "../site/src/islands/draft-chapters.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
 
 const API = "http://api.test";
 const PROJECT = "hollow-creek-anomaly";
@@ -79,6 +80,7 @@ function mount(): HTMLElement {
 }
 
 beforeEach(() => {
+  resetProjectStoresForTests();
   requests = [];
   document.body.textContent = "";
 });
@@ -92,10 +94,19 @@ describe("maintainer draft list", () => {
   it("shows draft and proposed chapters to a maintainer, newest first", async () => {
     stubFetch(
       maintainerRoutes([
-        chapter({ title: "Published", status: "published" }),
-        chapter({ title: "Older draft", updatedAt: "2026-07-20T00:00:00Z" }),
-        chapter({ title: "Ready for review", status: "proposed", updatedAt: "2026-07-22T00:00:00Z" }),
-        chapter({ title: "Archived", status: "archived" }),
+        chapter({ id: `${CHAPTER_ID}-published`, title: "Published", status: "published" }),
+        chapter({
+          id: `${CHAPTER_ID}-older`,
+          title: "Older draft",
+          updatedAt: "2026-07-20T00:00:00Z",
+        }),
+        chapter({
+          id: `${CHAPTER_ID}-review`,
+          title: "Ready for review",
+          status: "proposed",
+          updatedAt: "2026-07-22T00:00:00Z",
+        }),
+        chapter({ id: `${CHAPTER_ID}-archived`, title: "Archived", status: "archived" }),
       ]),
     );
     const host = mount();
@@ -116,6 +127,7 @@ describe("maintainer draft list", () => {
       { status: 200, body: me("editor") },
       { status: 401, body: { detail: "sign in required" } },
     ]) {
+      resetProjectStoresForTests();
       document.body.textContent = "";
       requests = [];
       stubFetch({ [`${API}/v1/me`]: response });

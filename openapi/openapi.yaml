@@ -429,7 +429,7 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Chapter"
+                      $ref: "#/components/schemas/ChapterSummary"
                   nextCursor:
                     $ref: "#/components/schemas/NextCursor"
         "401":
@@ -3785,6 +3785,44 @@ components:
           description: Valid block ids of this revision (persisted on the chapter projection).
           items:
             $ref: "#/components/schemas/Uuid"
+
+    ChapterSummary:
+      allOf:
+        - $ref: "#/components/schemas/Chapter"
+        - type: object
+          required: [activity]
+          properties:
+            activity:
+              $ref: "#/components/schemas/ChapterActivity"
+
+    ChapterActivity:
+      type: object
+      additionalProperties: false
+      description: >-
+        Open collaboration activity for a chapter. Each count is a
+        non-negative integer. Categories the caller is not authorized to read
+        are omitted rather than reported as zero.
+      properties:
+        openSuggestions:
+          type: integer
+          minimum: 0
+          description: Open suggested edits at any chapter scope.
+        openBlockComments:
+          type: integer
+          minimum: 0
+          description: Open comments anchored to a block or text range.
+        openChapterComments:
+          type: integer
+          minimum: 0
+          description: Open whole-chapter comments.
+        openReplies:
+          type: integer
+          minimum: 0
+          description: Open replies whose readable parent feedback is also open.
+        openWorkItems:
+          type: integer
+          minimum: 0
+          description: Work items in a non-terminal domain lifecycle state.
 
     AnnotationKind:
       type: string

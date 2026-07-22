@@ -184,6 +184,51 @@ describe("openapi.yaml is synced with the router", () => {
       "chapter_replacement",
     ]);
   });
+
+  it("documents capability-filtered chapter activity with the exact optional counts", () => {
+    type ActivitySchema = {
+      type?: string;
+      required?: string[];
+      additionalProperties?: boolean;
+      properties?: Record<string, { type?: string; minimum?: number }>;
+    };
+    const activity = spec.components.schemas["ChapterActivity"] as ActivitySchema | undefined;
+    expect(activity?.type).toBe("object");
+    expect(activity?.additionalProperties).toBe(false);
+    expect(activity?.required).toBeUndefined();
+    expect(Object.keys(activity?.properties ?? {})).toEqual([
+      "openSuggestions",
+      "openBlockComments",
+      "openChapterComments",
+      "openReplies",
+      "openWorkItems",
+    ]);
+    for (const field of Object.values(activity?.properties ?? {})) {
+      expect(field).toEqual(expect.objectContaining({ type: "integer", minimum: 0 }));
+    }
+
+    const chapterList = spec.paths["/v1/projects/{projectId}/chapters"]?.["get"] as
+      | {
+          responses?: {
+            "200"?: {
+              content?: {
+                "application/json"?: {
+                  schema?: {
+                    properties?: {
+                      items?: { items?: { $ref?: string } };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    expect(
+      chapterList?.responses?.["200"]?.content?.["application/json"]?.schema?.properties
+        ?.items?.items?.$ref,
+    ).toBe("#/components/schemas/ChapterSummary");
+  });
 });
 
 /**
