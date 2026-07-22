@@ -9,6 +9,12 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.26
+
+- Removed every em-dash and en-dash from the tool's output, docs, and code. No
+  behaviour change; the wizard, error messages, and generated files now use
+  plain hyphens.
+
 ## 0.1.25
 
 - **The collaborator skill.** `npx skills add JoeMattie/authorbot` installs a
