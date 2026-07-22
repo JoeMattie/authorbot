@@ -22,6 +22,8 @@ const SKILL_DIR = fileURLToPath(
   new URL("../../../skills/authorbot-collaborator/", import.meta.url),
 );
 const SPEC_PATH = fileURLToPath(new URL("../../../openapi/openapi.yaml", import.meta.url));
+const WORKFLOW_PATH = fileURLToPath(new URL("../../../examples/agent-workflow.mjs", import.meta.url));
+const DRAFT_EXAMPLE_PATH = `${SKILL_DIR}examples/submit-chapter-draft.py`;
 
 interface Spec {
   paths: Record<string, unknown>;
@@ -85,6 +87,29 @@ describe("the collaborator skill matches the API", () => {
     expect(unknown, `scope-shaped tokens not in API_SCOPES: ${unknown.join(", ")}`).toEqual([]);
     // And the skill must actually mention some scopes, or this asserts nothing.
     expect(scopeShaped.size).toBeGreaterThan(0);
+  });
+
+  it("documents the direct chapter-draft schema without requiring endpoint probing", () => {
+    const skill = readFileSync(`${SKILL_DIR}SKILL.md`, "utf8");
+    expect(skill).toContain("POST /v1/projects/{project}/chapter-submissions");
+    expect(skill).toContain('"title": "Required chapter title"');
+    expect(skill).toContain('"body": "Required Markdown prose"');
+    expect(skill).toContain('"slug": "optional-url-slug"');
+    expect(skill).toContain('"summary": "Optional chapter summary"');
+    expect(skill).toContain("Saving creates a draft only");
+  });
+
+  it("pins a descriptive user agent in the guidance and both reference clients", () => {
+    expect(allText).toContain("Python-urllib/...");
+    expect(allText).toContain("authorbot-agent/1.0");
+
+    const workflow = readFileSync(WORKFLOW_PATH, "utf8");
+    expect(workflow).toContain('"user-agent": "authorbot-agent/1.0"');
+
+    const python = readFileSync(DRAFT_EXAMPLE_PATH, "utf8");
+    expect(python).toContain('USER_AGENT = "authorbot-agent/1.0"');
+    expect(python).toContain('"title": title, "body": body');
+    expect(python).toContain('/chapter-submissions"');
   });
 });
 

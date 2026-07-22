@@ -23,6 +23,8 @@ export interface SiteChapter {
   publishedAt?: string;
   /** Actor refs from frontmatter `authors` (e.g. `github:octocat`). */
   authors: string[];
+  /** Ready-to-render names, using an agent token name when one was captured. */
+  authorLabels: string[];
   /**
    * Route path relative to the site root, no leading or trailing slash
    * (e.g. `chapters/baseline`), derived from `publication.chapter_url`.

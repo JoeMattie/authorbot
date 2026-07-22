@@ -18,6 +18,12 @@ describe("chapterFrontmatterSchema", () => {
     expectValid(chapterFrontmatterSchema, draft);
   });
 
+  it("accepts an agent token display name beside its durable actor ref", () => {
+    const chapter = clone(validChapter);
+    chapter.authors = [{ actor: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f", name: "drafter" }];
+    expectValid(chapterFrontmatterSchema, chapter);
+  });
+
   it("rejects an unknown status", () => {
     const bad = clone(validChapter);
     bad.status = "in_review";

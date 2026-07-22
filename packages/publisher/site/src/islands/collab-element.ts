@@ -178,6 +178,8 @@ export class AuthorbotCollab extends HTMLElement {
   private staleRevision = false;
   /** Draft body of the open reply form (survives background re-renders). */
   private replyDraft = "";
+  /** Submission error shown only when a failed reply is restored. */
+  private replyError: string | null = null;
   private selectionTimer: number | undefined;
   private resizeTimer: number | undefined;
 
@@ -967,6 +969,19 @@ export class AuthorbotCollab extends HTMLElement {
       return;
     }
     const draft = this.composer.draft;
+    const returnFocus = this.composerReturnFocus;
+    // Submission owns its own immutable draft from here. Clear and remove the
+    // visible form before waiting on the network so a normal POST never leaves
+    // a disabled composer hanging on screen. A rejected request restores this
+    // captured draft below, so immediate feedback never costs the user's text.
+    this.composer = CLOSED;
+    this.composerReturnFocus = null;
+    this.renderComposer();
+    const focusTarget =
+      returnFocus !== null && returnFocus.isConnected && returnFocus.closest("[hidden]") === null
+        ? returnFocus
+        : this.blockAffordance(draft.blockId);
+    focusTarget?.focus();
     const result = await this.api.createAnnotation(cfg.chapterId, {
       kind: draft.kind,
       scope: draft.scope,
@@ -981,18 +996,18 @@ export class AuthorbotCollab extends HTMLElement {
         // Stale build-time revision: every retry with this page is guaranteed
         // to fail, so disable Post and say why in human terms.
         this.staleRevision = true;
-        this.dispatchComposer({ type: "rejected", message: STALE_PAGE_HINT });
+        this.restoreComposerAfterFailure(draft, returnFocus, STALE_PAGE_HINT);
         return;
       }
-      this.dispatchComposer({
-        type: "rejected",
-        message: this.friendlyWriteError(result.status, result.message),
-      });
+      this.restoreComposerAfterFailure(
+        draft,
+        returnFocus,
+        this.friendlyWriteError(result.status, result.message),
+      );
       return;
     }
     const annotationId = result.value.annotationId ?? "";
     const operationId = result.value.operationId;
-    this.dispatchComposer({ type: "accepted", operationId, annotationId });
     // Optimistic card, honest about its state (§2.5).
     this.annotations.push({
       id: annotationId,
@@ -1012,12 +1027,24 @@ export class AuthorbotCollab extends HTMLElement {
     });
     this.markAnnotationSyncing(annotationId, operationId);
     this.announce("Annotation submitted; syncing.");
-    this.composer = CLOSED;
     this.renderAll();
     const card = this.cardEls.get(annotationId);
     if (card !== undefined) {
       card.focus();
     }
+  }
+
+  private restoreComposerAfterFailure(
+    draft: ComposerDraft,
+    returnFocus: HTMLElement | null,
+    message: string,
+  ): void {
+    let restored = composerReduce(CLOSED, { type: "open", draft });
+    restored = composerReduce(restored, { type: "submit" });
+    this.composer = composerReduce(restored, { type: "rejected", message });
+    this.composerReturnFocus = returnFocus;
+    this.renderComposer();
+    this.composerEl?.querySelector("textarea")?.focus();
   }
 
   private renderComposer(): void {
@@ -1439,6 +1466,7 @@ export class AuthorbotCollab extends HTMLElement {
         this.openReplyFor = this.openReplyFor === annotation.id ? null : annotation.id;
         this.replyParent = null;
         this.replyDraft = ""; // a fresh form starts empty
+        this.replyError = null;
         this.renderAll();
         this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
       });
@@ -1516,6 +1544,7 @@ export class AuthorbotCollab extends HTMLElement {
           this.openReplyFor = annotation.id;
           this.replyParent = reply.id;
           this.replyDraft = "";
+          this.replyError = null;
           this.renderAll();
           this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
         });
@@ -1539,11 +1568,18 @@ export class AuthorbotCollab extends HTMLElement {
     const textarea = el("textarea", "ab-textarea");
     textarea.rows = 3;
     textarea.required = true;
+    const errorLine = el("p", "ab-error");
+    errorLine.setAttribute("role", "alert");
+    errorLine.textContent = this.replyError ?? "";
+    errorLine.hidden = this.replyError === null;
     // The draft survives re-renders: an unrelated background sync settling
     // must never wipe a half-typed reply (§4 / data-loss).
     textarea.value = this.replyDraft;
     textarea.addEventListener("input", () => {
       this.replyDraft = textarea.value;
+      this.replyError = null;
+      errorLine.textContent = "";
+      errorLine.hidden = true;
     });
     label.append(textarea);
     const actions = el("div", "ab-actions");
@@ -1555,13 +1591,11 @@ export class AuthorbotCollab extends HTMLElement {
       this.openReplyFor = null;
       this.replyParent = null;
       this.replyDraft = "";
+      this.replyError = null;
       this.renderAll();
       this.cardEls.get(annotation.id)?.focus();
     });
     actions.append(post, cancel);
-    const errorLine = el("p", "ab-error");
-    errorLine.setAttribute("role", "alert");
-    errorLine.hidden = true;
     form.append(label, errorLine, actions);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1572,13 +1606,24 @@ export class AuthorbotCollab extends HTMLElement {
           errorLine.hidden = false;
           return;
         }
-        post.disabled = true;
         const parent = this.replyParent ?? undefined;
+        // As with the annotation composer, close and clear before awaiting the
+        // request. Keep local copies so a rejected POST can restore the exact
+        // reply and thread target.
+        this.openReplyFor = null;
+        this.replyParent = null;
+        this.replyDraft = "";
+        this.replyError = null;
+        this.renderAll();
+        this.cardEls.get(annotation.id)?.focus();
         const result = await this.api.createReply(annotation.id, body, parent);
         if (!result.ok) {
-          post.disabled = false;
-          errorLine.textContent = this.friendlyWriteError(result.status, result.message);
-          errorLine.hidden = false;
+          this.openReplyFor = annotation.id;
+          this.replyParent = parent ?? null;
+          this.replyDraft = body;
+          this.replyError = this.friendlyWriteError(result.status, result.message);
+          this.renderAll();
+          this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
           return;
         }
         const replyId = result.value.replyId ?? "";
@@ -1586,7 +1631,7 @@ export class AuthorbotCollab extends HTMLElement {
         replies.push({
           id: replyId,
           annotationId: annotation.id,
-          parentReplyId: this.replyParent,
+          parentReplyId: parent ?? null,
           authorActorId: this.me?.actor.id ?? "",
           body,
           status: "pending_git",
@@ -1594,9 +1639,6 @@ export class AuthorbotCollab extends HTMLElement {
         });
         this.repliesByAnnotation.set(annotation.id, replies);
         this.markReplySyncing(replyId, result.value.operationId);
-        this.openReplyFor = null;
-        this.replyParent = null;
-        this.replyDraft = "";
         this.announce("Reply submitted; syncing.");
         this.renderAll();
         this.cardEls.get(annotation.id)?.focus();

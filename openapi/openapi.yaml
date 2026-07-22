@@ -3729,7 +3729,7 @@ components:
       type: object
       description: Chapter projection (design §9.1), rebuilt from the book repository.
       required:
-        [id, projectId, path, slug, title, status, revision, contentHash, updatedAt]
+        [id, projectId, path, slug, title, order, status, revision, contentHash, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -3742,6 +3742,11 @@ components:
           $ref: "#/components/schemas/Slug"
         title:
           type: string
+        order:
+          description: Chapter reading order from frontmatter; null only while a migrated projection awaits refresh.
+          oneOf:
+            - type: number
+            - type: "null"
         status:
           $ref: "#/components/schemas/ChapterStatus"
         revision:

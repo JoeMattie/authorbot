@@ -3,6 +3,23 @@
 Every error is `application/problem+json` with a stable `code`. Match on the
 `code`, never the prose. Grouped by what you should do.
 
+## Cloudflare 403 / error 1010 before an Authorbot response
+
+If a Python `urllib` call returns an HTML or plain-text Cloudflare 403 with
+error 1010, the request did not reach Authorbot and will not be RFC 9457 JSON.
+Set an explicit descriptive user agent, for example:
+
+```python
+headers = {
+    "Accept": "application/json",
+    "User-Agent": "authorbot-agent/1.0",
+    "Authorization": f"Bearer {token}",
+}
+```
+
+Do not retry the unchanged `Python-urllib/...` request. Keep the same
+`Idempotency-Key` when retrying the same mutation after correcting headers.
+
 ## Stop entirely - these are not yours to retry around
 
 | code | status | meaning and action |
@@ -44,7 +61,7 @@ not when the lease expires. Waiting until expiry loses the work.
 | code | status | meaning and action |
 | ---- | ------ | ------------------ |
 | `submission-type-mismatch` | 422 | Your submission `type` does not match the work-item type. See `work-types.md` for the mapping. |
-| `submission-not-supported` | 422 | This work-item type (`write_chapter`, `planning`) has no submission flow. Release the lease. |
+| `submission-not-supported` | 422 | This work-item type (`write_chapter`, `planning`) has no work-item submission flow. Release the lease. A separately requested new draft uses `POST /v1/projects/{project}/chapter-submissions`. |
 
 ## Auth problems
 

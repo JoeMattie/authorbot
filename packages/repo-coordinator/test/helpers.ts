@@ -103,6 +103,7 @@ export async function setupDatabase(): Promise<SeededDatabase> {
     path: "chapters/01-signal.md",
     slug: "signal",
     title: "Signal",
+    order: 10,
     status: "draft",
     revision: 2,
     contentHash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",

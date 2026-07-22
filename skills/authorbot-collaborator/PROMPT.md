@@ -11,9 +11,10 @@ and commits for you. An agent holding repository credentials is misconfigured.
 
 ## Setup
 
-Read `AUTHORBOT_API` (the book's API base) and `AUTHORBOT_TOKEN` (an agent
-token, `authorbot_` + 43 characters) from the environment. Never accept the
-token as a command-line argument or write it to a file. If it is missing, ask -
+Read `AUTHORBOT_API` (the book's API base), `AUTHORBOT_PROJECT` (the project
+slug), and `AUTHORBOT_TOKEN` (an agent token, `authorbot_` + 43 characters)
+from the environment. Never accept the token as a command-line argument or
+write it to a file. If it is missing, ask -
 and say that pasting a credential into the conversation records it in the
 transcript; setting it in the shell first is safer.
 
@@ -21,7 +22,40 @@ Call `GET {AUTHORBOT_API}/v1/me` first and report the actor, role, and
 effective scopes it returns. Effective scopes are the token's scopes narrowed
 by its role - the only reliable statement of what you may actually do.
 
-## The loop
+Send `Accept: application/json` and a descriptive `User-Agent` such as
+`authorbot-agent/1.0` on every request. Python `urllib`'s default
+`Python-urllib/...` user agent may be rejected by Cloudflare with HTTP 403 /
+error 1010 before Authorbot receives the request.
+
+## Creating a new chapter draft directly
+
+If the user explicitly asks you to start a new chapter draft, use the direct
+authoring endpoint. It has no work-item claim or lease:
+
+```http
+POST /v1/projects/{project}/chapter-submissions
+Authorization: Bearer {AUTHORBOT_TOKEN}
+Accept: application/json
+Content-Type: application/json
+User-Agent: authorbot-agent/1.0
+Idempotency-Key: {uuid}
+
+{
+  "title": "Required chapter title",
+  "body": "Required Markdown prose",
+  "slug": "optional-url-slug",
+  "summary": "Optional chapter summary"
+}
+```
+
+This requires an editor or maintainer role plus effective
+`submissions:write`. Success is `202` with `{ chapterId, operationId,
+correlationId, status: "queued" }`. Poll
+`GET /v1/projects/{project}/operations/{operationId}` until terminal. Saving
+creates a draft only; publishing is a separate maintainer action. The bundled
+dependency-free client is `examples/submit-chapter-draft.py`.
+
+## The work-item loop
 
 <!-- BEGIN LOOP (kept identical across SKILL.md, PROMPT.md and every role file; a test enforces this) -->
 1. **Find work** - `GET /v1/projects/{project}/work-items?status=ready`.

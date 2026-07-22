@@ -27,6 +27,7 @@ const chapter: SiteChapter = {
   status: "published",
   revision: 3,
   authors: ["github:someone"],
+  authorLabels: ["someone"],
   path: "chapters/intro",
   href: "/chapters/intro/",
   html: "<p>x</p>",

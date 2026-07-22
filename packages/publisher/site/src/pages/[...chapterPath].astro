@@ -34,10 +34,6 @@ const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` 
 const chapterCharacters = site.characters.filter((character) =>
   character.chapters.some((entry) => entry.href === chapter.href),
 );
-const actorLabel = (actor: string) => {
-  const [kind, name = actor] = actor.split(":", 2);
-  return `${name}${kind === "agent" ? " (agent)" : ""}`;
-};
 ---
 
 <Base
@@ -74,7 +70,7 @@ const actorLabel = (actor: string) => {
             {(site.book.showAttribution || chapterCharacters.length > 0) && (
               <div class="chapter-credit-row">
                 {site.book.showAttribution && chapter.authors.length > 0 && (
-                  <span class="chapter-byline">by {chapter.authors.map(actorLabel).join(" and ")}</span>
+                  <span class="chapter-byline">by {chapter.authorLabels.join(" and ")}</span>
                 )}
                 {chapterCharacters.map((character) => (
                   <a class="character-chip" href={character.href}>{character.name}</a>
@@ -88,7 +84,7 @@ const actorLabel = (actor: string) => {
               <footer class="chapter-footer">
                 {site.book.showRevision && <span>Revision {chapter.revision}</span>}
                 {site.book.showAttribution && chapter.authors.length > 0 && (
-                  <span>By {chapter.authors.map(actorLabel).join(", ")}</span>
+                  <span>By {chapter.authorLabels.join(", ")}</span>
                 )}
               </footer>
             )

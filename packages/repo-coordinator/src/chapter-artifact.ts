@@ -9,9 +9,9 @@
  *
  * - `revision` is bumped to the given value (must be strictly greater than
  *   the stored one - an apply may never move a revision backwards);
- * - `authors` gains `{ actor }` for the applying actor when not already
+ * - `authors` gains `{ actor, name? }` for the applying actor when not already
  *   present (contract §6 "stable order": existing entries keep their order,
- *   a new author is appended last);
+ *   a new author is appended last); agent names are refreshed in place;
  * - every other field, the field order, YAML comments, and the entire body
  *   are preserved byte-for-byte (the frontmatter is edited via the `yaml`
  *   Document API, not re-serialized from a plain object).
@@ -21,7 +21,7 @@
  * chapter can never reach the book repository. Deterministic: the same input
  * always produces the same bytes.
  */
-import { isSeq, parseDocument } from "yaml";
+import { isMap, isSeq, parseDocument } from "yaml";
 import { chapterFrontmatterSchema, type ChapterFrontmatter } from "@authorbot/schemas";
 
 export interface ChapterFrontmatterUpdate {
@@ -29,6 +29,8 @@ export interface ChapterFrontmatterUpdate {
   revision: number;
   /** Actor reference (`github:octocat`) to credit in `authors`. */
   author: string;
+  /** Agent-token display name stored beside the durable actor reference. */
+  authorName?: string;
 }
 
 export interface UpdatedChapterFile {
@@ -85,8 +87,19 @@ export function applyChapterFrontmatterUpdate(
   const knownAuthors = (authors.toJSON() as unknown[]).map((item) =>
     item !== null && typeof item === "object" ? (item as { actor?: unknown }).actor : undefined,
   );
-  if (!knownAuthors.includes(update.author)) {
-    authors.add(doc.createNode({ actor: update.author }));
+  const authorIndex = knownAuthors.indexOf(update.author);
+  if (authorIndex === -1) {
+    authors.add(
+      doc.createNode({
+        actor: update.author,
+        ...(update.authorName === undefined ? {} : { name: update.authorName }),
+      }),
+    );
+  } else if (update.authorName !== undefined) {
+    const author = authors.items[authorIndex];
+    if (isMap(author)) {
+      author.set("name", update.authorName);
+    }
   }
 
   const frontmatter = chapterFrontmatterSchema.parse(doc.toJS());

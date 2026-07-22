@@ -285,6 +285,8 @@ export interface ChapterComposeContext {
   payload: ChapterWritePayload;
   /** Artifact actor reference (`github:octocat`) of the writing actor. */
   actorRef: string;
+  /** Human-readable token name for an agent actor; omitted for humans. */
+  actorName?: string;
   /** Git-operation attempt this invocation belongs to. */
   attempt: number;
 }
@@ -303,6 +305,8 @@ export interface ChapterComposeOutcome {
   content: string;
   slug: string;
   title: string;
+  /** Chapter frontmatter order persisted into the projection. */
+  order: number;
   status: "draft" | "proposed" | "published" | "archived";
   /** Revision the composed file carries. */
   revision: number;
@@ -1020,7 +1024,8 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       throw new Error(`submission ${submission.id} does not belong to work item ${workItem.id}`);
     }
     const annotation = await mustAnnotation(workItem.sourceAnnotationId);
-    const submitterRef = await actorRef(submission.actorId);
+    const submitter = await artifactActor(submission.actorId);
+    const submitterRef = submitter.ref;
 
     let resolved = readResolved(row);
     if (resolved === null || resolved.attempt !== op.attempts) {
@@ -1046,7 +1051,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       resolved = {
         attempt: op.attempts,
         ...(resolvedHead === null ? {} : { resolvedHead }),
-        outcome: await resolveOutcome(outcome, workItem, submitterRef),
+        outcome: await resolveOutcome(outcome, workItem, submitterRef, submitter.name),
       };
       await persistResolved(row, resolved);
     }
@@ -1138,7 +1143,8 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     branch: string,
   ): Promise<CommitPlan> {
     const payload = parseChapterWritePayload(row);
-    const writerRef = await actorRef(payload.actorId);
+    const writerActor = await artifactActor(payload.actorId);
+    const writerRef = writerActor.ref;
 
     let composed = readComposed(row);
     if (composed === null || composed.attempt !== op.attempts) {
@@ -1153,6 +1159,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         projectId: row.projectId,
         payload,
         actorRef: writerRef,
+        ...(writerActor.name === undefined ? {} : { actorName: writerActor.name }),
         attempt: op.attempts,
       });
       if (outcome.content.length === 0) {
@@ -1212,6 +1219,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         path: outcome.chapterPath,
         slug: outcome.slug,
         title: outcome.title,
+        order: outcome.order,
         status: outcome.status,
         revision: outcome.revision,
         contentHash: outcome.contentHash,
@@ -1264,11 +1272,13 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     outcome: SubmissionApplyOutcome,
     workItem: WorkItemRecord,
     submitterRef: string,
+    submitterName?: string,
   ): Promise<ResolvedApply["outcome"]> {
     if (outcome.result === "applied") {
       const updated = applyChapterFrontmatterUpdate(outcome.patchedSource, {
         revision: outcome.newRevision,
         author: submitterRef,
+        ...(submitterName === undefined ? {} : { authorName: submitterName }),
       });
       if (updated.frontmatter.id !== workItem.chapterId) {
         throw new Error(
@@ -1604,12 +1614,20 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
 
   /** Resolve an actor id to its artifact actor reference (`github:octocat`). */
   async function actorRef(actorId: string): Promise<string> {
+    return (await artifactActor(actorId)).ref;
+  }
+
+  /** Resolve durable attribution plus an optional agent-token display name. */
+  async function artifactActor(actorId: string): Promise<{ ref: string; name?: string }> {
     const actor = await repos.actors.getById(actorId);
     if (!actor) throw new Error(`actor ${actorId} not found`);
     if (actor.externalIdentity === null) {
       throw new Error(`actor ${actorId} has no external identity for artifact attribution`);
     }
-    return actor.externalIdentity;
+    return {
+      ref: actor.externalIdentity,
+      ...(actor.type === "agent" ? { name: actor.displayName } : {}),
+    };
   }
 
   return { drain };

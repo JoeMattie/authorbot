@@ -7,7 +7,7 @@ description: >-
   token) and asks you to draft, revise, critique, or check continuity on it.
 license: MIT
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   homepage: https://github.com/JoeMattie/authorbot
 ---
 
@@ -33,9 +33,10 @@ merge strategy, stop - the server does it, and your version will be wrong.
 
 ## Setup
 
-Read two values from the environment:
+Read three values from the environment:
 
 - `AUTHORBOT_API` - the book's API base, e.g. `https://my-book.example.com`
+- `AUTHORBOT_PROJECT` - the project slug used in `/v1/projects/{project}` paths
 - `AUTHORBOT_TOKEN` - an agent token, `authorbot_` followed by 43 characters
 
 **Never** accept the token as a command-line argument (it shows up in process
@@ -55,7 +56,45 @@ token's scopes narrowed by the role - not the scopes it was minted with - so
 this is the only reliable statement of what you may actually do. An agent that
 does not know its own permissions fails confusingly later.
 
-## The loop
+Send `Accept: application/json` and a descriptive `User-Agent` such as
+`authorbot-agent/1.0` on every request. Do not use Python `urllib`'s default
+`Python-urllib/...` user agent: Cloudflare may reject it with HTTP 403 / error
+1010 before the request reaches Authorbot. The bundled Python example below
+sets the header explicitly.
+
+## Creating a new chapter draft directly
+
+When the user explicitly asks you to start a new chapter draft, do not probe
+the work queue for a schema. This direct authoring flow has no claim or lease:
+
+```http
+POST /v1/projects/{project}/chapter-submissions
+Authorization: Bearer {AUTHORBOT_TOKEN}
+Accept: application/json
+Content-Type: application/json
+User-Agent: authorbot-agent/1.0
+Idempotency-Key: {uuid}
+
+{
+  "title": "Required chapter title",
+  "body": "Required Markdown prose",
+  "slug": "optional-url-slug",
+  "summary": "Optional chapter summary"
+}
+```
+
+This requires an editor or maintainer role and effective
+`submissions:write`. Success is `202` with `{ chapterId, operationId,
+correlationId, status: "queued" }`. Poll
+`GET /v1/projects/{project}/operations/{operationId}` until it is terminal.
+Saving creates a draft only; publishing is a separate maintainer action.
+
+Use `examples/submit-chapter-draft.py` for a dependency-free Python client.
+It reads the three environment variables, reads the body from standard input,
+sets a Cloudflare-safe user agent, submits the exact schema above, and polls
+the resulting operation.
+
+## The work-item loop
 
 <!-- BEGIN LOOP (kept identical across SKILL.md, PROMPT.md and every role file; a test enforces this) -->
 1. **Find work** - `GET /v1/projects/{project}/work-items?status=ready`.
@@ -86,7 +125,7 @@ is in [`references/work-types.md`](references/work-types.md). What each error
 means is in [`references/troubleshooting.md`](references/troubleshooting.md).
 
 A complete, dependency-free reference implementation of this loop is
-`examples/agent-workflow.mjs` in the Authorbot repository. Read it before
+`examples/agent-workflow.mjs` at the Authorbot repository root. Read it before
 writing your own client; do not reimplement what it already gets right.
 
 ## Doing the work well
