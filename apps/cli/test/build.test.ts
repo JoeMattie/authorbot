@@ -119,9 +119,15 @@ describe("authorbot build (built dist)", () => {
       expect(page).not.toContain("data-dev-login");
       expect(existsSync(path.join(out, "_astro", "authorbot-collab.js"))).toBe(true);
       expect(existsSync(path.join(out, "_astro", "authorbot-collab.css"))).toBe(true);
-      // Story pages stay script-free.
+      // API-enabled Story pages carry only the lightweight global account
+      // island. The API-free build remains the script-free publishing path.
       const story = await readFile(path.join(out, "story", "index.html"), "utf8");
-      expect(story).not.toContain("<script");
+      expect(story).toContain("<authorbot-account");
+      expect(story).toContain(
+        '<script type="module" src="/_astro/authorbot-account.js">',
+      );
+      expect(story).not.toContain("authorbot-collab.js");
+      expect(existsSync(path.join(out, "_astro", "authorbot-account.js"))).toBe(true);
     },
   );
 
