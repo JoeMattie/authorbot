@@ -35,7 +35,7 @@ order listed here.
    diff-augmented time-machine view. Restoring an old version creates a
    reviewable proposal rather than changing published prose directly.
 
-Slices 3-6 may add schema or migration work, but each slice must upgrade an
+Slices 3-7 may add schema or migration work, but each slice must upgrade an
 existing book safely and remain deployable on its own.
 
 ## 2. Slice 1 - one-click promotion and note navigation
@@ -59,8 +59,9 @@ existing book safely and remain deployable on its own.
 - The audit trail records actor, action, target, decision, work item, time, and
   correlation id. A reason is not fabricated. Legacy callers that send a
   reason retain it in the decision artifact.
-- Suggestion rejection and work cancellation remain reason-required. Comments
-  do not gain reject or vote controls.
+- Suggestion rejection and work cancellation remain reason-required. Slice 1
+  does not add comment reject or vote controls; slice 3 adds explicitly
+  permissioned, kind-scoped comment voting without changing the promotion rule.
 - A promoted comment's work artifact says to address the note. It must not call
   the comment a suggestion or present its body as already-final prose.
 
@@ -142,8 +143,8 @@ descriptive accessible names.
   request per chapter. Counts respect the caller's read permissions and never
   reveal the existence of feedback or Work the caller cannot read.
 - Pending-Git, withdrawn, rejected, resolved, superseded, and orphaned feedback
-  is excluded from the open counts. A suggestion promoted to Work leaves the
-  open-suggestion count and enters the non-terminal-Work count without being
+  is excluded from the open counts. Feedback promoted to Work leaves its open
+  feedback category and enters the non-terminal-Work count without being
   counted in both categories.
 - Each visual badge has an accessible category and count. The chapter row also
   exposes one concise screen-reader summary, such as “2 open suggestions, 1
