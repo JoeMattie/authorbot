@@ -683,5 +683,8 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
   if (book.license !== undefined) {
     model.book.license = book.license;
   }
+  if (book.planning?.method !== undefined) {
+    model.book.planningMethod = book.planning.method;
+  }
   return { model, warnings };
 }

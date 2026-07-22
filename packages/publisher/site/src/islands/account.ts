@@ -100,11 +100,23 @@ export class AuthorbotAccount extends HTMLElement {
 
   /** Keep the top-bar Work badge useful on every page, not only /work/. */
   private async syncGlobalWorkCount(): Promise<void> {
-    const result = await this.api.workItems();
-    if (!result.ok) {
-      return;
-    }
-    const count = result.value.items.length;
+    let count = 0;
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    do {
+      const result = await this.api.workItems(cursor);
+      if (!result.ok) {
+        return;
+      }
+      count += result.value.items.length;
+      const next = result.value.nextCursor;
+      if (next === null || seen.has(next)) {
+        cursor = undefined;
+        break;
+      }
+      seen.add(next);
+      cursor = next;
+    } while (cursor !== undefined);
     for (const badge of document.querySelectorAll<HTMLElement>("[data-work-count]")) {
       badge.textContent = String(count);
       badge.hidden = count === 0;
@@ -141,13 +153,11 @@ export class AuthorbotAccount extends HTMLElement {
     identity.append(avatar, identityCopy);
     strip.append(identity);
 
-    // Only the pages this viewer can actually use. Settings is maintainer-only
-    // (contract §3.6); the work queue is readable by any member.
+    // Settings remains an account action because it is maintainer-only. Work
+    // now lives in the primary navigation, so repeating it here would give
+    // every signed-in desktop user two links to the same page.
     if (isMaintainer(me)) {
       strip.append(this.link(`${this.cfg.base}settings/`, "Settings"));
-    }
-    if (role !== null) {
-      strip.append(this.link(`${this.cfg.base}work/`, "Work"));
     }
 
     const signOut = el("button", "ab-account-signout", "Sign out");

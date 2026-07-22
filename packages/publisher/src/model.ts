@@ -128,6 +128,8 @@ export interface SiteBook {
   /** `lang` attribute value, from `book.yml` `language`. */
   language: string;
   license?: string;
+  /** Author-selected planning method, when `book.yml` names one. */
+  planningMethod?: string;
   /** `publication.show_revision` (default false). */
   showRevision: boolean;
   /** `publication.show_attribution` (default false). */

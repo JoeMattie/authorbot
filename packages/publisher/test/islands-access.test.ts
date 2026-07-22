@@ -819,6 +819,13 @@ describe("moderating", () => {
     expect(calls.some((call) => call.url.includes("/moderation/queue"))).toBe(false);
   });
 
+  it("keeps a semantic legend on the annotation policy fieldset", async () => {
+    stubFetch(readRoutes());
+    const host = mount();
+    const legend = await until(() => host.querySelector<HTMLLegendElement>(".ab-policy-choices > legend"));
+    expect(legend.textContent).toBe("Annotation policy");
+  });
+
   it("shows the comment, its target passage and the author's history", async () => {
     stubFetch(gated());
     const host = mount();

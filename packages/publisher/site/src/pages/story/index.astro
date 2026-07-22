@@ -7,7 +7,9 @@ import { site } from "virtual:authorbot-site";
 <Base title={`Story outline · ${site.book.title}`} activeNav="outline">
   <div class="story-page story-outline-page">
     <header class="story-page-header">
-      <p class="story-eyebrow">Story outline · snowflake</p>
+      <p class="story-eyebrow">
+        Story outline{site.book.planningMethod ? ` · ${site.book.planningMethod}` : ""}
+      </p>
       <h1>How the book is built</h1>
       <p class="story-intro">
         Premise to parts to chapters to scenes. Each scene carries its goal, the conflict

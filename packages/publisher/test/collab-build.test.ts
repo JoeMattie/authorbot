@@ -319,6 +319,8 @@ describe("collab-enabled build", () => {
     // Progressive-enhancement fallback text lives inside the mount.
     expect(page).toContain("The work queue loads here once JavaScript is enabled.");
     expect(page).toContain("What needs doing");
+    expect(page).toContain("A valid submission commits immediately");
+    expect(page).not.toContain("until it passes review");
     expect(page).toContain("ab-work-icon-pencil");
     expect(page).not.toMatch(/<[^>]+style=/);
   });

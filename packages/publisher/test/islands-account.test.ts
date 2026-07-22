@@ -52,6 +52,46 @@ describe("account identity", () => {
     expect(badge.hidden).toBe(false);
     expect(account.querySelector(".ab-account-role")?.textContent).toBe("maintainer");
     expect(account.querySelector(".ab-account-avatar")?.textContent).toBe("JO");
+    expect(
+      [...account.querySelectorAll<HTMLAnchorElement>(".ab-account-link")].map(
+        (link) => link.textContent,
+      ),
+    ).toEqual(["Settings"]);
+  });
+
+  it("counts every page of ready work for the global badge", async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({ id: `work-${index}` }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return response({
+            actor: { id: "actor-3", displayName: "Editor", externalIdentity: "github:editor" },
+            scopes: ["work:read"],
+            memberships: [{ role: "editor" }],
+          });
+        }
+        if (url.includes("cursor=work-49")) {
+          return response({ items: [{ id: "work-50" }, { id: "work-51" }], nextCursor: null });
+        }
+        if (url.includes("/work-items?status=ready")) {
+          return response({ items: firstPage, nextCursor: "work-49" });
+        }
+        return response({ detail: "not found" }, 404);
+      }),
+    );
+    const badge = document.createElement("span");
+    badge.dataset.workCount = "";
+    badge.hidden = true;
+    const account = document.createElement("authorbot-account") as AuthorbotAccount;
+    account.dataset.apiBase = "http://api.test";
+    account.dataset.project = "hollow-creek-anomaly";
+    account.dataset.base = "/";
+    document.body.append(badge, account);
+
+    await expect.poll(() => badge.textContent).toBe("52");
+    expect(badge.hidden).toBe(false);
   });
 
   it("does not probe the work queue without work read access", async () => {

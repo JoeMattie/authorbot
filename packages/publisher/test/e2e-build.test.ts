@@ -253,6 +253,7 @@ describe("buildSite on examples/book-repo", () => {
   it("renders the redesigned story views from repository planning data", async () => {
     const outline = await readFile(path.join(outDefault, "story/index.html"), "utf8");
     expect(outline).toContain("How the book is built");
+    expect(outline).toContain("Story outline · snowflake");
     expect(outline).toContain("story-outline-node-scene");
     expect(outline).toContain("Establish the drift as real, small, and periodic.");
     expect(outline).toContain("Every plausible explanation implicates the instrument");

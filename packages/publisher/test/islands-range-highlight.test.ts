@@ -26,6 +26,32 @@ describe("persisted range highlights", () => {
     expect(range?.toString()).toBe("emphasized wor");
   });
 
+  it("preserves NFC mapping when a DOM grapheme uses combining marks", () => {
+    const block = document.createElement("p");
+    block.textContent = "Cafe\u0301 noir";
+    document.body.append(block);
+
+    const range = rangeForSelector(block, {
+      textPosition: { start: 0, end: 4 },
+      textQuote: { exact: "Café" },
+    });
+
+    expect(range?.toString().normalize("NFC")).toBe("Café");
+  });
+
+  it("resolves a selector at the end of a long block without rescanning per character", () => {
+    const block = document.createElement("p");
+    block.textContent = `${"x".repeat(20_000)} target`;
+    document.body.append(block);
+
+    const range = rangeForSelector(block, {
+      textPosition: { start: 20_001, end: 20_007 },
+      textQuote: { exact: "target" },
+    });
+
+    expect(range?.toString()).toBe("target");
+  });
+
   it("fails closed when the persisted quote no longer matches", () => {
     const block = document.createElement("p");
     block.textContent = "The live chapter changed.";

@@ -358,7 +358,7 @@ export class AuthorbotAccess extends HTMLElement {
     section.append(el("p", "ab-access-note ab-policy-anonymous", ANONYMOUS_NOTE));
 
     const group = el("fieldset", "ab-policy-choices");
-    group.append(srOnly("Annotation policy"));
+    group.append(el("legend", "ab-sr", "Annotation policy"));
 
     let chosen: AnnotationPolicy = current;
     const apply = el("button", "ab-btn ab-primary ab-policy-apply", "Change the policy");
