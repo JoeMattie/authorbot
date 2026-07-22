@@ -49,6 +49,7 @@ import {
   CHAPTER_TRAILER,
   isGitWriteError,
   OPERATION_TRAILER,
+  REVISION_PROPOSAL_TRAILER,
   WORK_ITEM_TRAILER,
   type BookRepoWriter,
   type CommitFile,
@@ -64,6 +65,7 @@ export const OUTBOX_KINDS = [
   "work_item.update",
   "submission.apply",
   "chapter.write",
+  "repository_document.write",
   "book_config.update",
 ] as const;
 export type OutboxKind = (typeof OUTBOX_KINDS)[number];
@@ -281,6 +283,11 @@ export interface ChapterWritePayload {
   revisionProposalId?: string;
   /** Composer-defined author intent (title, body, baseRevision, …). */
   intent: Record<string, unknown>;
+}
+
+/** Apply one reviewed Outline, Timeline, or Character document proposal. */
+export interface RepositoryDocumentWritePayload {
+  revisionProposalId: string;
 }
 
 /** Everything the composer needs to render the chapter at branch head. */
@@ -682,6 +689,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     }
     statements.push(...(await releaseFailedApplyStatements(row, ts, error)));
     statements.push(...(await releaseFailedChapterWriteStatements(row, ts)));
+    statements.push(...(await releaseFailedRepositoryDocumentStatements(row, ts, error)));
     statements.push(...(await releaseFailedBookConfigStatements(row, ts)));
     statements.push(repos.outbox.markFailedStatement(row.id, ts));
     await db.batch(statements);
@@ -840,6 +848,49 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
         status: "conflicted",
         updatedAt: ts,
+      }),
+    ];
+  }
+
+  /** A failed planning-document write settles its reviewed proposal as conflict. */
+  async function releaseFailedRepositoryDocumentStatements(
+    row: OutboxRecord,
+    ts: string,
+    error: string,
+  ): Promise<SqlStatement[]> {
+    if (row.kind !== "repository_document.write") return [];
+    let payload: RepositoryDocumentWritePayload;
+    try {
+      payload = parseRepositoryDocumentWritePayload(row);
+    } catch {
+      return [];
+    }
+    const proposal = await repos.revisionProposals.getById(payload.revisionProposalId);
+    if (
+      proposal === null ||
+      proposal.projectId !== row.projectId ||
+      proposal.proposalType !== "repository_document" ||
+      proposal.status !== "applying" ||
+      proposal.gitOperationId !== row.gitOperationId
+    ) {
+      return [];
+    }
+    return [
+      repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+        status: "conflicted",
+        updatedAt: ts,
+      }),
+      repos.events.appendStatement({
+        projectId: row.projectId,
+        type: "revision_proposal_conflicted",
+        payload: {
+          revisionProposalId: proposal.id,
+          targetKind: proposal.targetKind,
+          targetId: proposal.targetId,
+          targetPath: proposal.targetPath,
+          reason: error,
+        },
+        createdAt: ts,
       }),
     ];
   }
@@ -1010,6 +1061,10 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
 
     if (kind === "chapter.write") {
       return buildChapterWritePlan(row, op, branch);
+    }
+
+    if (kind === "repository_document.write") {
+      return buildRepositoryDocumentWritePlan(row, op, branch);
     }
 
     /**
@@ -1296,6 +1351,57 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     };
   }
 
+  /**
+   * Apply the exact bytes a maintainer reviewed for a repository-backed
+   * planning document. Unlike chapters these documents do not carry a
+   * numeric revision, so the immutable content hash is the complete stale
+   * base guard. The plan is also pinned to the head read for this attempt,
+   * preventing an unrelated concurrent commit from turning the write into a
+   * blind overwrite.
+   */
+  async function buildRepositoryDocumentWritePlan(
+    row: OutboxRecord,
+    op: GitOperationRecord,
+    branch: string,
+  ): Promise<CommitPlan> {
+    const payload = parseRepositoryDocumentWritePayload(row);
+    const proposal = await linkedRepositoryDocumentProposal(row, payload);
+    if (writer.readFile === undefined) {
+      throw new Error("repository_document.write requires a writer with readFile");
+    }
+    const resolvedHead = (await writer.resolveHead?.(branch)) ?? null;
+    const current = await writer.readFile(branch, proposal.targetPath);
+    if (current === null) {
+      throw new Error(`repository document ${proposal.targetPath} no longer exists`);
+    }
+    const [currentHash, retainedBaseHash] = await Promise.all([
+      sha256Hash(current),
+      sha256Hash(proposal.baseContent),
+    ]);
+    if (retainedBaseHash !== proposal.baseContentHash) {
+      throw new Error(`revision proposal ${proposal.id} retained an invalid base snapshot`);
+    }
+    if (currentHash !== proposal.baseContentHash) {
+      throw new Error(
+        `${proposal.targetKind} document ${proposal.targetPath} changed after revision proposal ` +
+          `${proposal.id} was created`,
+      );
+    }
+    const author = await artifactActor(proposal.authorActorId);
+    const label = proposal.targetKind === "character" ? `character ${proposal.targetId}` : proposal.targetKind;
+    return {
+      branch,
+      ...(resolvedHead === null ? {} : { expectedHead: resolvedHead }),
+      files: [{ path: proposal.targetPath, content: proposal.proposedContent }],
+      message: `Revise ${label}`,
+      trailers: {
+        [ACTOR_TRAILER]: author.ref,
+        [REVISION_PROPOSAL_TRAILER]: proposal.id,
+        [OPERATION_TRAILER]: op.id,
+      },
+    };
+  }
+
   /** Finalize statements for a committed `chapter.write` row. */
   async function chapterWriteSyncStatements(
     row: OutboxRecord,
@@ -1370,6 +1476,33 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       throw new Error(
         `revision proposal ${proposal.id} does not belong to chapter ${payload.chapterId}`,
       );
+    }
+    if (proposal.status !== "applying") {
+      throw new Error(`revision proposal ${proposal.id} is ${proposal.status}, not applying`);
+    }
+    if (proposal.gitOperationId !== row.gitOperationId) {
+      throw new Error(
+        `revision proposal ${proposal.id} belongs to git operation ${proposal.gitOperationId}`,
+      );
+    }
+    return proposal;
+  }
+
+  /** Resolve and integrity-check a reviewed planning-document proposal. */
+  async function linkedRepositoryDocumentProposal(
+    row: OutboxRecord,
+    payload: RepositoryDocumentWritePayload,
+  ) {
+    const proposal = await repos.revisionProposals.getById(payload.revisionProposalId);
+    if (proposal === null) {
+      throw new Error(`revision proposal ${payload.revisionProposalId} not found`);
+    }
+    if (
+      proposal.projectId !== row.projectId ||
+      proposal.proposalType !== "repository_document" ||
+      proposal.chapterId !== null
+    ) {
+      throw new Error(`revision proposal ${proposal.id} is not a repository document proposal`);
     }
     if (proposal.status !== "applying") {
       throw new Error(`revision proposal ${proposal.id} is ${proposal.status}, not applying`);
@@ -1661,6 +1794,35 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     return statements;
   }
 
+  /** Finalize a committed Outline, Timeline, or Character document write. */
+  async function repositoryDocumentSyncStatements(
+    row: OutboxRecord,
+    commitSha: string | null,
+    ts: string,
+  ): Promise<SqlStatement[]> {
+    const payload = parseRepositoryDocumentWritePayload(row);
+    const proposal = await linkedRepositoryDocumentProposal(row, payload);
+    return [
+      repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
+        status: "approved",
+        commitSha,
+        updatedAt: ts,
+      }),
+      repos.events.appendStatement({
+        projectId: row.projectId,
+        type: "revision_proposal_applied",
+        payload: {
+          revisionProposalId: proposal.id,
+          targetKind: proposal.targetKind,
+          targetId: proposal.targetId,
+          targetPath: proposal.targetPath,
+          commitSha,
+        },
+        createdAt: ts,
+      }),
+    ];
+  }
+
   /**
    * The `operation_completed` feed event (contract §5): appended in the same
    * finalize batch that marks the operation committed and the outbox row done,
@@ -1687,6 +1849,9 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     }
     if (kind === "chapter.write") {
       return chapterWriteSyncStatements(row, commitSha, ts);
+    }
+    if (kind === "repository_document.write") {
+      return repositoryDocumentSyncStatements(row, commitSha, ts);
     }
     if (kind === "annotation.create") {
       const payload = parseAnnotationPayload(row);
@@ -1958,6 +2123,21 @@ function parseChapterWritePayload(row: OutboxRecord): ChapterWritePayload {
     throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
   }
   return payload as ChapterWritePayload;
+}
+
+function parseRepositoryDocumentWritePayload(
+  row: OutboxRecord,
+): RepositoryDocumentWritePayload {
+  const payload = row.payload as Partial<RepositoryDocumentWritePayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.revisionProposalId !== "string" ||
+    payload.revisionProposalId === ""
+  ) {
+    throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
+  }
+  return payload as RepositoryDocumentWritePayload;
 }
 
 function parseSubmissionApplyPayload(row: OutboxRecord): SubmissionApplyPayload {

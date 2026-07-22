@@ -99,6 +99,8 @@ export const BASE_REVISION_TRAILER = "Authorbot-Base-Revision";
  * so without this the commit named nothing but its operation id.
  */
 export const CHAPTER_TRAILER = "Authorbot-Chapter";
+/** Immutable revision proposal whose reviewed bytes a commit applied. */
+export const REVISION_PROPOSAL_TRAILER = "Authorbot-Revision-Proposal";
 
 export type GitWriteFailure =
   /** Branch head is not where the caller expected (retryable → `conflict`). */
