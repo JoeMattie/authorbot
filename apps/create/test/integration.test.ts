@@ -70,6 +70,7 @@ describe("the whole flow", () => {
     expect(harness.runner.ran("wrangler", "deploy")).toBe(true);
     expect(harness.runner.ran("wrangler", "d1", "create")).toBe(true);
     expect(harness.runner.ran("wrangler", "d1", "migrations", "apply")).toBe(true);
+    expect(harness.out.all()).toContain("export AUTHORBOT_PROJECT=hollow-creek-anomaly");
   });
 
   it("applies database migrations before deploying the API (ADR-0021 §4)", async () => {

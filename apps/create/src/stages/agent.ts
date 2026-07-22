@@ -134,9 +134,11 @@ export const agentStage: Stage = async (ctx: WizardContext): Promise<StageOutcom
   );
   ctx.reporter.literal("npx skills add JoeMattie/authorbot");
   ctx.reporter.info(
-    "Point it at this book with two environment variables, so the token never lands in a file or a chat transcript:",
+    "Point it at this book with three environment variables, so the token never lands in a file or a chat transcript:",
   );
-  ctx.reporter.literal(`export AUTHORBOT_API=${base}\nexport AUTHORBOT_TOKEN=<the token above>`);
+  ctx.reporter.literal(
+    `export AUTHORBOT_API=${base}\nexport AUTHORBOT_PROJECT=${book.slug}\nexport AUTHORBOT_TOKEN=<the token above>`,
+  );
 
   await ctx.journal.update((data) => {
     data.agent = { name, promptPath };

@@ -64,8 +64,8 @@
 //     "DEFAULT_BRANCH": "main"
 //   }
 //
-// Also set the AUTHORBOT_D1_DATABASE repository variable to the same database
-// name, which switches on the migration step in publish.yml (ADR-0021 §4).
+// Once this API package and D1 binding are present, publish.yml detects them
+// and applies pending migrations before every deploy (ADR-0021 §4).
 {
   "name": "my-book",
   "compatibility_date": "2026-06-01",

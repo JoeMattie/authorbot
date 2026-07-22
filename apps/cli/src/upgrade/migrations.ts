@@ -86,16 +86,120 @@ export interface BookRepoMigration {
   apply(repo: MigrationRepo): Promise<string[]>;
 }
 
+const PUBLISH_WORKFLOW = ".github/workflows/publish.yml";
+const LEGACY_D1_COMMAND = 'npx wrangler d1 migrations apply "$D1_DATABASE" --remote';
+const SAFE_D1_COMMAND = "npx wrangler d1 migrations apply DB --remote";
+
 /**
- * The migrations this release of the toolchain knows how to run.
+ * The original generated workflow made database migrations conditional on an
+ * optional repository variable. A collaboration Worker could therefore
+ * deploy new code while silently leaving its D1 schema behind. The DB binding
+ * in wrangler.jsonc is the source of truth, so configured books now address it
+ * directly and static-only books opt out by having no API migration directory.
  *
- * Empty, and correctly so: no book-repo format change has shipped yet, and
- * inventing one to exercise the mechanism would rewrite author files for no
- * reason. The mechanism itself is tested against fixture migrations; when a
- * real format change lands, its migration is appended here and the upgrade
- * path already works.
+ * This deliberately rewrites only the recognizable generated step. A book
+ * with a custom publish workflow is left alone rather than having its YAML
+ * reformatted or its deployment policy guessed at.
  */
-export const BOOK_REPO_MIGRATIONS: readonly BookRepoMigration[] = [];
+const failSafeD1Migrations: BookRepoMigration = {
+  id: "0001-fail-safe-d1-migrations",
+  from: "0.1.0",
+  to: "0.1.31",
+  description:
+    "Make configured D1 migrations run before deploy without an optional repository variable",
+  async apply(repo) {
+    if (!(await repo.exists(PUBLISH_WORKFLOW))) {
+      return [];
+    }
+
+    const before = await repo.read(PUBLISH_WORKFLOW);
+    if (before.includes(SAFE_D1_COMMAND)) {
+      return [];
+    }
+
+    const newline = before.includes("\r\n") ? "\r\n" : "\n";
+    const lines = before.split(/\r?\n/);
+    const stepStart = lines.findIndex(
+      (line) => line.trim() === "- name: Apply pending database migrations",
+    );
+    if (stepStart < 0) {
+      return [];
+    }
+    const stepIndent = /^\s*/.exec(lines[stepStart] ?? "")?.[0] ?? "      ";
+    const nextStep = lines.findIndex(
+      (line, index) => index > stepStart && line.startsWith(`${stepIndent}- name:`),
+    );
+    const runLine = lines.findIndex(
+      (line, index) =>
+        index >= stepStart &&
+        (nextStep < 0 || index < nextStep) &&
+        line.trim() === `run: ${LEGACY_D1_COMMAND}`,
+    );
+    if (runLine < 0) {
+      return [];
+    }
+    const legacyStep = lines.slice(stepStart, runLine + 1).join("\n");
+    if (!legacyStep.includes("vars.AUTHORBOT_D1_DATABASE")) {
+      return [];
+    }
+
+    const propertyIndent = `${stepIndent}  `;
+    const scriptIndent = `${propertyIndent}  `;
+    lines.splice(
+      stepStart,
+      runLine - stepStart + 1,
+      `${stepIndent}- name: Apply pending database migrations`,
+      `${propertyIndent}if: \${{ steps.creds.outputs.present == 'true' }}`,
+      `${propertyIndent}env:`,
+      `${scriptIndent}CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}`,
+      `${scriptIndent}CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}`,
+      `${propertyIndent}run: |`,
+      `${scriptIndent}if [ ! -d node_modules/@authorbot/api/migrations ]; then`,
+      `${scriptIndent}  echo "::notice::No @authorbot/api package is pinned, so this static-only book has no D1 migrations."`,
+      `${scriptIndent}  exit 0`,
+      `${scriptIndent}fi`,
+      `${scriptIndent}${SAFE_D1_COMMAND}`,
+    );
+
+    const setupStart = lines.findIndex((line) =>
+      line.includes("#   5. Only once you have turned on collaboration"),
+    );
+    if (setupStart >= 0) {
+      let setupEnd = setupStart;
+      while (setupEnd + 1 < lines.length && (lines[setupEnd + 1] ?? "").trim() !== "") {
+        setupEnd += 1;
+      }
+      const setupBlock = lines.slice(setupStart, setupEnd + 1).join("\n");
+      if (setupBlock.includes("AUTHORBOT_D1_DATABASE")) {
+        lines.splice(setupStart, setupEnd - setupStart + 1);
+      }
+    }
+
+    const staticOnlyLine = lines.findIndex((line) =>
+      line.includes("# time. Skipped entirely for a static-only book, which has no database."),
+    );
+    if (staticOnlyLine >= 0) {
+      const commentIndent = /^\s*/.exec(lines[staticOnlyLine] ?? "")?.[0] ?? "      ";
+      lines.splice(
+        staticOnlyLine,
+        1,
+        `${commentIndent}# time. A static-only book has no @authorbot/api package, so the step`,
+        `${commentIndent}# exits cleanly. Once the API package is pinned, a missing DB binding is`,
+        `${commentIndent}# an error: silently deploying a Worker ahead of its schema is unsafe.`,
+      );
+    }
+
+    const after = lines.join(newline);
+    if (after === before) {
+      return [];
+    }
+    await repo.write(PUBLISH_WORKFLOW, after);
+    return [PUBLISH_WORKFLOW];
+  },
+};
+
+/** The migrations this release of the toolchain knows how to run. */
+export const BOOK_REPO_MIGRATIONS: readonly BookRepoMigration[] = [failSafeD1Migrations];
 
 export interface SelectedMigration {
   readonly migration: BookRepoMigration;

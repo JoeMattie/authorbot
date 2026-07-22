@@ -42,10 +42,17 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await expect(card.locator(".ab-status-open")).toBeVisible();
   await expect(card).toHaveAttribute("aria-label", /^Suggestion by mara-e2e on “/u);
 
+  // A suggestion remains useful when its prose has scrolled away: choosing
+  // the card brings the anchored section back into the viewport.
+  const firstBlock = page.locator('main .prose [id^="b-"]').first();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await expect(firstBlock).not.toBeInViewport();
+  await card.click();
+  await expect(firstBlock).toBeInViewport();
+
   // The exact selected text is highlighted and wired to its card in the
   // sticky notes rail. Focusing the active card still exposes the broader
   // block outline for keyboard and low-vision readers.
-  const firstBlock = page.locator('main .prose [id^="b-"]').first();
   const highlight = firstBlock.locator(".ab-inline-highlight");
   await expect(highlight).toHaveText("rift appeared on a Tuesday, in the");
   await expect(card).toBeVisible();

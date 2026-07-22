@@ -225,11 +225,13 @@ npm install @authorbot/api      # commit the updated package-lock.json
 npx wrangler d1 create authorbot   # note the returned database_id
 ```
 
-Set the `AUTHORBOT_D1_DATABASE` repository variable to the same database name.
-That switches on the `wrangler d1 migrations apply` step in `publish.yml`,
-which runs **before** the Worker deploy (ADR-0021 §4) - migrate-then-deploy is
-the only safe ordering, because for the seconds between the two the old Worker
-is still serving against the new schema.
+Add the returned database to `wrangler.jsonc` under the standard `DB` binding.
+Once `@authorbot/api` and that binding are present, `publish.yml` automatically
+runs `wrangler d1 migrations apply DB --remote` **before** the Worker deploy
+(ADR-0021 §4). A configured collaboration Worker cannot silently skip this
+step: a missing or invalid D1 binding fails the deployment. Migrate-then-deploy
+is the only safe ordering, because for the seconds between the two the old
+Worker is still serving against the new schema.
 
 ### 3b. One Worker, one origin
 

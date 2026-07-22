@@ -1402,6 +1402,7 @@ export class AuthorbotCollab extends HTMLElement {
         return;
       }
       this.activateAnnotation(annotation.id);
+      block?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
     });
 
     if (quote !== undefined) {
