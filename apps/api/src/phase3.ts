@@ -30,7 +30,6 @@ import {
   authorizeForceCreateWorkItem,
   authorizeRejectSuggestion,
   authorizeReopenSuggestion,
-  authorizeVote,
   cancelWorkItemCommandSchema,
   castVoteCommandSchema,
   clearVoteCommandSchema,
@@ -43,7 +42,12 @@ import {
 } from "@authorbot/domain";
 import { evaluate, workTypeForScope } from "@authorbot/rule-engine";
 import { z } from "zod";
-import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
+import {
+  authOf,
+  hasEditorialAuthority,
+  requireProjectScope,
+  type AuthServices,
+} from "./auth.js";
 import type { AppDeps, AppEnv, Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import { annotationJson } from "./json.js";
@@ -516,7 +520,10 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   // ---- votes (contract §2, §3, §4) ------------------------------------------
 
   const voteHandler = (mode: "cast" | "clear") => async (c: Context<AppEnv>) => {
-    const guard = await requireProjectScope(c, services, "votes:write");
+    // Kind-specific authority is checked after the annotation is loaded. This
+    // first guard still applies membership, freeze/pause/policy, and rate
+    // limits without allowing the old umbrella to decide comment authority.
+    const guard = await requireProjectScope(c, services, null, { capability: "vote" });
     if ("response" in guard) {
       return guard.response;
     }
@@ -569,10 +576,21 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         if (annotation instanceof Response) {
           return annotation;
         }
-        // Suggestion-only (contract §2: comments -> 422).
-        const voteDecision = authorizeVote({ annotationKind: annotation.kind });
-        if (!voteDecision.allowed) {
-          return problem(c, "domain-rule-failed", { detail: voteDecision.message });
+        const requiredCapability =
+          annotation.kind === "suggestion" ? "suggestions:vote" : "comments:vote";
+        // Legacy votes:write remains suggestion-only. Passing no legacy scope
+        // for a comment makes the compatibility credential fail closed while
+        // canonical tokens and sessions use the exact kind capability.
+        if (
+          !hasEditorialAuthority(
+            a,
+            annotation.kind === "suggestion" ? "votes:write" : null,
+            { capabilities: [requiredCapability] },
+          )
+        ) {
+          return problem(c, "forbidden", {
+            detail: `actor lacks required editorial capability "${requiredCapability}"`,
+          });
         }
         if (!VOTABLE_STATUSES.has(annotation.status)) {
           return problem(c, "state-conflict", {
@@ -673,7 +691,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         let createdWorkItem = false;
         let stickyMirror = false;
 
-        for (const entry of await ctx.rules(guard.project.id)) {
+        // Comment votes use the same tally/history machinery but can never
+        // cross the suggestion-to-Work rule. Promotion remains the explicit
+        // maintainer action for a comment.
+        const applicableRules =
+          annotation.kind === "suggestion" ? await ctx.rules(guard.project.id) : [];
+        for (const entry of applicableRules) {
           const evaluation = evaluate(entry.rule, metrics);
           if (evaluation.satisfied) {
             ruleSatisfied = true;
@@ -882,7 +905,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
        * suggestion changes an annotation, so it asks for `annotations:write`
        * and picks up the policy gate that goes with it.
        */
-      const guard = await requireProjectScope(c, services, "annotations:write");
+      const guard = await requireProjectScope(c, services, "annotations:write", {
+        editorial: {
+          capabilities: ["suggestions:read", "feedback:moderate"],
+          legacyAction: "feedback:moderate",
+        },
+      });
       if ("response" in guard) {
         return guard.response;
       }
@@ -1018,7 +1046,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
        * suggestion and then manufacture work on it - no vote, no rule, and no
        * scope that says anything about work.
        */
-      const guard = await requireProjectScope(c, services, "work:claim");
+      const guard = await requireProjectScope(c, services, "work:claim", {
+        editorial: {
+          capabilities: ["work:promote"],
+          legacyAction: "work:promote",
+        },
+      });
       if ("response" in guard) {
         return guard.response;
       }
@@ -1138,7 +1171,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/cancel", auth, idem, async (c) => {
     /** `work:claim`, not `null` - see force-create-work-item above. */
-    const guard = await requireProjectScope(c, services, "work:claim");
+    const guard = await requireProjectScope(c, services, "work:claim", {
+      editorial: {
+        capabilities: ["work:cancel"],
+        legacyAction: "work:cancel",
+      },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1237,7 +1275,9 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   ]);
 
   app.get("/v1/projects/:projectId/work-items", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "work:read");
+    const guard = await requireProjectScope(c, services, "work:read", {
+      editorial: { capabilities: ["work:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1273,7 +1313,9 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   });
 
   app.get("/v1/projects/:projectId/work-items/:workItemId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "work:read");
+    const guard = await requireProjectScope(c, services, "work:read", {
+      editorial: { capabilities: ["work:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }

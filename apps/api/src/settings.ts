@@ -64,7 +64,7 @@ import {
   type DeclarativeRule,
 } from "@authorbot/schemas";
 import { z } from "zod";
-import { authOf, type AuthServices } from "./auth.js";
+import { authOf, requireHumanSession, type AuthServices } from "./auth.js";
 import type { AppDeps, AppEnv, Clock } from "./deps.js";
 import { problem } from "./problems.js";
 import { proseWriteBlocked } from "./reconcile.js";
@@ -227,15 +227,9 @@ export interface SettingsContext {
     c: Context<AppEnv>,
   ): Promise<{ project: ProjectRecord } | { response: Response }>;
   /**
-   * Write guard: the same, but requiring `members:manage`.
-   *
-   * Settings is a control-plane surface - it is where `annotation_policy` is
-   * set, so a credential that can PATCH here can reopen a `locked` book. For a
-   * human session this changes nothing (the maintainer bundle contains
-   * `members:manage`). For an agent token it is the difference between "role
-   * alone decides" and the Phase 2 §3 intersection actually binding: an agent
-   * granted the maintainer role so it can annotate a locked book must not
-   * thereby be able to unlock it.
+   * Write guard: the same, but requiring `members:manage`. Settings handlers
+   * reject bearer credentials before invoking it because Settings is an
+   * ambient-session control surface.
    */
   requireProjectWrite(
     c: Context<AppEnv>,
@@ -321,6 +315,8 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
   // ---- GET ----------------------------------------------------------------
 
   app.get("/v1/projects/:projectId/settings", auth, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) return sessionOnly;
     const guard = await ctx.requireProject(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
@@ -405,6 +401,8 @@ export function registerSettingsRoutes(ctx: SettingsContext): void {
   // ---- PATCH --------------------------------------------------------------
 
   app.patch("/v1/projects/:projectId/settings", auth, idem, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) return sessionOnly;
     const guard = await ctx.requireProjectWrite(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);

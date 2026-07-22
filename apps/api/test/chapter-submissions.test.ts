@@ -25,6 +25,7 @@ import {
   devLogin,
   fixtureSnapshot,
   makeHarness,
+  mintCanonicalToken,
   mintToken,
 } from "./helpers.js";
 import {
@@ -559,6 +560,50 @@ describe("authorization matrix (contract §3.5)", () => {
       expect.objectContaining({ name: "author-agent" }),
     ]);
   });
+
+  it("requires exact chapters:write and chapters:publish canonical grants", async () => {
+    const chapterWriter = await mintCanonicalToken(
+      harness,
+      maintainer,
+      ["chapters:write"],
+      "chapter-writer",
+    );
+    const created = await harness.app.request(
+      `/v1/projects/${harness.projectId}/chapter-submissions`,
+      {
+        method: "POST",
+        headers: headers(undefined, chapterWriter.token),
+        body: JSON.stringify({ title: "Canonical agent draft", body: PROSE }),
+      },
+    );
+    expect(created.status).toBe(202);
+
+    await harness.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(chapterWriter.actorId)
+      .run();
+    const cannotPublish = await harness.app.request(
+      `/v1/projects/${harness.projectId}/chapters/${CHAPTER_ID}/unpublish`,
+      { method: "POST", headers: headers(undefined, chapterWriter.token) },
+    );
+    expect(cannotPublish.status).toBe(403);
+
+    const publisher = await mintCanonicalToken(
+      harness,
+      maintainer,
+      ["chapters:publish"],
+      "chapter-publisher",
+    );
+    await harness.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(publisher.actorId)
+      .run();
+    const canPublish = await harness.app.request(
+      `/v1/projects/${harness.projectId}/chapters/${CHAPTER_ID}/unpublish`,
+      { method: "POST", headers: headers(undefined, publisher.token) },
+    );
+    expect(canPublish.status).toBe(202);
+  });
 });
 
 describe("validation before the outbox (contract §3.5)", () => {
@@ -797,10 +842,12 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
     expect(String(after.body["body"])).toContain("A new closing paragraph.");
   });
 
-  it("is editor/maintainer only, matching the write it feeds", async () => {
+  it("is readable by project members while writing stays separately gated", async () => {
     const { chapterId } = await createChapter();
     expect((await getSource(chapterId, editor)).status).toBe(200);
-    expect((await getSource(chapterId, contributor)).status).toBe(403);
+    expect((await getSource(chapterId, contributor)).status).toBe(200);
+    const reader = await devLogin(harness, "chapter-source-reader", "reader");
+    expect((await getSource(chapterId, reader)).status).toBe(200);
   });
 
   it("404s an unknown chapter", async () => {

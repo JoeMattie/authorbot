@@ -17,8 +17,9 @@ info:
     - List endpoints use cursor pagination (`cursor`, `limit`, `nextCursor`).
     - Every response carries `X-Correlation-Id`; asynchronous commands return
       an operation id resolvable at `/v1/projects/{projectId}/operations/{operationId}`.
-    - Humans (GitHub-backed session cookie) and agents (bearer token) are
-      treated identically after authorization.
+    - Editorial routes authorize humans and agents through the same exact
+      capability vocabulary. Project-control routes require a GitHub-backed
+      human session and refuse bearer credentials.
 
     Implementation status: operations marked `x-implementation-status: planned`
     are design skeleton for later phases and are not served yet. Everything
@@ -58,7 +59,7 @@ paths:
     get:
       operationId: getMe
       tags: [identity]
-      summary: Return the authenticated actor, memberships, and effective scopes.
+      summary: Return the authenticated actor, memberships, and effective capabilities.
       responses:
         "200":
           description: The current actor.
@@ -69,7 +70,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [actor, memberships, scopes, authKind]
+                required:
+                  - actor
+                  - memberships
+                  - scopes
+                  - authKind
+                  - capabilityMode
+                  - grantedCapabilities
+                  - roleCapabilityCeiling
+                  - effectiveCapabilities
+                  - legacyEffectiveActions
                 properties:
                   actor:
                     $ref: "#/components/schemas/Actor"
@@ -85,6 +95,18 @@ paths:
                   authKind:
                     type: string
                     enum: [session, token]
+                  capabilityMode:
+                    $ref: "#/components/schemas/CapabilityMode"
+                  grantedCapabilities:
+                    $ref: "#/components/schemas/EditorialCapabilitySet"
+                  roleCapabilityCeiling:
+                    $ref: "#/components/schemas/EditorialCapabilitySet"
+                  effectiveCapabilities:
+                    $ref: "#/components/schemas/EditorialCapabilitySet"
+                  legacyEffectiveActions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LegacyEffectiveAction"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -286,14 +308,13 @@ paths:
     get:
       operationId: listAgentTokens
       tags: [access]
-      summary: Agent token metadata - never the token value.
+      summary: Agent token metadata and effective capabilities - never the token value.
       description: >-
-        Name, scopes, owning human, membership role, created / last-used /
-        expiry times. Tokens are never re-displayable: no code path in the
-        system can return a token value after the mint response that created
-        it. The membership `role` is shown alongside the scopes because
-        effective authority is `token.scopes` intersected with the role bundle,
-        so scopes alone would overstate what a token can do.
+        Name, canonical grant and role ceiling, effective capabilities, legacy
+        compatibility state, owning human, membership role, and created /
+        last-used / expiry times. Tokens are never re-displayable: no code path
+        in the system can return a token value after the mint response that
+        created it.
       parameters:
         - name: includeRevoked
           in: query
@@ -326,7 +347,7 @@ paths:
     post:
       operationId: createAgentToken
       tags: [identity]
-      summary: Mint a named, scoped, expiring agent token (returned once).
+      summary: Mint a named, capability-limited, expiring agent token (returned once).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -334,25 +355,43 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [name, scopes]
-              properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 100
-                scopes:
-                  type: array
-                  minItems: 1
-                  description: Requested scopes; effective scopes are capped by the agent's pinned `editor` membership bundle.
-                  items:
-                    $ref: "#/components/schemas/Scope"
-                expiresInDays:
-                  type: integer
-                  minimum: 1
-                  maximum: 90
-                  default: 30
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [name, capabilities]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 100
+                    capabilities:
+                      $ref: "#/components/schemas/EditorialCapabilitySet"
+                    expiresInDays:
+                      type: integer
+                      minimum: 1
+                      maximum: 90
+                      default: 30
+                - type: object
+                  deprecated: true
+                  description: Deprecated legacy scope request retained during the Phase 11 transition.
+                  additionalProperties: false
+                  required: [name, scopes]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 100
+                    scopes:
+                      type: array
+                      minItems: 1
+                      uniqueItems: true
+                      items:
+                        $ref: "#/components/schemas/Scope"
+                    expiresInDays:
+                      type: integer
+                      minimum: 1
+                      maximum: 90
+                      default: 30
       responses:
         "201":
           description: Token created; the secret appears exactly once, here.
@@ -398,6 +437,61 @@ paths:
       responses:
         "204":
           description: Token revoked (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/agent-tokens/{tokenId}/capabilities:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: tokenId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Uuid"
+    put:
+      operationId: replaceAgentTokenCapabilities
+      tags: [identity]
+      summary: Replace an active agent token's complete canonical capability set.
+      description: >-
+        Human-session maintainer control. The replacement is atomic and does
+        not rotate or return the bearer secret. Sending the same complete set
+        with the same idempotency key is safe to retry.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [capabilities]
+              properties:
+                capabilities:
+                  $ref: "#/components/schemas/EditorialCapabilitySet"
+      responses:
+        "200":
+          description: Updated metadata and effective capability projection.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AgentToken"
+                  - type: object
+                    required: [role]
+                    properties:
+                      role:
+                        oneOf:
+                          - $ref: "#/components/schemas/Role"
+                          - type: "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3276,6 +3370,54 @@ components:
         - tokens:manage
         - members:manage
 
+    EditorialCapability:
+      type: string
+      description: Exact Phase 11 editorial authority; unknown names never inherit access.
+      enum:
+        - chapters:read
+        - comments:read
+        - suggestions:read
+        - comments:write
+        - suggestions:write
+        - replies:write
+        - comments:vote
+        - suggestions:vote
+        - feedback:withdraw-own
+        - feedback:moderate
+        - work:read
+        - work:promote
+        - work:claim
+        - work:submit
+        - work:cancel
+        - chapters:write
+        - chapters:publish
+
+    EditorialCapabilitySet:
+      type: array
+      uniqueItems: true
+      items:
+        $ref: "#/components/schemas/EditorialCapability"
+
+    CapabilityMode:
+      type: string
+      description: Human role projection, translated legacy token, or canonical token grant.
+      enum: [human, legacy, canonical]
+
+    LegacyEffectiveAction:
+      type: object
+      additionalProperties: false
+      required: [action, source, sourceScope]
+      properties:
+        action:
+          type: string
+          enum: [feedback:moderate, work:promote, work:cancel]
+        source:
+          type: string
+          const: legacy-scope
+        sourceScope:
+          type: string
+          enum: [annotations:write, work:claim]
+
     NextCursor:
       description: Cursor for the next page, or null on the last page.
       oneOf:
@@ -3808,7 +3950,20 @@ components:
     AgentToken:
       type: object
       description: Agent token metadata; the secret itself is never returned after minting.
-      required: [id, projectId, actorId, name, scopes, createdBy, createdAt, expiresAt]
+      required:
+        - id
+        - projectId
+        - actorId
+        - name
+        - scopes
+        - capabilityMode
+        - grantedCapabilities
+        - roleCapabilityCeiling
+        - effectiveCapabilities
+        - legacyEffectiveActions
+        - createdBy
+        - createdAt
+        - expiresAt
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -3821,8 +3976,22 @@ components:
           type: string
         scopes:
           type: array
+          deprecated: true
+          description: Compatibility shadow for legacy deployments; do not infer authority from it.
           items:
             $ref: "#/components/schemas/Scope"
+        capabilityMode:
+          $ref: "#/components/schemas/CapabilityMode"
+        grantedCapabilities:
+          $ref: "#/components/schemas/EditorialCapabilitySet"
+        roleCapabilityCeiling:
+          $ref: "#/components/schemas/EditorialCapabilitySet"
+        effectiveCapabilities:
+          $ref: "#/components/schemas/EditorialCapabilitySet"
+        legacyEffectiveActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/LegacyEffectiveAction"
         createdBy:
           description: Actor id of the minting maintainer.
           $ref: "#/components/schemas/Uuid"

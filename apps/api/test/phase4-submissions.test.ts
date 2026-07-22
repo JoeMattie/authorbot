@@ -8,7 +8,14 @@
 import { describe, expect, it } from "vitest";
 import { parseWorkItemArtifact } from "@authorbot/repo-coordinator";
 import { uuidv7 } from "../src/ids.js";
-import { BLOCK_ID_1, BLOCK_ID_2, CHAPTER_ID, devLogin, jsonRequest } from "./helpers.js";
+import {
+  BLOCK_ID_1,
+  BLOCK_ID_2,
+  CHAPTER_ID,
+  devLogin,
+  jsonRequest,
+  mintCanonicalToken,
+} from "./helpers.js";
 import {
   BLOCK_2_TEXT,
   CHAPTER_PATH,
@@ -176,6 +183,78 @@ describe("submission verification order (contract §4)", () => {
       const denied = await submit(ctx, { type: "chapter_replacement", content: "A body." });
       expect(denied.status).toBe(422);
       expect(denied.body["code"]).toBe("submission-not-supported");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("requires work:submit independently from work:claim for canonical tokens", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const maintainer = await devLogin(harness, "canonical-owner", "maintainer");
+      const claimOnly = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:claim"],
+        "claim-only",
+      );
+      const first = await createReadyWorkItem(harness);
+      const claimedFirst = await claimWorkItem(harness, { token: claimOnly.token }, first.workItemId);
+      expect(claimedFirst.status).toBe(201);
+      const firstLease = claimedFirst.body["lease"] as { id: string; token: string };
+      const firstDocument = claimedFirst.body["document"] as {
+        revision: number;
+        contentHash: string;
+      };
+      const denied = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${first.workItemId}/submissions`,
+        jsonRequest(
+          "POST",
+          {
+            leaseId: firstLease.id,
+            leaseToken: firstLease.token,
+            type: "range_replacement",
+            baseRevision: firstDocument.revision,
+            baseContentHash: firstDocument.contentHash,
+            content: "haze settled over",
+          },
+          { Authorization: `Bearer ${claimOnly.token}` },
+        ),
+      );
+      expect(denied.status).toBe(403);
+      expect((await harness.repos.workItems.getById(first.workItemId))?.status).toBe("leased");
+
+      const worker = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:claim", "work:submit"],
+        "claim-and-submit",
+      );
+      const second = await createReadyWorkItem(harness);
+      const claimedSecond = await claimWorkItem(harness, { token: worker.token }, second.workItemId);
+      expect(claimedSecond.status).toBe(201);
+      const secondLease = claimedSecond.body["lease"] as { id: string; token: string };
+      const secondDocument = claimedSecond.body["document"] as {
+        revision: number;
+        contentHash: string;
+      };
+      const accepted = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${second.workItemId}/submissions`,
+        jsonRequest(
+          "POST",
+          {
+            leaseId: secondLease.id,
+            leaseToken: secondLease.token,
+            type: "range_replacement",
+            baseRevision: secondDocument.revision,
+            baseContentHash: secondDocument.contentHash,
+            content: "haze settled over",
+          },
+          { Authorization: `Bearer ${worker.token}` },
+        ),
+      );
+      expect(accepted.status).toBe(202);
+      expect((await harness.repos.workItems.getById(second.workItemId))?.status).toBe("completed");
     } finally {
       harness.close();
     }

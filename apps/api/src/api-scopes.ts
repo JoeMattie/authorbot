@@ -1,20 +1,28 @@
 /**
- * Phase 3 scope extension (Phase 3 contract §2): `votes:write` joins the
- * scope vocabulary and the **contributor** role bundle (and everything above
- * it, bundles being cumulative).
+ * API authorization compatibility during the Phase 11 granular-permissions
+ * expansion.
  *
- * `@authorbot/domain`'s scope module still pins the Phase 2 vocabulary and is
- * outside this workstream's assigned paths, so the extension lives here in
- * the API layer: the auth middleware computes effective scopes with these
- * functions instead of the domain ones. The domain bundles remain the single
- * source for everything that is not `votes:write`.
+ * Existing editorial routes still name the legacy scope vocabulary in this
+ * release increment. Auth therefore keeps a conservative effective `scopes`
+ * projection alongside the canonical capability projection. New route work
+ * consumes `effectiveCapabilities`; old routes keep their exact behaviour
+ * until they are converted one by one.
  */
 import { z } from "zod";
 import {
+  editorialCapabilitiesSchema,
+  effectiveEditorialCapabilities,
+  legacyEffectiveActions,
+  legacyScopeShadow,
   MAX_TOKEN_NAME_LENGTH,
+  parseEditorialCapabilities,
+  parseLegacyScopes,
   ROLE_SCOPES,
   SCOPES,
+  roleEditorialCapabilities,
   roleScopes,
+  type EditorialCapability,
+  type LegacyEffectiveAction,
   type Role,
   type Scope,
 } from "@authorbot/domain";
@@ -54,11 +62,114 @@ export function apiEffectiveScopes(
 }
 
 /**
- * Phase 3 mint command: identical to the domain
- * `mintAgentTokenCommandSchema` but admitting `votes:write` in `scopes`
- * (mirrored here because the domain schema pins the Phase 2 enum).
+ * The complete authorization picture returned by `/v1/me` and token metadata.
+ * `scopes` remains internal compatibility data and is serialized separately on
+ * the legacy response field; the other arrays are canonical Phase 11 values.
  */
-export const mintAgentTokenApiCommandSchema = z.strictObject({
+export interface CapabilityProjection {
+  capabilityMode: "human" | "legacy" | "canonical";
+  grantedCapabilities: EditorialCapability[];
+  roleCapabilityCeiling: EditorialCapability[];
+  effectiveCapabilities: EditorialCapability[];
+  legacyEffectiveActions: LegacyEffectiveAction[];
+  scopes: ApiScope[];
+}
+
+/** Public canonical fields shared by `/v1/me` and token metadata responses. */
+export function capabilityProjectionJson(
+  projection: CapabilityProjection,
+): Omit<CapabilityProjection, "scopes"> {
+  return {
+    capabilityMode: projection.capabilityMode,
+    grantedCapabilities: projection.grantedCapabilities,
+    roleCapabilityCeiling: projection.roleCapabilityCeiling,
+    effectiveCapabilities: projection.effectiveCapabilities,
+    legacyEffectiveActions: projection.legacyEffectiveActions,
+  };
+}
+
+/** Canonical role-derived projection for a human session. */
+export function sessionCapabilityProjection(role: Role | null): CapabilityProjection {
+  const ceiling = role === null ? [] : [...roleEditorialCapabilities(role)];
+  return {
+    capabilityMode: "human",
+    grantedCapabilities: [...ceiling],
+    roleCapabilityCeiling: [...ceiling],
+    effectiveCapabilities: [...ceiling],
+    legacyEffectiveActions: [],
+    scopes: role === null ? [] : [...apiRoleScopes(role)],
+  };
+}
+
+/**
+ * Dual-read projection for an agent-token row.
+ *
+ * Canonical rows never trust the stored legacy shadow for authorization: it is
+ * recomputed from the parsed canonical grant. A malformed or unknown
+ * canonical set therefore produces no canonical authority and no compatibility
+ * scope, even if the shadow column was corrupted or written too broadly.
+ */
+export function tokenCapabilityProjection(
+  token: {
+    scopes: readonly string[];
+    capabilitiesV2?: readonly string[] | null;
+    capabilityMode?: "legacy" | "canonical";
+  },
+  role: Role | null,
+): CapabilityProjection {
+  const capabilityMode = token.capabilityMode ?? "legacy";
+  const ceiling = role === null ? [] : [...roleEditorialCapabilities(role)];
+
+  if (capabilityMode === "canonical") {
+    const parsed = parseEditorialCapabilities(token.capabilitiesV2 ?? null);
+    const granted = parsed.ok ? parsed.capabilities : [];
+    const safeShadow = parsed.ok ? legacyScopeShadow(granted) : [];
+    return {
+      capabilityMode,
+      grantedCapabilities: [...granted],
+      roleCapabilityCeiling: ceiling,
+      effectiveCapabilities:
+        role === null ? [] : effectiveEditorialCapabilities(granted, role),
+      legacyEffectiveActions: [],
+      scopes: role === null ? [] : apiEffectiveScopes(safeShadow, role),
+    };
+  }
+
+  const parsed = parseLegacyScopes(token.scopes);
+  const granted = parsed.ok ? parsed.capabilities : [];
+  return {
+    capabilityMode,
+    grantedCapabilities: [...granted],
+    roleCapabilityCeiling: ceiling,
+    effectiveCapabilities:
+      role === null ? [] : effectiveEditorialCapabilities(granted, role),
+    legacyEffectiveActions:
+      parsed.ok && role !== null ? legacyEffectiveActions(parsed.scopes, role) : [],
+    // Preserve legacy route behaviour for known old scopes. Unknown names are
+    // ignored by apiEffectiveScopes and never enter the canonical projection.
+    scopes: parsed.ok && role !== null ? apiEffectiveScopes(token.scopes, role) : [],
+  };
+}
+
+const tokenNameSchema = z
+  .string()
+  .min(1, "name must not be empty")
+  .max(MAX_TOKEN_NAME_LENGTH, `name must be at most ${MAX_TOKEN_NAME_LENGTH} characters`);
+
+const expiresInDaysSchema = z.number().int().min(1).max(90).default(30);
+
+const canonicalMintSchema = z.strictObject({
+  name: tokenNameSchema,
+  capabilities: editorialCapabilitiesSchema,
+  expiresInDays: expiresInDaysSchema,
+}).transform((command) => ({ ...command, authorizationMode: "canonical" as const }));
+
+/**
+ * Deprecated request compatibility. It deliberately creates a legacy row so
+ * callers using umbrella scopes retain their exact current route behaviour
+ * until those routes move to canonical guards.
+ */
+const legacyMintSchema = z.strictObject({
   name: z
     .string()
     .min(1, "name must not be empty")
@@ -70,6 +181,17 @@ export const mintAgentTokenApiCommandSchema = z.strictObject({
       (scopes) => new Set(scopes).size === scopes.length,
       "scopes must not contain duplicates",
     ),
-  expiresInDays: z.number().int().min(1).max(90).default(30),
-});
+  expiresInDays: expiresInDaysSchema,
+}).transform((command) => ({ ...command, authorizationMode: "legacy" as const }));
+
+/** New canonical mint body plus the temporary legacy request alias. */
+export const mintAgentTokenApiCommandSchema = z.union([
+  canonicalMintSchema,
+  legacyMintSchema,
+]);
 export type MintAgentTokenApiCommand = z.infer<typeof mintAgentTokenApiCommandSchema>;
+
+/** Complete-set replacement used by the session-only token update route. */
+export const replaceAgentTokenCapabilitiesApiCommandSchema = z.strictObject({
+  capabilities: editorialCapabilitiesSchema,
+});

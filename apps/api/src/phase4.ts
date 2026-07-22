@@ -263,7 +263,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
   // ---- claim (contract §2, §3) ---------------------------------------------
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/claim", auth, claimIdem, async (c) => {
-    const guard = await requireProjectScope(c, services, "work:claim");
+    const guard = await requireProjectScope(c, services, "work:claim", {
+      editorial: { capabilities: ["work:claim"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -502,7 +504,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
    * the credential binding (albeit with the token redacted).
    */
   const authorizeRecoveryBeforeReplay: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const guard = await requireProjectScope(c, services, "work:claim");
+    const guard = await requireProjectScope(c, services, "work:claim", {
+      editorial: { capabilities: ["work:claim"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -675,7 +679,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
   // ---- renew (contract §2) --------------------------------------------------
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/lease/renew", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "work:claim");
+    const guard = await requireProjectScope(c, services, "work:claim", {
+      editorial: { capabilities: ["work:claim"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -796,7 +802,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
   // ---- release (contract §2: holder or maintainer) --------------------------
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/lease/release", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, null);
+    const guard = await requireProjectScope(c, services, "work:claim", {
+      editorial: { capabilities: ["work:claim"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -875,7 +883,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
   // ---- submissions (contract §4) --------------------------------------------
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/submissions", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "submissions:write");
+    const guard = await requireProjectScope(c, services, "submissions:write", {
+      editorial: { capabilities: ["work:submit"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }

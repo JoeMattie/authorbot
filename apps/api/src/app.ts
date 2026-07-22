@@ -8,6 +8,8 @@ import type { Context } from "hono";
 import {
   createRepositories,
   isUniqueConstraintError,
+  type AgentTokenRecord,
+  type AnnotationRecord,
   type ProjectRecord,
   type Repositories,
   type SqlStatement,
@@ -17,6 +19,7 @@ import {
   createAnnotationCommandSchema,
   createReplyCommandSchema,
   isWorkItemTerminal,
+  legacyScopeShadow,
   resolveSessionExpiry,
   resolveTokenExpiry,
   roleSchema,
@@ -25,7 +28,13 @@ import {
   AGENT_TOKEN_PREFIX,
   WORK_ITEM_STATUSES,
 } from "@authorbot/domain";
-import { apiRoleScopes, mintAgentTokenApiCommandSchema } from "./api-scopes.js";
+import {
+  apiRoleScopes,
+  capabilityProjectionJson,
+  mintAgentTokenApiCommandSchema,
+  replaceAgentTokenCapabilitiesApiCommandSchema,
+  tokenCapabilityProjection,
+} from "./api-scopes.js";
 import { parseRuleEntries, resolveRuleEntries, type RuleEntry } from "./rules.js";
 import { registerSettingsRoutes } from "./settings.js";
 import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
@@ -43,8 +52,10 @@ import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import {
   authOf,
+  hasEditorialAuthority,
   optionalAuth,
   requireAuth,
+  requireHumanSession,
   requireProjectScope,
   type AuthServices,
 } from "./auth.js";
@@ -277,7 +288,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     c: Context<AppEnv>,
   ): Promise<{ project: ProjectRecord } | { response: Response }> => {
     if (c.get("auth") !== undefined) {
-      return requireProjectScope(c, services, "annotations:read");
+      // Kind authority is applied after rows are loaded. A mixed collection
+      // may legitimately expose comments but not suggestions (or vice versa),
+      // so the old umbrella cannot decide admission up front.
+      return requireProjectScope(c, services, null);
     }
     if (!publicAnnotations) {
       return {
@@ -290,6 +304,68 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return { response: problem(c, "not-found", { detail: "unknown project" }) };
     }
     return { project };
+  };
+
+  const feedbackReadCapability = (
+    kind: "comment" | "suggestion",
+  ): "comments:read" | "suggestions:read" =>
+    kind === "comment" ? "comments:read" : "suggestions:read";
+
+  /** Exact kind read, after `requireReadOrPublic` has admitted the request. */
+  const canReadFeedbackKind = (
+    c: Context<AppEnv>,
+    kind: "comment" | "suggestion",
+  ): boolean => {
+    const requestAuth = c.get("auth");
+    if (requestAuth === undefined) return true;
+    // An open/approval-gated policy may admit a signed-in human nonmember.
+    // Reaching this point means the project guard already proved that policy.
+    if (requestAuth.kind === "session" && requestAuth.membership === null) return true;
+    return hasEditorialAuthority(requestAuth, "annotations:read", {
+      capabilities: [feedbackReadCapability(kind)],
+    });
+  };
+
+  const requireFeedbackKindRead = (
+    c: Context<AppEnv>,
+    kind: "comment" | "suggestion",
+  ): Response | null => {
+    if (canReadFeedbackKind(c, kind)) return null;
+    return problem(c, "forbidden", {
+      detail: `actor lacks required editorial capability "${feedbackReadCapability(kind)}"`,
+    });
+  };
+
+  /**
+   * Filter before forming the caller's page. Reading a raw page and filtering
+   * afterward would let a denied kind consume slots and move the cursor,
+   * leaking its presence while producing short or empty pages.
+   */
+  const listReadableAnnotations = async (
+    c: Context<AppEnv>,
+    chapterId: string,
+    limit: number,
+    afterId: string,
+  ): Promise<AnnotationRecord[]> => {
+    const visible: AnnotationRecord[] = [];
+    let cursor = afterId;
+    const batchSize = Math.max(limit, 100);
+    while (visible.length < limit) {
+      const batch = await repos.annotations.listByChapter(chapterId, {
+        limit: batchSize,
+        afterId: cursor,
+      });
+      if (batch.length === 0) break;
+      for (const annotation of batch) {
+        if (canReadFeedbackKind(c, annotation.kind)) {
+          visible.push(annotation);
+          if (visible.length === limit) break;
+        }
+      }
+      if (visible.length === limit || batch.length < batchSize) break;
+      cursor = batch[batch.length - 1]?.id ?? cursor;
+    }
+    return visible;
   };
 
   const now = (): string => toTimestamp(clock.now());
@@ -461,11 +537,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       memberships: a.membership !== null ? [membershipJson(a.membership)] : [],
       scopes: a.scopes,
       authKind: a.kind,
+      ...capabilityProjectionJson(a),
     });
   });
 
   app.get("/v1/projects/:projectId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -520,6 +599,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * who intends to fix the repository instead and just wants writes open.
    */
   app.post("/v1/projects/:projectId/divergence/clear", auth, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) return sessionOnly;
     const guard = await requireProjectScope(c, services, "chapters:read");
     if ("response" in guard) {
       return guard.response;
@@ -574,6 +655,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.get("/v1/projects/:projectId/members", auth, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) return sessionOnly;
     const guard = await requireProjectScope(c, services, "chapters:read");
     if ("response" in guard) {
       return guard.response;
@@ -613,6 +696,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/agent-tokens", auth, mintIdem, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) {
+      return sessionOnly;
+    }
     /**
      * CONTROL surface (Phase 7): a freeze must not block this.
      *
@@ -649,14 +736,21 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const tokenId = uuidv7(clock.now());
     const plaintext = `${AGENT_TOKEN_PREFIX}${randomBase64Url(32)}`;
     const tokenHash = await sha256Hex(plaintext);
+    const canonical = command.authorizationMode === "canonical";
+    const capabilities = canonical ? command.capabilities : null;
+    const tokenScopes = canonical
+      ? legacyScopeShadow(command.capabilities)
+      : command.scopes;
 
-    const tokenRecord = {
+    const tokenRecord: AgentTokenRecord = {
       id: tokenId,
       projectId: guard.project.id,
       actorId: agentActorId,
       name: command.name,
       tokenHash,
-      scopes: [...command.scopes],
+      scopes: [...tokenScopes],
+      capabilitiesV2: capabilities === null ? null : [...capabilities],
+      capabilityMode: canonical ? "canonical" : "legacy",
       createdBy: a.actor.id,
       createdAt: timestamp,
       expiresAt: expiry.expiresAt,
@@ -664,7 +758,12 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       lastUsedAt: null,
     };
 
-    const responseBody = { ...agentTokenJson(tokenRecord), token: plaintext };
+    const projection = tokenCapabilityProjection(tokenRecord, "editor");
+    const responseBody = {
+      ...agentTokenJson(tokenRecord),
+      ...capabilityProjectionJson(projection),
+      token: plaintext,
+    };
     const statements: SqlStatement[] = [
       repos.actors.insertStatement({
         id: agentActorId,
@@ -712,7 +811,13 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         targetType: "agent_token",
         targetId: tokenId,
         correlationId: c.get("correlationId"),
-        metadata: { name: command.name, scopes: command.scopes, expiresAt: expiry.expiresAt },
+        metadata: {
+          name: command.name,
+          capabilityMode: tokenRecord.capabilityMode,
+          capabilities: projection.grantedCapabilities,
+          legacyScopes: tokenRecord.scopes,
+          expiresAt: expiry.expiresAt,
+        },
         createdAt: timestamp,
       }),
     ];
@@ -724,7 +829,105 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return c.json(responseBody, 201);
   });
 
+  app.put(
+    "/v1/projects/:projectId/agent-tokens/:tokenId/capabilities",
+    auth,
+    idem,
+    async (c) => {
+      const sessionOnly = requireHumanSession(c);
+      if (sessionOnly !== null) {
+        return sessionOnly;
+      }
+      const guard = await requireProjectScope(c, services, "tokens:manage", {
+        surface: "control",
+      });
+      if ("response" in guard) {
+        return guard.response;
+      }
+      const body = await readJson(c);
+      if (body instanceof Response) {
+        return body;
+      }
+      const parsed = replaceAgentTokenCapabilitiesApiCommandSchema.safeParse(body);
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+
+      const token = await repos.agentTokens.getById(c.req.param("tokenId"));
+      if (token === null || token.projectId !== guard.project.id) {
+        return problem(c, "not-found", { detail: "unknown agent token" });
+      }
+      if (
+        token.revokedAt !== null ||
+        Date.parse(token.expiresAt) <= clock.now().getTime()
+      ) {
+        return problem(c, "state-conflict", {
+          detail: "only an active agent token's capabilities can be changed",
+        });
+      }
+
+      const membership = await repos.projectMemberships.getByProjectAndActor(
+        guard.project.id,
+        token.actorId,
+      );
+      const role = membership?.revokedAt === null ? membership.role : null;
+      const before = tokenCapabilityProjection(token, role);
+      const capabilities = parsed.data.capabilities;
+      const scopes = legacyScopeShadow(capabilities);
+      const updated: AgentTokenRecord = {
+        ...token,
+        scopes: [...scopes],
+        capabilitiesV2: [...capabilities],
+        capabilityMode: "canonical",
+      };
+      const after = tokenCapabilityProjection(updated, role);
+      const responseBody = {
+        ...agentTokenJson(updated),
+        ...capabilityProjectionJson(after),
+        role,
+      };
+      const timestamp = now();
+      await deps.db.batch([
+        repos.agentTokens.setCapabilityStateStatement(token.id, {
+          scopes,
+          capabilitiesV2: capabilities,
+          capabilityMode: "canonical",
+        }),
+        repos.auditEvents.insertStatement({
+          id: uuidv7(clock.now()),
+          projectId: guard.project.id,
+          actorId: authOf(c).actor.id,
+          action: "agent_token.capabilities.update",
+          targetType: "agent_token",
+          targetId: token.id,
+          correlationId: c.get("correlationId"),
+          metadata: {
+            before: {
+              capabilityMode: before.capabilityMode,
+              capabilities: before.grantedCapabilities,
+              legacyEffectiveActions: before.legacyEffectiveActions,
+              legacyScopes: token.scopes,
+            },
+            after: {
+              capabilityMode: after.capabilityMode,
+              capabilities: after.grantedCapabilities,
+              legacyEffectiveActions: after.legacyEffectiveActions,
+              legacyScopes: updated.scopes,
+            },
+          },
+          createdAt: timestamp,
+        }),
+        ...claimStatements(c, 200, responseBody),
+      ]);
+      return c.json(responseBody, 200);
+    },
+  );
+
   app.delete("/v1/projects/:projectId/agent-tokens/:tokenId", auth, idem, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) {
+      return sessionOnly;
+    }
     /**
      * CONTROL surface: access-control.ts names "revoke a token" as one of the
      * things a freeze must not refuse. Before this it was the only one that
@@ -787,7 +990,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   // ---- chapters --------------------------------------------------------------
 
   app.get("/v1/projects/:projectId/chapters", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -802,18 +1007,35 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       { limit, afterId: cursor },
     );
     const requestAuth = authOf(c);
-    const canReadFeedback = requestAuth.scopes.includes("annotations:read");
-    const canReadWork = requestAuth.scopes.includes("work:read");
+    const canReadComments = hasEditorialAuthority(requestAuth, "annotations:read", {
+      capabilities: ["comments:read"],
+    });
+    const canReadSuggestions = hasEditorialAuthority(requestAuth, "annotations:read", {
+      capabilities: ["suggestions:read"],
+    });
+    const canReadWork = hasEditorialAuthority(requestAuth, "work:read", {
+      capabilities: ["work:read"],
+    });
     return c.json({
       items: summaryPage.items.map(({ chapter, activity }) => ({
         ...chapterJson(chapter),
         activity: {
-          ...(canReadFeedback
+          ...(canReadSuggestions
             ? {
                 openSuggestions: activity.openSuggestions,
+              }
+            : {}),
+          ...(canReadComments
+            ? {
                 openBlockComments: activity.openBlockComments,
                 openChapterComments: activity.openChapterComments,
-                openReplies: activity.openCommentReplies + activity.openSuggestionReplies,
+              }
+            : {}),
+          ...(canReadComments || canReadSuggestions
+            ? {
+                openReplies:
+                  (canReadComments ? activity.openCommentReplies : 0) +
+                  (canReadSuggestions ? activity.openSuggestionReplies : 0),
               }
             : {}),
           ...(canReadWork ? { openWorkItems: activity.openWorkItems } : {}),
@@ -826,7 +1048,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.get("/v1/projects/:projectId/chapters/:chapterId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -849,21 +1073,18 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * substitute: it is gated behind claiming a work item with a lease, and it
    * returns the raw file including block markers.
    *
-   * Editor/maintainer scoped like the write it feeds, and marker-stripped so
+   * Canonical credentials need `chapters:read`; legacy credentials keep the
+   * historical `submissions:write` gate. The response is marker-stripped so
    * the body a client sends back is the body a human edited - marker reuse for
    * unchanged blocks is `applyChapterReplacement`'s job at drain time, not the
    * client's.
    */
   app.get("/v1/projects/:projectId/chapters/:chapterId/source", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "submissions:write");
+    const guard = await requireProjectScope(c, services, "submissions:write", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
-    }
-    const role = authOf(c).role;
-    if (role !== "editor" && role !== "maintainer") {
-      return problem(c, "forbidden", {
-        detail: "only an editor or a maintainer may read chapter source for editing",
-      });
     }
     const chapter = await repos.chapters.getById(c.req.param("chapterId"));
     if (chapter === null || chapter.projectId !== guard.project.id) {
@@ -929,11 +1150,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (limit instanceof Response) {
       return limit;
     }
-    const cursor = c.req.query("cursor");
-    const annotations = await repos.annotations.listByChapter(chapter.id, {
-      limit,
-      ...(cursor !== undefined ? { afterId: cursor } : {}),
-    });
+    const cursor = c.req.query("cursor") ?? "";
+    const annotations = await listReadableAnnotations(c, chapter.id, limit, cursor);
     // Phase 3 contract §2/§6: embed aggregate vote tallies (public: counts
     // only) plus the create_work_item decision badge; members also see their
     // own current vote (`myVote`). The member actor id is null for anonymous
@@ -966,12 +1184,21 @@ export function createApi(deps: AppDeps): AuthorbotApi {
      * approved one, and cursor paging over `items` stays a paging over real
      * annotations.
      */
-    const viewerRole = c.get("auth")?.role ?? null;
+    const canModerate =
+      requestAuth !== undefined &&
+      hasEditorialAuthority(requestAuth, "annotations:write", {
+        capabilities: ["feedback:moderate"],
+        legacyAction: "feedback:moderate",
+      });
     let pending: Record<string, unknown>[] = [];
     if (viewerActorId !== null) {
       const queued = await repos.pendingAnnotations.listPendingByChapter(chapter.id);
       pending = queued
-        .filter((row) => viewerRole === "maintainer" || row.authorActorId === viewerActorId)
+        .filter(
+          (row) =>
+            (canModerate || row.authorActorId === viewerActorId) &&
+            canReadFeedbackKind(c, row.kind),
+        )
         .map(pendingAnnotationJson);
     }
 
@@ -994,6 +1221,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (annotation === null || annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
+    const denied = requireFeedbackKindRead(c, annotation.kind);
+    if (denied !== null) return denied;
     const requestAuth = c.get("auth");
     const memberActorId =
       requestAuth !== undefined && requestAuth.membership !== null
@@ -1007,10 +1236,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     auth,
     idem,
     async (c) => {
-      const guard = await requireProjectScope(c, services, "annotations:write");
-      if ("response" in guard) {
-        return guard.response;
-      }
       const body = await readJson(c);
       if (body instanceof Response) {
         return body;
@@ -1024,6 +1249,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         return problem(c, "validation-failed", { issues: issueList(parsed.error) });
       }
       const command = parsed.data;
+      const writeCapability =
+        command.kind === "comment" ? "comments:write" : "suggestions:write";
+      const guard = await requireProjectScope(c, services, "annotations:write", {
+        editorial: { capabilities: ["chapters:read", writeCapability] },
+      });
+      if ("response" in guard) {
+        return guard.response;
+      }
 
       const findings = bodySafetyFindings(command.body);
       if (findings.length > 0) {
@@ -1215,6 +1448,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (annotation === null || annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
+    const denied = requireFeedbackKindRead(c, annotation.kind);
+    if (denied !== null) return denied;
     const limit = parseLimit(c);
     if (limit instanceof Response) {
       return limit;
@@ -1228,14 +1463,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/replies", auth, idem, async (c) => {
-    // `requireMembership` (Phase 7): a permissive annotation policy widens who
-    // may START a thread, not who may join one - see ProjectGuardOptions.
-    const guard = await requireProjectScope(c, services, "annotations:write", {
-      requireMembership: true,
-    });
-    if ("response" in guard) {
-      return guard.response;
-    }
     const body = await readJson(c);
     if (body instanceof Response) {
       return body;
@@ -1256,7 +1483,30 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     }
 
     const annotation = await repos.annotations.getById(command.annotationId);
-    if (annotation === null || annotation.projectId !== guard.project.id) {
+    if (annotation === null) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    const parentReadCapability = feedbackReadCapability(annotation.kind);
+    const requirements = {
+      capabilities: ["replies:write", parentReadCapability],
+    } as const;
+    if (!hasEditorialAuthority(authOf(c), "annotations:write", requirements)) {
+      return problem(c, "forbidden", {
+        detail:
+          "actor lacks required editorial capabilities: replies:write, " +
+          parentReadCapability,
+      });
+    }
+    // `requireMembership` (Phase 7): a permissive annotation policy widens who
+    // may START a thread, not who may join one - see ProjectGuardOptions.
+    const guard = await requireProjectScope(c, services, "annotations:write", {
+      requireMembership: true,
+      editorial: requirements,
+    });
+    if ("response" in guard) {
+      return guard.response;
+    }
+    if (annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
     if (annotation.status !== "open" && annotation.status !== "pending_git") {
@@ -1323,12 +1573,35 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/withdraw", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "annotations:write");
+    const annotation = await repos.annotations.getById(c.req.param("annotationId"));
+    if (annotation === null) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    const a = authOf(c);
+    const withdrawingOwn = annotation.authorActorId === a.actor.id;
+    const requirements = withdrawingOwn
+      ? { capabilities: ["feedback:withdraw-own"] as const }
+      : {
+          capabilities: ["feedback:moderate"] as const,
+          legacyAction: "feedback:moderate" as const,
+        };
+    const policyMayAdmitNonmemberAuthor =
+      withdrawingOwn && a.kind === "session" && a.membership === null;
+    if (
+      !policyMayAdmitNonmemberAuthor &&
+      !hasEditorialAuthority(a, "annotations:write", requirements)
+    ) {
+      return problem(c, "forbidden", {
+        detail: `actor lacks required editorial capability "${requirements.capabilities[0]}"`,
+      });
+    }
+    const guard = await requireProjectScope(c, services, "annotations:write", {
+      editorial: requirements,
+    });
     if ("response" in guard) {
       return guard.response;
     }
-    const annotation = await repos.annotations.getById(c.req.param("annotationId"));
-    if (annotation === null || annotation.projectId !== guard.project.id) {
+    if (annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
     if (annotation.status === "pending_git") {
@@ -1337,7 +1610,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       });
     }
 
-    const a = authOf(c);
     const author = await repos.actors.getById(annotation.authorActorId);
     const decision = authorizeAnnotationWithdraw({
       annotationAuthor: author?.externalIdentity ?? `system:actor-${annotation.authorActorId}`,
@@ -1418,7 +1690,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   // ---- operations ------------------------------------------------------------
 
   app.get("/v1/projects/:projectId/operations/:operationId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1933,7 +2207,11 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     clock,
     getProject,
     auth,
-    requireRead: (c) => requireProjectScope(c, services, "chapters:read"),
+    requireRead: async (c) => {
+      const sessionOnly = requireHumanSession(c);
+      if (sessionOnly !== null) return { response: sessionOnly };
+      return requireProjectScope(c, services, "chapters:read");
+    },
   });
 
   return { app, repos, bootstrap, rebuild, reconcile };

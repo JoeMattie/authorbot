@@ -186,7 +186,9 @@ export function registerChapterSubmissionRoutes(ctx: ChapterSubmissionsContext):
   // ---- create / revise (contract §3.5) --------------------------------------
 
   app.post("/v1/projects/:projectId/chapter-submissions", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "submissions:write");
+    const guard = await requireProjectScope(c, services, "submissions:write", {
+      editorial: { capabilities: ["chapters:write"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -314,7 +316,9 @@ export function registerChapterSubmissionRoutes(ctx: ChapterSubmissionsContext):
 
   for (const action of ["publish", "unpublish"] as const) {
     app.post(`/v1/projects/:projectId/chapters/:chapterId/${action}`, auth, idem, async (c) => {
-      const guard = await requireProjectScope(c, services, "submissions:write");
+      const guard = await requireProjectScope(c, services, "submissions:write", {
+        editorial: { capabilities: ["chapters:publish"] },
+      });
       if ("response" in guard) {
         return guard.response;
       }

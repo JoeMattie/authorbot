@@ -520,7 +520,7 @@ describe("pause agents stops the fleet and leaves humans working", () => {
       jsonRequest("POST", {}, { Authorization: `Bearer ${token}` }),
     );
     expect(selfResume.status).toBe(403);
-    expect((await json(selfResume)).code).toBe("agents-paused");
+    expect((await json(selfResume)).code).toBe("forbidden");
   });
 
   it("resumes cleanly, restoring every token unchanged", async () => {

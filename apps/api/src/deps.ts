@@ -5,8 +5,13 @@
  * better-sqlite3 + fakes).
  */
 import type { SqlDatabase, Repositories, ActorRecord, ProjectMembershipRecord } from "@authorbot/database";
-import type { LeaseConfig, Role } from "@authorbot/domain";
-import type { ApiScope } from "./api-scopes.js";
+import type {
+  EditorialCapability,
+  LeaseConfig,
+  LegacyEffectiveAction,
+  Role,
+} from "@authorbot/domain";
+import type { ApiScope, CapabilityProjection } from "./api-scopes.js";
 import type { IdentityProvider } from "./identity/provider.js";
 import type { IdempotencyClaim } from "./idempotency.js";
 import type { BookRepoReader } from "./projection/reader.js";
@@ -159,6 +164,16 @@ export interface AuthContext {
   role: Role | null;
   /** Effective scopes: role bundle for sessions, token ∩ bundle for tokens. */
   scopes: ApiScope[];
+  /** Which representation is authoritative for this credential. */
+  capabilityMode: CapabilityProjection["capabilityMode"];
+  /** Exact canonical grant written on a token, or the session role bundle. */
+  grantedCapabilities: EditorialCapability[];
+  /** Current project role ceiling, independently visible to callers. */
+  roleCapabilityCeiling: EditorialCapability[];
+  /** Exact grant ∩ current role ceiling. */
+  effectiveCapabilities: EditorialCapability[];
+  /** Explicitly source-tagged compatibility authority on legacy tokens only. */
+  legacyEffectiveActions: LegacyEffectiveAction[];
   /** Present for token auth. */
   tokenId?: string;
   /** Present for session auth. */

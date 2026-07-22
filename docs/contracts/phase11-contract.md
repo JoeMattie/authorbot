@@ -425,6 +425,12 @@ and stripped control-plane authority can never reactivate.
   write the chapter.
 - Maintainers see a readable chapter diff with unchanged context, additions,
   deletions, author, base/current revision, and any conflict warning.
+- Generate a standard unified patch from the immutable before/after snapshots
+  with `diff`, and lazy-load Diff2Html core for browser rendering. Use a
+  side-by-side view on wide screens and line-by-line output at narrow widths,
+  omit file-list and syntax-highlighting chrome, cap expensive comparisons,
+  and retain an accessible plain-text before/after fallback. Treat proposal
+  content as hostile input and pin escaping/XSS behavior with regression tests.
 - Approve applies the proposal through the existing validated Git write path,
   updates attribution and linked artifacts atomically, and triggers the normal
   deployment path. Reject records the maintainer decision without changing the
@@ -441,12 +447,41 @@ and stripped control-plane authority can never reactivate.
 
 - Show Edit only to editor and maintainer roles that also hold the required
   `revisions:write` capability. The API remains the authorization boundary.
+- Use Milkdown Crepe as the in-place Markdown editing surface. Load its editor
+  code and styles only after Edit is activated so ordinary chapter reading does
+  not pay the editor bundle cost. Configure its supported schema and output so
+  submitted content round-trips through Authorbot's safe canonical Markdown
+  path without introducing raw HTML or browser-only document state.
+- Use the same Milkdown-backed manuscript surface for collaboration when an
+  authenticated reader activates Notes. An Authorbot-owned Milkdown plugin
+  maps durable block and range anchors to ProseMirror decorations and selection
+  state; Milkdown's block and tooltip providers supply the block-note affordance
+  and anchored composer. Annotation bodies, votes, replies, and status remain
+  API/store state and are never serialized into chapter Markdown.
+- Keep anonymous reading on the static published HTML and lazy-load the
+  Milkdown collaboration/editor bundle only when Notes or Edit is activated.
+  Do not introduce Yjs or a second real-time authority: Authorbot's shared
+  project store and event reconciliation remain canonical.
 - Edit mode replaces the rendered manuscript body in place and preserves a
   clean reading-width layout. It supports ordinary prose structure and
   round-trips to safe canonical Markdown without raw HTML.
 - Cancel restores the untouched reading view. Submit captures the current
   chapter revision/hash and creates a proposed whole-chapter revision through
   slice 4. It never publishes directly.
+- Editors use `Submit for review`. A maintainer who holds both
+  `revisions:write` and `revisions:review` also gets `Apply changes`: one
+  activation creates the immutable proposal and its approval record inside the
+  same serialized command, then sends it through the identical validation,
+  Git, attribution, and deployment path. It requires no second self-review
+  click and never bypasses the durable diff or audit history. Applying a draft
+  keeps it a draft; applying an edit to published prose triggers the ordinary
+  rebuild and deploy.
+- Extend the same Milkdown, proposal, diff, attribution, and review workflow to
+  the repository-backed Outline, Timeline, and Character pages. These are
+  canonical Markdown/YAML repository artifacts, never browser-only CMS state.
+  Editors submit changes for review; a maintainer with write and review
+  authority may use the same atomic `Apply changes` path. Each proposal names
+  every affected file and is applied as one validated Git commit or not at all.
 - The editor clearly reports saving, review pending, stale base, rejection,
   approval, and deployment states. Draft text survives recoverable errors and
   navigation warnings prevent accidental loss.

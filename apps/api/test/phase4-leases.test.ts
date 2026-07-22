@@ -17,7 +17,14 @@ import {
   verifyLeaseToken,
 } from "../src/index.js";
 import { uuidv7 } from "../src/ids.js";
-import { devLogin, jsonRequest, mintToken, BLOCK_ID_1, CHAPTER_ID } from "./helpers.js";
+import {
+  devLogin,
+  jsonRequest,
+  mintCanonicalToken,
+  mintToken,
+  BLOCK_ID_1,
+  CHAPTER_ID,
+} from "./helpers.js";
 import {
   claimWorkItem,
   createReadyWorkItem,
@@ -223,6 +230,34 @@ describe("claim (contract §2/§3)", () => {
       const conflict = await claimWorkItem(harness, { cookie: editor }, workItemId);
       expect(conflict.status).toBe(409);
       expect(conflict.body["code"]).toBe("state-conflict");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("requires the exact work:claim capability from canonical agent tokens", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const maintainer = await devLogin(harness, "capability-owner", "maintainer");
+      const readOnly = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:read"],
+        "work-reader",
+      );
+      const claimer = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:claim"],
+        "work-claimer",
+      );
+      const first = await createReadyWorkItem(harness);
+      const denied = await claimWorkItem(harness, { token: readOnly.token }, first.workItemId);
+      expect(denied.status).toBe(403);
+      expect((await harness.repos.workItems.getById(first.workItemId))?.status).toBe("ready");
+
+      const allowed = await claimWorkItem(harness, { token: claimer.token }, first.workItemId);
+      expect(allowed.status).toBe(201);
     } finally {
       harness.close();
     }

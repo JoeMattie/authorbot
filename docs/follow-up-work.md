@@ -139,22 +139,21 @@ slices 4 and 5:
 Maintainers may eventually get a direct edit shortcut, but the durable result
 must use the same validated Git path and attribution record.
 
-### Open decision: folding summaries into the outline
+### Generated chapter summaries on the Outline page
 
-Do not silently rewrite an author-maintained outline. Choose one of these
-semantics before implementation:
+Generate a clearly labeled `Chapter summaries` section on the published
+Outline page from current chapter frontmatter at build time. Keep it separate
+from the curated outline Markdown and never rewrite that author-maintained file
+as a side effect of changing a chapter summary.
 
-1. Generate a `Chapter summaries` portion of the Outline page from current
-   chapter frontmatter at build time. This is the recommended default because
-   it keeps the curated outline and generated navigation distinct.
-2. Synchronize summaries into an explicitly marked generated region of a
-   repository outline file, with deterministic markers and conflict handling.
-3. Offer a maintainer-reviewed action that copies selected summaries into
-   curated outline prose.
-
-The decision must define ordering, unpublished chapter visibility, what happens
-when a summary is removed, and whether the generated material is part of the
-book's canonical planning documents or only its published navigation.
+- Use canonical chapter order.
+- Show unpublished chapters only to authenticated collaborators who may read
+  them; the public Outline includes published chapters only.
+- Removing a summary removes that chapter's generated entry on the next build.
+- The generated section is published navigation derived from canonical chapter
+  metadata, not a second canonical planning document.
+- The curated Outline itself remains directly editable through the Slice 5
+  Milkdown proposal and maintainer-apply workflow.
 
 ## Chapter contributor display
 
@@ -185,7 +184,7 @@ from each contributor to the historical revisions they changed.
 4. Continue Phase 11 slice 3 permissions.
 5. Add summary proposals, completed Work attribution, contributor display, and
    diff links alongside slices 4 and 5.
-6. Resolve the outline-folding decision before implementing generated or
-   synchronized outline content.
+6. Add the generated Chapter summaries section without rewriting curated
+   outline content.
 7. Carry the Discussion separation into slice 6 and historical contributor
    links into slice 7.

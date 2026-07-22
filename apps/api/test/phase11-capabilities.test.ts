@@ -1,0 +1,346 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  API_ORIGIN,
+  devLogin,
+  jsonRequest,
+  makeHarness,
+  mintToken,
+  type TestHarness,
+} from "./helpers.js";
+
+interface CanonicalMintBody {
+  id: string;
+  actorId: string;
+  token: string;
+  scopes: string[];
+  capabilityMode: string;
+  grantedCapabilities: string[];
+  roleCapabilityCeiling: string[];
+  effectiveCapabilities: string[];
+  legacyEffectiveActions: unknown[];
+}
+
+describe("Phase 11 agent-token capabilities", () => {
+  let h: TestHarness;
+  let maintainer: string;
+
+  beforeEach(async () => {
+    h = await makeHarness();
+    maintainer = await devLogin(h, "phase11-maintainer", "maintainer");
+  });
+
+  afterEach(() => h.close());
+
+  const mintCanonical = async (
+    capabilities: string[],
+    key = "phase11-canonical-mint",
+  ): Promise<CanonicalMintBody> => {
+    const response = await h.app.request(
+      `/v1/projects/${h.projectId}/agent-tokens`,
+      jsonRequest(
+        "POST",
+        { name: "canonical-agent", capabilities },
+        { Cookie: maintainer, "Idempotency-Key": key },
+      ),
+    );
+    expect(response.status).toBe(201);
+    return (await response.json()) as CanonicalMintBody;
+  };
+
+  it("mints canonical rows with a conservative shadow and projects the role ceiling", async () => {
+    const body = await mintCanonical([
+      "chapters:publish",
+      "suggestions:write",
+      "chapters:read",
+      "suggestions:read",
+    ]);
+
+    expect(body.capabilityMode).toBe("canonical");
+    expect(body.grantedCapabilities).toEqual([
+      "chapters:read",
+      "suggestions:read",
+      "suggestions:write",
+      "chapters:publish",
+    ]);
+    expect(body.scopes).toEqual(["chapters:read"]);
+    expect(body.effectiveCapabilities).toEqual([
+      "chapters:read",
+      "suggestions:read",
+      "suggestions:write",
+    ]);
+    expect(body.roleCapabilityCeiling).toContain("work:submit");
+    expect(body.roleCapabilityCeiling).not.toContain("chapters:publish");
+    expect(body.legacyEffectiveActions).toEqual([]);
+
+    const stored = await h.repos.agentTokens.getById(body.id);
+    expect(stored).toMatchObject({
+      capabilityMode: "canonical",
+      capabilitiesV2: body.grantedCapabilities,
+      scopes: ["chapters:read"],
+    });
+
+    const me = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${body.token}` },
+    });
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({
+      authKind: "token",
+      capabilityMode: "canonical",
+      grantedCapabilities: body.grantedCapabilities,
+      effectiveCapabilities: body.effectiveCapabilities,
+      scopes: ["chapters:read"],
+      legacyEffectiveActions: [],
+    });
+  });
+
+  it("intersects an exact grant with the current role on every request", async () => {
+    const body = await mintCanonical(["chapters:read", "chapters:publish"]);
+    expect(body.effectiveCapabilities).not.toContain("chapters:publish");
+
+    await h.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(body.actorId)
+      .run();
+    const elevated = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${body.token}` },
+    });
+    expect(elevated.status).toBe(200);
+    const projection = (await elevated.json()) as {
+      grantedCapabilities: string[];
+      roleCapabilityCeiling: string[];
+      effectiveCapabilities: string[];
+    };
+    expect(projection.grantedCapabilities).toEqual(["chapters:read", "chapters:publish"]);
+    expect(projection.roleCapabilityCeiling).toContain("chapters:publish");
+    expect(projection.effectiveCapabilities).toEqual([
+      "chapters:read",
+      "chapters:publish",
+    ]);
+  });
+
+  it("dual-reads legacy rows and identifies preserved actions by source", async () => {
+    const { token, tokenId } = await mintToken(h, maintainer, [
+      "annotations:write",
+      "work:claim",
+    ]);
+    const record = await h.repos.agentTokens.getById(tokenId);
+    if (record === null) throw new Error("minted token record is missing");
+    await h.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(record.actorId)
+      .run();
+
+    const me = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({
+      capabilityMode: "legacy",
+      grantedCapabilities: [
+        "comments:write",
+        "suggestions:write",
+        "replies:write",
+        "feedback:withdraw-own",
+        "work:claim",
+      ],
+      legacyEffectiveActions: [
+        {
+          action: "feedback:moderate",
+          source: "legacy-scope",
+          sourceScope: "annotations:write",
+        },
+        {
+          action: "work:promote",
+          source: "legacy-scope",
+          sourceScope: "work:claim",
+        },
+        {
+          action: "work:cancel",
+          source: "legacy-scope",
+          sourceScope: "work:claim",
+        },
+      ],
+    });
+  });
+
+  it("fails closed for unknown and malformed canonical grant sets", async () => {
+    const { token, tokenId } = await mintToken(h, maintainer, ["chapters:read"]);
+    await h.db
+      .prepare(
+        `UPDATE agent_tokens
+            SET capability_mode = 'canonical',
+                capabilities_v2 = '["future:unknown"]',
+                scopes = '["chapters:read"]'
+          WHERE id = ?`,
+      )
+      .bind(tokenId)
+      .run();
+
+    const unknown = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(unknown.status).toBe(200);
+    expect(await unknown.json()).toMatchObject({
+      capabilityMode: "canonical",
+      grantedCapabilities: [],
+      effectiveCapabilities: [],
+      scopes: [],
+    });
+
+    await h.db
+      .prepare(`UPDATE agent_tokens SET capabilities_v2 = '{not-json' WHERE id = ?`)
+      .bind(tokenId)
+      .run();
+    const malformed = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(malformed.status).toBe(401);
+  });
+
+  it("replaces the complete set idempotently without rotating or returning the secret", async () => {
+    const { tokenId } = await mintToken(h, maintainer, ["annotations:write"]);
+    const before = await h.repos.agentTokens.getById(tokenId);
+    expect(before).not.toBeNull();
+    const path = `/v1/projects/${h.projectId}/agent-tokens/${tokenId}/capabilities`;
+    const key = "phase11-capabilities-replace";
+    const request = () =>
+      h.app.request(
+        path,
+        jsonRequest(
+          "PUT",
+          { capabilities: ["comments:read", "chapters:read"] },
+          { Cookie: maintainer, "Idempotency-Key": key },
+        ),
+      );
+
+    const first = await request();
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as Record<string, unknown>;
+    expect(firstBody).toMatchObject({
+      id: tokenId,
+      capabilityMode: "canonical",
+      scopes: ["chapters:read"],
+      grantedCapabilities: ["chapters:read", "comments:read"],
+      effectiveCapabilities: ["chapters:read", "comments:read"],
+      legacyEffectiveActions: [],
+    });
+    expect(firstBody).not.toHaveProperty("token");
+    expect(firstBody).not.toHaveProperty("tokenHash");
+
+    const replay = await request();
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(firstBody);
+
+    const stored = await h.repos.agentTokens.getById(tokenId);
+    expect(stored?.tokenHash).toBe(before?.tokenHash);
+    expect(stored).toMatchObject({
+      capabilityMode: "canonical",
+      scopes: ["chapters:read"],
+      capabilitiesV2: ["chapters:read", "comments:read"],
+    });
+    const audit = await h.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_events
+          WHERE action = 'agent_token.capabilities.update' AND target_id = ?`,
+      )
+      .bind(tokenId)
+      .first<{ count: number }>();
+    expect(audit?.count).toBe(1);
+
+    const cleared = await h.app.request(
+      path,
+      jsonRequest(
+        "PUT",
+        { capabilities: [] },
+        { Cookie: maintainer, "Idempotency-Key": "phase11-capabilities-clear" },
+      ),
+    );
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      capabilityMode: "canonical",
+      scopes: [],
+      grantedCapabilities: [],
+      effectiveCapabilities: [],
+    });
+  });
+
+  it("projects capabilities in the session-only token list", async () => {
+    const minted = await mintCanonical(["chapters:read", "comments:read"]);
+    const list = await h.app.request(`/v1/projects/${h.projectId}/agent-tokens`, {
+      headers: { Cookie: maintainer },
+    });
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { items: Array<Record<string, unknown>> };
+    const item = body.items.find(({ id }) => id === minted.id);
+    expect(item).toMatchObject({
+      id: minted.id,
+      capabilityMode: "canonical",
+      grantedCapabilities: ["chapters:read", "comments:read"],
+      effectiveCapabilities: ["chapters:read", "comments:read"],
+      legacyEffectiveActions: [],
+    });
+    expect(item).not.toHaveProperty("token");
+    expect(item).not.toHaveProperty("tokenHash");
+  });
+
+  it("rejects bearer credentials on every token-management route before scope checks", async () => {
+    const { token, tokenId } = await mintToken(h, maintainer, [
+      "chapters:read",
+      "tokens:manage",
+      "members:manage",
+    ]);
+    const record = await h.repos.agentTokens.getById(tokenId);
+    if (record === null) throw new Error("minted token record is missing");
+    await h.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(record.actorId)
+      .run();
+
+    const authorization = { Authorization: `Bearer ${token}` };
+    const attempts = [
+      h.app.request(`/v1/projects/${h.projectId}/agent-tokens`, {
+        headers: authorization,
+      }),
+      h.app.request(
+        `/v1/projects/${h.projectId}/agent-tokens`,
+        jsonRequest(
+          "POST",
+          { name: "forbidden", capabilities: [] },
+          { ...authorization, "Idempotency-Key": "phase11-token-post" },
+        ),
+      ),
+      h.app.request(
+        `/v1/projects/${h.projectId}/agent-tokens/${tokenId}/capabilities`,
+        jsonRequest(
+          "PUT",
+          { capabilities: [] },
+          { ...authorization, "Idempotency-Key": "phase11-token-put" },
+        ),
+      ),
+      h.app.request(`/v1/projects/${h.projectId}/agent-tokens/${tokenId}`, {
+        method: "DELETE",
+        headers: {
+          ...authorization,
+          "Idempotency-Key": "phase11-token-delete",
+        },
+      }),
+      h.app.request(
+        `/v1/projects/${h.projectId}/agent-tokens/revoke-all`,
+        jsonRequest(
+          "POST",
+          { reason: "must require a human session" },
+          { ...authorization, "Idempotency-Key": "phase11-token-revoke-all" },
+        ),
+      ),
+    ];
+
+    for (const response of await Promise.all(attempts)) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        code: "forbidden",
+        detail: "agent-token credentials cannot manage agent tokens",
+      });
+    }
+    expect((await h.repos.agentTokens.getById(tokenId))?.revokedAt).toBeNull();
+  });
+});
