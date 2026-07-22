@@ -1,22 +1,49 @@
 ---
+import Icon from "../../../components/Icon.astro";
 import Base from "../../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
+
+const monogram = (name: string): string =>
+  name
+    .replace(/^Dr\.\s+/u, "")
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
 ---
 
-<Base title={`Characters · ${site.book.title}`}>
-  <h1>Characters</h1>
-  {
-    site.characters.length === 0 ? (
-      <p>This book has no character records.</p>
-    ) : (
-      <ul class="character-index">
-        {site.characters.map((character) => (
-          <li>
-            <a href={character.href}>{character.name}</a>
-            {character.summary && <p class="summary">{character.summary}</p>}
-          </li>
-        ))}
-      </ul>
-    )
-  }
+<Base title={`Characters · ${site.book.title}`} activeNav="characters">
+  <div class="story-page story-characters-page">
+    <header class="story-page-header">
+      <p class="story-eyebrow">Characters</p>
+      <h1>Who is in the room</h1>
+    </header>
+    {
+      site.characters.length === 0 ? (
+        <p class="story-empty">This book has no character records yet.</p>
+      ) : (
+        <ul class="character-grid">
+          {site.characters.map((character) => (
+            <li>
+              <a class="character-card" href={character.href}>
+                <div class="character-card-heading">
+                  <span class="character-avatar" aria-hidden="true">{monogram(character.name)}</span>
+                  <span>
+                    <strong>{character.name}</strong>
+                    <span class="character-card-meta">
+                      {character.aliases.length > 0 && `${character.aliases.join(", ")} · `}
+                      {character.chapters.length} {character.chapters.length === 1 ? "chapter" : "chapters"}
+                    </span>
+                  </span>
+                  <Icon name="chevron-right" size={17} class="character-card-arrow" />
+                </div>
+                {character.summary && <span class="character-card-summary">{character.summary}</span>}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </div>
 </Base>

@@ -29,6 +29,7 @@ const csp =
   "connect-src 'self'; " +
   "img-src 'self' data:";
 const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
+const workStylesHref = `${site.basePath}_astro/authorbot-work.css`;
 const src = `${site.basePath}_astro/authorbot-collab.js`;
 const chapters = Object.fromEntries(
   site.chapters.map((chapter) => [chapter.id, { title: chapter.title, href: chapter.href }]),
@@ -41,12 +42,29 @@ const chapters = Object.fromEntries(
   noindex={true}
   csp={csp}
   collabStylesHref={collabStylesHref}
+  extraStylesHrefs={[workStylesHref]}
+  activeNav="work"
 >
   <section class="work-page">
-    <h1>Work queue</h1>
-    <p class="work-intro">
-      Ready work items generated from suggestions that met the project's voting rule.
-    </p>
+    <svg class="ab-work-icon-sprite" aria-hidden="true">
+      <defs>
+        <symbol id="ab-work-icon-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></symbol>
+        <symbol id="ab-work-icon-file-plus" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></symbol>
+        <symbol id="ab-work-icon-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9M6 3v12"/></symbol>
+        <symbol id="ab-work-icon-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></symbol>
+        <symbol id="ab-work-icon-timer" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6M12 2v3"/></symbol>
+        <symbol id="ab-work-icon-check" viewBox="0 0 24 24"><path d="m3 12 4 4L17 6"/><path d="m13 16 2 2 6-7"/></symbol>
+      </defs>
+    </svg>
+    <header class="work-masthead">
+      <p class="work-eyebrow">Work queue</p>
+      <h1>What needs doing</h1>
+      <p class="work-intro">
+        Approved suggestions and author requests become tasks here. Claim one to hold a short
+        lease on it, edit, and submit. A valid submission commits immediately; if the chapter
+        moved underneath it, the edit returns to the queue as a conflict instead.
+      </p>
+    </header>
     <authorbot-work-queue
       data-api-base={collab.apiBase}
       data-project={collab.projectSlug}

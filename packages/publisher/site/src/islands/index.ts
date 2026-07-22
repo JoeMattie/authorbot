@@ -3,7 +3,8 @@
  * §3.5-§3.6): defines the collaboration custom elements. One bundle serves
  * every island; chapter pages mount `<authorbot-collab>`, the `/work/` page
  * mounts `<authorbot-work-queue>`, `/write/` and chapter pages mount the
- * chapter composer, and `/settings/` mounts the maintainer settings view.
+ * chapter composer. The settings and access consoles have page-only bundles,
+ * keeping their administration code off reader pages.
  * Emitted only for builds given an API base.
  */
 import { AuthorbotAccount } from "./account.js";
@@ -11,7 +12,6 @@ import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
-import { AuthorbotSettings } from "./settings-view.js";
 import { AuthorbotWorkQueue } from "./work-queue.js";
 
 const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
@@ -22,7 +22,6 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
   ["authorbot-new-chapter", AuthorbotNewChapter],
-  ["authorbot-settings", AuthorbotSettings],
 ];
 
 for (const [tag, constructor] of ELEMENTS) {

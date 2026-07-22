@@ -1,5 +1,6 @@
 ---
 import { site } from "virtual:authorbot-site";
+import Icon from "../components/Icon.astro";
 import "../styles/site.css";
 
 const {
@@ -8,6 +9,8 @@ const {
   noindex = false,
   csp,
   collabStylesHref,
+  settingsConsole = false,
+  activeNav,
   /**
    * Additional island stylesheets. `/settings/` loads the Phase 7 access-control
    * sheet on top of the collaboration one; every other page passes nothing, so
@@ -16,18 +19,22 @@ const {
   extraStylesHrefs = [],
 } = Astro.props;
 const base = site.basePath;
+const brandTitle = site.book.title.toLowerCase().replace(/\.+$/, "");
+const safeBookTitle = site.book.title.replace(/[<>]/g, "");
+const currentNav = activeNav as string | undefined;
 // The account strip - sign in, sign out, and the way into Settings and Work.
 //
-// Shown on every page that already loads the islands bundle, which is the same
-// condition as `collabStylesHref`. Deliberately NOT on the story pages: those
-// are read-only and stay script-free, and pushing the whole bundle (annotation
-// gutters, composer, work queue, settings) onto an outline nobody can edit
-// would cost every reader real bytes to render one link.
-//
-// The index is in the set, which is what matters most: it is where the author
-// of a book with no chapters lands, and where there was previously no way to
-// sign in at all.
-const account = site.collab && collabStylesHref ? site.collab : undefined;
+// Every page in a collaboration build shares the signed-in identity. Pages
+// with collaboration controls already load the main bundle; story pages use
+// a tiny account-only entry so they do not pay for annotations or work flows.
+const account = site.collab && !settingsConsole ? site.collab : undefined;
+const accountScriptHref =
+  account && !collabStylesHref ? `${site.basePath}_astro/authorbot-account.js` : undefined;
+const effectiveCsp =
+  csp ??
+  (accountScriptHref
+    ? "default-src 'self'; connect-src 'self'; img-src 'self' data:"
+    : undefined);
 // Astro escapes attribute quotes but keeps `<`/`>` inside attribute values;
 // dropping them here guarantees the built output never contains a literal
 // `<script` anywhere, even inside a quoted attribute (contract section 6).
@@ -40,39 +47,56 @@ const safeDescription =
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    {csp && <meta http-equiv="Content-Security-Policy" content={csp} />}
+    {effectiveCsp && <meta http-equiv="Content-Security-Policy" content={effectiveCsp} />}
     <title>{title}</title>
     {safeDescription && <meta name="description" content={safeDescription} />}
     {noindex && <meta name="robots" content="noindex" />}
     {collabStylesHref && <link rel="stylesheet" href={collabStylesHref} />}
     {extraStylesHrefs.map((href: string) => <link rel="stylesheet" href={href} />)}
   </head>
-  <body>
+  <body class={settingsConsole ? "settings-console-body" : undefined}>
     <a class="skip-link" href="#main">Skip to content</a>
-    <header class="site-header">
-      <nav aria-label="Site">
-        <a class="book-link" href={base}>{site.book.title}</a>
-        <ul class="site-nav">
-          <li><a href={`${base}story/`}>Outline</a></li>
-          <li><a href={`${base}story/timeline/`}>Timeline</a></li>
-          <li><a href={`${base}story/characters/`}>Characters</a></li>
-        </ul>
-        {account && (
-          <authorbot-account
-            data-api-base={account.apiBase}
-            data-project={account.projectSlug}
-            data-base={base}
-          ></authorbot-account>
-        )}
-      </nav>
-    </header>
-    <main id="main">
+    {!settingsConsole && (
+      <header class="site-header">
+        <nav aria-label="Site">
+          <a class="book-link" href={base} aria-label={`${safeBookTitle} chapters`}>
+            <span class="book-mark"><Icon name="flask-conical" size={18} /></span>
+            <span class="book-wordmark">{brandTitle}<b>.</b></span>
+          </a>
+          <ul class="site-nav">
+            <li><a href={base} aria-current={currentNav === "chapters" ? "page" : undefined}>Chapters</a></li>
+            <li><a href={`${base}story/`} aria-current={currentNav === "outline" ? "page" : undefined}>Outline</a></li>
+            <li><a href={`${base}story/timeline/`} aria-current={currentNav === "timeline" ? "page" : undefined}>Timeline</a></li>
+            <li><a href={`${base}story/characters/`} aria-current={currentNav === "characters" ? "page" : undefined}>Characters</a></li>
+            {site.collab && (
+              <li data-collab-nav="work">
+                <a href={`${base}work/`} aria-current={currentNav === "work" ? "page" : undefined}>
+                  Work <span class="site-nav-count" data-work-count hidden>0</span>
+                </a>
+              </li>
+            )}
+          </ul>
+          {account && <span class="site-account-divider" data-collab-nav="divider" aria-hidden="true"></span>}
+          {account && (
+            <authorbot-account
+              data-api-base={account.apiBase}
+              data-project={account.projectSlug}
+              data-base={base}
+            ></authorbot-account>
+          )}
+        </nav>
+      </header>
+    )}
+    <main id="main" class={settingsConsole ? "settings-console-main" : undefined}>
       <slot />
     </main>
-    <footer class="site-footer">
-      <p>
-        {site.book.title}{site.book.license ? ` · ${site.book.license}` : ""}
-      </p>
-    </footer>
+    {!settingsConsole && (
+      <footer class="site-footer">
+        <p>
+          {site.book.title}{site.book.license ? ` · ${site.book.license}` : ""}
+        </p>
+      </footer>
+    )}
+    {accountScriptHref && <script is:inline type="module" src={accountScriptHref}></script>}
   </body>
 </html>

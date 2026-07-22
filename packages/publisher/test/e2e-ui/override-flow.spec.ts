@@ -35,8 +35,10 @@ test("a maintainer promotes a suggestion to work against a visible tally", async
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "override-maintainer", "maintainer");
 
-  const card = page.locator(".ab-card", { hasText: SUGGESTION });
+  const card = page.locator(".ab-card", { hasText: SUGGESTION }).first();
   await expect(card).toBeVisible({ timeout: 30_000 });
+  await card.locator(".ab-card-head").click();
+  await expect(card).toHaveClass(/ab-active/);
 
   // No work item yet: the rule is not met.
   await expect(card.locator(".ab-badge")).toHaveCount(0);

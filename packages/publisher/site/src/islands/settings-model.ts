@@ -2,14 +2,14 @@
  * Pure logic behind `<authorbot-settings>` (Phase 6 contract §3.6).
  *
  * No DOM, no network: this module is the part of book settings that can be
- * reasoned about - and unit-tested - on its own. Two jobs.
+ * reasoned about, and unit-tested, on its own. Two jobs.
  *
  * **1. The minimal patch.** `PATCH .../settings` is a read-modify-write of
  * `book.yml` that lands as a commit, and the API distinguishes `null` (clear
  * this optional field) from absent (leave it alone). So the view must send
  * exactly the fields the maintainer actually changed: an untouched save has to
  * be a no-op rather than an empty commit, and a guarded field must count as
- * "changed" only when its value really differs - otherwise re-saving a form
+ * "changed" only when its value really differs, otherwise re-saving a form
  * would demand confirmation for a slug nobody touched.
  *
  * **2. Author-facing governance.** The contract asks for the vote rule "in
@@ -49,7 +49,7 @@ export interface RuleAction {
 }
 
 /**
- * A rule as the *client* holds it - deliberately WITHOUT `version`.
+ * A rule as the *client* holds it, deliberately WITHOUT `version`.
  *
  * `GET .../settings` returns the effective rules, which DO carry a version
  * (they come from `book.yml` or the deployment bootstrap). The PATCH schema is
@@ -70,7 +70,7 @@ export const HUMAN_MAINTAINER_METRIC = "human_maintainer_approvals";
 // Snapshot + patch
 // ---------------------------------------------------------------------------
 
-/** Publication display flags: `null` means "not set - use the default". */
+/** Publication display flags: `null` means "not set, use the default". */
 export interface PublicationFlags {
   show_revision: boolean | null;
   show_attribution: boolean | null;
@@ -185,7 +185,7 @@ function same(a: unknown, b: unknown): boolean {
  * The minimal patch: only fields whose value actually differs.
  *
  * Consequences worth stating. A save with no edits produces `{}`, which the
- * view refuses to send at all - no empty settings commit in `git log`. A
+ * view refuses to send at all, no empty settings commit in `git log`. A
  * guarded field appears only on a real change, so the confirmation step fires
  * when something breaks and never merely because a form was re-submitted.
  * `null` is a value here, not an absence: clearing the licence sends
@@ -209,7 +209,7 @@ export function buildPatch(original: SettingsSnapshot, edited: SettingsSnapshot)
 
   if (!same(original.rules, edited.rules)) {
     // The rule map REPLACES the stored one wholesale (that is what makes a rule
-    // deletable), so the whole edited map goes - versionless, by construction.
+    // deletable), so the whole edited map goes, versionless, by construction.
     patch.governance = { rules: edited.rules };
   }
   return patch;
@@ -228,7 +228,7 @@ export function patchIsEmpty(patch: SettingsPatch): boolean {
 export const GOVERNANCE_HEADING = "How many approvals before a suggestion becomes work?";
 
 /**
- * "at least 3", "exactly 1" - the quantity half of a clause, so each metric
+ * "at least 3", "exactly 1", the quantity half of a clause, so each metric
  * only has to supply the thing being counted.
  */
 export function countPhrase(operator: string, value: number): string {
@@ -268,7 +268,7 @@ interface MetricLanguage {
 const METRIC_LANGUAGE: Readonly<Record<string, MetricLanguage>> = Object.freeze({
   approvals: {
     phrase: (count) => `${count} people approve it`,
-    explain: "Counts every approval, whoever casts it - readers, collaborators, agents, you.",
+    explain: "Counts every approval, whoever casts it, readers, collaborators, agents, you.",
   },
   rejections: {
     phrase: (count) => `${count} people reject it`,
@@ -276,7 +276,7 @@ const METRIC_LANGUAGE: Readonly<Record<string, MetricLanguage>> = Object.freeze(
   },
   abstentions: {
     phrase: (count) => `${count} people abstain`,
-    explain: "Counts votes cast as 'abstain' - read as taking part without taking a side.",
+    explain: "Counts votes cast as 'abstain', read as taking part without taking a side.",
   },
   net_score: {
     phrase: (count) => `approvals minus rejections is ${count}`,
@@ -286,10 +286,10 @@ const METRIC_LANGUAGE: Readonly<Record<string, MetricLanguage>> = Object.freeze(
   distinct_voters: {
     phrase: (count) => `${count} different people have voted`,
     explain:
-      "Counts how many people took part at all, whichever way they voted - a way to require that a change has been seen, not just liked.",
+      "Counts how many people took part at all, whichever way they voted, a way to require that a change has been seen, not just liked.",
   },
   human_approvals: {
-    phrase: (count) => `${count} people - not agents - approve it`,
+    phrase: (count) => `${count} people, not agents, approve it`,
     explain: "Approvals from agent accounts do not count towards this requirement.",
   },
   agent_approvals: {
@@ -299,7 +299,7 @@ const METRIC_LANGUAGE: Readonly<Record<string, MetricLanguage>> = Object.freeze(
   maintainer_approvals: {
     phrase: (count) => `${count} maintainers approve it`,
     explain:
-      "Counts approvals from anyone holding the maintainer role - and an agent token you own can hold that role, so this requirement can be met without a person ever reading the change. If that is not what you want, require a human maintainer's approval instead.",
+      "Counts approvals from anyone holding the maintainer role, and an agent token you own can hold that role, so this requirement can be met without a person ever reading the change. If that is not what you want, require a human maintainer's approval instead.",
   },
   [HUMAN_MAINTAINER_METRIC]: {
     phrase: (count) =>
@@ -307,7 +307,7 @@ const METRIC_LANGUAGE: Readonly<Record<string, MetricLanguage>> = Object.freeze(
         ? "you (or another human maintainer) approve it"
         : `${count} human maintainers approve it`,
     explain:
-      "This is the requirement that keeps your book yours: nothing becomes work on it without a human maintainer agreeing. It is deliberately narrower than 'a maintainer approves it', because you can grant maintainer role to your own agent tokens - so a plain maintainer requirement could be satisfied by an agent you own, which is consensus you manufactured rather than consensus you got. Counting only humans closes that. You can remove it: on a genuinely collaborative project you may not want a personal veto on every change, and that is your call.",
+      "This is the requirement that keeps your book yours: nothing becomes work on it without a human maintainer agreeing. It is deliberately narrower than 'a maintainer approves it', because you can grant maintainer role to your own agent tokens, so a plain maintainer requirement could be satisfied by an agent you own, which is consensus you manufactured rather than consensus you got. Counting only humans closes that. You can remove it: on a genuinely collaborative project you may not want a personal veto on every change, and that is your call.",
   },
 });
 
@@ -394,7 +394,7 @@ export function hasHumanMaintainerClause(rule: EditableRule): boolean {
 export const HUMAN_MAINTAINER_LABEL = "Require a human maintainer's approval";
 
 /**
- * Add or remove the human-maintainer clause - the contract makes it both
+ * Add or remove the human-maintainer clause, the contract makes it both
  * editable and removable, so both directions are a supported edit rather than
  * a special case the view has to hand-roll.
  */
@@ -416,7 +416,7 @@ export function withHumanMaintainerClause(rule: EditableRule, required: boolean)
 
 /** The wording for a book still running the deployment's bootstrap rules. */
 export const BOOTSTRAP_NOTICE =
-  "This book has not adopted its own rules yet - it is running the defaults this Authorbot deployment was started with. Saving here adopts them as your book's own rules, written into book.yml and committed like any other change.";
+  "This book has not adopted its own rules yet, it is running the defaults this Authorbot deployment was started with. Saving here adopts them as your book's own rules, written into book.yml and committed like any other change.";
 
 export const BOOK_SOURCE_NOTICE =
   "These are your book's own rules, stored in book.yml and versioned with the prose they govern.";
@@ -434,7 +434,7 @@ export function sourceNotice(source: string): string {
  * Plain-language summaries for the identifiers an author is most likely to
  * pick. Short on purpose: this is orientation, not legal advice.
  *
- * Anything not listed gets NO summary - the raw identifier is shown alone.
+ * Anything not listed gets NO summary, the raw identifier is shown alone.
  * Guessing at an unrecognised licence would be worse than silence: an author
  * choosing how their book may be reused deserves either a summary that is
  * right or none at all.
@@ -447,7 +447,7 @@ const LICENSE_SUMMARIES: Readonly<Record<string, string>> = Object.freeze({
   "cc-by-nc-4.0":
     "Anyone may share and adapt your book for non-commercial purposes, as long as they credit you.",
   "cc-by-nd-4.0":
-    "Anyone may share your book as it is, including commercially, as long as they credit you - but adaptations may not be published.",
+    "Anyone may share your book as it is, including commercially, as long as they credit you, but adaptations may not be published.",
   "cc-by-nc-sa-4.0":
     "Anyone may share and adapt your book for non-commercial purposes, as long as they credit you and release their version under this same licence.",
   "cc0-1.0":

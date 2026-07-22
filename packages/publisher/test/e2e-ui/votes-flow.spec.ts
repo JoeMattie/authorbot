@@ -44,8 +44,10 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
   await pageA.goto(chapterUrl("baseline"));
   await devLogin(pageA, "vote-alice", "contributor");
 
-  const card = pageA.locator(".ab-card", { hasText: SUGGESTION_BODY });
+  const card = pageA.locator(".ab-card", { hasText: SUGGESTION_BODY }).first();
   await expect(card).toBeVisible();
+  await card.locator(".ab-card-head").click();
+  await expect(card).toHaveClass(/ab-active/);
   const approve = card.locator('.ab-vote-btn[data-vote="approve"]');
   await expect(approve).toBeEnabled();
   await approve.click();
@@ -82,7 +84,7 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
   await expect(
     pageM.locator(".ab-work-item .ab-work-chapter", { hasText: "Baseline" }).first(),
   ).toBeVisible();
-  await expect(pageM.locator(".ab-work-item .ab-work-base").first()).toContainText("Base revision");
+  await expect(pageM.locator(".ab-work-item .ab-work-head").first()).toContainText(/rev \d+/);
   await expect(pageM.locator(".ab-work-item .ab-work-support").first()).toContainText("approve");
 
   await ctxA.close();
@@ -95,8 +97,10 @@ test("signed-out reader sees the tally but has no enabled controls (§7)", async
   await page.goto(chapterUrl("baseline"));
 
   // show_public_annotations: the suggestion renders for the anonymous reader.
-  const card = page.locator(".ab-card", { hasText: SUGGESTION_BODY });
+  const card = page.locator(".ab-card", { hasText: SUGGESTION_BODY }).first();
   await expect(card).toBeVisible();
+  await card.locator(".ab-card-head").click();
+  await expect(card).toHaveClass(/ab-active/);
   // Tallies are visible to everyone (counts only).
   await expect(card.locator(".ab-vote-tally")).toContainText("approve");
   // The segments exist but are all disabled (enabled only with votes:write).
@@ -115,8 +119,10 @@ test("keyboard-only voting round trip", async ({ browser }) => {
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "kb-voter", "contributor");
 
-  const card = page.locator(".ab-card", { hasText: SUGGESTION_BODY });
+  const card = page.locator(".ab-card", { hasText: SUGGESTION_BODY }).first();
   await expect(card).toBeVisible();
+  await card.locator(".ab-card-head").click();
+  await expect(card).toHaveClass(/ab-active/);
   const approve = card.locator('.ab-vote-btn[data-vote="approve"]');
   const abstain = card.locator('.ab-vote-btn[data-vote="abstain"]');
 

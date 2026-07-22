@@ -65,11 +65,35 @@ test("human completes a range_replacement: claim → edit → submit → complet
   const context = await browser.newContext();
   const page = await context.newPage();
   await signIn(page, "work-hera", "editor");
+  await page.setViewportSize({ width: 390, height: 844 });
   await claimInUi(page, item.id);
+
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toContainText("Work");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const nav = document.querySelector(".site-nav")?.getBoundingClientRect();
+        const active = document
+          .querySelector('.site-nav a[aria-current="page"]')
+          ?.getBoundingClientRect();
+        return (
+          nav !== undefined &&
+          active !== undefined &&
+          active.left >= nav.left - 1 &&
+          active.right <= nav.right + 1
+        );
+      }),
+    )
+    .toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
 
   // ---- the edit view carries the §15.3 task bundle -------------------------
   const panel = page.locator(".ab-claim");
-  await expect(panel.locator(".ab-claim-title")).toHaveText("Your task: Revise range");
+  await expect(panel.locator(".ab-claim-title")).toHaveText("Revise passage");
   await expect(panel.locator(".ab-claim-request")).toHaveText("This clause could be sharper.");
   await expect(panel.locator(".ab-claim-criteria li").first()).toBeVisible();
   await expect(panel.locator(".ab-original-text")).toHaveText(original);

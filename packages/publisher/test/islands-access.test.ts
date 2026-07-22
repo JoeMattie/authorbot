@@ -522,11 +522,12 @@ describe("restricting", () => {
     );
     const host = mount();
     await until(() => host.querySelector(".ab-policy-choices"));
-    const lockedLabel = [...host.querySelectorAll<HTMLElement>(".ab-field-label")].find((node) =>
-      (node.textContent ?? "").startsWith("Author only"),
+    const lockedLabel = [...host.querySelectorAll<HTMLElement>(".ab-field-label")].find(
+      (node) => (node.textContent ?? "") === "Locked",
     );
     expect(lockedLabel).toBeDefined();
     const section = host.querySelector<HTMLElement>(".ab-access-policy");
+    expect(section?.textContent).toMatch(/only maintainers may write/i);
     expect(section?.textContent).toMatch(/keep their membership/i);
   });
 
@@ -585,13 +586,20 @@ describe("restricting", () => {
     const host = mount();
     await until(() => host.querySelector(".ab-access-freeze-btn"));
     const button = host.querySelector<HTMLButtonElement>(".ab-access-freeze-btn")!;
-    expect(button.disabled).toBe(true); // no reason yet
-
-    const reason = host.querySelector<HTMLTextAreaElement>("#ab-freeze-reason")!;
-    reason.value = "a fleet is misbehaving";
-    reason.dispatchEvent(new Event("input"));
     expect(button.disabled).toBe(false);
     button.click();
+
+    const reason = host.querySelector<HTMLTextAreaElement>("#ab-freeze-reason")!;
+    const ack = host.querySelector<HTMLInputElement>(".ab-confirm-check")!;
+    const confirm = host.querySelector<HTMLButtonElement>(".ab-confirm-go")!;
+    expect(confirm.disabled).toBe(true);
+    reason.value = "a fleet is misbehaving";
+    reason.dispatchEvent(new Event("input"));
+    expect(confirm.disabled).toBe(true);
+    ack.checked = true;
+    ack.dispatchEvent(new Event("change"));
+    expect(confirm.disabled).toBe(false);
+    confirm.click();
 
     const call = await until(() => calls.find((c) => c.url.endsWith("/access/freeze")));
     expect(call.body).toEqual({ reason: "a fleet is misbehaving" });
@@ -610,10 +618,14 @@ describe("restricting", () => {
     expect(agents.textContent).toMatch(/human collaborators keep working/i);
     expect(agents.textContent).toMatch(/nothing is revoked/i);
 
+    host.querySelector<HTMLButtonElement>(".ab-access-pause-btn")!.click();
     const reason = host.querySelector<HTMLTextAreaElement>("#ab-pause-reason")!;
     reason.value = "runaway loop";
     reason.dispatchEvent(new Event("input"));
-    host.querySelector<HTMLButtonElement>(".ab-access-pause-btn")!.click();
+    const ack = host.querySelector<HTMLInputElement>(".ab-confirm-check")!;
+    ack.checked = true;
+    ack.dispatchEvent(new Event("change"));
+    host.querySelector<HTMLButtonElement>(".ab-confirm-go")!.click();
     const call = await until(() => calls.find((c) => c.url.endsWith("/access/pause-agents")));
     expect(call.body).toEqual({ reason: "runaway loop" });
   });
@@ -797,13 +809,21 @@ describe("moderating", () => {
       [`${base}/settings`]: () => json(200, settingsDoc("approval-gated")),
     });
 
-  it("shows the queue only when the policy actually gates something", async () => {
+  it("shows an empty review section without fetching a queue when the policy is open", async () => {
     stubFetch(readRoutes());
     const host = mount();
     await until(() => host.querySelector(".ab-access-body"));
-    expect(host.querySelector(".ab-access-moderation")).toBeNull();
+    expect(host.querySelector(".ab-access-moderation")).not.toBeNull();
+    expect(text(host, ".ab-queue-empty")).toContain("Nothing is waiting");
     // And it does not ask for a queue it knows is empty by construction.
     expect(calls.some((call) => call.url.includes("/moderation/queue"))).toBe(false);
+  });
+
+  it("keeps a semantic legend on the annotation policy fieldset", async () => {
+    stubFetch(readRoutes());
+    const host = mount();
+    const legend = await until(() => host.querySelector<HTMLLegendElement>(".ab-policy-choices > legend"));
+    expect(legend.textContent).toBe("Annotation policy");
   });
 
   it("shows the comment, its target passage and the author's history", async () => {
@@ -990,7 +1010,8 @@ describe("accessibility", () => {
     await until(() => host.querySelector(".ab-remove-collaborator"));
     host.querySelector<HTMLButtonElement>(".ab-remove-collaborator")!.click();
     const panel = await until(() => host.querySelector<HTMLElement>(".ab-access-confirm"));
-    expect(panel.getAttribute("role")).toBe("group");
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.getAttribute("aria-modal")).toBe("true");
     expect(panel.getAttribute("aria-label")).toContain("Remove Avery");
   });
 });

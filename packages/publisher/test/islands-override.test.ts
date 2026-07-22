@@ -229,10 +229,13 @@ describe("the tally shown beside the actions", () => {
     expect(roles).toEqual(["Maintainer approvals: 1", "Human maintainer approvals: 0"]);
   });
 
-  it("shows “-” for role counts an older API did not supply", async () => {
+  it("shows a plain fallback for role counts an older API did not supply", async () => {
     await mountAs("maintainer", [suggestion({ votes: tally({ approvals: 1, netScore: 1, distinctVoters: 1 }) })]);
     const roles = [...document.querySelectorAll(".ab-override-role")].map((n) => n.textContent);
-    expect(roles).toEqual(["Maintainer approvals: -", "Human maintainer approvals: -"]);
+    expect(roles).toEqual([
+      "Maintainer approvals: Not reported",
+      "Human maintainer approvals: Not reported",
+    ]);
   });
 
   it("names the action in the framing once a form is open", async () => {

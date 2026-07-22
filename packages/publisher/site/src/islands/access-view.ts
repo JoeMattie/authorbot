@@ -1,10 +1,10 @@
 /**
- * `<authorbot-access>` - the author-facing access control surface (Phase 7
+ * `<authorbot-access>`, the author-facing access control surface (Phase 7
  * contract: Seeing, Restricting, Moderating, Revoking).
  *
  * Mounted beneath `<authorbot-settings>` on `/settings/`, and shipped as its
  * OWN bundle rather than inside `authorbot-collab.js`. That is not an
- * optimisation detail - Phase 2b §1 budgets the collaboration islands at 35 KB
+ * optimisation detail, Phase 2b §1 budgets the collaboration islands at 35 KB
  * gzipped because that is what every reader downloads on every chapter page,
  * and a moderation queue nobody but a maintainer can open has no business in
  * that number. See `buildIslands` in src/build.ts.
@@ -24,7 +24,7 @@
  * **Removing someone is not erasing them.** Every one of those panels, and
  * every report of what a revocation did, carries `CONTRIBUTIONS_RETAINED`. The
  * contract says the interface must not imply otherwise, so the sentence is
- * structural rather than decorative - it comes from `access-model.ts`, where a
+ * structural rather than decorative, it comes from `access-model.ts`, where a
  * test asserts its presence.
  *
  * **Freeze is not a moderation setting.** It renders in its own visually
@@ -32,8 +32,8 @@
  * readers alone, and it is kept apart from pause-agents, which is a different
  * control for a different problem.
  *
- * Security: every API-sourced string - including annotation bodies, which are
- * untrusted user prose - reaches the DOM through `textContent` (via `el`).
+ * Security: every API-sourced string, including annotation bodies, which are
+ * untrusted user prose, reaches the DOM through `textContent` (via `el`).
  * `innerHTML` is never used; the build test greps the bundle for the literal.
  */
 import { isMaintainer, type AnnotationPolicy, type Me, type Role } from "./api.js";
@@ -88,6 +88,7 @@ interface AccessData {
   roleConsequences: Record<string, string>;
   tokens: AgentTokenMeta[];
   queue: PendingAnnotation[];
+  reviewCount: number;
   audit: AuditEvent[];
   /** The API's own account of each annotation policy mode, when it sends one. */
   policyOptions: Record<string, string>;
@@ -97,7 +98,7 @@ interface AccessData {
 
 /**
  * `apiBase === ""` is valid (the API at the origin root), so only a MISSING
- * attribute means "not a collab build" - the element then stays inert and the
+ * attribute means "not a collab build", the element then stays inert and the
  * page's static fallback survives.
  */
 function parseConfig(host: HTMLElement): Config | null {
@@ -106,6 +107,15 @@ function parseConfig(host: HTMLElement): Config | null {
     return null;
   }
   return { apiBase, project };
+}
+
+function initials(value: string): string {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  const letters =
+    words.length > 1
+      ? words.slice(0, 2).map((word) => word[0] ?? "")
+      : value.slice(0, 2).split("");
+  return letters.join("").toUpperCase();
 }
 
 /**
@@ -126,6 +136,13 @@ const MINTABLE_SCOPES: ReadonlyArray<readonly [string, string, boolean]> = [
   ["annotations:read", "Read comments left on the prose.", false],
   ["annotations:write", "Leave comments of its own.", false],
 ];
+
+const POLICY_DISPLAY_LABEL: Readonly<Record<AnnotationPolicy, string>> = Object.freeze({
+  open: "Open",
+  "approval-gated": "Approval required",
+  "collaborators-only": "Collaborators only",
+  locked: "Locked",
+});
 
 export class AuthorbotAccess extends HTMLElement {
   private api!: AccessApi;
@@ -219,6 +236,9 @@ export class AuthorbotAccess extends HTMLElement {
       roleConsequences: collaborators.ok ? collaborators.value.roleConsequences : {},
       tokens: tokens.ok ? tokens.value.items : [],
       queue: queue.ok ? queue.value.items : [],
+      reviewCount: queue.ok
+        ? queue.value.pendingCount
+        : (state.value.pendingModerationCount ?? 0),
       audit: audit.ok ? audit.value.items : [],
       policyOptions: settings.ok ? (settings.value.settings.collaboration?.options ?? {}) : {},
       settingsPending: settings.ok && settings.value.status === "pending_git",
@@ -268,28 +288,48 @@ export class AuthorbotAccess extends HTMLElement {
     if (data === null) return;
     this.body.textContent = "";
     this.body.append(this.policySection(data));
-    // The queue is the direct consequence of `approval-gated`, so it renders
-    // immediately below the mode that produces it rather than at the bottom of
-    // a page an author has to remember to scroll.
-    if (data.state.requiresApproval) {
-      this.body.append(this.moderationSection(data));
-    }
+    this.body.append(this.moderationSection(data));
     this.body.append(this.emergencySection(data));
     this.body.append(this.collaboratorsSection(data));
     this.body.append(this.tokensSection(data));
     this.body.append(this.auditSection(data));
+    this.syncConsole(data);
   }
 
   private section(className: string, heading: string, intro?: string): HTMLElement {
     const section = el("section", `ab-access-section ${className}`);
-    // h3: the page supplies the h1 ("Book settings") and the h2 this island
-    // sits under, so starting at h3 keeps one unbroken heading outline rather
-    // than a second h1 competing with the page's own.
-    section.append(el("h3", "ab-access-heading", heading));
+    const meta: Record<string, { key: string; eyebrow: string }> = {
+      "ab-access-policy": { key: "policy", eyebrow: "People & access" },
+      "ab-access-collaborators": { key: "collaborators", eyebrow: "People & access" },
+      "ab-access-tokens": { key: "tokens", eyebrow: "People & access" },
+      "ab-access-emergency": { key: "emergency", eyebrow: "Safety" },
+      "ab-access-moderation": { key: "moderation", eyebrow: "Safety" },
+      "ab-access-audit": { key: "activity", eyebrow: "Record" },
+    };
+    const details = meta[className] ?? { key: className, eyebrow: "Book settings" };
+    section.dataset["consoleSection"] = details.key;
+    section.append(
+      el("p", `ab-section-eyebrow${details.key === "emergency" ? " ab-section-eyebrow-danger" : ""}`, details.eyebrow),
+      el("h1", "ab-access-heading", heading),
+    );
     if (intro !== undefined) {
       section.append(el("p", "ab-access-intro", intro));
     }
     return section;
+  }
+
+  private syncConsole(data: AccessData): void {
+    const console = this.closest<HTMLElement>("[data-settings-console]");
+    if (console === null) return;
+    const active = console.dataset["activeSection"] ?? "governance";
+    for (const panel of console.querySelectorAll<HTMLElement>("[data-console-section]")) {
+      panel.hidden = panel.dataset["consoleSection"] !== active;
+    }
+    const badge = console.querySelector<HTMLElement>("[data-settings-badge='moderation']");
+    if (badge !== null) {
+      badge.textContent = String(data.reviewCount);
+      badge.hidden = !data.state.requiresApproval;
+    }
   }
 
   // ---- restricting: the annotation policy ---------------------------------
@@ -302,7 +342,7 @@ export class AuthorbotAccess extends HTMLElement {
    * choosing between them should be able to see all four at once, each with
    * what it actually means. A `<select>` hides three of the four behind a
    * click, which is precisely the wrong shape for a decision this consequential
-   * - and for `locked`, which is the one most likely to be misread as "turn
+   *, and for `locked`, which is the one most likely to be misread as "turn
    * collaboration off" and which therefore has the most to say for itself.
    *
    * Unlike freeze and pause, this is a `book.yml` change: it commits, it is
@@ -313,24 +353,29 @@ export class AuthorbotAccess extends HTMLElement {
     const section = this.section(
       "ab-access-policy",
       "Who may comment and suggest",
-      "Four modes, from a public book to a private workspace. Move up and down them as freely as you like - nothing is lost either way, and your collaborators keep their membership and their history in every mode.",
+      "Four modes, from a public book to a private workspace. Move up and down them as freely as you like, nothing is lost either way, and your collaborators keep their membership and their history in every mode.",
     );
     section.append(el("p", "ab-access-note ab-policy-anonymous", ANONYMOUS_NOTE));
 
     const group = el("fieldset", "ab-policy-choices");
-    group.append(el("legend", "ab-access-control-name", "Annotation policy"));
+    group.append(el("legend", "ab-sr", "Annotation policy"));
 
     let chosen: AnnotationPolicy = current;
     const apply = el("button", "ab-btn ab-primary ab-policy-apply", "Change the policy");
     apply.type = "button";
     apply.disabled = true;
+    const changedNote = el(
+      "span",
+      "ab-policy-change-note",
+      "Saves as a commit and takes effect within a few seconds.",
+    );
+    changedNote.hidden = true;
+    const cards: { policy: AnnotationPolicy; card: HTMLElement; radio: HTMLInputElement }[] = [];
 
     for (const policy of POLICY_ORDER) {
       const id = `ab-policy-${policy}`;
       const choice = el("div", "ab-policy-choice");
-      if (policy === current) {
-        choice.classList.add("ab-policy-current");
-      }
+      if (policy === current) choice.classList.add("ab-policy-current");
       const label = el("label", "ab-field-check ab-policy-label");
       label.htmlFor = id;
       const radio = el("input", "ab-policy-radio");
@@ -341,10 +386,11 @@ export class AuthorbotAccess extends HTMLElement {
       radio.checked = policy === current;
       const describedBy = `${id}-means`;
       radio.setAttribute("aria-describedby", describedBy);
-      label.append(radio, el("span", "ab-field-label", POLICY_LABEL[policy]));
+      const dot = el("span", "ab-policy-radio-dot");
+      label.append(radio, dot, el("span", "ab-field-label", POLICY_DISPLAY_LABEL[policy]));
       choice.append(label);
       if (policy === current) {
-        choice.append(el("span", "ab-badge ab-badge-role", "Current"));
+        choice.append(el("span", "ab-badge ab-badge-role ab-current-pill", "Current"));
       }
       // The server's own words about the mode, so the sentence an author reads
       // is generated from the constant the API enforces with.
@@ -355,7 +401,13 @@ export class AuthorbotAccess extends HTMLElement {
         if (!radio.checked) return;
         chosen = policy;
         apply.disabled = policy === current;
+        changedNote.hidden = policy === current;
+        for (const row of cards) {
+          row.card.classList.toggle("is-selected", row.radio.checked);
+        }
       });
+      cards.push({ policy, card: choice, radio });
+      choice.classList.toggle("is-selected", radio.checked);
       group.append(choice);
     }
     section.append(group);
@@ -366,7 +418,7 @@ export class AuthorbotAccess extends HTMLElement {
         el(
           "p",
           "ab-policy-pending",
-          "A previous settings change has not been committed to your repository yet. Changing the policy is off until it lands - reload this page in a moment.",
+          "A previous settings change has not been committed to your repository yet. Changing the policy is off until it lands, reload this page in a moment.",
         ),
       );
       return section;
@@ -375,7 +427,9 @@ export class AuthorbotAccess extends HTMLElement {
     apply.addEventListener("click", () => {
       void this.applyPolicy(chosen);
     });
-    section.append(apply);
+    const actions = el("div", "ab-policy-actions");
+    actions.append(apply, changedNote);
+    section.append(actions);
 
     if (current === "approval-gated") {
       section.append(el("p", "ab-access-note ab-policy-queue-note", QUEUE_NOT_DRAINED_NOTE));
@@ -394,15 +448,15 @@ export class AuthorbotAccess extends HTMLElement {
      * Honest about the delay. The policy lives in `book.yml`, so the change is
      * a commit: the API has accepted it, but the projection the enforcement
      * gate reads updates when that commit lands. Claiming the new mode is
-     * already in force would be a lie for the seconds in between - and those
+     * already in force would be a lie for the seconds in between, and those
      * are exactly the seconds an author would spend testing it.
      */
     await this.load();
     this.report([
       `Saved: ${POLICY_LABEL[policy]}.`,
-      "The change is being committed to your book's repository now, and takes effect as soon as that lands - usually within a few seconds.",
+      "The change is being committed to your book's repository now, and takes effect as soon as that lands, usually within a few seconds.",
       policy === "locked"
-        ? "Your collaborators keep their membership and everything they have contributed. You and your maintainers - including any agent you have granted the maintainer role - can still write."
+        ? "Your collaborators keep their membership and everything they have contributed. You and your maintainers, including any agent you have granted the maintainer role, can still write."
         : "Your collaborators keep their membership and everything they have contributed.",
     ]);
   }
@@ -431,6 +485,9 @@ export class AuthorbotAccess extends HTMLElement {
 
     // --- freeze ---
     const freeze = el("div", "ab-access-control ab-access-freeze");
+    const freezeIcon = el("span", "ab-emergency-icon ab-freeze-icon");
+    freezeIcon.setAttribute("aria-hidden", "true");
+    freeze.append(freezeIcon);
     freeze.append(el("h4", "ab-access-control-name", frozen ? "This book is frozen" : "Freeze the book"));
     freeze.append(el("p", "ab-access-control-means", frozen ? UNFREEZE_MEANS : FREEZE_MEANS));
     if (frozen) {
@@ -447,29 +504,37 @@ export class AuthorbotAccess extends HTMLElement {
       });
       freeze.append(lift);
     } else {
-      // A reason is required to freeze: it is the act everyone else will need
-      // explained an hour later, and it is the one that stops their work.
-      const field = this.reasonField({
-        id: "ab-freeze-reason",
-        label: "Why are you freezing the book?",
-        hint: "Your collaborators see this when a write is refused, so say enough to be useful.",
-        required: true,
-      });
       const button = el("button", "ab-btn ab-danger ab-access-freeze-btn", "Freeze the book");
       button.type = "button";
-      button.disabled = true;
-      field.input.addEventListener("input", () => {
-        button.disabled = field.input.value.trim() === "";
-      });
+      const slot = el("div", "ab-access-confirm-slot");
       button.addEventListener("click", () => {
-        void this.applyFreeze(true, field.input.value.trim());
+        this.openConfirm({
+          slot,
+          trigger: button,
+          heading: "Freeze this book?",
+          consequences: [
+            "Every write stops immediately, including yours. Readers are unaffected.",
+            "Your collaborators keep their membership and all existing work.",
+          ],
+          acknowledgement: "I understand this stops every writer, including me.",
+          confirmLabel: "Freeze the book",
+          reason: {
+            id: "ab-freeze-reason",
+            label: "Why are you freezing the book?",
+            required: true,
+          },
+          run: (reason) => this.applyFreeze(true, reason),
+        });
       });
-      freeze.append(field.wrap, button);
+      freeze.append(button, slot);
     }
     section.append(freeze);
 
     // --- pause agents ---
     const agents = el("div", "ab-access-control ab-access-agents");
+    const agentsIcon = el("span", "ab-emergency-icon ab-pause-icon");
+    agentsIcon.setAttribute("aria-hidden", "true");
+    agents.append(agentsIcon);
     agents.append(
       el("h4", "ab-access-control-name", paused ? "All agents are paused" : "Pause all agents"),
     );
@@ -490,22 +555,29 @@ export class AuthorbotAccess extends HTMLElement {
       });
       agents.append(resume);
     } else {
-      const field = this.reasonField({
-        id: "ab-pause-reason",
-        label: "Why are you pausing the agents?",
-        hint: "Recorded in the activity log so you can tell later what happened.",
-        required: true,
-      });
       const button = el("button", "ab-btn ab-access-pause-btn", "Pause all agents");
       button.type = "button";
-      button.disabled = true;
-      field.input.addEventListener("input", () => {
-        button.disabled = field.input.value.trim() === "";
-      });
+      const slot = el("div", "ab-access-confirm-slot");
       button.addEventListener("click", () => {
-        void this.applyPause(true, field.input.value.trim());
+        this.openConfirm({
+          slot,
+          trigger: button,
+          heading: "Pause all agents?",
+          consequences: [
+            "Every agent token is suspended immediately. Your human collaborators keep working.",
+            "Nothing is revoked. Resuming restores every token with its name, scopes, expiry, and history intact.",
+          ],
+          acknowledgement: "I understand every agent will pause immediately.",
+          confirmLabel: "Pause all agents",
+          reason: {
+            id: "ab-pause-reason",
+            label: "Why are you pausing the agents?",
+            required: true,
+          },
+          run: (reason) => this.applyPause(true, reason),
+        });
       });
-      agents.append(field.wrap, button);
+      agents.append(button, slot);
     }
     section.append(agents);
     return section;
@@ -545,7 +617,7 @@ export class AuthorbotAccess extends HTMLElement {
   private collaboratorsSection(data: AccessData): HTMLElement {
     const section = this.section(
       "ab-access-collaborators",
-      "Who can touch this book",
+      "Collaborators",
       "Everyone with access, what their role lets them do, and when they last did anything.",
     );
     if (data.collaborators.length === 0) {
@@ -568,18 +640,34 @@ export class AuthorbotAccess extends HTMLElement {
     const name = collaboratorName(row);
 
     const header = el("div", "ab-access-row-head");
-    header.append(el("span", "ab-collaborator-name", name));
+    header.append(
+      el(
+        "span",
+        `ab-collaborator-avatar${row.isAgent ? " is-agent" : ""}`,
+        initials(name),
+      ),
+    );
+    const identity = el("div", "ab-collaborator-identity");
+    const nameLine = el("div", "ab-collaborator-name-line");
+    nameLine.append(el("span", "ab-collaborator-name", name));
+    if (row.actorId === this.me?.actor.id) {
+      nameLine.append(el("span", "ab-collaborator-self", "that's you"));
+    }
+    identity.append(nameLine);
     if (row.isAgent) {
       // An agent actor is a token's identity, not a person's. Said plainly
       // rather than shown as a machine sitting silently among the humans.
-      header.append(el("span", "ab-badge ab-badge-agent", "Agent"));
+      identity.append(el("span", "ab-badge ab-badge-agent", "Agent"));
     }
-    header.append(el("span", "ab-badge ab-badge-role", roleLabel(row.role)));
+    identity.append(el("span", "ab-badge ab-badge-role", roleLabel(row.role)));
+    header.append(identity);
     item.append(header);
 
     const facts = el("dl", "ab-access-facts");
     const fact = (term: string, value: string): void => {
-      facts.append(el("dt", "ab-fact-term", term), el("dd", "ab-fact-value", value));
+      const pair = el("div", "ab-fact");
+      pair.append(el("dt", "ab-fact-term", term), el("dd", "ab-fact-value", value));
+      facts.append(pair);
     };
     fact("Joined", formatWhen(row.joinedAt, "at an unrecorded time"));
     // Genuinely unknown for a membership older than this feature: `null` is the
@@ -588,10 +676,10 @@ export class AuthorbotAccess extends HTMLElement {
     fact(
       "Added by",
       row.addedByActorId === null
-        ? "Not recorded - this membership predates access logging"
+        ? "Not recorded, this membership predates access logging"
         : this.actorLabel(row.addedByActorId, data),
     );
-    fact("Last acted", formatWhen(row.lastActedAt, "Never - they have done nothing on this book"));
+    fact("Last acted", formatWhen(row.lastActedAt, "Never, they have done nothing on this book"));
     item.append(facts);
 
     item.append(el("p", "ab-role-means", roleMeans(row.role, data.roleConsequences)));
@@ -703,13 +791,13 @@ export class AuthorbotAccess extends HTMLElement {
     const section = this.section(
       "ab-access-tokens",
       "Agent tokens",
-      "What each token is called, what it may do, who minted it, and when it was last used. A token's value is shown once, when it is minted, and can never be displayed again - not here, and not by any other part of Authorbot.",
+      "What each token is called, what it may do, who minted it, and when it was last used. A token's value is shown once, when it is minted, and can never be displayed again, not here, and not by any other part of Authorbot.",
     );
     const active = data.tokens.filter((token) => tokenStatus(token) === "active");
 
     // Before the empty-list check, deliberately. A book with no tokens is
     // exactly the book whose maintainer is looking for a way to make one, and
-    // the early return below used to end the section right here - so the one
+    // the early return below used to end the section right here, so the one
     // state that needs this control most was the one state that never showed
     // it.
     section.append(this.mintControl());
@@ -751,7 +839,7 @@ export class AuthorbotAccess extends HTMLElement {
           confirmLabel: "Revoke all tokens",
           reason: {
             id: "ab-revoke-all-reason",
-            label: "Why? (required - this is the one you will want explained later)",
+            label: "Why? (required, this is the one you will want explained later)",
             required: true,
           },
           run: (reason) => this.applyRevokeAll(reason),
@@ -767,7 +855,7 @@ export class AuthorbotAccess extends HTMLElement {
    * Minting an agent token.
    *
    * This is the control the product did not have. `POST /agent-tokens` needs
-   * a maintainer *session* - a cookie a browser holds - and the only thing
+   * a maintainer *session*, a cookie a browser holds, and the only thing
    * that ever asked for it was the setup wizard, which wanted a bearer token
    * no author has ever been issued, then pointed at this page to "mint one
    * from your book's settings". This page could list tokens and revoke them,
@@ -786,7 +874,7 @@ export class AuthorbotAccess extends HTMLElement {
       el(
         "p",
         "ab-access-control-means",
-        "A credential for a software agent that writes with you. Its value is shown once, here, and never again - Authorbot keeps only a hash.",
+        "A credential for a software agent that writes with you. Its value is shown once, here, and never again, Authorbot keeps only a hash.",
       ),
     );
 
@@ -877,7 +965,7 @@ export class AuthorbotAccess extends HTMLElement {
       el(
         "p",
         "ab-access-control-means",
-        "Copy it now. This is the only time it is ever shown, and nothing in Authorbot can display it again - if it is lost, revoke it and make another.",
+        "Copy it now. This is the only time it is ever shown, and nothing in Authorbot can display it again, if it is lost, revoke it and make another.",
       ),
     );
     const value = el("code", "ab-access-token-value", minted.token);
@@ -919,7 +1007,9 @@ export class AuthorbotAccess extends HTMLElement {
 
     const facts = el("dl", "ab-access-facts");
     const fact = (term: string, value: string): void => {
-      facts.append(el("dt", "ab-fact-term", term), el("dd", "ab-fact-value", value));
+      const pair = el("div", "ab-fact");
+      pair.append(el("dt", "ab-fact-term", term), el("dd", "ab-fact-value", value));
+      facts.append(pair);
     };
     fact("Owner", token.owner?.displayName ?? "Not recorded");
     /**
@@ -928,7 +1018,7 @@ export class AuthorbotAccess extends HTMLElement {
      * with its membership role, and an agent working a locked book is exactly
      * the one holding `maintainer` here.
      */
-    fact("Membership role", token.role === null ? "No membership - it can do nothing" : roleLabel(token.role as Role));
+    fact("Membership role", token.role === null ? "No membership, it can do nothing" : roleLabel(token.role as Role));
     fact("Permissions", token.scopes.length === 0 ? "None" : token.scopes.join(", "));
     fact("Created", formatWhen(token.createdAt, "at an unrecorded time"));
     fact("Last used", formatWhen(token.lastUsedAt, "Never used"));
@@ -987,10 +1077,14 @@ export class AuthorbotAccess extends HTMLElement {
   private moderationSection(data: AccessData): HTMLElement {
     const section = this.section(
       "ab-access-moderation",
-      "Waiting for your review",
-      "This book is approval-gated: comments and suggestions from people outside your collaborators wait here. Nothing queued has reached your repository, and nothing queued can be voted on or turn into work.",
+      "Review queue",
+      data.state.requiresApproval
+        ? "Comments and suggestions from people outside your collaborators wait here. Nothing queued has reached your repository, and nothing queued can be voted on or turn into work."
+        : "Nothing waits here under the current comment policy. If you switch to Approval required, new public comments and suggestions will stay here until you approve or reject them.",
     );
-    section.append(el("p", "ab-access-note", QUEUE_NOT_DRAINED_NOTE));
+    if (data.state.requiresApproval) {
+      section.append(el("p", "ab-access-note", QUEUE_NOT_DRAINED_NOTE));
+    }
 
     if (data.queue.length === 0) {
       section.append(el("p", "ab-access-empty ab-queue-empty", "Nothing is waiting for review."));
@@ -1027,7 +1121,8 @@ export class AuthorbotAccess extends HTMLElement {
     tickLabel.append(tick, srOnly(`Select this ${pending.kind} by ${author} for a bulk action`));
     header.append(tickLabel);
     header.append(
-      el("span", "ab-pending-who", `${pending.kind === "suggestion" ? "Suggestion" : "Comment"} by ${author}`),
+      el("span", "ab-badge ab-pending-kind", pending.kind === "suggestion" ? "Suggestion" : "Comment"),
+      el("span", "ab-pending-who", `by ${author}`),
     );
     header.append(
       el("span", "ab-pending-when", formatWhen(pending.createdAt, "at an unrecorded time")),
@@ -1036,14 +1131,14 @@ export class AuthorbotAccess extends HTMLElement {
 
     /**
      * The comment itself. UNTRUSTED prose written by someone who is, by
-     * definition, not yet trusted - rendered as plain text through
+     * definition, not yet trusted, rendered as plain text through
      * `textContent`, never as markup, and never treated as an instruction.
      */
     const quote = el("blockquote", "ab-pending-body", pending.body);
     item.append(quote);
 
     // Its target passage, so a moderator can see what it is about without
-    // leaving the page - and a link to go and look properly.
+    // leaving the page, and a link to go and look properly.
     const target = el("p", "ab-pending-target");
     const chapterTitle = pending.chapter?.title;
     target.textContent =
@@ -1070,7 +1165,7 @@ export class AuthorbotAccess extends HTMLElement {
         trigger: reject,
         heading: "Reject this comment?",
         consequences: [
-          "It never appears publicly and never reaches your repository - there is nothing in Git to remove.",
+          "It never appears publicly and never reaches your repository, there is nothing in Git to remove.",
           "Its author is not notified.",
           "The record is kept here, so a mistake is recoverable and a pattern of abuse stays visible.",
         ],
@@ -1078,7 +1173,7 @@ export class AuthorbotAccess extends HTMLElement {
         confirmLabel: "Reject",
         reason: {
           id: `ab-reject-reason-${pending.id}`,
-          label: "Reason (optional, kept for your own records - the author is not told)",
+          label: "Reason (optional, kept for your own records, the author is not told)",
         },
         run: (reason) => this.applyRejection(pending, reason),
       });
@@ -1213,8 +1308,8 @@ export class AuthorbotAccess extends HTMLElement {
     if (approved > 0) {
       lines.push(
         approved === 1
-          ? "1 comment approved - it is being committed to your repository now."
-          : `${approved} comments approved - they are being committed to your repository now.`,
+          ? "1 comment approved, it is being committed to your repository now."
+          : `${approved} comments approved, they are being committed to your repository now.`,
       );
     }
     if (rejected > 0) {
@@ -1230,7 +1325,7 @@ export class AuthorbotAccess extends HTMLElement {
       );
     }
     if (lines.length === 0) {
-      lines.push("Nothing changed - every comment you selected had already been reviewed.");
+      lines.push("Nothing changed, every comment you selected had already been reviewed.");
     }
     this.selected.clear();
     await this.load();
@@ -1249,7 +1344,7 @@ export class AuthorbotAccess extends HTMLElement {
   private auditSection(data: AccessData): HTMLElement {
     const section = this.section(
       "ab-access-audit",
-      "Recent activity",
+      "Activity log",
       "Everything that has happened to this book's access and content, newest first. Filter by person to see what one collaborator has done.",
     );
 
@@ -1264,7 +1359,7 @@ export class AuthorbotAccess extends HTMLElement {
     select.append(everyone);
 
     // Offer everyone with access, plus anyone the current page shows who is no
-    // longer a member - a removed collaborator's history is exactly what an
+    // longer a member, a removed collaborator's history is exactly what an
     // author is looking for after they remove them.
     const offered = new Map<string, string>();
     for (const row of data.collaborators) {
@@ -1301,10 +1396,16 @@ export class AuthorbotAccess extends HTMLElement {
 
     const list = el("ol", "ab-access-list ab-audit-list");
     for (const event of data.audit) {
-      const item = el("li", "ab-audit-event");
-      item.append(
-        el("span", "ab-audit-what", `${auditActorName(event)} ${auditActionText(event)}`),
+      const item = el(
+        "li",
+        `ab-audit-event${event.actorType === "agent" ? " is-agent" : ""}`,
       );
+      const what = el("span", "ab-audit-what");
+      what.append(
+        el("strong", "ab-audit-actor", auditActorName(event)),
+        document.createTextNode(` ${auditActionText(event)}`),
+      );
+      item.append(what);
       item.append(el("span", "ab-audit-when", formatWhen(event.at, "at an unrecorded time")));
       const reason = auditReason(event);
       if (reason !== null) {
@@ -1345,9 +1446,9 @@ export class AuthorbotAccess extends HTMLElement {
    * The destructive-action confirmation, used by every irreversible control on
    * this surface.
    *
-   * Never default-yes. The panel states what actually happens - including, in
+   * Never default-yes. The panel states what actually happens, including, in
    * every case, that the person's existing contributions and attribution
-   * remain - then requires a deliberate tick before the confirm button becomes
+   * remain, then requires a deliberate tick before the confirm button becomes
    * usable. The cancel button is labelled for the safe outcome ("Keep access")
    * rather than a bare "Cancel", so the escape reads as a decision rather than
    * as a dismissal, and it takes focus first.
@@ -1363,12 +1464,16 @@ export class AuthorbotAccess extends HTMLElement {
     run: (reason: string) => Promise<void>;
   }): void {
     options.slot.textContent = "";
+    options.slot.classList.add("is-open");
+    options.slot.setAttribute("role", "presentation");
     const panel = el("div", "ab-access-confirm");
-    panel.setAttribute("role", "group");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
     panel.setAttribute("aria-label", options.heading);
+    panel.addEventListener("click", (event) => event.stopPropagation());
     // Not a heading element: the panel is already announced as a labelled
     // group (role + aria-label above), and a heading here would land at a
-    // different depth depending on which control opened it - h5 under
+    // different depth depending on which control opened it, h5 under
     // "Revoke every token at once", h4 under a collaborator row. A paragraph
     // styled as a heading gives one consistent structure and no phantom level.
     panel.append(el("p", "ab-confirm-heading", options.heading));
@@ -1403,11 +1508,14 @@ export class AuthorbotAccess extends HTMLElement {
     const actions = el("div", "ab-confirm-actions");
     const cancel = el("button", "ab-btn ab-confirm-cancel", CANCEL_LABEL);
     cancel.type = "button";
-    cancel.addEventListener("click", () => {
+    const close = (): void => {
       options.slot.textContent = "";
+      options.slot.classList.remove("is-open");
       options.trigger.hidden = false;
       options.trigger.focus();
-    });
+    };
+    cancel.addEventListener("click", close);
+    options.slot.addEventListener("click", close, { once: true });
 
     const confirm = el("button", "ab-btn ab-danger ab-confirm-go", options.confirmLabel);
     confirm.type = "button";
@@ -1422,6 +1530,7 @@ export class AuthorbotAccess extends HTMLElement {
     confirm.addEventListener("click", () => {
       confirm.disabled = true;
       options.slot.textContent = "";
+      options.slot.classList.remove("is-open");
       options.trigger.hidden = false;
       void options.run(reasonInput?.value.trim() ?? "");
     });

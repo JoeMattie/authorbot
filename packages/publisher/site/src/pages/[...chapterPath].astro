@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Collab from "../components/Collab.astro";
+import Icon from "../components/Icon.astro";
 import { SITE_CSP } from "../lib/csp.js";
 import { site } from "virtual:authorbot-site";
 
@@ -30,6 +31,13 @@ const collab = site.collab;
 // carries the policy whether or not it also loads the islands (lib/csp.ts).
 const csp = SITE_CSP;
 const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;
+const chapterCharacters = site.characters.filter((character) =>
+  character.chapters.some((entry) => entry.href === chapter.href),
+);
+const actorLabel = (actor: string) => {
+  const [kind, name = actor] = actor.split(":", 2);
+  return `${name}${kind === "agent" ? " (agent)" : ""}`;
+};
 ---
 
 <Base
@@ -38,31 +46,58 @@ const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` 
   noindex={chapter.isDraft}
   csp={csp}
   collabStylesHref={collabStylesHref}
+  activeNav="chapters"
 >
-  <article class="chapter">
-    {
-      chapter.isDraft && (
-        <p class="draft-banner" role="status">
-          <strong>Draft.</strong> This chapter has status “{chapter.status}” and is
-          not part of the published book.
-        </p>
-      )
-    }
-    <header class="chapter-header">
-      <h1>{chapter.title}</h1>
-    </header>
-    <div class="prose" set:html={chapter.html} />
-    {
-      showFooter && (
-        <footer class="chapter-footer">
-          {site.book.showRevision && <span>Revision {chapter.revision}</span>}
-          {site.book.showAttribution && chapter.authors.length > 0 && (
-            <span>By {chapter.authors.join(", ")}</span>
-          )}
-        </footer>
-      )
-    }
-  </article>
+  <div class="chapter-page">
+    <a class="chapter-back" href={site.basePath}>
+      <Icon name="chevron-left" size={15} /> All chapters
+    </a>
+    <div class="chapter-reading-layout ab-reading-layout">
+      <div class="chapter-reading-column">
+        <article class="chapter">
+          {
+            chapter.isDraft && (
+              <p class="draft-banner" role="status">
+                <strong>Draft.</strong> This chapter has status “{chapter.status}” and is
+                not part of the published book.
+              </p>
+            )
+          }
+          <header class="chapter-header">
+            <p class="chapter-kicker">
+              <span>Chapter {String(index + 1).padStart(2, "0")}</span>
+              <span class={`status-pill status-${chapter.status}`}>{chapter.status}</span>
+              {site.book.showRevision && <span>rev {chapter.revision}</span>}
+            </p>
+            <h1>{chapter.title}</h1>
+            {chapter.summary && <p class="chapter-deck">{chapter.summary}</p>}
+            {(site.book.showAttribution || chapterCharacters.length > 0) && (
+              <div class="chapter-credit-row">
+                {site.book.showAttribution && chapter.authors.length > 0 && (
+                  <span class="chapter-byline">by {chapter.authors.map(actorLabel).join(" and ")}</span>
+                )}
+                {chapterCharacters.map((character) => (
+                  <a class="character-chip" href={character.href}>{character.name}</a>
+                ))}
+              </div>
+            )}
+          </header>
+          <div class="prose" set:html={chapter.html} />
+          {
+            showFooter && (
+              <footer class="chapter-footer">
+                {site.book.showRevision && <span>Revision {chapter.revision}</span>}
+                {site.book.showAttribution && chapter.authors.length > 0 && (
+                  <span>By {chapter.authors.map(actorLabel).join(", ")}</span>
+                )}
+              </footer>
+            )
+          }
+        </article>
+      </div>
+      {collab && <Collab collab={collab} chapter={chapter} />}
+    </div>
+  </div>
   <nav class="chapter-nav" aria-label="Chapter navigation">
     <span class="chapter-nav-prev">
       {prev && (
@@ -104,5 +139,4 @@ const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` 
       </>
     )
   }
-  {collab && <Collab collab={collab} chapter={chapter} />}
 </Base>

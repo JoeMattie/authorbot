@@ -392,6 +392,7 @@ function buildOutline(
       id: node.id,
       type: node.type,
       order: node.order,
+      relationships: [],
       children: (childrenOf.get(node.id) ?? [])
         .filter((child) => !seen.has(child.id))
         .sort((a, b) => a.order - b.order)
@@ -400,6 +401,17 @@ function buildOutline(
     };
     if (node.summary !== undefined) {
       out.summary = node.summary;
+    }
+    if (node.type !== "chapter") {
+      if (node.goal !== undefined) {
+        out.goal = node.goal;
+      }
+      if (node.conflict !== undefined) {
+        out.conflict = node.conflict;
+      }
+      if (node.outcome !== undefined) {
+        out.outcome = node.outcome;
+      }
     }
     if (node.type === "chapter") {
       const chapter = includedById.get(node.chapter_id);
@@ -438,6 +450,29 @@ function buildOutline(
         }
       }
     }
+  }
+
+  // Add graph links only after privacy filtering. A relationship into a
+  // suppressed draft subtree must not reveal the target's title on a public
+  // outline page.
+  const visibleById = new Map<string, OutlineNode>();
+  const visit = (entries: OutlineNode[]): void => {
+    for (const entry of entries) {
+      visibleById.set(entry.id, entry);
+      visit(entry.children);
+    }
+  };
+  visit(outline);
+  for (const link of result.data.links ?? []) {
+    const source = visibleById.get(link.from);
+    const target = visibleById.get(link.to);
+    if (source === undefined || target === undefined) {
+      continue;
+    }
+    source.relationships.push({
+      type: link.type.replaceAll("_", " "),
+      targetTitle: target.title ?? target.id,
+    });
   }
   return outline;
 }
@@ -493,6 +528,7 @@ function buildTimeline(
           }),
           locations: (event.locations ?? []).map((ref) => ref.slice("location:".length)),
           chapters,
+          facts: event.facts ?? [],
         },
       ];
     });
@@ -646,6 +682,9 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
   };
   if (book.license !== undefined) {
     model.book.license = book.license;
+  }
+  if (book.planning?.method !== undefined) {
+    model.book.planningMethod = book.planning.method;
   }
   return { model, warnings };
 }

@@ -40,6 +40,7 @@ import {
   type OverrideDraft,
 } from "./override-control.js";
 import { captureRange, type CapturedSelection } from "./selection.js";
+import { clearRangeHighlights, rangeForSelector } from "./range-highlight.js";
 import { VoteControl } from "./vote-control.js";
 
 interface Config {
@@ -64,7 +65,7 @@ interface FocusRestore {
 
 const DESKTOP_QUERY = "(min-width: 960px)";
 const CARD_GAP = 12;
-const REFRESH_HINT = "Still syncing - refresh the page to see the final state.";
+const REFRESH_HINT = "Still syncing; refresh the page to see the final state.";
 const STALE_PAGE_HINT =
   "This chapter has changed since this page was published; " +
   "annotating is disabled until the site is republished.";
@@ -142,6 +143,8 @@ export class AuthorbotCollab extends HTMLElement {
   private blocks: HTMLElement[] = [];
   private blockUis = new Map<HTMLElement, HTMLElement>();
   private gutter!: HTMLElement;
+  private railHeader!: HTMLElement;
+  private railCount!: HTMLElement;
   private drawer!: HTMLElement;
   private drawerPanel!: HTMLElement;
   private drawerToggle!: HTMLButtonElement;
@@ -166,6 +169,7 @@ export class AuthorbotCollab extends HTMLElement {
   private replyParent: string | null = null;
   private confirmWithdraw: string | null = null;
   private lastCapture: CapturedSelection | null = null;
+  private activeAnnotationId: string | null = null;
 
   private mql!: MediaQueryList;
   private started = false;
@@ -219,6 +223,8 @@ export class AuthorbotCollab extends HTMLElement {
   private buildScaffold(): void {
     this.mainEl.classList.add("ab-enabled");
     this.proseEl.classList.add("ab-prose");
+    const readingLayout = this.closest<HTMLElement>(".chapter-reading-layout") ?? this.mainEl;
+    readingLayout.classList.add("ab-reading-layout");
 
     this.liveRegion = el("div", "ab-sr");
     this.liveRegion.setAttribute("role", "status");
@@ -229,9 +235,14 @@ export class AuthorbotCollab extends HTMLElement {
     this.authbar.tabIndex = -1; // focus fallback target (never in tab order)
     this.cardsHost = el("div", "ab-cards");
 
+    this.railHeader = el("header", "ab-rail-head");
+    this.railHeader.append(el("span", "ab-rail-eyebrow", "Notes on this chapter"));
+    this.railCount = el("span", "ab-rail-count", "0");
+    this.railHeader.append(this.railCount);
+
     this.gutter = el("aside", "ab-gutter");
     this.gutter.setAttribute("aria-label", "Annotations");
-    this.mainEl.append(this.gutter);
+    readingLayout.append(this.gutter);
 
     this.drawer = el("div", "ab-drawer");
     this.drawerToggle = el("button", "ab-drawer-toggle");
@@ -248,12 +259,31 @@ export class AuthorbotCollab extends HTMLElement {
     this.drawer.append(this.drawerToggle, this.drawerPanel);
     document.body.append(this.drawer);
 
+    const discussion = el("section", "ab-discussion-boundary");
+    discussion.setAttribute("aria-labelledby", "ab-discussion-title");
+    const discussionTitle = el("h2", undefined, "Discussion");
+    discussionTitle.id = "ab-discussion-title";
+    discussion.append(
+      discussionTitle,
+      el(
+        "p",
+        "ab-discussion-copy",
+        "Chapter-wide threads are not available yet. For a line-level note, select a passage above.",
+      ),
+      el("span", "ab-chip ab-status-pending", "API planned"),
+    );
+    if (readingLayout === this.mainEl) {
+      this.mainEl.append(discussion);
+    } else {
+      readingLayout.insertAdjacentElement("afterend", discussion);
+    }
+
     this.selTool = el("div", "ab-seltool");
     this.selTool.dataset.abUi = "true";
     this.selTool.hidden = true;
     const commentBtn = el("button", "ab-btn", "Comment");
     commentBtn.type = "button";
-    const suggestBtn = el("button", "ab-btn", "Suggest change");
+    const suggestBtn = el("button", "ab-btn", "Suggest an edit");
     suggestBtn.type = "button";
     for (const [button, kind] of [
       [commentBtn, "comment"],
@@ -288,6 +318,11 @@ export class AuthorbotCollab extends HTMLElement {
       const glyph = el("span", "ab-annotate-glyph", "✎");
       glyph.setAttribute("aria-hidden", "true"); // decorative; sr-only text names the button
       annotate.append(glyph, srOnly("Annotate this block"));
+      annotate.addEventListener("focus", () => {
+        window.requestAnimationFrame(() => {
+          annotate.scrollIntoView({ block: "center", inline: "nearest" });
+        });
+      });
       annotate.addEventListener("click", () => {
         if (!this.canWrite()) {
           // Signed-out: the affordance leads to sign-in, never a dead end.
@@ -347,11 +382,11 @@ export class AuthorbotCollab extends HTMLElement {
 
   private placeContainers(): void {
     if (this.isDesktop) {
-      this.gutter.append(this.authbar, this.cardsHost);
+      this.gutter.append(this.railHeader, this.authbar, this.cardsHost);
       this.gutter.hidden = false;
       this.drawer.hidden = true;
     } else {
-      this.drawerPanel.append(this.authbar, this.cardsHost);
+      this.drawerPanel.append(this.railHeader, this.authbar, this.cardsHost);
       this.gutter.hidden = true;
       this.drawer.hidden = false;
       this.updateDrawer();
@@ -360,7 +395,8 @@ export class AuthorbotCollab extends HTMLElement {
 
   private updateDrawer(): void {
     const count = this.visibleAnnotations().length;
-    this.drawerToggle.textContent = `Annotations (${count})`;
+    this.railCount.textContent = String(count);
+    this.drawerToggle.textContent = `Notes on this chapter (${count})`;
     this.drawerToggle.setAttribute("aria-expanded", String(this.drawerOpen));
     this.drawerPanel.hidden = !this.drawerOpen;
   }
@@ -411,6 +447,12 @@ export class AuthorbotCollab extends HTMLElement {
     }
     this.loadError = null;
     this.annotations = result.value;
+    if (
+      this.activeAnnotationId === null ||
+      !this.annotations.some((annotation) => annotation.id === this.activeAnnotationId)
+    ) {
+      this.activeAnnotationId = this.visibleAnnotations()[0]?.id ?? null;
+    }
     await this.loadReplies();
     // Cards for server-side pending records show "syncing" and poll (§2.5).
     for (const annotation of this.annotations) {
@@ -475,7 +517,7 @@ export class AuthorbotCollab extends HTMLElement {
     // A fresh crossing changes the annotation's server-side status; reconcile
     // authoritative state so the card reflects it even if the feed is down.
     if (!hadDecision && annotation.decision != null) {
-      this.announce("Threshold reached - queued as a work item.");
+      this.announce("Threshold reached. Queued as a work item.");
       this.scheduleRefetch();
     }
   }
@@ -508,7 +550,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.overrideDrafts.delete(annotationId);
     this.announce(
       action === "promote"
-        ? "Promoted to work - a work item was created."
+        ? "Promoted to work. A work item was created."
         : "Suggestion rejected.",
     );
     this.scheduleRefetch();
@@ -603,7 +645,7 @@ export class AuthorbotCollab extends HTMLElement {
       return "Your role is read-only here.";
     }
     if (status === 0) {
-      return "Network error - is the API reachable?";
+      return "Network error. Is the API reachable?";
     }
     return message;
   }
@@ -637,7 +679,74 @@ export class AuthorbotCollab extends HTMLElement {
       if (!on && card.contains(document.activeElement)) {
         continue;
       }
-      card.classList.toggle("ab-active", on);
+      card.classList.toggle("ab-hovered", on);
+    }
+  }
+
+  private activateAnnotation(annotationId: string, moveFocus = false): void {
+    this.activeAnnotationId = annotationId;
+    for (const [id, card] of this.cardEls) {
+      card.classList.toggle("ab-active", id === annotationId);
+    }
+    for (const mark of this.proseEl.querySelectorAll<HTMLElement>(".ab-inline-highlight")) {
+      mark.classList.toggle("ab-highlight-active", mark.dataset.annotationId === annotationId);
+    }
+    const card = this.cardEls.get(annotationId);
+    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (moveFocus) {
+      card?.focus();
+    }
+    this.layout();
+  }
+
+  private renderRangeHighlights(): void {
+    clearRangeHighlights(this.proseEl);
+    const annotations = this.visibleAnnotations()
+      .filter(
+        (annotation) =>
+          annotation.scope === "range" &&
+          annotation.target?.textPosition !== undefined &&
+          annotation.target.textQuote !== undefined,
+      )
+      .sort(
+        (a, b) =>
+          (b.target?.textPosition?.start ?? 0) - (a.target?.textPosition?.start ?? 0),
+      );
+    for (const annotation of annotations) {
+      const block = this.blockFor(annotation);
+      const target = annotation.target;
+      if (block === null || target?.textPosition === undefined) {
+        continue;
+      }
+      const range = rangeForSelector(block, {
+        textPosition: target.textPosition,
+        ...(target.textQuote === undefined ? {} : { textQuote: target.textQuote }),
+      });
+      if (range === null) {
+        continue;
+      }
+      const mark = el(
+        "mark",
+        `ab-inline-highlight ab-highlight-${annotation.kind}` +
+          (annotation.id === this.activeAnnotationId ? " ab-highlight-active" : ""),
+      );
+      mark.dataset.annotationId = annotation.id;
+      mark.tabIndex = 0;
+      mark.setAttribute("role", "button");
+      mark.setAttribute(
+        "aria-label",
+        `${annotation.kind === "suggestion" ? "Suggestion" : "Comment"} by ${this.authorName(annotation.authorActorId)}`,
+      );
+      mark.addEventListener("click", () => this.activateAnnotation(annotation.id, true));
+      mark.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          this.activateAnnotation(annotation.id, true);
+        }
+      });
+      const fragment = range.extractContents();
+      mark.append(fragment);
+      range.insertNode(mark);
     }
   }
 
@@ -646,6 +755,18 @@ export class AuthorbotCollab extends HTMLElement {
       return this.me.actor.displayName;
     }
     return this.memberNames.get(actorId) ?? "member";
+  }
+
+  private formattedDate(createdAt: string): string {
+    const parsed = new Date(createdAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return createdAt;
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(parsed);
   }
 
   private visibleAnnotations(): Annotation[] {
@@ -773,16 +894,15 @@ export class AuthorbotCollab extends HTMLElement {
     }
     const range = selection.getRangeAt(0);
     const capture = captureRange(range);
-    if (capture === null) {
+    if (capture === null || capture.selector.textQuote.exact.length < 5) {
       this.hideSelTool();
       return;
     }
     this.lastCapture = capture;
     const rect = range.getBoundingClientRect();
-    const mainRect = this.mainEl.getBoundingClientRect();
     this.selTool.hidden = false;
-    this.selTool.style.top = `${rect.bottom - mainRect.top + 8}px`;
-    this.selTool.style.left = `${Math.max(0, rect.left - mainRect.left)}px`;
+    this.selTool.style.top = `${Math.max(8, rect.top - 8)}px`;
+    this.selTool.style.left = `${Math.max(12, rect.left + rect.width / 2)}px`;
   }
 
   private hideSelTool(): void {
@@ -923,7 +1043,7 @@ export class AuthorbotCollab extends HTMLElement {
       }
     });
 
-    const legendText = draft.scope === "range" ? "Annotate selection" : "Annotate block";
+    const legendText = draft.scope === "range" ? "Note on this passage" : "Note on this block";
     form.append(el("p", "ab-composer-title", legendText));
 
     if (draft.selector !== null) {
@@ -935,7 +1055,7 @@ export class AuthorbotCollab extends HTMLElement {
     kinds.append(el("legend", "ab-sr", "Annotation kind"));
     for (const [kind, label] of [
       ["comment", "Comment"],
-      ["suggestion", "Suggest change"],
+      ["suggestion", "Suggest an edit"],
     ] as const) {
       const wrap = el("label", "ab-kind");
       const radio = el("input");
@@ -953,7 +1073,7 @@ export class AuthorbotCollab extends HTMLElement {
 
     const bodyLabel = el("label", "ab-field");
     const labelText =
-      draft.kind === "suggestion" ? "Suggested change (Markdown)" : "Comment (Markdown)";
+      draft.kind === "suggestion" ? "Suggested replacement" : "What do you want to add?";
     bodyLabel.append(el("span", "ab-field-label", labelText));
     const textarea = el("textarea", "ab-textarea");
     textarea.rows = 4;
@@ -1011,6 +1131,7 @@ export class AuthorbotCollab extends HTMLElement {
       this.cardEls.set(annotation.id, card);
       this.cardsHost.append(card);
     }
+    this.renderRangeHighlights();
     if (this.loadError !== null) {
       this.cardsHost.append(el("p", "ab-error", `Annotations unavailable: ${this.loadError}`));
     }
@@ -1200,6 +1321,7 @@ export class AuthorbotCollab extends HTMLElement {
     const quote = annotation.target?.textQuote?.exact;
     const card = el("section", "ab-card ab-card-shell");
     card.tabIndex = -1;
+    card.classList.toggle("ab-active", annotation.id === this.activeAnnotationId);
     const labelParts = [
       annotation.kind === "suggestion" ? "Suggestion" : "Comment",
       `by ${author}`,
@@ -1216,12 +1338,16 @@ export class AuthorbotCollab extends HTMLElement {
     if (block !== null) {
       card.addEventListener("focusin", () => {
         block.classList.add("ab-target");
-        card.classList.add("ab-active");
+        // Do not expand synchronously during pointer focus: moving controls
+        // under the pointer between mousedown and mouseup can activate a vote
+        // instead of the collapsed card the reader chose.
+        if (!card.classList.contains("ab-active")) {
+          window.requestAnimationFrame(() => this.activateAnnotation(annotation.id));
+        }
       });
       card.addEventListener("focusout", (event) => {
         if (!card.contains(event.relatedTarget as Node | null)) {
           block.classList.remove("ab-target");
-          card.classList.remove("ab-active");
         }
       });
       card.addEventListener("mouseenter", () => block.classList.add("ab-target"));
@@ -1236,14 +1362,34 @@ export class AuthorbotCollab extends HTMLElement {
     header.append(
       el("span", `ab-chip ab-kind-${annotation.kind}`, annotation.kind),
       el("span", "ab-author", author),
-      el("span", `ab-chip ab-status-${status.label}`, status.label),
+      el("time", "ab-card-date", this.formattedDate(annotation.createdAt)),
+      el("span", `ab-chip ab-status-${status.label} ab-card-status`, status.label),
     );
     card.append(header);
+
+    card.addEventListener("click", (event) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("button, a, input, textarea, select") !== null
+      ) {
+        return;
+      }
+      this.activateAnnotation(annotation.id);
+    });
 
     if (quote !== undefined) {
       card.append(el("blockquote", "ab-quote", truncate(quote, 120)));
     }
     card.append(el("p", "ab-body", annotation.body));
+    if (annotation.kind === "suggestion" && quote !== undefined) {
+      const diff = el("div", "ab-suggestion-diff");
+      diff.setAttribute("aria-label", "Suggested edit");
+      diff.append(
+        el("del", "ab-diff-original", truncate(quote, 160)),
+        el("ins", "ab-diff-replacement", annotation.body),
+      );
+      card.append(diff);
+    }
     if (status.hint !== null) {
       card.append(el("p", "ab-hint", status.hint));
     }
@@ -1349,7 +1495,10 @@ export class AuthorbotCollab extends HTMLElement {
     for (const reply of replies.filter((entry) => entry.parentReplyId === parentId)) {
       const item = el("li", "ab-reply");
       const head = el("div", "ab-reply-head");
-      head.append(el("span", "ab-author", this.authorName(reply.authorActorId)));
+      head.append(
+        el("span", "ab-author", this.authorName(reply.authorActorId)),
+        el("time", "ab-reply-date", this.formattedDate(reply.createdAt)),
+      );
       const sync = this.replySync.get(reply.id);
       if (sync !== undefined || reply.status === "pending_git") {
         head.append(
@@ -1584,7 +1733,7 @@ export class AuthorbotCollab extends HTMLElement {
         this.blocks.find((candidate) => candidate.id === `b-${this.composer.draft?.blockId}`) ??
         null;
       items.push({
-        id: " composer",
+        id: "\0composer",
         desiredTop: blockTop(block),
         height: this.composerEl.offsetHeight,
       });
@@ -1592,7 +1741,7 @@ export class AuthorbotCollab extends HTMLElement {
     const assigned = stackCards(items, CARD_GAP);
     let bottom = 0;
     for (const [id, top] of assigned) {
-      const target = id === " composer" ? this.composerEl : this.cardEls.get(id);
+      const target = id === "\0composer" ? this.composerEl : this.cardEls.get(id);
       if (target === null || target === undefined) {
         continue;
       }

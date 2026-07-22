@@ -1,0 +1,2092 @@
+/* Settings-only console styles. Loaded only by /settings/ so reader pages keep their collaboration budget. */
+
+/* ==== Settings console redesign ========================================== */
+
+body.settings-console-body {
+  overflow: hidden;
+  background: #1b1815;
+}
+
+main.settings-console-main {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-console {
+  --surface-page: #1b1815;
+  --surface-card: #221f1b;
+  --surface-raised: #282420;
+  --surface-sunken: #141210;
+  --surface-selected: rgba(91, 116, 245, 0.16);
+  --blue-200: #bcc9ff;
+  --blue-300: #9fb2ff;
+  --blue-500: #5b74f5;
+  --blue-600: #4258de;
+  --blue-700: #2f42b8;
+  --blue-800: #26358f;
+  --blue-900: #1d2a66;
+  --orange-300: #ffab7a;
+  --orange-500: #f2772e;
+  --orange-700: #a8481a;
+  --amber-400: #e9b23f;
+  --red-400: #f0736f;
+  --red-500: #e0554f;
+  --green-400: #72c79a;
+  --text-strong: #f1efea;
+  --text-body: #c2bdb2;
+  --text-muted: #989289;
+  --text-faint: #767069;
+  --text-link: #9fb2ff;
+  --border-subtle: #282420;
+  --border-default: #332f2a;
+  --border-strong: #5a544c;
+  --border-focus: #5b74f5;
+  --tint-primary: rgba(91, 116, 245, 0.15);
+  --tint-accent: rgba(242, 119, 46, 0.13);
+  --tint-success: rgba(70, 164, 112, 0.14);
+  --tint-danger: rgba(224, 85, 79, 0.14);
+  --tint-warning: rgba(233, 178, 63, 0.13);
+  --tint-neutral: rgba(152, 146, 137, 0.12);
+  --on-tint-primary: #cbd4ff;
+  --on-tint-accent: #ffc2a0;
+  --on-tint-warning: #f1d391;
+  --font-display: "Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Source Serif 4", Georgia, "Iowan Old Style", serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --ring: 0 0 0 3px rgba(91, 116, 245, 0.4);
+  --shadow-md: 0 16px 38px rgba(0, 0, 0, 0.28);
+  --shadow-block: 0 9px 0 rgba(8, 7, 6, 0.22);
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--surface-page);
+  color: var(--text-body);
+  color-scheme: dark;
+  font-family: var(--font-display);
+}
+
+.settings-console [hidden] {
+  display: none !important;
+}
+
+.settings-icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.settings-topbar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 57px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(20, 18, 16, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.settings-brand,
+.settings-breadcrumb,
+.settings-topnav,
+.settings-topbar .ab-account,
+.settings-topbar .ab-account-identity {
+  display: flex;
+  align-items: center;
+}
+
+.settings-brand {
+  gap: 9px;
+  color: var(--text-strong);
+  text-decoration: none;
+}
+
+.settings-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: linear-gradient(150deg, var(--blue-500), var(--blue-800));
+  box-shadow: 0 5px 12px rgba(20, 35, 105, 0.28);
+}
+
+.settings-brand-mark svg,
+.settings-section-nav svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.settings-brand-mark svg {
+  width: 18px;
+  height: 18px;
+  color: white;
+}
+
+.settings-wordmark {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.settings-wordmark span {
+  color: var(--orange-500);
+}
+
+.settings-breadcrumb {
+  gap: 8px;
+  min-width: 0;
+  padding-left: 18px;
+  border-left: 1px solid var(--border-default);
+  color: var(--text-faint);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.settings-breadcrumb a,
+.settings-topnav a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.settings-breadcrumb strong {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+.settings-topnav {
+  gap: 22px;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.settings-topnav a:hover {
+  color: var(--text-strong);
+}
+
+.settings-topbar-divider {
+  width: 1px;
+  height: 25px;
+  background: var(--border-default);
+}
+
+.settings-topbar authorbot-account:empty {
+  display: none;
+}
+
+.settings-topbar .ab-account {
+  gap: 10px;
+  flex-wrap: nowrap;
+  font-size: 12.5px;
+}
+
+.settings-topbar .ab-account-identity {
+  gap: 8px;
+}
+
+.settings-topbar .ab-account-avatar {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, var(--blue-500), var(--blue-800));
+  color: white;
+  font: 600 10px var(--font-mono);
+}
+
+.settings-topbar .ab-account-identity-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.settings-topbar .ab-account-who {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.settings-topbar .ab-account-role {
+  color: var(--orange-300);
+  font: 600 8px var(--font-mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.settings-topbar .ab-account-link {
+  display: none;
+}
+
+.settings-topbar .ab-account-signout {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.settings-topbar .ab-account-signout:hover {
+  border-color: var(--border-default);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+}
+
+.settings-console-layout {
+  display: grid;
+  grid-template-columns: 266px minmax(0, 1fr);
+  height: calc(100vh - 57px);
+}
+
+.settings-sidebar {
+  overflow-y: auto;
+  padding: 20px 14px 40px;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.settings-sidebar-intro {
+  padding: 0 10px 17px;
+}
+
+.settings-eyebrow,
+.ab-section-eyebrow,
+.settings-nav-group > p {
+  margin: 0;
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.settings-eyebrow,
+.ab-section-eyebrow {
+  color: var(--orange-500);
+}
+
+.settings-sidebar-intro > p:last-child {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font: 400 13px/1.5 var(--font-body);
+}
+
+.settings-sidebar code {
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.settings-section-nav,
+.settings-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-section-nav {
+  gap: 20px;
+}
+
+.settings-nav-group {
+  gap: 3px;
+}
+
+.settings-nav-group > p {
+  padding: 0 11px 6px;
+  color: var(--text-faint);
+}
+
+.settings-section-nav button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 500 13.5px var(--font-display);
+  text-align: left;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.settings-section-nav button svg {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.settings-section-nav button:hover {
+  background: var(--surface-raised);
+  color: var(--text-strong);
+}
+
+.settings-section-nav button.is-active {
+  background: var(--surface-selected);
+  color: var(--text-strong);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--blue-500);
+}
+
+.settings-section-nav button.is-active svg {
+  color: var(--blue-300);
+}
+
+.settings-nav-count {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--tint-accent);
+  color: var(--on-tint-accent);
+  font: 600 10px var(--font-mono);
+}
+
+.settings-panel-scroll {
+  overflow-y: auto;
+  min-width: 0;
+  background: var(--surface-page);
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.settings-panel {
+  width: min(100%, 940px);
+  min-height: 100%;
+  padding: 38px 46px 140px;
+}
+
+.settings-console authorbot-settings,
+.settings-console authorbot-access {
+  display: block;
+}
+
+.settings-console .settings-fallback,
+.settings-console .ab-settings-denied {
+  max-width: 64ch;
+  margin: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-card);
+  color: var(--text-muted);
+  font: 400 15px/1.6 var(--font-body);
+}
+
+.settings-console .ab-settings-authbar {
+  margin: 0 0 20px;
+}
+
+.settings-console .ab-me {
+  display: none;
+}
+
+.settings-console .ab-settings-form,
+.settings-console .ab-settings-body {
+  display: block;
+  max-width: none;
+}
+
+.settings-console .ab-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-console .ab-section-eyebrow {
+  margin-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.settings-console .ab-settings-heading {
+  margin: 0 0 10px;
+  color: var(--text-strong);
+  font: 600 34px/1.15 var(--font-display);
+  letter-spacing: -0.03em;
+}
+
+.settings-console .ab-section-intro {
+  max-width: 64ch;
+  margin: 0 0 30px;
+  color: var(--text-muted);
+  font: 400 16px/1.65 var(--font-body);
+}
+
+.settings-console .ab-settings-card {
+  margin: 0 0 26px;
+  padding: 26px 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.settings-console .ab-settings-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.settings-console .ab-field,
+.settings-console .ab-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+}
+
+.settings-console .ab-field-label {
+  display: block;
+  margin: 0;
+  color: var(--text-strong);
+  font: 600 13px var(--font-display);
+}
+
+.settings-console .ab-input,
+.settings-console .ab-reason-input {
+  width: 100%;
+  min-height: 41px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  font: 400 15px var(--font-display);
+}
+
+.settings-console .ab-settings-language,
+.settings-console .ab-settings-license,
+.settings-console .ab-guarded-input,
+.settings-console .ab-rule-threshold {
+  font-family: var(--font-mono);
+}
+
+.settings-console .ab-input:focus,
+.settings-console .ab-reason-input:focus,
+.settings-console button:focus-visible,
+.settings-console summary:focus-visible {
+  border-color: var(--border-focus);
+  outline: 0;
+  box-shadow: var(--ring);
+}
+
+.settings-console .ab-field-hint,
+.settings-console .ab-license-summary,
+.settings-console .ab-publication-intro {
+  margin: 0;
+  color: var(--text-faint);
+  font: 400 13px/1.5 var(--font-body);
+}
+
+.settings-console .ab-settings-publication {
+  display: block;
+}
+
+.settings-console .ab-settings-legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  color: var(--text-strong);
+  font: 600 13px var(--font-display);
+}
+
+.settings-console .ab-publication-intro {
+  margin-bottom: 18px;
+}
+
+.settings-console .ab-publication-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 13px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-console .ab-publication-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-console .ab-publication-copy .ab-field-label {
+  color: var(--text-body);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.settings-console .ab-segmented {
+  display: flex;
+  flex: none;
+  padding: 3px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--surface-sunken);
+}
+
+.settings-console .ab-segment {
+  min-height: 29px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 500 11px var(--font-display);
+  cursor: pointer;
+}
+
+.settings-console .ab-segment.is-selected {
+  background: var(--blue-600);
+  color: white;
+  box-shadow: 0 2px 8px rgba(20, 35, 105, 0.35);
+}
+
+/* Governance flow. */
+.settings-console .ab-governance-source {
+  position: relative;
+  max-width: 64ch;
+  margin: 0 0 30px;
+  padding: 13px 16px 13px 44px;
+  border: 0;
+  border-left: 3px solid var(--blue-500);
+  border-radius: 0 8px 8px 0;
+  background: var(--tint-primary);
+  color: var(--on-tint-primary);
+  font: 400 14px/1.55 var(--font-body);
+}
+
+.settings-console .ab-governance-source::before {
+  position: absolute;
+  top: 12px;
+  left: 15px;
+  content: "i";
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--blue-300);
+  border-radius: 50%;
+  color: var(--blue-300);
+  font: 600 11px var(--font-mono);
+}
+
+.settings-console .ab-governance-bootstrap {
+  border-style: solid;
+}
+
+.settings-console .ab-governance-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.settings-console .ab-flow-node {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  column-gap: 13px;
+  width: min(100%, 560px);
+  padding: 15px 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.settings-console .ab-flow-icon {
+  grid-row: 1 / span 2;
+  color: var(--text-muted);
+  font: 500 22px var(--font-mono);
+  text-align: center;
+}
+
+.settings-console .ab-flow-node-title {
+  color: var(--text-strong);
+  font: 600 14px var(--font-display);
+}
+
+.settings-console .ab-flow-node-copy {
+  color: var(--text-faint);
+  font: 400 12.5px var(--font-body);
+}
+
+.settings-console .ab-flow-connector {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 2px;
+  height: 28px;
+  background: var(--border-default);
+  color: var(--border-strong);
+  font: 16px/1 var(--font-display);
+}
+
+.settings-console .ab-rule {
+  width: min(100%, 640px);
+  padding: 18px 20px 22px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-block);
+}
+
+.settings-console .ab-rule-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.settings-console .ab-rule-name,
+.settings-console .ab-rule-all,
+.settings-console .ab-gate-join b {
+  color: var(--text-faint);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-console .ab-rule-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.settings-console .ab-rule-all {
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.settings-console .ab-rule-lead,
+.settings-console .ab-rule-outcome {
+  margin: 0;
+  color: var(--text-faint);
+  font: 400 12.5px/1.5 var(--font-body);
+}
+
+.settings-console .ab-rule-lead {
+  margin-bottom: 12px;
+}
+
+.settings-console .ab-rule-clauses {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-console .ab-rule-clause {
+  display: flex;
+  gap: 14px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  list-style: none;
+}
+
+.settings-console .ab-gate-number,
+.settings-console .ab-human-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--tint-primary);
+  color: var(--blue-300);
+  font: 600 12px var(--font-mono);
+}
+
+.settings-console .ab-gate-content,
+.settings-console .ab-human-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-console .ab-gate-name,
+.settings-console .ab-human-title {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-strong);
+  font: 600 13px var(--font-display);
+}
+
+.settings-console .ab-gate-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-body);
+  font: 400 15px/1.5 var(--font-body);
+}
+
+.settings-console .ab-threshold-stepper {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--surface-card);
+}
+
+.settings-console .ab-threshold-button,
+.settings-console .ab-rule-threshold {
+  width: 28px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.settings-console .ab-threshold-button {
+  cursor: pointer;
+  font: 500 16px var(--font-display);
+}
+
+.settings-console .ab-threshold-button:hover {
+  background: var(--surface-raised);
+  color: var(--text-strong);
+}
+
+.settings-console .ab-rule-threshold {
+  appearance: textfield;
+  color: var(--blue-200);
+  font: 600 15px var(--font-mono);
+}
+
+.settings-console .ab-rule-threshold::-webkit-inner-spin-button {
+  appearance: none;
+}
+
+.settings-console .ab-why-button {
+  margin-top: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-link);
+  font: 500 12px var(--font-display);
+  cursor: pointer;
+}
+
+.settings-console .ab-clause-explain {
+  max-width: 58ch;
+  margin: 9px 0 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-default);
+  color: var(--text-muted);
+  font: 400 13.5px/1.6 var(--font-body);
+}
+
+.settings-console .ab-gate-join {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 24px;
+  padding-left: 16px;
+}
+
+.settings-console .ab-gate-join span {
+  width: 2px;
+  height: 16px;
+  margin-left: 12px;
+  background: var(--border-default);
+}
+
+.settings-console .ab-gate-join b {
+  font-size: 9px;
+}
+
+.settings-console .ab-human-maintainer-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1.5px solid var(--orange-700);
+  border-radius: 9px;
+  background: var(--tint-accent);
+}
+
+.settings-console .ab-human-icon {
+  background: rgba(242, 119, 46, 0.22);
+  color: var(--orange-300);
+}
+
+.settings-console .ab-human-title {
+  color: var(--on-tint-accent);
+  margin-bottom: 2px;
+}
+
+.settings-console .ab-human-sentence {
+  margin: 0;
+  color: var(--text-body);
+  font: 400 14px/1.5 var(--font-body);
+}
+
+.settings-console .ab-human-why {
+  color: var(--orange-300);
+}
+
+.settings-console .ab-human-explain {
+  border-color: var(--orange-700);
+}
+
+.settings-console .ab-human-maintainer-field {
+  position: relative;
+  flex: none;
+  margin: 1px 0 0;
+}
+
+.settings-console .ab-human-maintainer-field input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-console .ab-switch-track {
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 24px;
+  border-radius: 20px;
+  background: #5a544c;
+  cursor: pointer;
+  transition: background 200ms ease;
+}
+
+.settings-console .ab-switch-track::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  content: "";
+  transition: transform 200ms ease;
+}
+
+.settings-console .ab-human-maintainer-field input:checked + .ab-switch-track {
+  background: var(--blue-600);
+}
+
+.settings-console .ab-human-maintainer-field input:checked + .ab-switch-track::after {
+  transform: translateX(20px);
+}
+
+.settings-console .ab-human-maintainer-field input:focus-visible + .ab-switch-track {
+  box-shadow: var(--ring);
+}
+
+.settings-console .ab-rule-outcome {
+  margin-top: 14px;
+}
+
+.settings-console .ab-flow-end {
+  border-color: var(--blue-600);
+  background: linear-gradient(135deg, var(--blue-700), var(--blue-900));
+  box-shadow: var(--shadow-md);
+}
+
+.settings-console .ab-flow-end .ab-flow-icon,
+.settings-console .ab-flow-end .ab-flow-node-title {
+  color: white;
+}
+
+.settings-console .ab-flow-end-copy {
+  color: var(--blue-200);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Guarded addresses and the save bar. */
+.settings-console .ab-address-card,
+.settings-console .ab-guarded-field {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-console .ab-guarded-field {
+  gap: 10px;
+}
+
+.settings-console .ab-guarded-consequence {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: none;
+  margin: 0;
+  padding: 10px 13px;
+  border: 0;
+  border-left: 3px solid var(--amber-400);
+  border-radius: 0 7px 7px 0;
+  background: var(--tint-warning);
+  color: var(--on-tint-warning);
+  font: 400 13.5px/1.5 var(--font-body);
+}
+
+.settings-console .ab-guarded-consequence::before {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--amber-400);
+  content: "!";
+  font: 700 11px var(--font-mono);
+}
+
+.settings-console .ab-warning-icon,
+.settings-console .ab-dialog-warning {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--amber-400);
+  font: 700 11px var(--font-mono);
+}
+
+.settings-console .ab-settings-readonly {
+  max-width: none;
+  margin: 0;
+  padding: 2px 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.settings-console .ab-readonly-summary {
+  padding: 16px 0;
+  color: var(--text-body);
+  font: 500 14px var(--font-display);
+  cursor: pointer;
+}
+
+.settings-console .ab-readonly-intro,
+.settings-console .ab-readonly-list {
+  color: var(--text-muted);
+  font: 400 13.5px/1.6 var(--font-body);
+}
+
+.settings-console .ab-readonly-intro {
+  margin: 0 0 12px;
+}
+
+.settings-console .ab-readonly-list {
+  gap: 8px;
+  margin: 0 0 20px;
+}
+
+.settings-console .ab-btn {
+  min-height: 38px;
+  padding: 8px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-body);
+  font: 600 12.5px var(--font-display);
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.settings-console .ab-btn:hover {
+  background: var(--surface-raised);
+  color: var(--text-strong);
+}
+
+.settings-console .ab-btn:active {
+  transform: translateY(1px);
+}
+
+.settings-console .ab-primary {
+  border-color: var(--blue-600);
+  background: var(--blue-600);
+  color: white;
+}
+
+.settings-console .ab-primary:hover {
+  background: var(--blue-500);
+  filter: brightness(1.08);
+}
+
+.settings-console .ab-danger {
+  border-color: var(--red-500);
+  color: var(--red-400);
+}
+
+.settings-console .ab-settings-savebar {
+  position: sticky;
+  z-index: 12;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% + 36px);
+  margin: 30px -18px 0;
+  padding: 13px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: rgba(20, 18, 16, 0.94);
+  box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  animation: abSaveIn 200ms ease-out;
+}
+
+.settings-console .ab-savebar-mark {
+  color: var(--blue-300);
+  font: 600 18px var(--font-mono);
+}
+
+.settings-console .ab-savebar-copy {
+  flex: 1;
+  margin: 0;
+  color: var(--text-body);
+  font: 400 13px var(--font-body);
+}
+
+.settings-console .ab-settings-pending,
+.settings-console .ab-settings-status,
+.settings-console .ab-settings-error {
+  max-width: 64ch;
+  color: var(--text-muted);
+  font: 400 13.5px/1.5 var(--font-body);
+}
+
+.settings-console .ab-settings-error {
+  border-color: var(--red-500);
+  background: var(--tint-danger);
+  color: var(--red-400);
+}
+
+.settings-console .ab-settings-confirm {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.settings-console .ab-settings-confirm-dialog {
+  width: min(100%, 520px);
+  padding: 26px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-md);
+  animation: abDialogIn 200ms ease-out;
+}
+
+.settings-console .ab-dialog-warning {
+  margin-bottom: 13px;
+  color: var(--red-400);
+}
+
+.settings-console .ab-confirm-heading {
+  margin: 0 0 12px;
+  color: var(--text-strong);
+  font: 600 21px/1.25 var(--font-display);
+}
+
+.settings-console .ab-confirm-breaks {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font: 400 14px/1.6 var(--font-body);
+}
+
+.settings-console .ab-confirm-field {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.settings-console .ab-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.settings-console .ab-confirm-btn {
+  border-color: var(--red-500);
+  background: var(--red-500);
+  color: white;
+}
+
+@keyframes abSaveIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes abDialogIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 800px) {
+  body.settings-console-body {
+    overflow: auto;
+  }
+
+  .settings-console {
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .settings-topbar {
+    position: sticky;
+    top: 0;
+    gap: 12px;
+    padding: 0 14px;
+  }
+
+  .settings-breadcrumb {
+    overflow: hidden;
+    flex: 1;
+    padding-left: 12px;
+    text-overflow: ellipsis;
+  }
+
+  .settings-breadcrumb a,
+  .settings-topnav,
+  .settings-topbar-divider,
+  .settings-topbar .ab-account-identity-copy {
+    display: none;
+  }
+
+  .settings-console-layout {
+    display: block;
+    height: auto;
+  }
+
+  .settings-sidebar {
+    position: sticky;
+    z-index: 15;
+    top: 57px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .settings-sidebar-intro,
+  .settings-nav-group > p {
+    display: none;
+  }
+
+  .settings-section-nav,
+  .settings-nav-group {
+    flex-direction: row;
+  }
+
+  .settings-section-nav {
+    width: max-content;
+    gap: 8px;
+  }
+
+  .settings-nav-group {
+    gap: 3px;
+  }
+
+  .settings-section-nav button {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .settings-panel-scroll {
+    overflow: visible;
+  }
+
+  .settings-panel {
+    padding: 28px 20px 100px;
+  }
+
+  .settings-console .ab-settings-heading {
+    font-size: 29px;
+  }
+
+  .settings-console .ab-settings-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-console .ab-publication-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-console .ab-settings-savebar {
+    bottom: 14px;
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-console *,
+  .settings-console *::before,
+  .settings-console *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ==== Settings console redesign ========================================== */
+
+.settings-console .ab-access-body {
+  display: block;
+  margin: 0;
+}
+
+.settings-console .ab-access-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-console .ab-access-heading {
+  margin: 0 0 10px;
+  color: var(--text-strong);
+  font: 600 34px/1.15 var(--font-display);
+  letter-spacing: -0.03em;
+}
+
+.settings-console .ab-section-eyebrow-danger {
+  color: var(--red-400);
+}
+
+.settings-console .ab-access-intro {
+  max-width: 64ch;
+  margin: 0 0 26px;
+  color: var(--text-muted);
+  font: 400 16px/1.65 var(--font-body);
+  opacity: 1;
+}
+
+.settings-console .ab-access-note,
+.settings-console .ab-access-empty,
+.settings-console .ab-role-means,
+.settings-console .ab-pending-target,
+.settings-console .ab-pending-history,
+.settings-console .ab-access-control-means,
+.settings-console .ab-access-since,
+.settings-console .ab-access-reason {
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  opacity: 1;
+}
+
+.settings-console .ab-access-note {
+  margin: -14px 0 22px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.settings-console .ab-access-empty {
+  margin: 0;
+  padding: 28px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-card);
+  color: var(--text-muted);
+  font: 400 15px/1.5 var(--font-body);
+  text-align: center;
+}
+
+.settings-console .ab-access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-console .ab-access-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.settings-console .ab-access-row-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-console .ab-badge {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  padding: 3px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 20px;
+  background: var(--tint-neutral);
+  color: var(--text-muted);
+  font: 600 9px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-console .ab-badge-agent,
+.settings-console .ab-badge-role {
+  border-color: rgba(91, 116, 245, 0.28);
+  background: var(--tint-primary);
+  color: var(--on-tint-primary);
+}
+
+.settings-console .ab-badge-active {
+  border-color: rgba(70, 164, 112, 0.35);
+  background: var(--tint-success);
+  color: var(--green-400);
+}
+
+.settings-console .ab-badge-revoked,
+.settings-console .ab-badge-expired {
+  border-color: rgba(224, 85, 79, 0.38);
+  background: var(--tint-danger);
+  color: var(--red-400);
+}
+
+/* Policy radio cards. */
+.settings-console .ab-policy-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-console .ab-policy-choice {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 18px 20px;
+  border: 1.5px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--surface-card);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.settings-console .ab-policy-choice:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+}
+
+.settings-console .ab-policy-choice.is-selected {
+  border-color: var(--blue-500);
+  background: var(--surface-card);
+  box-shadow: var(--ring);
+}
+
+.settings-console .ab-policy-label {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.settings-console .ab-policy-radio {
+  position: absolute;
+  inset-inline-start: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings-console .ab-policy-radio-dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.settings-console .ab-policy-radio-dot::after {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+  content: "";
+  opacity: 0;
+}
+
+.settings-console .ab-policy-radio:checked + .ab-policy-radio-dot {
+  border-color: var(--blue-500);
+  background: var(--blue-600);
+}
+
+.settings-console .ab-policy-radio:checked + .ab-policy-radio-dot::after {
+  opacity: 1;
+}
+
+.settings-console .ab-policy-label .ab-field-label {
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.settings-console .ab-current-pill {
+  align-self: start;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.settings-console .ab-policy-means {
+  grid-column: 1 / -1;
+  margin: 3px 0 0 29px;
+  padding: 0;
+  color: var(--text-muted);
+  font: 400 14px/1.55 var(--font-body);
+  opacity: 1;
+}
+
+.settings-console .ab-policy-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.settings-console .ab-policy-change-note {
+  color: var(--text-faint);
+  font: 400 13px var(--font-body);
+}
+
+.settings-console .ab-policy-apply[disabled],
+.settings-console .ab-btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Collaborators. */
+.settings-console .ab-collaborator-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, var(--blue-500), var(--blue-800));
+  color: white;
+  font: 600 12px var(--font-mono);
+}
+
+.settings-console .ab-collaborator-avatar.is-agent {
+  background: linear-gradient(145deg, #625d56, #332f2a);
+  color: var(--text-body);
+}
+
+.settings-console .ab-collaborator-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.settings-console .ab-collaborator-name-line {
+  flex-basis: 100%;
+}
+
+.settings-console .ab-collaborator-name {
+  color: var(--text-strong);
+  font: 600 15px var(--font-display);
+}
+
+.settings-console .ab-collaborator-self {
+  margin-left: 8px;
+  color: var(--text-faint);
+  font: italic 12px var(--font-body);
+}
+
+.settings-console .ab-access-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.settings-console .ab-fact {
+  min-width: 0;
+}
+
+.settings-console .ab-fact-term,
+.settings-console .ab-fact-value {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.settings-console .ab-fact-term {
+  margin-bottom: 3px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-console .ab-fact-value {
+  color: var(--text-body);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.settings-console .ab-role-means {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.settings-console .ab-access-row-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-console .ab-role-change {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.settings-console .ab-role-preview {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--blue-500);
+  background: var(--tint-primary);
+  color: var(--text-muted);
+  font: 400 13px/1.5 var(--font-body);
+}
+
+/* Agent token mint and rows. */
+.settings-console .ab-access-mint {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 24px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-block);
+}
+
+.settings-console .ab-access-control-name {
+  margin: 0;
+  color: var(--text-strong);
+  font: 600 16px var(--font-display);
+}
+
+.settings-console .ab-access-control-means {
+  max-width: 64ch;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.settings-console .ab-access-mint-form {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 18px;
+  margin-top: 6px;
+}
+
+.settings-console .ab-access-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-strong);
+  font: 600 13px var(--font-display);
+}
+
+.settings-console .ab-access-scopes {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 18px;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--surface-sunken);
+}
+
+.settings-console .ab-access-scopes legend {
+  padding: 0 5px;
+  color: var(--text-strong);
+  font: 600 13px var(--font-display);
+}
+
+.settings-console .ab-access-scope {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: start;
+  padding: 7px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-console .ab-access-scope:hover {
+  background: var(--surface-raised);
+}
+
+.settings-console .ab-access-scope input {
+  grid-row: 1 / span 2;
+  margin-top: 2px;
+}
+
+.settings-console .ab-access-scope-name {
+  color: var(--blue-200);
+  font: 500 11px var(--font-mono);
+}
+
+.settings-console .ab-access-scope-means {
+  color: var(--text-faint);
+  font: 400 12.5px/1.4 var(--font-body);
+}
+
+.settings-console .ab-access-mint-form > .ab-primary {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.settings-console .ab-access-mint-slot {
+  order: -1;
+}
+
+.settings-console .ab-access-token-once {
+  margin: 0 0 8px;
+  padding: 18px;
+  border: 1px solid var(--blue-600);
+  border-radius: 9px;
+  background: var(--tint-primary);
+  animation: abAccessFadeIn 200ms ease-out;
+}
+
+.settings-console .ab-access-token-value {
+  display: block;
+  overflow-x: auto;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: #0d0c0b;
+  color: var(--blue-200);
+  font: 500 12px/1.5 var(--font-mono);
+  word-break: break-all;
+}
+
+.settings-console .ab-token-name {
+  color: var(--text-strong);
+  font: 600 14px var(--font-mono);
+}
+
+.settings-console .ab-token .ab-access-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-console .ab-access-revoke-all {
+  margin-top: 22px;
+  padding: 18px 20px;
+  border: 1px solid var(--red-500);
+  border-radius: 10px;
+  background: var(--tint-danger);
+}
+
+/* Emergency controls. */
+.settings-console .ab-access-emergency {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  border: 0;
+  background: transparent;
+}
+
+.settings-console .ab-access-emergency > .ab-section-eyebrow,
+.settings-console .ab-access-emergency > .ab-access-heading,
+.settings-console .ab-access-emergency > .ab-access-intro {
+  grid-column: 1 / -1;
+}
+
+.settings-console .ab-access-control {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 280px;
+  padding: 24px;
+  border: 1px solid var(--border-default);
+  border-radius: 11px;
+  background: var(--surface-card);
+}
+
+.settings-console .ab-access-freeze {
+  border-color: var(--red-500);
+}
+
+.settings-console .ab-emergency-icon {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  color: var(--amber-400);
+}
+
+.settings-console .ab-emergency-icon::before,
+.settings-console .ab-emergency-icon::after {
+  position: absolute;
+  width: 14px;
+  height: 2px;
+  margin: 15px 9px;
+  background: currentColor;
+  content: "";
+}
+
+.settings-console .ab-freeze-icon {
+  color: var(--red-400);
+}
+
+.settings-console .ab-freeze-icon::before {
+  transform: rotate(45deg);
+}
+
+.settings-console .ab-freeze-icon::after {
+  transform: rotate(-45deg);
+}
+
+.settings-console .ab-pause-icon::before {
+  width: 3px;
+  height: 14px;
+  margin: 9px 0 0 10px;
+  box-shadow: 9px 0 0 currentColor;
+}
+
+.settings-console .ab-pause-icon::after {
+  display: none;
+}
+
+.settings-console .ab-access-control > .ab-btn {
+  margin-top: auto;
+}
+
+.settings-console .ab-access-freeze-btn {
+  border-color: var(--red-500);
+  background: var(--red-500);
+  color: white;
+}
+
+/* Moderation cards. */
+.settings-console .ab-pending {
+  gap: 14px;
+}
+
+.settings-console .ab-pending-kind {
+  border-color: rgba(91, 116, 245, 0.3);
+  background: var(--tint-primary);
+  color: var(--on-tint-primary);
+}
+
+.settings-console .ab-pending-who {
+  color: var(--text-body);
+  font: 500 13px var(--font-display);
+}
+
+.settings-console .ab-pending-when {
+  margin-left: auto;
+  color: var(--text-faint);
+  font: 400 10px var(--font-mono);
+}
+
+.settings-console .ab-pending-body {
+  max-width: none;
+  margin: 0;
+  padding: 14px 16px;
+  border-left: 3px solid var(--blue-500);
+  background: var(--surface-sunken);
+  color: var(--text-body);
+  font: 400 15px/1.6 var(--font-body);
+  white-space: pre-wrap;
+}
+
+.settings-console .ab-pending-target,
+.settings-console .ab-pending-history {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-console .ab-pending .ab-access-row-actions {
+  justify-content: flex-start;
+}
+
+.settings-console .ab-access-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-default);
+}
+
+.settings-console .ab-bulk-count {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font: 400 13px var(--font-body);
+}
+
+/* Activity timeline. */
+.settings-console .ab-audit-filter {
+  max-width: 240px;
+  margin-bottom: 24px;
+}
+
+.settings-console .ab-audit-list {
+  position: relative;
+  gap: 0;
+  padding-left: 28px;
+}
+
+.settings-console .ab-audit-list::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 7px;
+  width: 2px;
+  background: var(--border-default);
+  content: "";
+}
+
+.settings-console .ab-audit-event {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 22px;
+  border: 0;
+}
+
+.settings-console .ab-audit-event::before {
+  position: absolute;
+  top: 8px;
+  left: -26px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface-page);
+  border-radius: 50%;
+  background: var(--blue-500);
+  box-shadow: 0 0 0 1px var(--blue-500);
+  content: "";
+}
+
+.settings-console .ab-audit-event.is-agent::before {
+  background: var(--text-faint);
+  box-shadow: 0 0 0 1px var(--text-faint);
+}
+
+.settings-console .ab-audit-what {
+  color: var(--text-body);
+  font: 500 14px var(--font-display);
+}
+
+.settings-console .ab-audit-actor {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.settings-console .ab-audit-when {
+  color: var(--text-faint);
+  font: 400 10px var(--font-mono);
+}
+
+.settings-console .ab-audit-reason {
+  margin: 0;
+  color: var(--text-muted);
+  font: 400 13px/1.5 var(--font-body);
+}
+
+/* Shared access status and modal confirmations. */
+.settings-console .ab-access-status,
+.settings-console .ab-access-error {
+  max-width: 68ch;
+  color: var(--text-muted);
+  font: 400 13.5px/1.5 var(--font-body);
+}
+
+.settings-console .ab-access-error {
+  border-color: var(--red-500);
+  background: var(--tint-danger);
+  color: var(--red-400);
+}
+
+.settings-console .ab-access-confirm-slot.is-open {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.settings-console .ab-access-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  width: min(100%, 540px);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow-y: auto;
+  margin: 0;
+  padding: 26px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-md);
+  animation: abAccessDialogIn 200ms ease-out;
+}
+
+.settings-console .ab-access-confirm .ab-confirm-heading {
+  margin: 0;
+  color: var(--text-strong);
+  font: 600 21px/1.25 var(--font-display);
+}
+
+.settings-console .ab-confirm-consequences {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font: 400 14px/1.55 var(--font-body);
+}
+
+.settings-console .ab-reason-field {
+  width: 100%;
+}
+
+.settings-console .ab-confirm-actions {
+  justify-content: flex-end;
+}
+
+.settings-console .ab-confirm-go {
+  border-color: var(--red-500);
+  background: var(--red-500);
+  color: white;
+}
+
+@keyframes abAccessFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes abAccessDialogIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 800px) {
+  .settings-console .ab-access-heading {
+    font-size: 29px;
+  }
+
+  .settings-console .ab-access-facts,
+  .settings-console .ab-token .ab-access-facts,
+  .settings-console .ab-access-scopes,
+  .settings-console .ab-access-emergency,
+  .settings-console .ab-access-mint-form {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-console .ab-access-emergency > .ab-section-eyebrow,
+  .settings-console .ab-access-emergency > .ab-access-heading,
+  .settings-console .ab-access-emergency > .ab-access-intro,
+  .settings-console .ab-access-scopes,
+  .settings-console .ab-access-mint-form > .ab-primary {
+    grid-column: 1;
+  }
+
+  .settings-console .ab-access-control {
+    min-height: 0;
+  }
+
+  .settings-console .ab-access-row-actions,
+  .settings-console .ab-policy-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-console .ab-role-change {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .settings-console .ab-role-preview {
+    grid-column: 1;
+  }
+}

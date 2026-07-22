@@ -23,41 +23,49 @@ async function openSettings(page: Page, login: string): Promise<void> {
   await expect(page.locator(".ab-settings-form")).toBeVisible({ timeout: 30_000 });
 }
 
+async function openSection(page: Page, section: "about" | "governance" | "addresses"): Promise<void> {
+  await page.locator(`[data-settings-target="${section}"]`).click();
+  await expect(page.locator(`[data-console-section="${section}"]`)).toBeVisible();
+}
+
 /**
  * Save and wait for the commit to land. A settings write is queued through the
  * same outbox as any other mutation, and the API refuses a second change while
  * one is in flight - so the next test step has to wait for it, not race it.
  */
-async function saveAndSettle(page: Page): Promise<void> {
+async function saveAndSettle(page: Page, section: "about" | "addresses"): Promise<void> {
   await page.locator("button.ab-settings-save").click();
   await expect(page.locator("p.ab-settings-error")).toBeHidden();
   await expect(page.locator("p.ab-settings-status")).not.toBeEmpty({ timeout: 30_000 });
   await expect(async () => {
     await page.reload();
     await expect(page.locator("p.ab-settings-pending")).toHaveCount(0);
-    await expect(page.locator("button.ab-settings-save")).toBeVisible();
+    await openSection(page, section);
+    await expect(page.locator("button.ab-settings-save")).toHaveCount(1);
   }).toPass({ timeout: 60_000 });
 }
 
 test("a settings change round-trips through book.yml", async ({ page }) => {
   await openSettings(page, "settings-e2e");
+  await openSection(page, "about");
 
   const title = page.locator("input.ab-settings-title");
   await expect(title).toHaveValue(ORIGINAL_TITLE);
   await title.fill(NEW_TITLE);
-  await saveAndSettle(page);
+  await saveAndSettle(page, "about");
 
   // Round trip: the value came back from the API, not from the form state.
   await expect(page.locator("input.ab-settings-title")).toHaveValue(NEW_TITLE);
 
   // Put it back, so nothing downstream inherits a renamed book.
   await page.locator("input.ab-settings-title").fill(ORIGINAL_TITLE);
-  await saveAndSettle(page);
+  await saveAndSettle(page, "about");
   await expect(page.locator("input.ab-settings-title")).toHaveValue(ORIGINAL_TITLE);
 });
 
 test("a guarded field states what it breaks before the change is accepted", async ({ page }) => {
   await openSettings(page, "guarded-e2e");
+  await openSection(page, "addresses");
 
   const chapterUrlField = page.locator("input.ab-settings-chapter-url");
   await expect(chapterUrlField).toHaveValue(ORIGINAL_CHAPTER_URL);
@@ -84,6 +92,7 @@ test("a guarded field states what it breaks before the change is accepted", asyn
 
   // Reloading now proves the unconfirmed change was never stored.
   await page.reload();
+  await openSection(page, "addresses");
   await expect(page.locator("input.ab-settings-chapter-url")).toHaveValue(ORIGINAL_CHAPTER_URL);
 
   // Confirm explicitly, and it applies.
@@ -96,6 +105,7 @@ test("a guarded field states what it breaks before the change is accepted", asyn
   await expect(async () => {
     await page.reload();
     await expect(page.locator("p.ab-settings-pending")).toHaveCount(0);
+    await openSection(page, "addresses");
     await expect(page.locator("input.ab-settings-chapter-url")).toHaveValue(NEW_CHAPTER_URL);
   }).toPass({ timeout: 60_000 });
 
@@ -109,6 +119,7 @@ test("a guarded field states what it breaks before the change is accepted", asyn
   await expect(async () => {
     await page.reload();
     await expect(page.locator("p.ab-settings-pending")).toHaveCount(0);
+    await openSection(page, "addresses");
     await expect(page.locator("input.ab-settings-chapter-url")).toHaveValue(ORIGINAL_CHAPTER_URL);
   }).toPass({ timeout: 60_000 });
 });
@@ -149,4 +160,40 @@ test("governance reads in author-facing language, and never-editable fields are 
   expect(await page.locator(".ab-settings-form").innerText()).not.toMatch(
     /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
   );
+});
+
+test("the console chrome exposes one focused section at a time", async ({ page }) => {
+  await openSettings(page, "console-e2e");
+  if (process.env["AUTHORBOT_SETTINGS_MOBILE"] === "true") {
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+  await expect(page.locator(".settings-topbar")).toBeVisible();
+  await expect(page.locator(".settings-sidebar")).toBeVisible();
+
+  const sections = [
+    "about",
+    "governance",
+    "addresses",
+    "policy",
+    "collaborators",
+    "tokens",
+    "emergency",
+    "moderation",
+    "activity",
+  ] as const;
+  await expect(page.locator("[data-settings-target]")).toHaveCount(sections.length);
+  for (const section of sections) {
+    await page.locator(`[data-settings-target="${section}"]`).click();
+    await expect(page.locator(`[data-console-section="${section}"]`)).toBeVisible();
+    await expect(page.locator("[data-console-section]:visible")).toHaveCount(1);
+  }
+
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth === document.documentElement.clientWidth),
+  ).toBe(true);
+  const screenshot = process.env["AUTHORBOT_SETTINGS_SCREENSHOT"];
+  if (screenshot !== undefined) {
+    await page.locator('[data-settings-target="governance"]').click();
+    await page.screenshot({ path: screenshot });
+  }
 });
