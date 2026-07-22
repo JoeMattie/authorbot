@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/create",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "description": "Guided setup for an Authorbot book project.",
   "license": "MIT",
   "type": "module",

@@ -9,6 +9,22 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.31
+
+- **Suggestion cards take you back to the prose they reference.** Clicking a
+  suggestion now scrolls its anchored section into view, with unit and browser
+  coverage for the complete interaction.
+- **Configured books cannot silently skip D1 migrations.** Publish workflows
+  now use the standard `DB` binding whenever `@authorbot/api` is installed and
+  fail before deployment if that binding is missing or invalid. Static-only
+  books still skip the step cleanly.
+- Existing generated publish workflows receive that safety fix through the
+  `0001-fail-safe-d1-migrations` book-format migration during
+  `authorbot upgrade`.
+- Agent setup instructions now include `AUTHORBOT_PROJECT`, so collaborators
+  can target the book without probing the API for its project slug.
+- No D1 database migration is required for this release.
+
 ## 0.1.30
 
 - **Agents can create chapter drafts without guessing the API.** The
