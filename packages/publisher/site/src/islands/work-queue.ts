@@ -14,7 +14,7 @@
  * markup is the chapter link, whose href comes from the build-time chapter map
  * (trusted), never from API data. The lease token is never rendered.
  */
-import { CollabApi, type Me, type TaskBundle, type WorkItem } from "./api.js";
+import { type Me, type WorkItem } from "./api.js";
 import { el, srOnly } from "./dom.js";
 import { tallyOrEmpty, tallySummary } from "./vote-view.js";
 import { ClaimPanel, typeLabel, workTypeIcon, type ChapterRef } from "./work-claim.js";
@@ -27,6 +27,11 @@ import {
   toStoredClaim,
   type StoredClaim,
 } from "./work-state.js";
+import {
+  type ProjectStore,
+  type SafeTaskBundle,
+} from "./project-store.js";
+import { loadProjectStore } from "./project-store-loader.js";
 
 interface WorkConfig {
   apiBase: string;
@@ -63,9 +68,10 @@ function sessionStorageOrNull(): Storage | null {
 }
 
 export class AuthorbotWorkQueue extends HTMLElement {
-  private api!: CollabApi;
+  private store!: ProjectStore;
   private cfg!: WorkConfig;
   private started = false;
+  private mountGeneration = 0;
   private list!: HTMLElement;
   private status!: HTMLElement;
   private live!: HTMLElement;
@@ -74,6 +80,12 @@ export class AuthorbotWorkQueue extends HTMLElement {
   private cursor: string | null = null;
   private count = 0;
   private me: Me | null = null;
+  private unsubscribe: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
+  private scaffolded = false;
+  private claimErrors = new Map<string, string>();
+  private recoveryError: string | null = null;
+  private renderedQueueProjection: string | null = null;
 
   /** Injected by tests; `Date.now` in the browser. */
   now: () => number = () => Date.now();
@@ -83,27 +95,53 @@ export class AuthorbotWorkQueue extends HTMLElement {
       return;
     }
     this.started = true;
+    const generation = ++this.mountGeneration;
     const cfg = parseConfig(this);
     if (cfg === null) {
       return; // misconfigured build: leave the static fallback in place
     }
     this.cfg = cfg;
-    this.api = new CollabApi(cfg.apiBase, cfg.project);
-    void this.start();
+    void this.connectStore(cfg, generation);
+  }
+
+  private async connectStore(cfg: WorkConfig, generation: number): Promise<void> {
+    let store: ProjectStore;
+    try {
+      store = await loadProjectStore(cfg);
+    } catch {
+      // The queue's server-rendered explanation remains usable when the
+      // shared state chunk cannot be loaded after its bounded retry.
+      return;
+    }
+    if (!this.isCurrentMount(generation)) return;
+    this.store = store;
+    await this.start(generation, store);
   }
 
   disconnectedCallback(): void {
+    this.started = false;
+    this.mountGeneration += 1;
     this.panel?.destroy();
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.releaseConnection?.();
+    this.releaseConnection = null;
   }
 
-  private async start(): Promise<void> {
-    const auth = await this.api.meResult();
-    if (!auth.ok) {
+  private isCurrentMount(generation: number): boolean {
+    return this.started && this.isConnected && this.mountGeneration === generation;
+  }
+
+  private async start(generation: number, store: ProjectStore): Promise<void> {
+    await store.getState().ensureSession();
+    if (!this.isCurrentMount(generation)) return;
+    const state = store.getState();
+    if (state.sessionStatus !== "ready") {
       // Unreachable API: leave the static fallback (progressive enhancement).
       return;
     }
-    this.me = auth.value;
-    this.scaffold();
+    this.me = state.session;
+    this.scaffold(generation, store);
     // A claim survives a refresh (contract §7 / Phase 2b draft preservation).
     const stored = loadClaim(sessionStorageOrNull(), this.cfg.project);
     if (stored !== null) {
@@ -111,14 +149,134 @@ export class AuthorbotWorkQueue extends HTMLElement {
         clearClaim(sessionStorageOrNull(), this.cfg.project);
         this.announce("Your lease expired while you were away; the work item is back in the queue.");
       } else {
-        this.openPanel(stored, true);
+        await this.recoverStoredClaim(stored, generation, store);
+        if (!this.isCurrentMount(generation)) return;
       }
     }
-    await this.load(true);
+    await this.load(true, generation, store);
+    if (!this.isCurrentMount(generation)) return;
+    this.unsubscribe = store.subscribe(() => {
+      this.syncFromStore(generation, store);
+    });
+    if (!this.isCurrentMount(generation)) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+      return;
+    }
+    this.releaseConnection = store.getState().retainConnection();
+  }
+
+  /** Drop stale private rows and rebuild affordances when the viewer changes. */
+  private syncFromStore(generation: number, store: ProjectStore): void {
+    if (!this.isCurrentMount(generation) || !this.scaffolded) return;
+    const state = store.getState();
+    if (state.sessionStatus === "error") {
+      this.me = null;
+      this.clearQueue("Work queue unavailable. Sign in again to continue.");
+      return;
+    }
+    if (state.sessionStatus !== "ready") return;
+    this.me = state.session;
+    if (state.workItemsStatus === "idle") {
+      this.clearQueue("Loading work…");
+      void state.ensureWorkItems();
+      return;
+    }
+    if (state.workItemsStatus === "ready") {
+      this.renderQueueFromStore();
+      return;
+    }
+    if (state.workItemsStatus === "error") {
+      this.clearQueue(
+        state.session === null
+          ? "Sign in with an editor (or higher) role to view work."
+          : state.session.scopes.includes("work:read")
+            ? `Work queue unavailable: ${state.workItemsError ?? "request failed"}`
+            : "Your role cannot view the work queue.",
+      );
+    }
+  }
+
+  private clearQueue(message: string): void {
+    const projection = `clear:${message}`;
+    if (this.renderedQueueProjection === projection) return;
+    this.renderedQueueProjection = projection;
+    this.list.textContent = "";
+    this.count = 0;
+    this.cursor = null;
+    this.moreWrap.hidden = true;
+    this.syncGlobalCount();
+    this.status.hidden = false;
+    this.status.textContent = message;
   }
 
   private canClaim(): boolean {
     return this.me !== null && this.me.scopes.includes("work:claim");
+  }
+
+  private async recoverStoredClaim(
+    stored: StoredClaim,
+    generation: number,
+    store: ProjectStore,
+  ): Promise<void> {
+    if (!this.isCurrentMount(generation)) return;
+    const bundle: SafeTaskBundle = {
+      workItem: stored.workItem,
+      lease: stored.lease,
+      document: stored.document,
+      ...(stored.target === null ? {} : { target: stored.target }),
+      context: stored.context,
+      submissionSchema: stored.submissionSchema,
+    };
+    this.announce("Recovering your claimed work and draft.");
+    const recovered = await store.getState().recoverClaim(bundle);
+    if (!this.isCurrentMount(generation)) return;
+    if (!recovered.ok) {
+      this.showRecoveryFailure(stored, recovered.message, generation, store);
+      return;
+    }
+    this.recoveryError = null;
+    const claim: StoredClaim = {
+      ...stored,
+      lease: recovered.value.lease,
+    };
+    saveClaim(sessionStorageOrNull(), this.cfg.project, claim);
+    this.openPanel(claim, true);
+    if (store.getState().workItemsStatus === "ready") this.renderQueueFromStore();
+    this.announce("Claim restored. Your lease token was rotated safely.");
+  }
+
+  private showRecoveryFailure(
+    stored: StoredClaim,
+    message: string,
+    generation: number,
+    store: ProjectStore,
+  ): void {
+    this.recoveryError =
+      `Your saved draft is still here, but its lease could not be recovered: ${message}`;
+    this.status.hidden = false;
+    this.status.textContent = "";
+    this.status.append(document.createTextNode(this.recoveryError));
+
+    const retry = el("button", "ab-btn", "Retry recovery");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      retry.disabled = true;
+      void this.recoverStoredClaim(stored, generation, store).finally(() => {
+        if (this.isCurrentMount(generation)) retry.disabled = false;
+      });
+    });
+    const forget = el("button", "ab-btn", "Discard saved draft and forget claim");
+    forget.type = "button";
+    forget.addEventListener("click", () => {
+      if (!this.isCurrentMount(generation)) return;
+      clearClaim(sessionStorageOrNull(), this.cfg.project);
+      store.getState().forgetClaim(stored.workItemId);
+      this.recoveryError = null;
+      this.announce("Saved draft and stale claim removed.");
+      this.renderQueueFromStore();
+    });
+    this.status.append(document.createTextNode(" "), retry, document.createTextNode(" "), forget);
   }
 
   /**
@@ -132,45 +290,76 @@ export class AuthorbotWorkQueue extends HTMLElement {
     return stored !== null && !leaseStatus(stored.lease, this.now()).expired;
   }
 
-  private async load(first: boolean): Promise<void> {
-    const result = await this.api.workItems(this.cursor ?? undefined);
-    if (!result.ok) {
-      if (result.status === 0) {
+  private async load(
+    first: boolean,
+    generation = this.mountGeneration,
+    store = this.store,
+  ): Promise<void> {
+    if (!this.isCurrentMount(generation)) return;
+    if (first) {
+      await store.getState().refreshWorkItems();
+    } else {
+      await store.getState().ensureWorkItems();
+    }
+    if (!this.isCurrentMount(generation)) return;
+    const state = store.getState();
+    if (state.workItemsStatus !== "ready") {
+      if (state.workItemsStatus === "loading") {
         return;
       }
       this.status.hidden = false;
       this.status.textContent =
-        result.status === 401 || result.status === 403
-          ? "Sign in with an editor (or higher) role to view the work queue."
-          : `Work queue unavailable: ${result.message}`;
+        `Work queue unavailable: ${state.workItemsError ?? "request failed"}`;
       this.moreWrap.hidden = true;
       return;
     }
-    if (first) {
-      this.list.textContent = "";
-      this.count = 0;
-    }
-    for (const item of result.value.items) {
+    this.renderQueueFromStore();
+  }
+
+  private renderQueueFromStore(): void {
+    const state = this.store.getState();
+    const projection = JSON.stringify([
+      state.session?.actor.id ?? null,
+      [...(state.session?.scopes ?? [])].sort(),
+      this.recoveryError,
+      this.hasActiveClaim(),
+      state.workItemIds.map((id) => state.workItemsById[id] ?? null),
+    ]);
+    if (projection === this.renderedQueueProjection) return;
+    this.renderedQueueProjection = projection;
+    this.list.textContent = "";
+    this.count = 0;
+    for (const id of state.workItemIds) {
+      const item = state.workItemsById[id];
+      if (item === undefined) continue;
       this.list.append(this.buildItem(item));
       this.count += 1;
     }
-    this.cursor = result.value.nextCursor;
-    this.moreWrap.hidden = this.cursor === null;
+    this.cursor = null;
+    this.moreWrap.hidden = true;
     this.syncGlobalCount();
-    this.status.hidden = this.count > 0;
-    if (this.count === 0) {
+    if (this.recoveryError !== null) {
+      this.status.hidden = false;
+    } else if (this.count === 0) {
       this.status.hidden = false;
       this.status.textContent = "No work items are ready.";
+    } else {
+      this.status.hidden = true;
+      this.status.textContent = "";
     }
   }
 
   /** Re-read the queue from the top (after a claim, release, or completion). */
-  private async reload(): Promise<void> {
+  private async reload(
+    generation = this.mountGeneration,
+    store = this.store,
+  ): Promise<void> {
+    if (!this.isCurrentMount(generation)) return;
     this.cursor = null;
-    await this.load(true);
+    await this.load(true, generation, store);
   }
 
-  private scaffold(): void {
+  private scaffold(generation: number, store: ProjectStore): void {
     this.textContent = "";
     this.status = el("p", "ab-work-status");
     this.status.setAttribute("role", "status");
@@ -185,28 +374,30 @@ export class AuthorbotWorkQueue extends HTMLElement {
     more.type = "button";
     more.addEventListener("click", () => {
       more.disabled = true;
-      void this.load(false).finally(() => {
-        more.disabled = false;
+      void this.load(false, generation, store).finally(() => {
+        if (this.isCurrentMount(generation)) more.disabled = false;
       });
     });
     this.moreWrap.append(more);
 
     this.panel = new ClaimPanel({
-      api: this.api,
+      store: this.store,
       project: this.cfg.project,
       storage: sessionStorageOrNull(),
       chapters: this.cfg.chapters,
       now: () => this.now(),
       announce: (message) => this.announce(message),
       onExit: (reason) => {
+        if (!this.isCurrentMount(generation)) return;
         if (reason === "released") {
           this.panel?.hide();
         }
-        void this.reload();
+        void this.reload(generation, store);
       },
     });
 
     this.append(this.live, this.panel.root, this.status, this.list, this.moreWrap);
+    this.scaffolded = true;
   }
 
   private announce(message: string): void {
@@ -337,9 +528,11 @@ export class AuthorbotWorkQueue extends HTMLElement {
     button.setAttribute("aria-label", `Claim ${typeLabel(item.type)} work item`);
     const error = el("p", "ab-error ab-claim-error");
     error.setAttribute("role", "alert");
-    error.hidden = true;
+    error.textContent = this.claimErrors.get(item.id) ?? "";
+    error.hidden = error.textContent === "";
     button.addEventListener("click", () => {
       button.disabled = true;
+      this.claimErrors.delete(item.id);
       error.hidden = true;
       void this.claim(item, error).finally(() => {
         button.disabled = false;
@@ -350,7 +543,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
   }
 
   private async claim(item: WorkItem, error: HTMLElement): Promise<void> {
-    const result = await this.api.claim(item.id);
+    const result = await this.store.getState().claimWork(item.id);
     if (!result.ok) {
       // 409 `lease-held` carries the holder's display name only - no token,
       // no actor id (contract §2).
@@ -359,14 +552,23 @@ export class AuthorbotWorkQueue extends HTMLElement {
         result.status === 409 && typeof holder === "string"
           ? `Already claimed by ${holder}.`
           : `Claim failed: ${result.message}`;
+      this.claimErrors.set(item.id, error.textContent);
       // The message stays put: reloading the list here would wipe the very
       // explanation the reader needs.
       error.hidden = false;
+      const currentError = [...this.querySelectorAll<HTMLElement>(".ab-work-item")]
+        .find((row) => row.dataset["workItemId"] === item.id)
+        ?.querySelector<HTMLElement>(".ab-claim-error");
+      if (currentError !== undefined && currentError !== null) {
+        currentError.textContent = error.textContent;
+        currentError.hidden = false;
+      }
       return;
     }
     const claim = storedClaimFor(result.value);
-    // Persist immediately: the token is returned exactly once, so a refresh
-    // between claiming and submitting must not strand the lease.
+    this.claimErrors.delete(item.id);
+    // Persist only non-secret task metadata and the draft. A refresh rotates
+    // the token through the credential-bound recovery endpoint.
     saveClaim(sessionStorageOrNull(), this.cfg.project, claim);
     const bundle = result.value;
     this.announce(`Claimed. ${typeLabel(bundle.workItem.type)}, your lease is running.`);
@@ -385,7 +587,7 @@ function formatCreatedAt(value: string): string {
  * prefilled with the target (contract §7), so the writer edits the existing
  * prose instead of retyping it.
  */
-export function storedClaimFor(bundle: TaskBundle): StoredClaim {
+export function storedClaimFor(bundle: SafeTaskBundle): StoredClaim {
   const draft = prefillFor({
     workItem: bundle.workItem,
     document: bundle.document,

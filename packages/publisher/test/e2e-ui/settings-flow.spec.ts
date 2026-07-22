@@ -39,6 +39,10 @@ async function saveAndSettle(page: Page, section: "about" | "addresses"): Promis
   await expect(page.locator("p.ab-settings-status")).not.toBeEmpty({ timeout: 30_000 });
   await expect(async () => {
     await page.reload();
+    // The static settings shell has no pending marker. Wait for the island to
+    // finish its authoritative GET before treating an absent marker as proof
+    // that the Git operation settled.
+    await expect(page.locator(".ab-settings-form")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator("p.ab-settings-pending")).toHaveCount(0);
     await openSection(page, section);
     await expect(page.locator("button.ab-settings-save")).toHaveCount(1);
@@ -104,6 +108,7 @@ test("a guarded field states what it breaks before the change is accepted", asyn
   await page.locator("button.ab-confirm-btn").click();
   await expect(async () => {
     await page.reload();
+    await expect(page.locator(".ab-settings-form")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator("p.ab-settings-pending")).toHaveCount(0);
     await openSection(page, "addresses");
     await expect(page.locator("input.ab-settings-chapter-url")).toHaveValue(NEW_CHAPTER_URL);
@@ -118,6 +123,7 @@ test("a guarded field states what it breaks before the change is accepted", asyn
   await page.locator("button.ab-confirm-btn").click();
   await expect(async () => {
     await page.reload();
+    await expect(page.locator(".ab-settings-form")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator("p.ab-settings-pending")).toHaveCount(0);
     await openSection(page, "addresses");
     await expect(page.locator("input.ab-settings-chapter-url")).toHaveValue(ORIGINAL_CHAPTER_URL);

@@ -29,6 +29,13 @@ export interface Me {
   memberships?: MeMembership[];
 }
 
+/** Exact response of the dev-only login route (singular project membership). */
+export interface DevLogin {
+  actor: MeActor;
+  membership: MeMembership;
+  scopes: string[];
+}
+
 /** Roles that may author chapters (contract §3.5) and read settings (§3.6). */
 export type Role = "reader" | "contributor" | "editor" | "maintainer";
 
@@ -143,20 +150,30 @@ export interface FeedEvent {
 
 export interface Reply {
   id: string;
+  /** Returned by authoritative reads; absent on older optimistic adapters. */
+  projectId?: string;
   annotationId: string;
   parentReplyId: string | null;
   authorActorId: string;
   body: string;
   status: string;
+  /** Lets a refetched pending reply resume its Git-operation reconciliation. */
+  gitOperationId?: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Operation {
   id: string;
+  projectId: string;
+  correlationId: string;
   state: string;
+  attempts: number;
   error: string | null;
   /** Present once the operation has committed (Phase 2 contract §5). */
-  commitSha?: string | null;
+  commitSha: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -188,17 +205,63 @@ export function parseSubmissionConflict(error: string | null | undefined): Submi
   }
 }
 
+/** Common 202 body for a Git-backed collaboration mutation. */
 export interface Accepted {
   operationId: string;
+  correlationId: string;
+  status: string;
   annotationId?: string;
   replyId?: string;
 }
 
+/** A comment/suggestion accepted into the Git-backed collaboration stream. */
+export interface QueuedAnnotationAccepted {
+  outcome: "queued_git";
+  operationId: string;
+  annotationId: string;
+  correlationId: string;
+  status: "queued";
+}
+
+/**
+ * A contribution retained for maintainer moderation. There is deliberately no
+ * operation id: approval-gated submissions do not create a Git operation,
+ * outbox row, or public annotation until a maintainer approves them.
+ */
+export interface PendingReviewAnnotationAccepted {
+  outcome: "pending_review";
+  pendingId: string;
+  annotationId: null;
+  correlationId: string;
+  status: "pending_review";
+  moderation: {
+    state: "pending";
+    message: string;
+  };
+}
+
+export type CreateAnnotationAccepted =
+  | QueuedAnnotationAccepted
+  | PendingReviewAnnotationAccepted;
+
+/** A reply accepted into the Git-backed collaboration stream. */
+export interface ReplyAccepted extends Accepted {
+  replyId: string;
+}
+
+/** An annotation withdrawal accepted into the Git-backed stream. */
+export interface WithdrawAccepted extends Accepted {
+  annotationId: string;
+}
+
 /** The 200 body of a vote cast/clear (Phase 3 contract §2). */
 export interface VoteResult {
+  annotationId: string;
   value: VoteValue | null;
   votes: VoteTally;
+  ruleSatisfied: boolean;
   decision: DecisionSummary | null;
+  correlationId: string;
 }
 
 // ---- Phase 4: leases, task bundle, submissions ------------------------------
@@ -221,10 +284,15 @@ export interface BundleTarget {
  */
 export interface TaskBundle {
   workItem: { id: string; type: string; acceptanceCriteria: string[]; priority: string };
-  /** `token` is returned exactly once by the API and is never logged. */
+  /**
+   * `token` is returned on the first claim response. An idempotent replay
+   * carries `tokenRedacted: true` instead, so the client must recover it
+   * through the credential-bound rotation endpoint.
+   */
   lease: {
     id: string;
-    token: string;
+    token?: string;
+    tokenRedacted?: true;
     expiresAt: string;
     maxExpiresAt: string;
     /** Contract §3 (amended): lets a fresh claim honor the deployment's
@@ -245,6 +313,30 @@ export interface LeaseRenewal {
   maxExpiresAt: string;
   renewalCount: number;
   renewalPromptAt: string;
+}
+
+/** 200 body of a credential-bound lease-token rotation. */
+export interface LeaseRecovery {
+  workItemId: string;
+  lease: {
+    id: string;
+    token?: string;
+    tokenRedacted?: true;
+    expiresAt: string;
+    maxExpiresAt: string;
+    renewalCount: number;
+    renewalPromptAt: string;
+  };
+  correlationId: string;
+}
+
+/** 200 body of `POST .../lease/release` (contract §2). */
+export interface LeaseRelease {
+  workItemId: string;
+  leaseId: string;
+  status: string;
+  expired: boolean;
+  correlationId: string;
 }
 
 /** 202 body of `POST .../submissions` (contract §4). */
@@ -451,6 +543,20 @@ export interface OverrideResult {
   correlationId: string;
 }
 
+/**
+ * A caller may retain one key across retries of the same logical command.
+ * When omitted, the legacy behavior remains: each method call gets a fresh
+ * UUID. The store owns the retained key; this transport never persists it.
+ */
+export interface MutationOptions {
+  idempotencyKey?: string;
+  /**
+   * A caller-owned request correlation lets the event feed identify its own
+   * mutation even when the event wins the HTTP response race.
+   */
+  correlationId?: string;
+}
+
 export type ApiResult<T> =
   | { ok: true; value: T }
   /**
@@ -458,11 +564,29 @@ export type ApiResult<T> =
    * returned one, so callers can use its typed extensions (e.g. the claim
    * 409's holder display name) instead of re-parsing `detail`.
    */
-  | { ok: false; status: number; message: string; problem?: Record<string, unknown> };
+  | {
+      ok: false;
+      status: number;
+      message: string;
+      problem?: Record<string, unknown>;
+      /**
+       * The command may have landed, but the client could not read a usable
+       * success response. Callers must reconcile with an authoritative read
+       * instead of rolling forward or retrying under a new idempotency key.
+       */
+      ambiguous?: true;
+    };
 
 interface PageBody {
   items: unknown[];
   nextCursor: string | null;
+}
+
+interface JsonResultOptions {
+  /** A lost response may hide a committed write. */
+  mutation?: boolean;
+  /** Plain-language subject used in an ambiguous success message. */
+  subject?: string;
 }
 
 /**
@@ -476,6 +600,27 @@ export async function problemMessage(response: Response): Promise<string> {
     return body.detail ?? body.title ?? `request failed (${response.status})`;
   } catch {
     return `request failed (${response.status})`;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unreadableSuccess(status: number, subject = "request"): ApiResult<never> {
+  return {
+    ok: false,
+    status,
+    message: `${subject} may have succeeded, but its response could not be read`,
+    ambiguous: true,
+  };
+}
+
+async function readSuccessJson<T>(response: Response, subject?: string): Promise<ApiResult<T>> {
+  try {
+    return { ok: true, value: (await response.json()) as T };
+  } catch {
+    return unreadableSuccess(response.status, subject);
   }
 }
 
@@ -495,9 +640,9 @@ export class CollabApi {
    * the API refused it - the caller keeps the button and says so, rather than
    * reloading into a page where the reader is still signed in.
    */
-  async signOut(): Promise<boolean> {
+  async signOut(options?: MutationOptions): Promise<boolean> {
     try {
-      const response = await this.post(`${this.base}/v1/auth/logout`, {});
+      const response = await this.post(`${this.base}/v1/auth/logout`, {}, options);
       return response.ok;
     } catch {
       return false;
@@ -512,8 +657,8 @@ export class CollabApi {
     return fetch(url, { credentials: "include", headers: { accept: "application/json" } });
   }
 
-  protected async post(url: string, body: unknown): Promise<Response> {
-    return this.mutate("POST", url, body);
+  protected async post(url: string, body: unknown, options?: MutationOptions): Promise<Response> {
+    return this.mutate("POST", url, body, options);
   }
 
   /**
@@ -525,6 +670,7 @@ export class CollabApi {
     method: "POST" | "PUT" | "PATCH" | "DELETE",
     url: string,
     body?: unknown,
+    options?: MutationOptions,
   ): Promise<Response> {
     return fetch(url, {
       method,
@@ -532,7 +678,10 @@ export class CollabApi {
       headers: {
         accept: "application/json",
         "content-type": "application/json",
-        "idempotency-key": crypto.randomUUID(),
+        "idempotency-key": options?.idempotencyKey ?? crypto.randomUUID(),
+        ...(options?.correlationId === undefined
+          ? {}
+          : { "x-correlation-id": options.correlationId }),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
@@ -618,17 +767,15 @@ export class CollabApi {
     return names;
   }
 
-  private async accept(url: string, body: unknown): Promise<ApiResult<Accepted>> {
-    let response: Response;
-    try {
-      response = await this.post(url, body);
-    } catch {
-      return { ok: false, status: 0, message: "network error - is the API reachable?" };
-    }
-    if (response.status !== 202 && !response.ok) {
-      return { ok: false, status: response.status, message: await problemMessage(response) };
-    }
-    return { ok: true, value: (await response.json()) as Accepted };
+  private async accept<T>(
+    url: string,
+    body: unknown,
+    options?: MutationOptions,
+  ): Promise<ApiResult<T>> {
+    return this.jsonResult<T>(this.post(url, body, options), [202], {
+      mutation: true,
+      subject: "mutation",
+    });
   }
 
   async createAnnotation(
@@ -640,37 +787,113 @@ export class CollabApi {
       target?: RangeSelector | { blockId: string };
       body: string;
     },
-  ): Promise<ApiResult<Accepted>> {
-    return this.accept(
+    options?: MutationOptions,
+  ): Promise<ApiResult<CreateAnnotationAccepted>> {
+    const accepted = await this.accept<Record<string, unknown>>(
       this.projectUrl(`/chapters/${encodeURIComponent(chapterId)}/annotations`),
       command,
+      options,
     );
+    if (!accepted.ok) {
+      return accepted;
+    }
+    const body = accepted.value;
+    if (!isRecord(body)) {
+      return unreadableSuccess(202, "annotation submission");
+    }
+    const correlationId = body["correlationId"];
+    if (
+      body["status"] === "pending_review" &&
+      typeof body["pendingId"] === "string" &&
+      body["annotationId"] === null &&
+      typeof correlationId === "string" &&
+      isRecord(body["moderation"]) &&
+      body["moderation"]["state"] === "pending" &&
+      typeof body["moderation"]["message"] === "string"
+    ) {
+      return {
+        ok: true,
+        value: {
+          outcome: "pending_review",
+          pendingId: body["pendingId"],
+          annotationId: null,
+          correlationId,
+          status: "pending_review",
+          moderation: {
+            state: "pending",
+            message: body["moderation"]["message"],
+          },
+        },
+      };
+    }
+    if (
+      body["status"] === "queued" &&
+      typeof body["operationId"] === "string" &&
+      typeof body["annotationId"] === "string" &&
+      typeof correlationId === "string"
+    ) {
+      return {
+        ok: true,
+        value: {
+          outcome: "queued_git",
+          operationId: body["operationId"],
+          annotationId: body["annotationId"],
+          correlationId,
+          status: "queued",
+        },
+      };
+    }
+    return unreadableSuccess(202, "annotation submission");
   }
 
   async createReply(
     annotationId: string,
     body: string,
     parentReplyId?: string,
-  ): Promise<ApiResult<Accepted>> {
-    return this.accept(this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/replies`), {
-      body,
-      ...(parentReplyId !== undefined ? { parentReplyId } : {}),
-    });
+    options?: MutationOptions,
+  ): Promise<ApiResult<ReplyAccepted>> {
+    return this.accept<ReplyAccepted>(
+      this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/replies`),
+      {
+        body,
+        ...(parentReplyId !== undefined ? { parentReplyId } : {}),
+      },
+      options,
+    );
   }
 
-  async withdraw(annotationId: string): Promise<ApiResult<Accepted>> {
-    return this.accept(this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/withdraw`), {});
+  async withdraw(
+    annotationId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<WithdrawAccepted>> {
+    return this.accept<WithdrawAccepted>(
+      this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/withdraw`),
+      {},
+      options,
+    );
   }
 
   async operation(operationId: string): Promise<Operation | null> {
+    const result = await this.operationResult(operationId);
+    return result.ok ? result.value : null;
+  }
+
+  /**
+   * Operation polling with transport detail retained for the shared store.
+   * `operation()` remains as the nullable compatibility adapter for islands
+   * that have not moved into the store yet.
+   */
+  async operationResult(operationId: string): Promise<ApiResult<Operation>> {
     try {
-      const response = await this.get(this.projectUrl(`/operations/${encodeURIComponent(operationId)}`));
+      const response = await this.get(
+        this.projectUrl(`/operations/${encodeURIComponent(operationId)}`),
+      );
       if (!response.ok) {
-        return null;
+        return { ok: false, status: response.status, message: await problemMessage(response) };
       }
-      return (await response.json()) as Operation;
+      return readSuccessJson<Operation>(response, "operation read");
     } catch {
-      return null;
+      return { ok: false, status: 0, message: "network error" };
     }
   }
 
@@ -682,18 +905,30 @@ export class CollabApi {
    * decision (if any), so the caller updates the control in place without a
    * refetch.
    */
-  async castVote(annotationId: string, value: VoteValue): Promise<ApiResult<VoteResult>> {
+  async castVote(
+    annotationId: string,
+    value: VoteValue,
+    options?: MutationOptions,
+  ): Promise<ApiResult<VoteResult>> {
     return this.voteResult(
-      this.mutate("PUT", this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/vote`), {
-        value,
-      }),
+      this.mutate(
+        "PUT",
+        this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/vote`),
+        { value },
+        options,
+      ),
     );
   }
 
   /** Clear the viewer's vote (§2: `DELETE` clears). */
-  async clearVote(annotationId: string): Promise<ApiResult<VoteResult>> {
+  async clearVote(annotationId: string, options?: MutationOptions): Promise<ApiResult<VoteResult>> {
     return this.voteResult(
-      this.mutate("DELETE", this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/vote`)),
+      this.mutate(
+        "DELETE",
+        this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/vote`),
+        undefined,
+        options,
+      ),
     );
   }
 
@@ -702,20 +937,17 @@ export class CollabApi {
     try {
       response = await pending;
     } catch {
-      return { ok: false, status: 0, message: "network error - is the API reachable?" };
+      return {
+        ok: false,
+        status: 0,
+        message: "network error - is the API reachable?",
+        ambiguous: true,
+      };
     }
     if (!response.ok) {
       return { ok: false, status: response.status, message: await problemMessage(response) };
     }
-    const body = (await response.json()) as {
-      value: VoteValue | null;
-      votes: VoteTally;
-      decision: DecisionSummary | null;
-    };
-    return {
-      ok: true,
-      value: { value: body.value, votes: body.votes, decision: body.decision ?? null },
-    };
+    return readSuccessJson<VoteResult>(response, "vote");
   }
 
   // ---- work queue (Phase 3 contract §6) ------------------------------------
@@ -757,12 +989,18 @@ export class CollabApi {
   protected async jsonResult<T>(
     pending: Promise<Response>,
     okStatuses: readonly number[],
+    options: JsonResultOptions = {},
   ): Promise<ApiResult<T>> {
     let response: Response;
     try {
       response = await pending;
     } catch {
-      return { ok: false, status: 0, message: "network error - is the API reachable?" };
+      return {
+        ok: false,
+        status: 0,
+        message: "network error - is the API reachable?",
+        ...(options.mutation === true ? { ambiguous: true as const } : {}),
+      };
     }
     if (!okStatuses.includes(response.status)) {
       let body: Record<string, unknown> | undefined;
@@ -782,7 +1020,7 @@ export class CollabApi {
         ...(body === undefined ? {} : { problem: body }),
       };
     }
-    return { ok: true, value: (await response.json()) as T };
+    return readSuccessJson<T>(response, options.subject);
   }
 
   /**
@@ -790,8 +1028,12 @@ export class CollabApi {
    * `lease.token` is returned exactly once. The loser of a simultaneous claim
    * gets 409 `lease-held` with the holder's display name only.
    */
-  async claim(workItemId: string): Promise<ApiResult<TaskBundle>> {
-    return this.jsonResult<TaskBundle>(this.post(this.workItemUrl(workItemId, "/claim"), {}), [201]);
+  async claim(workItemId: string, options?: MutationOptions): Promise<ApiResult<TaskBundle>> {
+    return this.jsonResult<TaskBundle>(
+      this.post(this.workItemUrl(workItemId, "/claim"), {}, options),
+      [201],
+      { mutation: true, subject: "claim" },
+    );
   }
 
   /** Renew the lease (holder + current token, contract §2). */
@@ -799,26 +1041,55 @@ export class CollabApi {
     workItemId: string,
     leaseId: string,
     leaseToken: string,
+    options?: MutationOptions,
   ): Promise<ApiResult<LeaseRenewal>> {
     return this.jsonResult<LeaseRenewal>(
-      this.post(this.workItemUrl(workItemId, "/lease/renew"), { leaseId, leaseToken }),
+      this.post(this.workItemUrl(workItemId, "/lease/renew"), { leaseId, leaseToken }, options),
       [200],
+      { mutation: true, subject: "lease renewal" },
+    );
+  }
+
+  /** Rotate and recover the in-memory token for this credential's live lease. */
+  async recoverLease(
+    workItemId: string,
+    leaseId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<LeaseRecovery>> {
+    return this.jsonResult<LeaseRecovery>(
+      this.post(this.workItemUrl(workItemId, "/lease/recover"), { leaseId }, options),
+      [200],
+      { mutation: true, subject: "lease recovery" },
     );
   }
 
   /** Release the lease - holder or maintainer; no token required (contract §2). */
-  async releaseLease(workItemId: string, leaseId?: string): Promise<ApiResult<{ status: string }>> {
-    return this.jsonResult<{ status: string }>(
-      this.post(this.workItemUrl(workItemId, "/lease/release"), leaseId === undefined ? {} : { leaseId }),
+  async releaseLease(
+    workItemId: string,
+    leaseId?: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<LeaseRelease>> {
+    return this.jsonResult<LeaseRelease>(
+      this.post(
+        this.workItemUrl(workItemId, "/lease/release"),
+        leaseId === undefined ? {} : { leaseId },
+        options,
+      ),
       [200],
+      { mutation: true, subject: "lease release" },
     );
   }
 
   /** Submit the edit (contract §4): 202 + the operation to poll. */
-  async submitWork(workItemId: string, body: SubmitBody): Promise<ApiResult<SubmissionAccepted>> {
+  async submitWork(
+    workItemId: string,
+    body: SubmitBody,
+    options?: MutationOptions,
+  ): Promise<ApiResult<SubmissionAccepted>> {
     return this.jsonResult<SubmissionAccepted>(
-      this.post(this.workItemUrl(workItemId, "/submissions"), body),
+      this.post(this.workItemUrl(workItemId, "/submissions"), body, options),
       [202],
+      { mutation: true, subject: "submission" },
     );
   }
 
@@ -880,14 +1151,18 @@ export class CollabApi {
    * server generates the id, the slug, the order and every block marker, so
    * nothing here carries a UUID the author had to know.
    */
-  async createChapter(command: {
-    title: string;
-    body: string;
-    summary?: string;
-  }): Promise<ApiResult<ChapterAccepted>> {
+  async createChapter(
+    command: {
+      title: string;
+      body: string;
+      summary?: string;
+    },
+    options?: MutationOptions,
+  ): Promise<ApiResult<ChapterAccepted>> {
     return this.jsonResult<ChapterAccepted>(
-      this.post(this.projectUrl("/chapter-submissions"), command),
+      this.post(this.projectUrl("/chapter-submissions"), command, options),
       [202],
+      { mutation: true, subject: "chapter creation" },
     );
   }
 
@@ -896,36 +1171,52 @@ export class CollabApi {
    * back from `chapterSource`, so a chapter edited elsewhere in the meantime
    * fails with a clean 409 instead of silently clobbering the other edit.
    */
-  async reviseChapter(command: {
-    chapterId: string;
-    baseRevision: number;
-    title?: string;
-    body?: string;
-    summary?: string;
-  }): Promise<ApiResult<ChapterAccepted>> {
+  async reviseChapter(
+    command: {
+      chapterId: string;
+      baseRevision: number;
+      title?: string;
+      body?: string;
+      summary?: string;
+    },
+    options?: MutationOptions,
+  ): Promise<ApiResult<ChapterAccepted>> {
     return this.jsonResult<ChapterAccepted>(
-      this.post(this.projectUrl("/chapter-submissions"), command),
+      this.post(this.projectUrl("/chapter-submissions"), command, options),
       [202],
+      { mutation: true, subject: "chapter revision" },
     );
   }
 
   /** Publish a draft chapter - a separate explicit action (§3.5). */
-  async publishChapter(chapterId: string): Promise<ApiResult<ChapterAccepted>> {
-    return this.chapterStatus(chapterId, "publish");
+  async publishChapter(
+    chapterId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ChapterAccepted>> {
+    return this.chapterStatus(chapterId, "publish", options);
   }
 
   /** Return a published chapter to draft. */
-  async unpublishChapter(chapterId: string): Promise<ApiResult<ChapterAccepted>> {
-    return this.chapterStatus(chapterId, "unpublish");
+  async unpublishChapter(
+    chapterId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ChapterAccepted>> {
+    return this.chapterStatus(chapterId, "unpublish", options);
   }
 
   private async chapterStatus(
     chapterId: string,
     action: "publish" | "unpublish",
+    options?: MutationOptions,
   ): Promise<ApiResult<ChapterAccepted>> {
     return this.jsonResult<ChapterAccepted>(
-      this.post(this.projectUrl(`/chapters/${encodeURIComponent(chapterId)}/${action}`), {}),
+      this.post(
+        this.projectUrl(`/chapters/${encodeURIComponent(chapterId)}/${action}`),
+        {},
+        options,
+      ),
       [202],
+      { mutation: true, subject: `chapter ${action}` },
     );
   }
 
@@ -944,10 +1235,14 @@ export class CollabApi {
    * a `settings-confirmation-required` problem the FIRST time, carrying what
    * each change breaks; the view shows that text and resends with `confirm`.
    */
-  async patchSettings(patch: SettingsPatch): Promise<ApiResult<SettingsSaved>> {
+  async patchSettings(
+    patch: SettingsPatch,
+    options?: MutationOptions,
+  ): Promise<ApiResult<SettingsSaved>> {
     return this.jsonResult<SettingsSaved>(
-      this.mutate("PATCH", this.projectUrl("/settings"), patch),
+      this.mutate("PATCH", this.projectUrl("/settings"), patch, options),
       [200, 202],
+      { mutation: true, subject: "settings update" },
     );
   }
 
@@ -958,30 +1253,43 @@ export class CollabApi {
    * sends `{}` for the one-click UI; `reason` remains optional for older
    * callers whose rationale should continue to be retained.
    */
-  async promoteToWork(annotationId: string, reason?: string): Promise<ApiResult<OverrideResult>> {
+  async promoteToWork(
+    annotationId: string,
+    reason?: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<OverrideResult>> {
     return this.jsonResult<OverrideResult>(
       this.post(
         this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/force-create-work-item`),
         reason === undefined ? {} : { reason },
+        options,
       ),
       // 201: force-create makes a work item, so it answers "created" - unlike
       // reject, which only transitions the suggestion and answers 200.
       [201],
+      { mutation: true, subject: "work promotion" },
     );
   }
 
   /** Reject an open suggestion (the inverse override, same reason discipline). */
-  async rejectSuggestion(annotationId: string, reason: string): Promise<ApiResult<OverrideResult>> {
+  async rejectSuggestion(
+    annotationId: string,
+    reason: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<OverrideResult>> {
     return this.jsonResult<OverrideResult>(
-      this.post(this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/reject`), {
-        reason,
-      }),
+      this.post(
+        this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/reject`),
+        { reason },
+        options,
+      ),
       [200],
+      { mutation: true, subject: "suggestion rejection" },
     );
   }
 
   /** Dev-mode login (only rendered behind the `data-dev-login` build flag). */
-  async devLogin(login: string, role: string): Promise<ApiResult<Me>> {
+  async devLogin(login: string, role: string): Promise<ApiResult<DevLogin>> {
     let response: Response;
     try {
       response = await fetch(`${this.base}/v1/dev/login`, {
@@ -996,6 +1304,6 @@ export class CollabApi {
     if (!response.ok) {
       return { ok: false, status: response.status, message: await problemMessage(response) };
     }
-    return { ok: true, value: (await response.json()) as Me };
+    return readSuccessJson<DevLogin>(response, "dev login");
   }
 }

@@ -198,6 +198,7 @@ docs/                guides, the ADRs, and the design record
 - [GitHub App setup](./docs/github-app-setup.md) - the collaboration app, by hand
 - [Runbook](./docs/runbook.md) - failure modes, backup and restore, key rotation
 - [Releasing](./docs/npm-release.md) - how a version reaches npm
+- [Follow-up work](./docs/follow-up-work.md) - the live queue after the current implementation slice
 - [Architecture decisions](./docs/adr) - the ADRs
 - [`AUTHORBOT_PROJECT_DESIGN.md`](./AUTHORBOT_PROJECT_DESIGN.md) - the apex design document
 - [Implementation contracts](./docs/contracts) - the phase-by-phase build specs, kept as the design record

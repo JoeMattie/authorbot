@@ -936,10 +936,18 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     });
     // Phase 3 contract §2/§6: embed aggregate vote tallies (public: counts
     // only) plus the create_work_item decision badge; members also see their
-    // own current vote (`myVote`). The viewer id is null for anonymous reads.
-    const viewerActorId = c.get("auth")?.actor.id ?? null;
+    // own current vote (`myVote`). The member actor id is null for anonymous
+    // readers and authenticated nonmembers.
+    const requestAuth = c.get("auth");
+    const viewerActorId = requestAuth?.actor.id ?? null;
+    // Signed-in non-members may read annotations on open/approval-gated books,
+    // but member-only decision prose and `myVote` stay behind membership.
+    const memberActorId =
+      requestAuth !== undefined && requestAuth.membership !== null
+        ? requestAuth.actor.id
+        : null;
     const items = await Promise.all(
-      annotations.map((a) => annotationCollabJson(repos, a, viewerActorId)),
+      annotations.map((a) => annotationCollabJson(repos, a, memberActorId)),
     );
     const last = annotations[annotations.length - 1];
 
@@ -986,8 +994,12 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (annotation === null || annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
-    const viewerActorId = c.get("auth")?.actor.id ?? null;
-    return c.json(await annotationCollabJson(repos, annotation, viewerActorId));
+    const requestAuth = c.get("auth");
+    const memberActorId =
+      requestAuth !== undefined && requestAuth.membership !== null
+        ? requestAuth.actor.id
+        : null;
+    return c.json(await annotationCollabJson(repos, annotation, memberActorId));
   });
 
   app.post(
@@ -1847,8 +1859,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     services,
     auth,
     idem,
-    // Claim bundles carry the return-once lease token: replays store a
-    // redacted body (contract §2 "returned exactly once").
+    // Claim and recovery responses carry a return-once lease token: replays
+    // store a redacted body (contract §2 "returned exactly once").
     claimIdem: idempotency(services, { redactStored: redactClaimBundle }),
     serialize,
     leaseConfig: deps.config.leaseConfig,

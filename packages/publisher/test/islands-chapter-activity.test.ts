@@ -10,6 +10,7 @@ import { AuthorbotChapterActivity } from "../site/src/islands/chapter-activity.j
 import { AuthorbotDraftChapters } from "../site/src/islands/draft-chapters.js";
 import {
   createProjectStore,
+  getProjectStore,
   resetProjectStoresForTests,
   type ProjectStoreApi,
 } from "../site/src/islands/project-store.js";
@@ -275,6 +276,54 @@ describe("chapter activity navigation", () => {
       .toBe("2 open replies");
     expect(requests.filter((url) => url === `${API}/v1/me`)).toHaveLength(1);
     expect(requests.filter((url) => url.includes("/chapters?limit=200"))).toHaveLength(1);
+  });
+
+  it("does not retain a feed for the superseded side of an async reconnect", async () => {
+    const project = `delayed-reconnect-${++projectSequence}`;
+    let resolveSession!: (value: Response) => void;
+    const pendingSession = new Promise<Response>((resolve) => {
+      resolveSession = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url === `${API}/v1/me`) return pendingSession;
+      if (url.includes("/chapters?limit=200")) {
+        return new Response(
+          JSON.stringify({
+            items: [chapter(CHAPTER_ID, { openSuggestions: 1 })],
+            nextCursor: null,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = getProjectStore({ apiBase: API, project });
+    const release = vi.fn();
+    const retain = vi
+      .spyOn(store.getState(), "retainConnection")
+      .mockReturnValue(release);
+    const item = row(CHAPTER_ID, "delayed-reconnect");
+    const host = mount(project);
+
+    await expect.poll(() => fetchMock.mock.calls.length).toBe(1);
+    host.remove();
+    document.body.append(host);
+    resolveSession(
+      new Response(JSON.stringify(me), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect
+      .poll(() => item.querySelector(".ab-chapter-activity-badge")?.getAttribute("aria-label"))
+      .toBe("1 open suggestion");
+    await expect.poll(() => retain.mock.calls.length).toBe(1);
+    host.remove();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("shares one session and chapter read across account, drafts, and activity", async () => {

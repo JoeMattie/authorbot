@@ -420,8 +420,9 @@ export type NewEventRecord = Omit<EventRecord, "id">;
  *   renew or submit. Expired ⇔ `expiresAt <= now` (same boundary as
  *   human_sessions).
  *
- * `tokenHash` is the SHA-256 hex of the opaque lease token; the plaintext is
- * returned exactly once at claim time and never stored or logged.
+ * `tokenHash` is the SHA-256 hex of the opaque lease token; each plaintext is
+ * returned exactly once when issued at claim or credential-bound recovery,
+ * and is never stored or logged.
  * Verification is a constant-time hash compare in the API layer.
  */
 export interface LeaseRecord {

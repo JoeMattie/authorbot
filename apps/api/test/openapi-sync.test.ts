@@ -142,10 +142,11 @@ describe("openapi.yaml is synced with the router", () => {
     expect(stale, "shipped but still x-implementation-status: planned").toEqual([]);
   });
 
-  it("lists the four Phase 4 operations as implemented (contract §8.7)", () => {
+  it("lists the Phase 4 lease and submission operations as implemented (contract §8.7)", () => {
     const byId = new Map(specOperations().map((op) => [op.operationId, op]));
     for (const id of [
       "claimWorkItem",
+      "recoverWorkItemLeaseToken",
       "renewWorkItemLease",
       "releaseWorkItemLease",
       "createWorkItemSubmission",
@@ -229,6 +230,17 @@ describe("openapi.yaml is synced with the router", () => {
         ?.items?.items?.$ref,
     ).toBe("#/components/schemas/ChapterSummary");
   });
+
+  it("documents optional authentication for the public event-poll representation", () => {
+    const events = spec.paths["/v1/projects/{projectId}/events"]?.["get"] as
+      | { security?: Record<string, never[]>[] }
+      | undefined;
+    expect(events?.security).toEqual([
+      { githubSession: [] },
+      { agentToken: [] },
+      {},
+    ]);
+  });
 });
 
 /**
@@ -267,5 +279,51 @@ describe("component schema nullability matches the handlers", () => {
     // while it is also listed as required.
     const required = bundle.required?.includes("submissionSchema") ?? false;
     expect(required && !admitsNull(property)).toBe(false);
+  });
+});
+
+describe("shared-state response schemas match the live event and claim contracts", () => {
+  type Schema = {
+    type?: string;
+    minimum?: number;
+    const?: unknown;
+    required?: string[];
+    oneOf?: Schema[];
+    properties?: Record<string, Schema>;
+  };
+  const schemas = spec.components.schemas as Record<string, Schema>;
+
+  it("documents the exact event cursor envelope returned by the feed", () => {
+    const event = schemas["Event"];
+    expect(event?.required).toEqual(["id", "type", "payload", "createdAt"]);
+    expect(event?.properties?.["id"]).toEqual(
+      expect.objectContaining({ type: "integer", minimum: 1 }),
+    );
+    expect(Object.keys(event?.properties ?? {})).toEqual([
+      "id",
+      "type",
+      "payload",
+      "createdAt",
+    ]);
+  });
+
+  it("documents compact claim metadata and the redacted replay alternative", () => {
+    const bundle = schemas["TaskBundle"];
+    const workItem = bundle?.properties?.["workItem"];
+    expect(workItem?.required).toEqual(["id", "type", "acceptanceCriteria", "priority"]);
+    expect(Object.keys(workItem?.properties ?? {})).toEqual([
+      "id",
+      "type",
+      "acceptanceCriteria",
+      "priority",
+    ]);
+
+    const lease = bundle?.properties?.["lease"];
+    expect(lease?.required).toEqual(["id", "expiresAt", "maxExpiresAt", "renewalPromptAt"]);
+    expect(lease?.oneOf).toEqual([
+      { required: ["token"] },
+      { required: ["tokenRedacted"] },
+    ]);
+    expect(lease?.properties?.["tokenRedacted"]?.const).toBe(true);
   });
 });

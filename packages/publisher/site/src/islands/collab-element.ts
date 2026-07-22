@@ -32,7 +32,6 @@ import {
   type ComposerKind,
   type ComposerState,
 } from "./composer-state.js";
-import { CollabEvents } from "./events.js";
 import {
   canOverride,
   OverrideControl,
@@ -42,6 +41,8 @@ import {
 import { captureRange, type CapturedSelection } from "./selection.js";
 import { clearRangeHighlights, rangeForSelector } from "./range-highlight.js";
 import { VoteControl } from "./vote-control.js";
+import type { ProjectStore } from "./project-store.js";
+import { loadProjectStore } from "./project-store-loader.js";
 
 interface Config {
   apiBase: string;
@@ -69,6 +70,47 @@ const REFRESH_HINT = "Still syncing; refresh the page to see the final state.";
 const STALE_PAGE_HINT =
   "This chapter has changed since this page was published; " +
   "annotating is disabled until the site is republished.";
+
+function sameDecision(
+  left: Annotation["decision"],
+  right: Annotation["decision"],
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return left == null && right == null;
+  return left.id === right.id &&
+    left.actionType === right.actionType &&
+    left.result === right.result &&
+    left.supportChanged === right.supportChanged &&
+    left.workItemId === right.workItemId;
+}
+
+function sameReply(left: Reply | undefined, right: Reply | undefined): boolean {
+  return left === right ||
+    (left !== undefined &&
+      right !== undefined &&
+      left.id === right.id &&
+      left.parentReplyId === right.parentReplyId &&
+      left.authorActorId === right.authorActorId &&
+      left.body === right.body &&
+      left.status === right.status &&
+      left.gitOperationId === right.gitOperationId &&
+      left.createdAt === right.createdAt &&
+      left.updatedAt === right.updatedAt);
+}
+
+function sameSession(left: Me | null, right: Me | null): boolean {
+  if (left === right) return true;
+  if (left === null || right === null) return false;
+  const leftRoles = left.memberships?.map(({ role }) => role) ?? [];
+  const rightRoles = right.memberships?.map(({ role }) => role) ?? [];
+  return left.actor.id === right.actor.id &&
+    left.actor.displayName === right.actor.displayName &&
+    left.actor.externalIdentity === right.actor.externalIdentity &&
+    left.scopes.length === right.scopes.length &&
+    left.scopes.every((scope, index) => scope === right.scopes[index]) &&
+    leftRoles.length === rightRoles.length &&
+    leftRoles.every((role, index) => role === rightRoles[index]);
+}
 
 function parseConfig(host: HTMLElement): Config | null {
   const { apiBase, project, chapterId, chapterRevision } = host.dataset;
@@ -129,6 +171,9 @@ interface LocalSync {
 export class AuthorbotCollab extends HTMLElement {
   private cfg: Config | null = null;
   private api!: CollabApi;
+  private store!: ProjectStore;
+  private unsubscribeStore: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
   private me: Me | null = null;
   private memberNames = new Map<string, string>();
   private annotations: Annotation[] = [];
@@ -160,8 +205,6 @@ export class AuthorbotCollab extends HTMLElement {
   private overrideControls = new Map<string, OverrideControl>();
   /** Open override form + typed reason per suggestion (survives re-renders). */
   private overrideDrafts = new Map<string, OverrideDraft>();
-  private events: CollabEvents | null = null;
-  private eventsStarted = false;
   private refetchTimer: number | undefined;
 
   private composer: ComposerState = CLOSED;
@@ -175,13 +218,20 @@ export class AuthorbotCollab extends HTMLElement {
 
   private mql!: MediaQueryList;
   private started = false;
+  private mountGeneration = 0;
   private scaffolded = false;
+  private globalListenersConnected = false;
   /** Set when the API 409'd on the build-time chapter revision (stale page). */
   private staleRevision = false;
   /** Draft body of the open reply form (survives background re-renders). */
   private replyDraft = "";
   /** Submission error shown only when a failed reply is restored. */
   private replyError: string | null = null;
+  /** Preserve the dev-login draft if a session change replaces its controls. */
+  private devLoginDraft = "";
+  private devLoginRole = "contributor";
+  /** Session represented by the mounted auth controls; undefined means unrendered. */
+  private renderedAuthSession: Me | null | undefined;
   private selectionTimer: number | undefined;
   private resizeTimer: number | undefined;
 
@@ -190,6 +240,7 @@ export class AuthorbotCollab extends HTMLElement {
       return;
     }
     this.started = true;
+    const generation = ++this.mountGeneration;
     const cfg = parseConfig(this);
     const main = document.querySelector("main");
     const prose = document.querySelector<HTMLElement>("main .prose");
@@ -205,21 +256,53 @@ export class AuthorbotCollab extends HTMLElement {
     // No chrome yet: the scaffold is built by start() only after the API
     // answered the /v1/me probe (contract §1: with the API unreachable the
     // page keeps zero collaboration chrome).
-    void this.start();
+    void this.connectStore(cfg, generation);
+  }
+
+  private async connectStore(cfg: Config, generation: number): Promise<void> {
+    let store: ProjectStore;
+    try {
+      store = await loadProjectStore(cfg);
+    } catch {
+      // Collaboration is progressive enhancement. A permanently unavailable
+      // split chunk must leave the prose readable and add no collaboration UI.
+      return;
+    }
+    if (!this.isCurrentMount(generation)) return;
+    this.store = store;
+    this.unsubscribeStore = store.subscribe(() => {
+      if (this.isCurrentMount(generation)) this.syncFromStore();
+    });
+    await this.start(generation, store);
   }
 
   disconnectedCallback(): void {
-    this.events?.stop();
-    this.events = null;
+    this.started = false;
+    this.mountGeneration += 1;
+    this.unsubscribeStore?.();
+    this.unsubscribeStore = null;
+    this.releaseConnection?.();
+    this.releaseConnection = null;
     if (this.refetchTimer !== undefined) {
       window.clearTimeout(this.refetchTimer);
+      this.refetchTimer = undefined;
+    }
+    if (this.selectionTimer !== undefined) {
+      window.clearTimeout(this.selectionTimer);
+      this.selectionTimer = undefined;
+    }
+    if (this.resizeTimer !== undefined) {
+      window.clearTimeout(this.resizeTimer);
+      this.resizeTimer = undefined;
     }
     if (!this.scaffolded) {
       return;
     }
-    document.removeEventListener("selectionchange", this.onSelectionChange);
-    window.removeEventListener("resize", this.onResize);
-    this.mql.removeEventListener("change", this.onMediaChange);
+    this.disconnectGlobalListeners();
+  }
+
+  private isCurrentMount(generation: number): boolean {
+    return this.started && this.isConnected && this.mountGeneration === generation;
   }
 
   // ---- scaffold -----------------------------------------------------------
@@ -376,13 +459,29 @@ export class AuthorbotCollab extends HTMLElement {
     }
 
     this.mql = window.matchMedia(DESKTOP_QUERY);
-    this.mql.addEventListener("change", this.onMediaChange);
     this.placeContainers();
+    this.connectGlobalListeners();
+  }
 
+  private connectGlobalListeners(): void {
+    if (this.globalListenersConnected) return;
+    this.globalListenersConnected = true;
+    this.mql.addEventListener("change", this.onMediaChange);
     document.addEventListener("selectionchange", this.onSelectionChange);
     window.addEventListener("resize", this.onResize);
-    window.addEventListener("load", () => this.layout());
+    window.addEventListener("load", this.onWindowLoad);
   }
+
+  private disconnectGlobalListeners(): void {
+    if (!this.globalListenersConnected) return;
+    this.globalListenersConnected = false;
+    this.mql.removeEventListener("change", this.onMediaChange);
+    document.removeEventListener("selectionchange", this.onSelectionChange);
+    window.removeEventListener("resize", this.onResize);
+    window.removeEventListener("load", this.onWindowLoad);
+  }
+
+  private readonly onWindowLoad = (): void => this.layout();
 
   private readonly onMediaChange = (): void => {
     this.placeContainers();
@@ -421,57 +520,77 @@ export class AuthorbotCollab extends HTMLElement {
 
   // ---- data ---------------------------------------------------------------
 
-  private async start(): Promise<void> {
+  private async start(
+    generation = this.mountGeneration,
+    store = this.store,
+  ): Promise<void> {
     const cfg = this.cfg as Config;
-    const probe = await this.api.meResult();
-    if (!probe.ok) {
+    await store.getState().ensureSession();
+    if (!this.isCurrentMount(generation)) return;
+    const sessionState = store.getState();
+    if (sessionState.sessionStatus !== "ready") {
       // API unreachable (contract §1): render no collaboration chrome at all.
       // A scaffold from an earlier successful start (e.g. a re-login attempt
       // during a network blip) is kept as-is rather than torn down mid-use.
       return;
     }
-    this.me = probe.value;
+    this.me = sessionState.session;
     if (!this.scaffolded) {
       this.scaffolded = true;
       this.buildScaffold();
+    } else {
+      this.connectGlobalListeners();
     }
     if (this.me !== null) {
-      this.memberNames = await this.api.memberNames();
+      const expectedSession = this.me;
+      const memberNames = await this.api.memberNames();
+      if (
+        !this.isCurrentMount(generation) ||
+        !sameSession(expectedSession, store.getState().session)
+      ) {
+        return;
+      }
+      this.memberNames = memberNames;
     }
     if (this.me !== null || cfg.showPublic) {
-      await this.loadAnnotations();
+      if (!(await this.loadAnnotations(generation, store, cfg))) return;
     }
+    if (!this.isCurrentMount(generation)) return;
     this.renderAll();
-    // Live tallies/decisions (contract §6): start the event feed once, after
-    // the authoritative first load. Anonymous readers of a public book stream
-    // public events too; the feed self-selects SSE with a poll fallback.
     if (this.me !== null || cfg.showPublic) {
-      await this.startEvents();
+      if (!this.isCurrentMount(generation)) return;
+      this.releaseConnection ??= store.getState().retainConnection();
     }
   }
 
-  private async loadAnnotations(): Promise<void> {
-    const cfg = this.cfg as Config;
-    const result = await this.api.annotations(cfg.chapterId);
-    if (!result.ok) {
+  private async loadAnnotations(
+    generation = this.mountGeneration,
+    store = this.store,
+    cfg = this.cfg as Config,
+  ): Promise<boolean> {
+    if (!this.isCurrentMount(generation)) return false;
+    await store.getState().refreshAnnotations(cfg.chapterId);
+    if (!this.isCurrentMount(generation)) return false;
+    const state = store.getState();
+    if (state.annotationStatusByChapter[cfg.chapterId] !== "ready") {
       // Signed-out 401/403 simply means the API has no public read for this
       // project yet: keep the page clean (progressive enhancement §1).
       this.loadError =
-        result.status === 401 || result.status === 403 || result.status === 0
-          ? null
-          : result.message;
+        state.annotationErrorByChapter[cfg.chapterId] ?? null;
       this.annotations = [];
-      return;
+      return true;
     }
     this.loadError = null;
-    this.annotations = result.value;
+    this.annotations = (state.annotationIdsByChapter[cfg.chapterId] ?? []).flatMap(
+      (id) => state.annotationsById[id] ?? [],
+    );
     if (
       this.activeAnnotationId === null ||
       !this.annotations.some((annotation) => annotation.id === this.activeAnnotationId)
     ) {
       this.activeAnnotationId = this.visibleAnnotations()[0]?.id ?? null;
     }
-    await this.loadReplies();
+    if (!(await this.loadReplies(generation, store))) return false;
     // Cards for server-side pending records show "syncing" and poll (§2.5).
     for (const annotation of this.annotations) {
       if (
@@ -482,29 +601,117 @@ export class AuthorbotCollab extends HTMLElement {
         this.markAnnotationSyncing(annotation.id, annotation.gitOperationId);
       }
     }
+    return true;
   }
 
-  private async loadReplies(): Promise<void> {
+  private async loadReplies(
+    generation = this.mountGeneration,
+    store = this.store,
+  ): Promise<boolean> {
     // Attempted whenever annotations loaded (signed-in, or the anonymous
     // public read): a 401/403 simply yields no fetched replies.
     if (!this.repliesSupported) {
-      return;
+      return true;
     }
-    for (const annotation of this.annotations.slice(0, 25)) {
-      const result = await this.api.replies(annotation.id);
-      if (!result.ok) {
-        if (result.status === 404 || result.status === 405) {
-          this.repliesSupported = false; // API predates the list endpoint
+    for (const annotation of this.annotations) {
+      await store.getState().ensureReplies(annotation.id);
+      if (!this.isCurrentMount(generation)) return false;
+      const state = store.getState();
+      if (state.replyStatusByAnnotation[annotation.id] !== "ready") {
+        const status = state.replyErrorStatusByAnnotation[annotation.id];
+        if (status === 404 || status === 405) {
+          this.repliesSupported = false;
         }
-        return;
+        return true;
       }
-      this.repliesByAnnotation.set(annotation.id, result.value);
+      this.repliesByAnnotation.set(
+        annotation.id,
+        (state.replyIdsByAnnotation[annotation.id] ?? []).flatMap(
+          (id) => state.repliesById[id] ?? [],
+        ),
+      );
     }
+    return true;
   }
 
   private async refetch(): Promise<void> {
-    await this.loadAnnotations();
+    const generation = this.mountGeneration;
+    const store = this.store;
+    if (!(await this.loadAnnotations(generation, store))) return;
+    if (!this.isCurrentMount(generation)) return;
     this.renderAll();
+  }
+
+  /** Compatibility adapter while card/form state remains local to the island. */
+  private syncFromStore(): void {
+    if (this.cfg === null || !this.scaffolded) {
+      return;
+    }
+    const state = this.store.getState();
+    const sessionChanged = !sameSession(this.me, state.session);
+    const ids = state.annotationIdsByChapter[this.cfg.chapterId] ?? [];
+    const projectionUnchanged =
+      !sessionChanged &&
+      ids.length === this.annotations.length &&
+      ids.every((id, index) => state.annotationsById[id] === this.annotations[index]) &&
+      this.annotations.every((annotation) => {
+        const nextReplyIds = state.replyIdsByAnnotation[annotation.id] ?? [];
+        const currentReplies = this.repliesByAnnotation.get(annotation.id) ?? [];
+        return nextReplyIds.length === currentReplies.length &&
+          nextReplyIds.every(
+            (id, index) => state.repliesById[id] === currentReplies[index],
+          );
+      });
+    // Connection cursors, unrelated queue operations, and other store slices
+    // update frequently. They must not touch live controls or rebuild cards.
+    if (projectionUnchanged) return;
+    this.me = state.session;
+    if (sessionChanged) this.memberNames = new Map();
+    const nextAnnotations = ids.flatMap((id) => state.annotationsById[id] ?? []);
+    const onlyVoteDataChanged =
+      nextAnnotations.length === this.annotations.length &&
+      nextAnnotations.every((next, index) => {
+        const before = this.annotations[index];
+        return (
+          before !== undefined &&
+          before.id === next.id &&
+          before.status === next.status &&
+          before.body === next.body &&
+          sameDecision(before.decision, next.decision) &&
+          before.gitOperationId === next.gitOperationId
+        );
+      }) &&
+        nextAnnotations.every((annotation) => {
+          const nextReplyIds = state.replyIdsByAnnotation[annotation.id] ?? [];
+          const currentReplies = this.repliesByAnnotation.get(annotation.id) ?? [];
+          return (
+            nextReplyIds.length === currentReplies.length &&
+            nextReplyIds.every(
+              (id, index) => sameReply(currentReplies[index], state.repliesById[id]),
+            )
+          );
+        });
+    this.annotations = nextAnnotations;
+    if (!sessionChanged && onlyVoteDataChanged) {
+      for (const annotation of nextAnnotations) {
+        this.voteControls.get(annotation.id)?.update(annotation);
+        this.overrideControls.get(annotation.id)?.update(annotation);
+      }
+      return;
+    }
+    for (const annotation of this.annotations) {
+      const replyIds = state.replyIdsByAnnotation[annotation.id] ?? [];
+      this.repliesByAnnotation.set(
+        annotation.id,
+        replyIds.flatMap((id) => state.repliesById[id] ?? []),
+      );
+    }
+    this.renderAll();
+  }
+
+  /** Test and rolling-deployment adapter; the project store owns the feed. */
+  private onFeedEvent(event: FeedEvent): void {
+    this.store.getState().reconcileEvent(event);
   }
 
   // ---- votes (Phase 3 contract §2/§6) --------------------------------------
@@ -517,24 +724,20 @@ export class AuthorbotCollab extends HTMLElement {
       return;
     }
     control.setBusy(true);
-    const result = value === null
-      ? await this.api.clearVote(annotationId)
-      : await this.api.castVote(annotationId, value);
+    const result = await this.store.getState().setVote(annotationId, value);
     control.setBusy(false);
     if (!result.ok) {
       this.announce(this.friendlyWriteError(result.status, result.message));
       return;
     }
     const hadDecision = annotation.decision != null;
-    annotation.votes = result.value.votes;
-    annotation.myVote = result.value.value;
-    annotation.decision = result.value.decision;
-    control.update(annotation);
-    this.overrideControls.get(annotationId)?.update(annotation);
+    const current = this.store.getState().annotationsById[annotationId] ?? annotation;
+    control.update(current);
+    this.overrideControls.get(annotationId)?.update(current);
     this.announce(control.summary());
     // A fresh crossing changes the annotation's server-side status; reconcile
     // authoritative state so the card reflects it even if the feed is down.
-    if (!hadDecision && annotation.decision != null) {
+    if (!hadDecision && result.value.decision != null) {
       this.announce("Threshold reached. Queued as a work item.");
       this.scheduleRefetch();
     }
@@ -557,27 +760,26 @@ export class AuthorbotCollab extends HTMLElement {
     control?.setBusy(true);
     const result =
       action === "promote"
-        ? await this.api.promoteToWork(annotationId)
-        : await this.api.rejectSuggestion(annotationId, reason ?? "");
+        ? await this.store.getState().promoteAnnotation(annotationId)
+        : await this.store.getState().rejectAnnotation(annotationId, reason ?? "");
     control?.setBusy(false);
     if (!result.ok) {
-      return result.status === 0 || result.status === 401
+      const message = result.status === 0 || result.status === 401
         ? this.friendlyWriteError(result.status, result.message)
         : result.message;
+      // Optimistic promotion rebuilds the card. Put the error on the current
+      // control too, not only the detached control that initiated the call.
+      const currentError = this.overrideControls
+        .get(annotationId)
+        ?.root.querySelector<HTMLElement>(".ab-override-error");
+      if (currentError !== undefined && currentError !== null) {
+        currentError.textContent = message;
+        currentError.hidden = false;
+      }
+      return message;
     }
     this.overrideDrafts.delete(annotationId);
     if (action === "promote") {
-      const annotation = this.annotations.find((entry) => entry.id === annotationId);
-      if (annotation !== undefined) {
-        annotation.status = result.value.status;
-        annotation.decision = {
-          id: result.value.decisionId,
-          actionType: "create_work_item",
-          result: "create_work_item",
-          supportChanged: false,
-          workItemId: result.value.workItemId ?? null,
-        };
-      }
       this.openReplyFor = null;
       this.replyParent = null;
       this.renderAll();
@@ -589,71 +791,6 @@ export class AuthorbotCollab extends HTMLElement {
     );
     this.scheduleRefetch();
     return null;
-  }
-
-  // ---- live event feed (Phase 3 contract §5) -------------------------------
-
-  private async startEvents(): Promise<void> {
-    if (this.eventsStarted || this.cfg === null) {
-      return;
-    }
-    this.eventsStarted = true;
-    // Prime the fallback cursor at the current head and probe feed support in
-    // one call: an API predating the feed answers non-ok, so no stream/poll
-    // is started and the page simply has no live updates.
-    const primed = await this.api.pollEvents(0);
-    if (!primed.ok) {
-      return;
-    }
-    this.events = new CollabEvents({
-      url: this.api.eventsUrl(),
-      initialCursor: primed.value.latestId,
-      onEvent: (event) => this.onFeedEvent(event),
-      onReconnect: () => this.scheduleRefetch(),
-      poll: async (after) => {
-        const result = await this.api.pollEvents(after);
-        return result.ok
-          ? { ok: true, items: result.value.items, latestId: result.value.latestId }
-          : { ok: false };
-      },
-    });
-    this.events.start();
-  }
-
-  private onFeedEvent(event: FeedEvent): void {
-    const payload = event.payload;
-    const annotationId =
-      typeof payload["annotationId"] === "string" ? payload["annotationId"] : null;
-    switch (event.type) {
-      case "vote_aggregate": {
-        // Live tally update in place - never a re-render, so a voter's keyboard
-        // focus on the segmented control is preserved (contract §6).
-        if (annotationId === null) {
-          break;
-        }
-        const annotation = this.annotations.find((a) => a.id === annotationId);
-        const votes = payload["votes"];
-        if (annotation !== undefined && typeof votes === "object" && votes !== null) {
-          annotation.votes = votes as NonNullable<Annotation["votes"]>;
-          this.voteControls.get(annotationId)?.update(annotation);
-          // The override panel shows the tally being overridden, so it tracks
-          // the same in-place update - never a re-render that would steal
-          // focus from a half-typed reason.
-          this.overrideControls.get(annotationId)?.update(annotation);
-        }
-        break;
-      }
-      case "decision_created":
-      case "decision_support_changed":
-      case "work_item_created":
-      case "annotation_created":
-        // Status/decision/membership of resources changed: refetch the
-        // authoritative annotations (events are notifications, not state).
-        this.scheduleRefetch();
-        break;
-      default:
-        break;
-    }
   }
 
   private scheduleRefetch(): void {
@@ -883,7 +1020,7 @@ export class AuthorbotCollab extends HTMLElement {
   ): void {
     let polls = 0;
     const step = async (): Promise<void> => {
-      const operation = await this.api.operation(operationId);
+      const operation = await this.store.getState().refreshOperation(operationId);
       polls += 1;
       if (operation !== null && (operation.state === "committed" || operation.state === "verified")) {
         settle("committed");
@@ -1052,7 +1189,7 @@ export class AuthorbotCollab extends HTMLElement {
         ? returnFocus
         : this.blockAffordance(draft.blockId);
     focusTarget?.focus();
-    const result = await this.api.createAnnotation(cfg.chapterId, {
+    const result = await this.store.getState().createAnnotation(cfg.chapterId, {
       kind: draft.kind,
       scope: draft.scope,
       chapterRevision: cfg.chapterRevision,
@@ -1076,25 +1213,13 @@ export class AuthorbotCollab extends HTMLElement {
       );
       return;
     }
-    const annotationId = result.value.annotationId ?? "";
+    if (result.value.outcome === "pending_review") {
+      this.announce("Contribution submitted for maintainer review.");
+      this.renderAll();
+      return;
+    }
+    const annotationId = result.value.annotationId;
     const operationId = result.value.operationId;
-    // Optimistic card, honest about its state (§2.5).
-    this.annotations.push({
-      id: annotationId,
-      chapterId: cfg.chapterId,
-      kind: draft.kind,
-      scope: draft.scope,
-      chapterRevision: cfg.chapterRevision,
-      target:
-        draft.scope === "range" && draft.selector !== null
-          ? draft.selector
-          : { blockId: draft.blockId },
-      authorActorId: this.me?.actor.id ?? "",
-      body: draft.body,
-      status: "pending_git",
-      gitOperationId: operationId,
-      createdAt: new Date().toISOString(),
-    });
     this.markAnnotationSyncing(annotationId, operationId);
     this.announce("Annotation submitted; syncing.");
     this.renderAll();
@@ -1218,7 +1343,17 @@ export class AuthorbotCollab extends HTMLElement {
 
   private renderAll(): void {
     const restore = this.captureFocus();
-    this.renderAuthbar();
+    // Notes and replies hydrate independently of the session. Keep live auth
+    // controls mounted across those updates so a field cannot be detached
+    // between a user's keystroke and its input event. A true session change
+    // still replaces the controls immediately (for example, after login).
+    if (
+      this.renderedAuthSession === undefined ||
+      !sameSession(this.renderedAuthSession, this.me)
+    ) {
+      this.renderAuthbar();
+      this.renderedAuthSession = this.me;
+    }
     this.cardEls.clear();
     this.voteControls.clear();
     this.overrideControls.clear();
@@ -1707,7 +1842,7 @@ export class AuthorbotCollab extends HTMLElement {
         this.replyError = null;
         this.renderAll();
         this.cardEls.get(annotation.id)?.focus();
-        const result = await this.api.createReply(annotation.id, body, parent);
+        const result = await this.store.getState().createReply(annotation.id, body, parent);
         if (!result.ok) {
           this.openReplyFor = annotation.id;
           this.replyParent = parent ?? null;
@@ -1717,18 +1852,7 @@ export class AuthorbotCollab extends HTMLElement {
           this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
           return;
         }
-        const replyId = result.value.replyId ?? "";
-        const replies = this.repliesByAnnotation.get(annotation.id) ?? [];
-        replies.push({
-          id: replyId,
-          annotationId: annotation.id,
-          parentReplyId: parent ?? null,
-          authorActorId: this.me?.actor.id ?? "",
-          body,
-          status: "pending_git",
-          createdAt: new Date().toISOString(),
-        });
-        this.repliesByAnnotation.set(annotation.id, replies);
+        const replyId = result.value.replyId;
         this.markReplySyncing(replyId, result.value.operationId);
         this.announce("Reply submitted; syncing.");
         this.renderAll();
@@ -1739,7 +1863,7 @@ export class AuthorbotCollab extends HTMLElement {
   }
 
   private async withdraw(annotation: Annotation): Promise<void> {
-    const result = await this.api.withdraw(annotation.id);
+    const result = await this.store.getState().withdrawAnnotation(annotation.id);
     if (!result.ok) {
       this.annotationSync.set(annotation.id, {
         phase: "failed",
@@ -1789,6 +1913,10 @@ export class AuthorbotCollab extends HTMLElement {
       login.name = "login";
       login.required = true;
       login.autocomplete = "username";
+      login.value = this.devLoginDraft;
+      login.addEventListener("input", () => {
+        this.devLoginDraft = login.value;
+      });
       loginLabel.append(login);
       const roleLabel = el("label", "ab-field");
       roleLabel.append(el("span", "ab-field-label", "Role"));
@@ -1796,11 +1924,14 @@ export class AuthorbotCollab extends HTMLElement {
       for (const value of ["reader", "contributor", "editor", "maintainer"]) {
         const option = el("option", undefined, value);
         option.value = value;
-        if (value === "contributor") {
+        if (value === this.devLoginRole) {
           option.selected = true;
         }
         role.append(option);
       }
+      role.addEventListener("change", () => {
+        this.devLoginRole = role.value;
+      });
       roleLabel.append(role);
       const submit = el("button", "ab-btn ab-primary", "Sign in (dev)");
       submit.type = "submit";
@@ -1811,15 +1942,24 @@ export class AuthorbotCollab extends HTMLElement {
       form.addEventListener("submit", (event) => {
         event.preventDefault();
         void (async () => {
+          const generation = this.mountGeneration;
+          const store = this.store;
+          if (!this.isCurrentMount(generation)) return;
+          this.devLoginDraft = login.value;
+          this.devLoginRole = role.value;
           submit.disabled = true;
           const result = await this.api.devLogin(login.value, role.value);
+          if (!this.isCurrentMount(generation)) return;
           submit.disabled = false;
           if (!result.ok) {
             errorLine.textContent = result.message;
             errorLine.hidden = false;
             return;
           }
-          await this.start();
+          this.devLoginDraft = "";
+          await store.getState().refreshSession(true);
+          if (!this.isCurrentMount(generation)) return;
+          await this.start(generation, store);
         })();
       });
       this.authbar.append(form);

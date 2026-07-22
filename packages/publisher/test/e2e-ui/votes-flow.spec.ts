@@ -152,11 +152,15 @@ test("keyboard-only voting round trip", async ({ browser }) => {
   await expect(approve).toBeFocused();
   await approve.press("Enter");
   await expect(approve).toHaveAttribute("aria-pressed", "true");
+  // The pressed state is optimistic. Wait for the single in-flight write to
+  // settle before issuing the next keyboard action against the enabled group.
+  await expect(abstain).toBeEnabled();
 
   // Change the vote with the keyboard: abstain now pressed, approve released.
   await abstain.press("Enter");
   await expect(abstain).toHaveAttribute("aria-pressed", "true");
   await expect(approve).toHaveAttribute("aria-pressed", "false");
+  await expect(abstain).toBeEnabled();
 
   // Toggle the current vote off with the keyboard (clear).
   await abstain.press("Enter");

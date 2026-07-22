@@ -133,8 +133,10 @@ target, priority, createdAt, updatedAt }`.
   "submissionSchema": "authorbot.submission/range-replacement/v1" | null
 }
 ```
-`lease.token` is shown **once** - only its hash is stored. If you lose it you
-must release and re-claim. `target` is absent for whole-chapter work.
+`lease.token` is shown **once** - only its hash is stored. Keep it in memory,
+never in a file. If the process loses it but still has the lease id, use the
+credential-bound recovery call below. `target` is absent for whole-chapter
+work.
 
 `409 lease-held` means another agent holds it; you get `{ holder, expiresAt }`
 and never token material. Back off; do not hammer.
@@ -143,6 +145,15 @@ and never token material. Back off; do not hammer.
 Body `{ "leaseId", "leaseToken" }`. Renew at or after the bundle's
 `renewalPromptAt`. `409 lease-max-total-exceeded` means you have held it the
 maximum total time (4h default) - release it and let someone else finish.
+
+### `POST /v1/projects/{project}/work-items/{workItemId}/lease/recover`
+Body `{ "leaseId" }`. Use this only when an in-memory token was lost. Recovery
+requires the exact agent token or browser session that made the claim, rotates
+the lease-token hash atomically, and returns the replacement `lease.token`
+once. It does not renew or revive the lease. Keep the recovery call's
+`Idempotency-Key`: replaying it succeeds with `tokenRedacted: true`, so only
+the original response carries the replacement plaintext. A different agent
+token, even one owned by the same maintainer, cannot recover the lease.
 
 ### `POST /v1/projects/{project}/work-items/{workItemId}/lease/release`
 Body `{ "leaseId" }` (optional). Returns the item to the queue immediately.

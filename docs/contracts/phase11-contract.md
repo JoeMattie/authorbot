@@ -125,9 +125,9 @@ exit criteria below:
   optimistic transitions and rollback, reconcile the event feed, and perform
   authoritative refetches after reconnects or ambiguous failures.
 
-The chapter activity release is slice 2A. Slice 2B remains pending until its
-mutation, rollback, event, and reconnect tests satisfy the full slice 2 exit
-criteria.
+The chapter activity release is slice 2A. Slice 2B completes the shared-state
+contract with mutation, rollback, event, reconnect, and lease-recovery tests
+covering the full slice 2 exit criteria.
 
 - Use a project-scoped store built with `zustand/vanilla`. The site remains
   framework-free; custom elements become small view adapters that subscribe to
@@ -146,6 +146,15 @@ criteria.
   undeployed prose as published truth.
 - Keep lease tokens and other credentials in memory only. Do not place them in
   persisted Zustand middleware, browser storage, logs, or serialized state.
+  A browser may persist non-secret claim metadata and an in-progress draft.
+  After a refresh it restores the capability through
+  `POST .../lease/recover`, which is bound to the exact authenticated
+  credential that claimed the still-live lease, atomically rotates the token
+  hash, and returns the replacement plaintext once. A different login for the
+  same actor cannot recover or replay it because current scope and credential
+  binding are checked before idempotency lookup. Recovery never extends the
+  lease, compare-and-swaps its observed timing snapshot against concurrent
+  renewal, and idempotent replays redact the token.
 - Convert the chapter rail first, then account/Work/editor/review surfaces. A
   compatibility adapter keeps each conversion independently releasable.
 
@@ -177,9 +186,8 @@ criteria.
   exposes one concise screen-reader summary, such as “2 open suggestions, 1
   block comment, 3 replies, 1 active work item.” Color and icon shape are never
   the only category cues, and an all-zero row stays quiet.
-- Pending slice 2B, the store updates affected counts optimistically after
-  create, withdraw, reply, promote, claim, submit, review, and other lifecycle
-  actions.
+- In slice 2B, the store updates affected counts optimistically after create,
+  withdraw, reply, promote, claim, submit, review, and other lifecycle actions.
   It reconciles from the mutation response and event feed, then refetches the
   server aggregate after reconnects or ambiguous failures.
 
@@ -384,7 +392,7 @@ and stripped control-plane authority can never reactivate.
 4. Suggested-edit and reply tests cover kind-specific reads, pagination without
    existence leaks, current-revision validation, unsafe content, withdrawal
    ownership, moderation, rate limits, and Git projection.
-5. Work and chapter tests cover promotion, claim/renew/release, leased submit,
+5. Work and chapter tests cover promotion, claim/recover/renew/release, leased submit,
    draft create/revise, publish/unpublish, stale bases, conflicts, replayed
    idempotency keys, agent pause, project freeze, and revocation during an
    in-flight action.

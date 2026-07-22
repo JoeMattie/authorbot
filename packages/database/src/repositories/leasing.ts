@@ -162,25 +162,72 @@ export class LeasesRepository {
   }
 
   /**
+   * Rotate a live lease's token hash as a NULL-abort compare-and-swap.
+   *
+   * Recovery mints the replacement plaintext in the API process, then stores
+   * only its hash. Requiring the expected hash, expiry, renewal count, and
+   * lease liveness makes the old token invalid at the same instant the
+   * replacement becomes valid, prevents two recoveries from both claiming to
+   * have issued the current token, and prevents a raced renewal from making
+   * the atomically stored recovery response stale. A failed guard writes NULL
+   * into the NOT NULL column so the caller's audit, event, and idempotency rows
+   * in the same batch roll back.
+   */
+  rotateTokenCasStatement(
+    id: string,
+    expectedTokenHash: string,
+    expectedExpiresAt: string,
+    expectedRenewalCount: number,
+    replacementTokenHash: string,
+    now: string,
+  ): SqlStatement {
+    const recoverable = `released_at IS NULL AND revoked_at IS NULL
+                         AND expires_at > ? AND token_hash = ?
+                         AND expires_at = ? AND renewal_count = ?`;
+    return this.db
+      .prepare(
+        `UPDATE leases
+            SET token_hash = CASE WHEN ${recoverable} THEN ? ELSE NULL END
+          WHERE id = ?`,
+      )
+      .bind(
+        now,
+        expectedTokenHash,
+        expectedExpiresAt,
+        expectedRenewalCount,
+        replacementTokenHash,
+        id,
+      );
+  }
+
+  /**
    * Renew as a NULL-ABORT compare-and-swap, for composing into the renew
-   * command's batch. Identical guard to {@link renewStatement}, but instead
-   * of quietly affecting 0 rows when the lease is no longer live it writes
-   * NULL into the NOT NULL `token_hash` column, aborting the WHOLE batch -
-   * the same cross-isolate backstop `work_items` status changes use.
+   * command's batch. The guard requires both lease liveness and the token hash
+   * observed when the presented plaintext was verified. If recovery rotates
+   * the token in another isolate before this statement commits, the stale
+   * command aborts with the rest of its batch. Any failed guard writes NULL
+   * into the NOT NULL `token_hash` column, aborting the WHOLE batch - the same
+   * cross-isolate backstop `work_items` status changes use.
    *
    * This is what keeps a renewal honest: without it a lease released,
    * revoked, or expired by another isolate between the handler's read and its
    * write would still produce a 200, a bumped `renewal_count` in the
    * response, an audit row, and a `lease_renewed` event for a renewal that
    * never happened. Callers catch `isConstraintError` and re-read the lease
-   * to pick the right 409.
+   * to pick the right typed rejection.
    *
    * SQLite evaluates every SET expression against the PRE-update row, so all
    * three branches see the same guard result.
    */
-  renewCasStatement(id: string, newExpiresAt: string, now: string): SqlStatement {
+  renewCasStatement(
+    id: string,
+    expectedTokenHash: string,
+    newExpiresAt: string,
+    now: string,
+  ): SqlStatement {
     const live = `released_at IS NULL AND revoked_at IS NULL
-                  AND expires_at > ? AND expires_at < max_expires_at`;
+                  AND expires_at > ? AND expires_at < max_expires_at
+                  AND token_hash = ?`;
     return this.db
       .prepare(
         `UPDATE leases
@@ -189,13 +236,24 @@ export class LeasesRepository {
                 token_hash    = CASE WHEN ${live} THEN token_hash ELSE NULL END
           WHERE id = ?`,
       )
-      .bind(now, newExpiresAt, now, now, id);
+      .bind(
+        now,
+        expectedTokenHash,
+        newExpiresAt,
+        now,
+        expectedTokenHash,
+        now,
+        expectedTokenHash,
+        id,
+      );
   }
 
   /**
    * End the lease because its holder's submission was accepted - as a
    * NULL-ABORT compare-and-swap requiring the lease to still be LIVE
-   * (`active AND expires_at > now`).
+   * (`active AND expires_at > now`) and to retain the token hash against which
+   * the submitted plaintext was verified. A concurrent recovery therefore
+   * invalidates an already-validated old-token submission before it commits.
    *
    * The submission batch's work-item CAS only proves the item is `leased`; it
    * cannot tell "still leased by me" from "leased by whoever re-claimed it
@@ -205,8 +263,14 @@ export class LeasesRepository {
    * submit). Here the abort is unconditional and atomic: if the lease is not
    * live at write time, nothing in the batch persists.
    */
-  consumeForSubmissionStatement(id: string, releasedAt: string, now: string): SqlStatement {
-    const live = `released_at IS NULL AND revoked_at IS NULL AND expires_at > ?`;
+  consumeForSubmissionStatement(
+    id: string,
+    expectedTokenHash: string,
+    releasedAt: string,
+    now: string,
+  ): SqlStatement {
+    const live = `released_at IS NULL AND revoked_at IS NULL
+                  AND expires_at > ? AND token_hash = ?`;
     return this.db
       .prepare(
         `UPDATE leases
@@ -214,7 +278,7 @@ export class LeasesRepository {
                 token_hash  = CASE WHEN ${live} THEN token_hash ELSE NULL END
           WHERE id = ?`,
       )
-      .bind(now, releasedAt, now, id);
+      .bind(now, expectedTokenHash, releasedAt, now, expectedTokenHash, id);
   }
 
   /**

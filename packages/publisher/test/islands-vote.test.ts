@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotCollab } from "../site/src/islands/collab-element.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
 import { VoteControl } from "../site/src/islands/vote-control.js";
 import type { Annotation } from "../site/src/islands/api.js";
 
@@ -202,6 +203,7 @@ function annotationsRoute(items: Annotation[]): RouteMap {
 }
 
 beforeEach(() => {
+  resetProjectStoresForTests();
   vi.useRealTimers();
 });
 

@@ -10,7 +10,12 @@ import {
   DEFAULT_LEASE_CONFIG,
   LEASE_TOKEN_REGEX,
 } from "@authorbot/domain";
-import { leaseConfigFromEnv, sweepExpiredLeases } from "../src/index.js";
+import {
+  leaseConfigFromEnv,
+  mintLeaseToken,
+  sweepExpiredLeases,
+  verifyLeaseToken,
+} from "../src/index.js";
 import { uuidv7 } from "../src/ids.js";
 import { devLogin, jsonRequest, mintToken, BLOCK_ID_1, CHAPTER_ID } from "./helpers.js";
 import {
@@ -54,6 +59,26 @@ async function renew(
   return harness.app.request(
     `/v1/projects/${harness.projectId}/work-items/${workItemId}/lease/renew`,
     jsonRequest("POST", { leaseId, leaseToken }, { Cookie: cookie }),
+  );
+}
+
+async function recover(
+  harness: Phase4Harness,
+  credential: { cookie?: string; token?: string },
+  workItemId: string,
+  leaseId: string,
+  key = uuidv7(),
+): Promise<Response> {
+  const headers: Record<string, string> = { "Idempotency-Key": key };
+  if (credential.cookie !== undefined) {
+    headers["Cookie"] = credential.cookie;
+  }
+  if (credential.token !== undefined) {
+    headers["Authorization"] = `Bearer ${credential.token}`;
+  }
+  return harness.app.request(
+    `/v1/projects/${harness.projectId}/work-items/${workItemId}/lease/recover`,
+    jsonRequest("POST", { leaseId }, headers),
   );
 }
 
@@ -246,6 +271,240 @@ describe("claim (contract §2/§3)", () => {
   });
 });
 
+describe("credential-bound lease token recovery (contract §2)", () => {
+  it("rotates the live token, invalidates the old one, and redacts an idempotent replay", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "holder", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie }, workItemId);
+      expect(claimed.status).toBe(201);
+      const original = leaseOf(claimed.body);
+
+      const key = uuidv7();
+      const first = await recover(harness, { cookie }, workItemId, original.id, key);
+      expect(first.status).toBe(200);
+      const firstBody = (await first.json()) as {
+        workItemId: string;
+        correlationId: string;
+        lease: {
+          id: string;
+          token: string;
+          expiresAt: string;
+          maxExpiresAt: string;
+          renewalCount: number;
+          renewalPromptAt: string;
+        };
+      };
+      expect(firstBody.workItemId).toBe(workItemId);
+      expect(firstBody.lease.id).toBe(original.id);
+      expect(firstBody.lease.token).toMatch(LEASE_TOKEN_REGEX);
+      expect(firstBody.lease.token).not.toBe(original.token);
+      // Recovery rotates a capability; it never extends the lease.
+      expect(firstBody.lease.expiresAt).toBe(original.expiresAt);
+      expect(firstBody.lease.maxExpiresAt).toBe(original.maxExpiresAt);
+      expect(firstBody.lease.renewalPromptAt).toBe(original.renewalPromptAt);
+
+      const stored = await harness.repos.leases.getById(original.id);
+      expect(stored).not.toBeNull();
+      expect(await verifyLeaseToken(original.token, stored?.tokenHash ?? "")).toBe(false);
+      expect(await verifyLeaseToken(firstBody.lease.token, stored?.tokenHash ?? "")).toBe(true);
+
+      const replay = await recover(harness, { cookie }, workItemId, original.id, key);
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get("x-idempotency-replayed")).toBe("true");
+      const replayBody = (await replay.json()) as { lease: Record<string, unknown> };
+      expect(replayBody.lease["token"]).toBeUndefined();
+      expect(replayBody.lease["tokenRedacted"]).toBe(true);
+
+      const oldRenewal = await renew(harness, cookie, workItemId, original.id, original.token);
+      expect(oldRenewal.status).toBe(403);
+      expect(((await oldRenewal.json()) as { code: string }).code).toBe("lease-token-invalid");
+      const newRenewal = await renew(
+        harness,
+        cookie,
+        workItemId,
+        original.id,
+        firstBody.lease.token,
+      );
+      expect(newRenewal.status).toBe(200);
+
+      const audits = await harness.repos.auditEvents.listByProject(harness.projectId, {
+        limit: 200,
+      });
+      expect(audits.filter((event) => event.action === "lease.recover")).toHaveLength(1);
+      expect(await eventTypes(harness)).toContain("lease_recovered");
+      const events = await harness.repos.events.listAfter(harness.projectId, 0, 200);
+      expect(events.find((event) => event.type === "lease_recovered")?.payload).toEqual({
+        leaseId: original.id,
+        workItemId,
+        correlationId: firstBody.correlationId,
+      });
+
+      // Neither issuance is recoverable from operational rows, audit, events,
+      // or stored idempotency responses.
+      for (const table of ["leases", "audit_events", "events", "idempotency_keys"]) {
+        const rows = await harness.db.prepare(`SELECT * FROM ${table}`).all();
+        const serialized = JSON.stringify(rows);
+        expect(serialized).not.toContain(original.token);
+        expect(serialized).not.toContain(firstBody.lease.token);
+      }
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("allows only the exact credential that claimed the lease, not another session for the actor", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const claimingSession = await devLogin(harness, "holder", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie: claimingSession }, workItemId);
+      const lease = leaseOf(claimed.body);
+      const key = uuidv7();
+
+      const recovered = await recover(
+        harness,
+        { cookie: claimingSession },
+        workItemId,
+        lease.id,
+        key,
+      );
+      expect(recovered.status).toBe(200);
+
+      const secondSession = await devLogin(harness, "holder", "editor");
+      const denied = await recover(
+        harness,
+        { cookie: secondSession },
+        workItemId,
+        lease.id,
+        key,
+      );
+      expect(denied.status).toBe(403);
+      expect(denied.headers.get("x-idempotency-replayed")).toBeNull();
+      expect(((await denied.json()) as { code: string }).code).toBe("forbidden");
+
+      const stored = await harness.repos.leases.getById(lease.id);
+      expect(await verifyLeaseToken(lease.token, stored?.tokenHash ?? "")).toBe(false);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rechecks current work scope before replaying a successful recovery", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "holder", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie }, workItemId);
+      const lease = leaseOf(claimed.body);
+      const key = uuidv7();
+      expect((await recover(harness, { cookie }, workItemId, lease.id, key)).status).toBe(200);
+
+      const actor = await harness.repos.actors.getByExternalIdentity("github:holder");
+      const membership = await harness.repos.projectMemberships.getByProjectAndActor(
+        harness.projectId,
+        actor?.id ?? "missing",
+      );
+      await harness.repos.projectMemberships.revoke(
+        membership?.id ?? "missing",
+        "2026-07-19T18:05:00Z",
+      );
+
+      const replay = await recover(harness, { cookie }, workItemId, lease.id, key);
+      expect(replay.status).toBe(403);
+      expect(replay.headers.get("x-idempotency-replayed")).toBeNull();
+      expect(((await replay.json()) as { code: string }).code).toBe("forbidden");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("supports an agent only through the same bearer credential that claimed", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const maintainer = await devLogin(harness, "boss", "maintainer");
+      const { token } = await mintToken(harness, maintainer, [
+        "work:read",
+        "work:claim",
+        "submissions:write",
+      ]);
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { token }, workItemId);
+      expect(claimed.status).toBe(201);
+      const lease = leaseOf(claimed.body);
+
+      const response = await recover(harness, { token }, workItemId, lease.id);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { lease: { token: string } };
+      expect(body.lease.token).toMatch(LEASE_TOKEN_REGEX);
+
+      const stored = await harness.repos.leases.getById(lease.id);
+      expect(await verifyLeaseToken(lease.token, stored?.tokenHash ?? "")).toBe(false);
+      expect(await verifyLeaseToken(body.lease.token, stored?.tokenHash ?? "")).toBe(true);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("fails closed for a live lease created before credential binding", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "holder", "editor");
+      const actor = await harness.repos.actors.getByExternalIdentity("github:holder");
+      expect(actor).not.toBeNull();
+      const { workItemId } = await createReadyWorkItem(harness);
+      const minted = await mintLeaseToken();
+      const leaseId = uuidv7(harness.clock.now());
+      const timestamp = harness.clock.now().toISOString().replace(/\.\d{3}Z$/, "Z");
+      await harness.repos.leases.claim({
+        id: leaseId,
+        projectId: harness.projectId,
+        workItemId,
+        actorId: actor?.id ?? "missing",
+        tokenHash: minted.tokenHash,
+        issuedAt: timestamp,
+        expiresAt: "2026-07-19T18:30:00Z",
+        maxExpiresAt: "2026-07-19T22:00:00Z",
+        renewalCount: 0,
+        releasedAt: null,
+        revokedAt: null,
+      });
+      await harness.repos.workItems.updateStatus(workItemId, "leased", timestamp);
+
+      const response = await recover(harness, { cookie }, workItemId, leaseId);
+      expect(response.status).toBe(409);
+      const body = (await response.json()) as { code: string; detail: string };
+      expect(body.code).toBe("state-conflict");
+      expect(body.detail).toMatch(/predates credential-bound recovery/i);
+      const stored = await harness.repos.leases.getById(leaseId);
+      expect(await verifyLeaseToken(minted.token, stored?.tokenHash ?? "")).toBe(true);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("never revives an expired lease", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const cookie = await devLogin(harness, "holder", "editor");
+      const { workItemId } = await createReadyWorkItem(harness);
+      const claimed = await claimWorkItem(harness, { cookie }, workItemId);
+      const lease = leaseOf(claimed.body);
+      harness.clock.advanceMs(30 * MINUTE);
+
+      const response = await recover(harness, { cookie }, workItemId, lease.id);
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("lease-expired");
+      expect((await harness.repos.workItems.getById(workItemId))?.status).toBe("ready");
+      expect(await eventTypes(harness)).toContain("lease_expired");
+      expect((await harness.repos.leases.getById(lease.id))?.revokedAt).not.toBeNull();
+    } finally {
+      harness.close();
+    }
+  });
+});
+
 describe("stale-lease matrix (contract §8 exit criterion 2)", () => {
   async function claimedHarness(): Promise<{
     harness: Phase4Harness;
@@ -351,9 +610,26 @@ describe("stale-lease matrix (contract §8 exit criterion 2)", () => {
       // Partial clamp: 18:10 + 10m capped at 18:15 - allowed.
       const first = await renew(harness, cookie, workItemId, lease.id, lease.token);
       expect(first.status).toBe(200);
-      const firstBody = (await first.json()) as { expiresAt: string; renewalCount: number };
+      const firstBody = (await first.json()) as {
+        expiresAt: string;
+        maxExpiresAt: string;
+        renewalCount: number;
+        renewalPromptAt: string;
+      };
       expect(firstBody.expiresAt).toBe("2026-07-19T18:15:00Z");
       expect(firstBody.renewalCount).toBe(1);
+      expect(firstBody.renewalPromptAt).toBe("2026-07-19T18:14:00Z");
+      const renewedEvent = (
+        await harness.repos.events.listAfter(harness.projectId, 0, 200)
+      ).find((event) => event.type === "lease_renewed");
+      expect(renewedEvent?.payload).toMatchObject({
+        leaseId: lease.id,
+        workItemId,
+        expiresAt: firstBody.expiresAt,
+        maxExpiresAt: firstBody.maxExpiresAt,
+        renewalCount: firstBody.renewalCount,
+        renewalPromptAt: firstBody.renewalPromptAt,
+      });
 
       // At the cap: no extension possible.
       const second = await renew(harness, cookie, workItemId, lease.id, lease.token);

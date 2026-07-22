@@ -205,7 +205,7 @@ describe("claim persistence (refresh survival)", () => {
     saveClaim(window.sessionStorage, project, claim);
     expect(window.sessionStorage.getItem(claimStorageKey(project))).not.toBeNull();
     const back = loadClaim(window.sessionStorage, project);
-    expect(back?.lease.token).toBe("opaque-token");
+    expect(window.sessionStorage.getItem(claimStorageKey(project))).not.toContain("opaque-token");
     expect(back?.draft).toBe("new prose");
     expect(back?.document.revision).toBe(4);
     expect(back?.target?.exact).toBe("appeared on a Tuesday");
@@ -214,12 +214,32 @@ describe("claim persistence (refresh survival)", () => {
     expect(loadClaim(window.sessionStorage, project)).toBeNull();
   });
 
+  it("scrubs a legacy stored lease token synchronously while loading the claim", () => {
+    const legacy = {
+      ...toStoredClaim(bundle(), "legacy draft"),
+      lease: { ...bundle().lease },
+    };
+    window.sessionStorage.setItem(claimStorageKey(project), JSON.stringify(legacy));
+    expect(window.sessionStorage.getItem(claimStorageKey(project))).toContain("opaque-token");
+
+    const restored = loadClaim(window.sessionStorage, project);
+
+    expect(restored?.draft).toBe("legacy draft");
+    const raw = window.sessionStorage.getItem(claimStorageKey(project));
+    expect(raw).not.toContain("opaque-token");
+    expect(JSON.parse(raw ?? "null")?.lease).not.toHaveProperty("token");
+  });
+
   it("rejects malformed or partial stored state rather than half-restoring", () => {
     window.sessionStorage.setItem(claimStorageKey(project), "{not json");
     expect(loadClaim(window.sessionStorage, project)).toBeNull();
-    window.sessionStorage.setItem(claimStorageKey(project), JSON.stringify({ workItemId: "w" }));
+    expect(window.sessionStorage.getItem(claimStorageKey(project))).toBeNull();
+    window.sessionStorage.setItem(
+      claimStorageKey(project),
+      JSON.stringify({ workItemId: "w", lease: { token: "legacy-capability" } }),
+    );
     expect(loadClaim(window.sessionStorage, project)).toBeNull();
-    window.sessionStorage.clear();
+    expect(window.sessionStorage.getItem(claimStorageKey(project))).toBeNull();
   });
 
   it("never reaches for localStorage (the token must not outlive the tab)", async () => {

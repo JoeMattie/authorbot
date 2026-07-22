@@ -258,6 +258,15 @@ describe("apply pipeline: happy path (exit criterion 3)", () => {
       expect(types).toContain("submission_received");
       expect(types).toContain("work_item_completed");
       expect(types).toContain("operation_completed");
+      const received = (await harness.repos.events.listAfter(harness.projectId, 0, 500)).find(
+        (event) => event.type === "submission_received",
+      );
+      expect(received?.payload).toMatchObject({
+        submissionId,
+        operationId,
+        workItemId: ctx.workItemId,
+        correlationId: accepted.body["correlationId"],
+      });
     } finally {
       harness.close();
     }

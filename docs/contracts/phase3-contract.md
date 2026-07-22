@@ -81,11 +81,20 @@ aggregates (§26.1: aggregate-only), notifications.
   `events` table (monotonic id): `annotation_created`, `vote_aggregate`,
   `decision_created`, `decision_support_changed`, `work_item_created`,
   `operation_completed`. `Last-Event-ID` (or `?after=`) resumes; 15s
-  heartbeat comments; auth identical to annotation reads (public books
-  stream public events to anonymous readers; member-only otherwise).
-  Clients must refetch authoritative resources after reconnect (documented).
+  heartbeat comments; authenticated project members only. Clients must
+  refetch authoritative resources after reconnect (documented).
 - Same rows are pollable via `GET /v1/projects/{p}/events?after=<id>&poll=1`
-  returning JSON (simple-agent fallback, §26.1).
+  returning JSON (simple-agent fallback, §26.1). On public books, anonymous
+  callers and signed-in non-members admitted by an open/approval-gated policy
+  receive only explicitly public collaboration subtypes, and the cursor
+  advances across filtered member-only rows. `resolve_conflict` Work creation
+  and Work cancellation remain private even though they reuse Phase 3 event
+  names. A public `operation_completed` row is visible only for unambiguously
+  public annotation/reply outbox kinds; decision, Work, chapter, submission,
+  settings, and later private operations remain member-only. Public rows are
+  serialized through a per-type field projection, so additive internal payload
+  fields remain private until explicitly reviewed. Only current project members
+  may open SSE.
 
 ## 6. UI additions (islands, same rules as Phase 2b)
 

@@ -51,7 +51,7 @@ Do not retry the unchanged `Python-urllib/...` request. Keep the same
 | `lease-expired` | 409 | Your lease lapsed; the item is back in the queue. You cannot submit against it. Re-claim if you still want it. |
 | `lease-inactive` | 409 | The lease was released or revoked. Re-claim. |
 | `lease-max-total-exceeded` | 409 | You have held the item the maximum total time (4h default). Release it; let another claimant finish. |
-| `lease-token-invalid` | 403 | The lease token is wrong. You lost it, or copied it wrong - it is shown only once at claim. Release and re-claim. |
+| `lease-token-invalid` | 403 | The lease token is wrong. If this is the exact credential that claimed the item and you retained the lease id, rotate it once through `POST .../lease/recover`; otherwise release and re-claim. |
 
 **Renew before you need to.** The bundle's `renewalPromptAt` is when to renew,
 not when the lease expires. Waiting until expiry loses the work.

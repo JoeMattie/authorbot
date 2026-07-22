@@ -12,14 +12,13 @@ import { AuthorbotChapterActivity } from "./chapter-activity.js";
 import { AuthorbotChapterComposer } from "./chapter-composer.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
+import { loadLazyModule } from "./lazy-module.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
-import { AuthorbotWorkQueue } from "./work-queue.js";
 
 const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-collab", AuthorbotCollab],
   // The header strip: sign in, sign out, and the way into Settings and Work.
   ["authorbot-account", AuthorbotAccount],
-  ["authorbot-work-queue", AuthorbotWorkQueue],
   ["authorbot-chapter-activity", AuthorbotChapterActivity],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
@@ -30,4 +29,20 @@ for (const [tag, constructor] of ELEMENTS) {
   if (customElements.get(tag) === undefined) {
     customElements.define(tag, constructor);
   }
+}
+
+// The claim editor is substantial and appears only on /work/. Keep it out of
+// every chapter reader's entry payload while preserving the same custom
+// element contract on the page that mounts it.
+if (document.querySelector("authorbot-work-queue") !== null) {
+  void loadLazyModule(() => import("./work-queue.js"))
+    .then(({ AuthorbotWorkQueue }) => {
+      if (customElements.get("authorbot-work-queue") === undefined) {
+        customElements.define("authorbot-work-queue", AuthorbotWorkQueue);
+      }
+    })
+    .catch(() => {
+      // The mount already contains the progressive-enhancement fallback. A
+      // permanent chunk failure must stay handled and leave that copy intact.
+    });
 }

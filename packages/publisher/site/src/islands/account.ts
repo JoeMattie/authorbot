@@ -23,9 +23,10 @@
  * be reached it renders nothing, exactly like the other islands, chrome that
  * leads nowhere is worse than no chrome.
  */
-import { CollabApi, isMaintainer, roleOf, type Me } from "./api.js";
+import type { Me, Role } from "./api.js";
 import { el } from "./dom.js";
-import { getProjectStore, type ProjectStore } from "./project-store.js";
+import type { ProjectStore } from "./project-store.js";
+import { loadProjectStore } from "./project-store-loader.js";
 
 interface Config {
   apiBase: string;
@@ -43,31 +44,75 @@ function parseConfig(host: HTMLElement): Config | null {
   return { apiBase, project, base };
 }
 
+function roleOf(me: Me | null): Role | null {
+  const role = me?.memberships?.[0]?.role;
+  return role === "reader" || role === "contributor" || role === "editor" || role === "maintainer"
+    ? role
+    : null;
+}
+
+async function endSession(base: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${base}/v1/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "idempotency-key": crypto.randomUUID(),
+      },
+      body: "{}",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export class AuthorbotAccount extends HTMLElement {
-  private api!: CollabApi;
   private store!: ProjectStore;
   private cfg!: Config;
-  private started = false;
+  private mount = 0;
+  private unsubscribe: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
+  private renderedSession: Me | null | undefined;
 
   connectedCallback(): void {
-    if (this.started) {
-      return;
-    }
-    this.started = true;
+    const mount = ++this.mount;
     const cfg = parseConfig(this);
     if (cfg === null) {
       return;
     }
     this.cfg = cfg;
-    this.api = new CollabApi(cfg.apiBase, cfg.project);
-    this.store = getProjectStore(cfg);
     window.addEventListener("resize", this.onResize);
-    window.requestAnimationFrame(() => this.revealActiveNavigation());
-    void this.start();
+    this.onResize();
+    void this.connectStore(cfg, mount);
+  }
+
+  private async connectStore(cfg: Config, mount: number): Promise<void> {
+    let store: ProjectStore;
+    try {
+      store = await loadProjectStore(cfg);
+    } catch {
+      // A missing lazy chunk is a progressive-enhancement failure: keep the
+      // account strip empty, with no rejected promise escaping this mount.
+      return;
+    }
+    if (!this.isConnected || mount !== this.mount) return;
+    this.store = store;
+    this.unsubscribe = store.subscribe(() => this.syncFromStore());
+    await this.start(mount, store);
   }
 
   disconnectedCallback(): void {
+    this.mount += 1;
     window.removeEventListener("resize", this.onResize);
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    const release = this.releaseConnection;
+    this.releaseConnection = null;
+    release?.();
+    this.renderedSession = undefined;
   }
 
   private readonly onResize = (): void => {
@@ -87,44 +132,71 @@ export class AuthorbotAccount extends HTMLElement {
     nav.scrollLeft = Math.max(0, activeLeft - (nav.clientWidth - activeRect.width) / 2);
   }
 
-  private async start(): Promise<void> {
-    await this.store.getState().ensureSession();
-    const state = this.store.getState();
+  private async start(mount: number, store: ProjectStore): Promise<void> {
+    await store.getState().ensureSession();
+    if (!this.isConnected || mount !== this.mount) return;
+    const state = store.getState();
     if (state.sessionStatus !== "ready") {
       // API unreachable: no chrome at all, rather than controls that fail.
       return;
     }
-    this.render(state.session);
-    window.requestAnimationFrame(() => this.revealActiveNavigation());
-    if (state.session?.scopes.includes("work:read") === true) {
-      await this.syncGlobalWorkCount();
-      window.requestAnimationFrame(() => this.revealActiveNavigation());
+    this.syncFromStore();
+  }
+
+  /** Reconcile account identity and the Work badge after any credential change. */
+  private syncFromStore(): void {
+    const state = this.store.getState();
+    if (state.sessionStatus !== "ready") {
+      if (state.sessionStatus === "error") {
+        this.renderedSession = undefined;
+        this.textContent = "";
+        const release = this.releaseConnection;
+        this.releaseConnection = null;
+        release?.();
+        this.syncGlobalWorkCount(0);
+      }
+      return;
     }
+    if (state.session !== this.renderedSession) {
+      this.renderedSession = state.session;
+      this.render(state.session);
+      this.onResize();
+    }
+    const canReadWork = state.session?.scopes.includes("work:read") === true;
+    if (!canReadWork) {
+      const release = this.releaseConnection;
+      this.releaseConnection = null;
+      release?.();
+      this.syncGlobalWorkCount(0);
+      return;
+    }
+    if (state.workItemsStatus === "idle") {
+      void state.ensureWorkItems();
+    }
+    if (this.releaseConnection === null) {
+      // `retainConnection()` publishes "connecting" synchronously. Install a
+      // sentinel before that notification so this subscriber cannot recurse.
+      this.releaseConnection = () => {};
+      this.releaseConnection = state.retainConnection();
+    }
+    this.syncGlobalWorkCount(
+      state.workItemsStatus === "ready" ? state.workItemIds.length : 0,
+    );
   }
 
   /** Keep the top-bar Work badge useful on every page, not only /work/. */
-  private async syncGlobalWorkCount(): Promise<void> {
-    let count = 0;
-    let cursor: string | undefined;
-    const seen = new Set<string>();
-    do {
-      const result = await this.api.workItems(cursor);
-      if (!result.ok) {
-        return;
-      }
-      count += result.value.items.length;
-      const next = result.value.nextCursor;
-      if (next === null || seen.has(next)) {
-        cursor = undefined;
-        break;
-      }
-      seen.add(next);
-      cursor = next;
-    } while (cursor !== undefined);
+  private syncGlobalWorkCount(count: number): void {
+    let changed = false;
     for (const badge of document.querySelectorAll<HTMLElement>("[data-work-count]")) {
-      badge.textContent = String(count);
-      badge.hidden = count === 0;
+      const text = String(count);
+      const hidden = count === 0;
+      changed ||= badge.textContent !== text || badge.hidden !== hidden;
+      badge.textContent = text;
+      badge.hidden = hidden;
     }
+    // The badge changes the active Work row's width on compact navigation.
+    // Recenter only when that geometry actually changed.
+    if (changed) this.onResize();
   }
 
   private render(me: Me | null): void {
@@ -133,7 +205,7 @@ export class AuthorbotAccount extends HTMLElement {
 
     if (me === null) {
       const signIn = el("a", "ab-account-signin", "Sign in with GitHub");
-      signIn.href = this.api.signInUrl(window.location.href);
+      signIn.href = `${this.cfg.apiBase}/v1/auth/github?return_to=${encodeURIComponent(window.location.href)}`;
       strip.append(signIn);
       this.append(strip);
       return;
@@ -160,7 +232,7 @@ export class AuthorbotAccount extends HTMLElement {
     // Settings remains an account action because it is maintainer-only. Work
     // now lives in the primary navigation, so repeating it here would give
     // every signed-in desktop user two links to the same page.
-    if (isMaintainer(me)) {
+    if (role === "maintainer") {
       strip.append(this.link(`${this.cfg.base}settings/`, "Settings"));
     }
 
@@ -181,7 +253,7 @@ export class AuthorbotAccount extends HTMLElement {
 
   private async signOut(button: HTMLButtonElement): Promise<void> {
     button.disabled = true;
-    const ok = await this.api.signOut();
+    const ok = await endSession(this.cfg.apiBase);
     if (!ok) {
       button.disabled = false;
       button.textContent = "Sign out failed, retry";

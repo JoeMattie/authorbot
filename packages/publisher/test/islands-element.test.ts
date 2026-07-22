@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthorbotCollab } from "../site/src/islands/collab-element.js";
+import {
+  getProjectStore,
+  resetProjectStoresForTests,
+  type ProjectStore,
+} from "../site/src/islands/project-store.js";
 
 /**
  * Smoke tests for the `<authorbot-collab>` element wiring (Phase 2b contract
@@ -28,7 +33,7 @@ function stubFetch(routes: RouteMap): void {
       return {
         ok: route.status >= 200 && route.status < 300,
         status: route.status,
-        json: async () => route.body,
+        json: async () => structuredClone(route.body),
       } as Response;
     }),
   );
@@ -58,6 +63,7 @@ function mount(attrs: Record<string, string> = {}): AuthorbotCollab {
 
 beforeEach(() => {
   vi.useRealTimers();
+  resetProjectStoresForTests();
 });
 
 afterEach(() => {
@@ -94,6 +100,76 @@ describe("authorbot-collab element", () => {
     const form = document.querySelector(".ab-devlogin") as HTMLFormElement;
     expect(form.querySelector("input[name=login]")).toBeTruthy();
     expect(form.querySelectorAll("option").length).toBe(4);
+  });
+
+  it("keeps a login form mounted during an authoritative annotation refresh", async () => {
+    const annotation = {
+      id: "ann-refresh",
+      chapterId: CHAPTER_ID,
+      kind: "suggestion",
+      scope: "block",
+      chapterRevision: 3,
+      target: { blockId: BLOCK_ID },
+      authorActorId: "actor-1",
+      body: "Tighten this block.",
+      status: "open",
+      gitOperationId: null,
+      createdAt: "2026-07-19T00:00:00Z",
+      decision: {
+        id: "decision-1",
+        actionType: "create_work_item",
+        result: "accepted",
+        supportChanged: false,
+        workItemId: "work-1",
+      },
+    };
+    stubFetch({
+      [`${API}/v1/me`]: { status: 401, body: {} },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: { items: [annotation], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-refresh/replies`]: {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: "reply-1",
+              annotationId: "ann-refresh",
+              parentReplyId: null,
+              authorActorId: "actor-2",
+              body: "Agreed.",
+              status: "open",
+              gitOperationId: null,
+              createdAt: "2026-07-19T00:01:00Z",
+            },
+          ],
+          nextCursor: null,
+        },
+      },
+    });
+    mount({ "data-dev-login": "true" });
+    await expect
+      .poll(() => document.querySelector<HTMLInputElement>(".ab-devlogin input"))
+      .toBeTruthy();
+    const input = document.querySelector<HTMLInputElement>(
+      ".ab-devlogin input",
+    ) as HTMLInputElement;
+    const form = input.closest("form");
+    input.value = "still-typing";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    annotation.status = "pending_git";
+
+    await getProjectStore({ apiBase: API, project: "hollow-creek-anomaly" })
+      .getState()
+      .refreshAnnotations(CHAPTER_ID);
+
+    const refreshed = document.querySelector<HTMLInputElement>(
+      ".ab-devlogin input",
+    ) as HTMLInputElement;
+    expect(refreshed).toBe(input);
+    expect(refreshed.closest("form")).toBe(form);
+    expect(refreshed.value).toBe("still-typing");
   });
 
   it("adds a keyboard 'Annotate' affordance per anchored block (§2.2, §4)", async () => {
@@ -372,6 +448,90 @@ describe("authorbot-collab element", () => {
     expect(rebuilt).not.toBeNull();
     expect(rebuilt.value).toBe("half-typed reply the user cares about");
     expect(document.activeElement).toBe(rebuilt);
+  });
+
+  it("renders authoritative body and status changes for an existing reply id", async () => {
+    const replyId = "reply-same-id";
+    stubFetch({
+      [`${API}/v1/me`]: {
+        status: 200,
+        body: {
+          actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+          scopes: ["chapters:read", "annotations:read", "annotations:write"],
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/members`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: "ann-reply-refresh",
+              chapterId: CHAPTER_ID,
+              kind: "comment",
+              scope: "block",
+              chapterRevision: 3,
+              target: { blockId: BLOCK_ID },
+              authorActorId: "actor-1",
+              body: "Thread owner",
+              status: "open",
+              gitOperationId: null,
+              createdAt: "2026-07-19T00:00:00Z",
+            },
+          ],
+          nextCursor: null,
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-reply-refresh/replies`]: {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: replyId,
+              projectId: "hollow-creek-anomaly",
+              annotationId: "ann-reply-refresh",
+              parentReplyId: null,
+              authorActorId: "actor-2",
+              body: "Optimistic reply",
+              status: "pending_git",
+              gitOperationId: "op-reply-refresh",
+              createdAt: "2026-07-19T00:00:00Z",
+              updatedAt: "2026-07-19T00:00:00Z",
+            },
+          ],
+          nextCursor: null,
+        },
+      },
+    });
+    const element = mount();
+    await expect.poll(() => document.querySelector(".ab-reply .ab-body")?.textContent).toBe(
+      "Optimistic reply",
+    );
+    expect(document.querySelector(".ab-reply .ab-status-syncing")).not.toBeNull();
+
+    const store = (element as unknown as { store: ProjectStore }).store;
+    const before = store.getState().repliesById[replyId];
+    expect(before).toBeDefined();
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: {
+          ...before!,
+          body: "Authoritative reply",
+          status: "open",
+          gitOperationId: null,
+          updatedAt: "2026-07-19T00:00:01Z",
+        },
+      },
+    });
+
+    await expect.poll(() => document.querySelector(".ab-reply .ab-body")?.textContent).toBe(
+      "Authoritative reply",
+    );
+    expect(document.querySelector(".ab-reply .ab-status-syncing")).toBeNull();
   });
 
   it("clears and closes the note composer before its POST finishes", async () => {

@@ -398,7 +398,7 @@ describe("finding 5: a frozen book can still rotate one credential", () => {
 // Finding 6 - incident reasons must not leak through the anonymous feed
 // ---------------------------------------------------------------------------
 
-describe("finding 6: the event feed does not publish freeze/pause reasons", () => {
+describe("finding 6: the anonymous event feed does not publish control-plane events", () => {
   const SECRET_REASON = "rotating leaked token tok_9f13 used by contractor evelyn";
 
   beforeEach(async () => {
@@ -409,7 +409,7 @@ describe("finding 6: the event feed does not publish freeze/pause reasons", () =
   const anonymousEvents = async (): Promise<JsonBody> =>
     json(await harness.app.request(`/v1/projects/${harness.projectId}/events?poll=1&after=0`));
 
-  it("omits the reason from project_frozen and agents_paused for an anonymous reader", async () => {
+  it("omits project_frozen and agents_paused entirely for an anonymous reader", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     await freeze({ Cookie: maintainer }, SECRET_REASON);
     await harness.app.request(
@@ -419,10 +419,10 @@ describe("finding 6: the event feed does not publish freeze/pause reasons", () =
 
     const feed = await anonymousEvents();
     const types = feed.items.map((e: { type: string }) => e.type);
-    // The FACT is still published - a listening client must learn the book
-    // froze; it is the prose that is withheld.
-    expect(types).toContain("project_frozen");
-    expect(types).toContain("agents_paused");
+    // Public polling is limited to the reviewed collaboration vocabulary.
+    // Control-plane facts and their prose both remain member-only.
+    expect(types).not.toContain("project_frozen");
+    expect(types).not.toContain("agents_paused");
     expect(JSON.stringify(feed)).not.toContain("tok_9f13");
     expect(JSON.stringify(feed)).not.toContain("evelyn");
     for (const event of feed.items) {

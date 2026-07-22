@@ -7,7 +7,7 @@
  * `Storage` so they run under happy-dom and in tests) so the rules are unit
  * testable without a browser.
  */
-import type { BundleTarget, TaskBundle } from "./api.js";
+import type { BundleTarget, SubmissionType, TaskBundle } from "./api.js";
 
 /**
  * FALLBACK renewal prompt lead time - design §25 / contract §7 default
@@ -22,9 +22,9 @@ import type { BundleTarget, TaskBundle } from "./api.js";
  * the lead time from the lease's own `renewalPromptAt` whenever the server has
  * supplied one, falling back to this constant otherwise.
  *
- * Contract §3 pins the claim response's `lease` object to
- * `{ id, token, expiresAt, maxExpiresAt }`, so a freshly claimed lease has no
- * server-supplied prompt time and uses this default until its first renewal.
+ * Older deployments omitted `renewalPromptAt` from a fresh claim. Those
+ * bundles use this default; current deployments send the configured prompt
+ * time on claim, recovery, and renewal.
  */
 export const RENEWAL_PROMPT_MS = 5 * 60_000;
 
@@ -42,7 +42,6 @@ export function submitPollDelayMs(poll: number): number {
 
 export interface LeaseHandle {
   id: string;
-  token: string;
   expiresAt: string;
   maxExpiresAt: string;
   /**
@@ -246,13 +245,10 @@ export function conflictMessage(reason: string | null): string {
  * What the edit view needs to come back after a refresh (Phase 2b rule:
  * drafts and focus survive a reload).
  *
- * SECURITY: this includes the lease token, which the API returns exactly once
- * and which is the only way the holder can renew or submit. It is kept in
- * **sessionStorage** - same-origin, per-tab, dropped when the tab closes - and
- * is deleted the moment the lease is released, submitted, or expires. It is
- * never written to localStorage (which would outlive the session), never put
- * in the URL, never sent anywhere but the API, and never logged. An attacker
- * able to read it already holds the page's session cookie.
+ * SECURITY: this deliberately excludes the lease token. Only non-secret task
+ * metadata and the in-progress draft survive refresh. The shared project
+ * store keeps the token in a private in-memory closure and rotates it through
+ * the credential-bound recovery route after a reload.
  */
 export interface StoredClaim {
   workItemId: string;
@@ -272,10 +268,16 @@ export function claimStorageKey(project: string): string {
   return `authorbot.claim.${project}`;
 }
 
-export function toStoredClaim(bundle: TaskBundle, draft: string): StoredClaim {
+export function toStoredClaim(
+  bundle: Omit<TaskBundle, "lease"> & {
+    lease: LeaseHandle & { token?: string };
+  },
+  draft: string,
+): StoredClaim {
+  const { token: _token, ...lease } = bundle.lease;
   return {
     workItemId: bundle.workItem.id,
-    lease: { ...bundle.lease },
+    lease,
     workItem: bundle.workItem,
     document: bundle.document,
     target: bundle.target ?? null,
@@ -286,23 +288,44 @@ export function toStoredClaim(bundle: TaskBundle, draft: string): StoredClaim {
   };
 }
 
+/** Write only the token-free claim shape, falling back to a source-less copy. */
+function persistSafeClaim(storage: Storage, project: string, claim: StoredClaim): boolean {
+  const safeClaim: StoredClaim = {
+    ...claim,
+    lease: {
+      id: claim.lease.id,
+      expiresAt: claim.lease.expiresAt,
+      maxExpiresAt: claim.lease.maxExpiresAt,
+      ...(claim.lease.renewalPromptAt === undefined
+        ? {}
+        : { renewalPromptAt: claim.lease.renewalPromptAt }),
+    },
+  };
+  try {
+    storage.setItem(claimStorageKey(project), JSON.stringify(safeClaim));
+  } catch {
+    // Over quota (a very large chapter): keep the claim usable by dropping the
+    // chapter source, which the edit view only needs for non-range prefills.
+    try {
+      const lean: StoredClaim = {
+        ...safeClaim,
+        document: { ...claim.document, source: "" },
+      };
+      storage.setItem(claimStorageKey(project), JSON.stringify(lean));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Persist the claim; storage failures (quota, private mode) are non-fatal. */
 export function saveClaim(storage: Storage | null, project: string, claim: StoredClaim): void {
   if (storage === null) {
     return;
   }
-  try {
-    storage.setItem(claimStorageKey(project), JSON.stringify(claim));
-  } catch {
-    // Over quota (a very large chapter): keep the claim usable by dropping the
-    // chapter source, which the edit view only needs for non-range prefills.
-    try {
-      const lean: StoredClaim = { ...claim, document: { ...claim.document, source: "" } };
-      storage.setItem(claimStorageKey(project), JSON.stringify(lean));
-    } catch {
-      /* give up: the in-memory claim still works until the page unloads */
-    }
-  }
+  persistSafeClaim(storage, project, claim);
 }
 
 export function clearClaim(storage: Storage | null, project: string): void {
@@ -336,19 +359,20 @@ export function loadClaim(storage: Storage | null, project: string): StoredClaim
     if (
       typeof parsed.workItemId !== "string" ||
       typeof lease?.id !== "string" ||
-      typeof lease.token !== "string" ||
       typeof lease.expiresAt !== "string" ||
       typeof lease.maxExpiresAt !== "string" ||
       typeof parsed.document?.contentHash !== "string" ||
       typeof parsed.document.revision !== "number"
     ) {
+      // Invalid legacy data is unusable and may still contain the pre-2B
+      // plaintext lease capability. Do not leave it behind after rejecting it.
+      clearClaim(storage, project);
       return null;
     }
-    return {
+    const claim: StoredClaim = {
       workItemId: parsed.workItemId,
       lease: {
         id: lease.id,
-        token: lease.token,
         expiresAt: lease.expiresAt,
         maxExpiresAt: lease.maxExpiresAt,
         // Carried across a refresh so the countdown keeps honouring the
@@ -371,7 +395,23 @@ export function loadClaim(storage: Storage | null, project: string): StoredClaim
       draft: typeof parsed.draft === "string" ? parsed.draft : "",
       caret: typeof parsed.caret === "number" ? parsed.caret : null,
     };
+
+    // Releases before the memory-only lease change persisted `lease.token`.
+    // Scrub that legacy capability synchronously, before returning the claim
+    // to code that can start credential-bound recovery. Recovery may be
+    // offline or forbidden, so waiting for it to succeed would leave the old
+    // secret sitting in sessionStorage indefinitely.
+    if (Object.prototype.hasOwnProperty.call(lease, "token")) {
+      // If storage refuses both safe rewrites, fail closed and remove the old
+      // record rather than knowingly leaving capability material behind.
+      if (!persistSafeClaim(storage, project, claim)) {
+        clearClaim(storage, project);
+      }
+    }
+
+    return claim;
   } catch {
+    clearClaim(storage, project);
     return null;
   }
 }
@@ -388,8 +428,13 @@ export const SUBMISSION_TYPE_FOR_WORK_ITEM: Readonly<Record<string, string | nul
   planning: null,
 });
 
-export function submissionTypeFor(workItemType: string): string | null {
-  return SUBMISSION_TYPE_FOR_WORK_ITEM[workItemType] ?? null;
+export function submissionTypeFor(workItemType: string): SubmissionType | null {
+  const type = SUBMISSION_TYPE_FOR_WORK_ITEM[workItemType] ?? null;
+  return type === "range_replacement" ||
+    type === "block_replacement" ||
+    type === "chapter_replacement"
+    ? type
+    : null;
 }
 
 const MARKER_LINE = /^[ \t]*<!--[ \t]*authorbot:block[ \t]+id="([^"]*)"[ \t]*-->[ \t]*$/;

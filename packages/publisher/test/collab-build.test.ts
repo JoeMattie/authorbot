@@ -125,7 +125,11 @@ describe("api-url-less build (script-free regression)", () => {
     //
     // `authorbot-access.*` is Phase 7's maintainer surface, bundled apart from
     // the collaboration islands so no reader's chapter page carries it.
-    expect(collabFiles.filter((file) => !plainFiles.includes(file))).toEqual([
+    const additions = collabFiles.filter((file) => !plainFiles.includes(file));
+    const lazyAssets = additions.filter((file) => file.startsWith(path.join("_astro", "assets")));
+    expect(lazyAssets.some((file) => file.includes("project-store-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
+    expect(additions.filter((file) => !lazyAssets.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
       path.join("_astro", "authorbot-access.js"),
       path.join("_astro", "authorbot-account.js"),
@@ -265,6 +269,38 @@ describe("collab-enabled build", () => {
     const js = await readFile(path.join(outCollab, "_astro/authorbot-account.js"));
     expect(gzipSync(js).length).toBeLessThanOrEqual(4 * 1024);
     expect(js.length).toBeGreaterThan(0);
+  });
+
+  it("resolves each retryable lazy chunk beside the stable entries", async () => {
+    const assets = await readdir(path.join(outCollab, "_astro", "assets"));
+    const projectStore = assets.find((file) => file.startsWith("project-store-"));
+    const workQueue = assets.find((file) => file.startsWith("work-queue-"));
+    expect(projectStore).toBeDefined();
+    expect(workQueue).toBeDefined();
+
+    const account = await readFile(
+      path.join(outCollab, "_astro", "authorbot-account.js"),
+      "utf8",
+    );
+    const collab = await readFile(
+      path.join(outCollab, "_astro", "authorbot-collab.js"),
+      "utf8",
+    );
+    for (const [entry, js] of [
+      ["authorbot-account.js", account],
+      ["authorbot-collab.js", collab],
+    ] as const) {
+      expect(js, entry).toContain("./assets/");
+      expect(js, entry).not.toContain('"/assets/');
+      expect(js, entry).not.toContain("'/assets/");
+    }
+    // Vite may emit entry-specific copies with different content hashes; the
+    // important deployment contract is that each reference stays relative to
+    // its stable entry and points at the intended split chunk.
+    expect(account).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
+    expect(account).not.toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
   });
 
   it("hydrates the home page with private authoring entry points (Phase 6 §3.5)", async () => {

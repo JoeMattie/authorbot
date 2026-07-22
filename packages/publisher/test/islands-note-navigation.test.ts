@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { AuthorbotCollab } from "../site/src/islands/collab-element.js";
+import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
 import type { Annotation } from "../site/src/islands/api.js";
 
 const API = "http://api.test";
@@ -70,6 +71,7 @@ function mount(): AuthorbotCollab {
 }
 
 afterEach(() => {
+  resetProjectStoresForTests();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
