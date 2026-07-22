@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  BLOCK_ID_2,
   createOpenSuggestion,
   devLogin,
   jsonRequest,
@@ -108,6 +109,32 @@ describe("maintainer overrides", () => {
     expect(res.status).toBe(201);
     const [workItem] = await h.repos.workItems.listBySourceAnnotation(id);
     expect(workItem).toMatchObject({ type: "revise_chapter", target: null, status: "ready" });
+    expect((await h.repos.annotations.getById(id))?.status).toBe("work_item_created");
+  });
+
+  it("promotes a section comment to block work without losing its target", async () => {
+    const target = { blockId: BLOCK_ID_2 };
+    const id = await createOpenSuggestion(h, contributor, {
+      kind: "comment",
+      scope: "block",
+      target,
+      body: "Resolve the continuity issue in this section.",
+    });
+
+    const res = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${id}/force-create-work-item`,
+      jsonRequest("POST", {}, { Cookie: maintainer }),
+    );
+
+    expect(res.status).toBe(201);
+    const [workItem] = await h.repos.workItems.listBySourceAnnotation(id);
+    expect(workItem).toMatchObject({
+      type: "revise_block",
+      sourceAnnotationId: id,
+      baseRevision: 3,
+      target,
+      status: "ready",
+    });
     expect((await h.repos.annotations.getById(id))?.status).toBe("work_item_created");
   });
 

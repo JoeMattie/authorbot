@@ -99,8 +99,9 @@ descriptive accessible names.
 1. API and domain tests cover reasonless promotion of both comments and
    suggestions, maintainer and scope enforcement, optional legacy reasons,
    atomic uniqueness, and correct work type for all scopes.
-2. Publisher tests prove one activation sends `{}`, rejection still requires a
-   reason, and non-maintainers see no promotion control.
+2. Publisher tests prove one activation sends `{}`, range- and block-scoped
+   comments expose promotion, rejection still requires a reason, and
+   non-maintainers see no promotion control.
 3. After a 201 response, comment and suggestion cards immediately show the
    settled view and `Accepted` badge.
 4. Previous and Next traverse the full ordered set, update the position, focus

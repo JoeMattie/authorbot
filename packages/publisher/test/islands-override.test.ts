@@ -53,6 +53,14 @@ const suggestion = (over: Partial<Annotation> = {}): Annotation => ({
 const comment = (over: Partial<Annotation> = {}): Annotation =>
   suggestion({ kind: "comment", body: "Resolve this loose end.", ...over });
 
+const blockComment = (over: Partial<Annotation> = {}): Annotation =>
+  comment({
+    scope: "block",
+    target: { blockId: BLOCK_ID },
+    body: "Resolve this section's loose end.",
+    ...over,
+  });
+
 interface Route {
   status: number;
   body: unknown;
@@ -205,6 +213,17 @@ describe("promotion surface", () => {
     );
   });
 
+  it("offers Promote alongside Reply and Withdraw on a section comment", async () => {
+    await mountAs("maintainer", [blockComment({ authorActorId: "actor-1" })]);
+
+    const card = document.querySelector(".ab-card") as HTMLElement;
+    const buttons = [...card.querySelectorAll("button")].map((button) => button.textContent);
+    expect(buttons).toContain("Promote to work");
+    expect(buttons).toContain("Reply");
+    expect(buttons).toContain("Withdraw");
+    expect(card.getAttribute("aria-label")).toContain("on this block");
+  });
+
   it("shows non-maintainers no maintainer actions", async () => {
     await mountAs("contributor", [suggestion()]);
     expect(document.querySelector(".ab-override")).toBeNull();
@@ -286,8 +305,8 @@ describe("one-click promotion", () => {
     expect(document.querySelector('[role="status"]')?.textContent).toContain("Promoted to work");
   });
 
-  it("settles a promoted comment into a green note card", async () => {
-    await mountAs("maintainer", [comment()], {
+  it("settles a promoted section comment into a green note card", async () => {
+    await mountAs("maintainer", [blockComment()], {
       [`${API}/v1/projects/${PROJECT}/annotations/ann-1/force-create-work-item`]: promotedResponse,
     });
     promoteBtn()?.click();
@@ -295,9 +314,12 @@ describe("one-click promotion", () => {
       true,
     );
     const card = document.querySelector(".ab-card") as HTMLElement;
-    expect(card.querySelector(".ab-body")?.textContent).toBe("Resolve this loose end.");
+    expect(card.querySelector(".ab-body")?.textContent).toBe(
+      "Resolve this section's loose end.",
+    );
     expect(card.querySelector(".ab-accepted-badge")?.textContent).toBe("Accepted");
     expect(card.querySelector(".ab-actions")).toBeNull();
+    expect(card.getAttribute("aria-label")).toContain("on this block");
   });
 
   it("surfaces promotion failures without opening a reason form", async () => {
