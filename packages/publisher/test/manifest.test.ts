@@ -28,6 +28,8 @@ const chapter: SiteChapter = {
   revision: 3,
   authors: ["github:someone"],
   authorLabels: ["someone"],
+  primaryAuthor: { actor: "github:someone", label: "someone" },
+  contributors: [],
   path: "chapters/intro",
   href: "/chapters/intro/",
   html: "<p>x</p>",

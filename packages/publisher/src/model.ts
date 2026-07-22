@@ -25,6 +25,10 @@ export interface SiteChapter {
   authors: string[];
   /** Ready-to-render names, using an agent token name when one was captured. */
   authorLabels: string[];
+  /** First frontmatter credit: the chapter's originating author. */
+  primaryAuthor: { actor: string; label: string } | null;
+  /** Later accepted prose/metadata credits, deduplicated in first-seen order. */
+  contributors: { actor: string; label: string }[];
   /**
    * Route path relative to the site root, no leading or trailing slash
    * (e.g. `chapters/baseline`), derived from `publication.chapter_url`.

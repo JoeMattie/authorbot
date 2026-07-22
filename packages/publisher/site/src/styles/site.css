@@ -298,6 +298,7 @@ h1:first-child,
 .chapter-order,
 .chapter-revision,
 .chapter-byline,
+.chapter-contributors,
 .chapter-kicker,
 .chapter-back {
   font-family: var(--font-mono);
@@ -454,6 +455,12 @@ h1:first-child,
   font-size: 10px;
 }
 
+.chapter-index .chapter-contributors {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
 .empty-state {
   margin-top: 28px;
   padding: 28px;
@@ -540,6 +547,11 @@ h1:first-child,
 
 .chapter-credit-row .chapter-byline {
   margin-right: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.chapter-credit-row .chapter-contributors {
   color: var(--text-faint);
   font-size: 10px;
 }

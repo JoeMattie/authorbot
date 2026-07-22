@@ -580,6 +580,20 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
     .map((chapter) => {
       const fm = chapter.frontmatter;
       const routePath = chapterRoutePath(chapterUrl, fm.slug);
+      const credits = fm.authors.map((author) => {
+        const [kind, identifier = author.actor] = author.actor.split(":", 2);
+        const label = author.name ?? identifier;
+        return { actor: author.actor, label: `${label}${kind === "agent" ? " (agent)" : ""}` };
+      });
+      const primaryAuthor = credits[0] ?? null;
+      const contributorActors = new Set<string>(
+        primaryAuthor === null ? [] : [primaryAuthor.actor],
+      );
+      const contributors = credits.slice(1).filter((credit) => {
+        if (contributorActors.has(credit.actor)) return false;
+        contributorActors.add(credit.actor);
+        return true;
+      });
       const site: SiteChapter = {
         id: fm.id,
         slug: fm.slug,
@@ -587,12 +601,10 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
         order: fm.order,
         status: fm.status as SiteChapter["status"],
         revision: fm.revision,
-        authors: fm.authors.map((author) => author.actor),
-        authorLabels: fm.authors.map((author) => {
-          const [kind, identifier = author.actor] = author.actor.split(":", 2);
-          const label = author.name ?? identifier;
-          return `${label}${kind === "agent" ? " (agent)" : ""}`;
-        }),
+        authors: credits.map((credit) => credit.actor),
+        authorLabels: credits.map((credit) => credit.label),
+        primaryAuthor,
+        contributors,
         path: routePath,
         href: `${basePath}${routePath}/`,
         html: chapter.html,

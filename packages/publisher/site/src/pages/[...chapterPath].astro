@@ -73,8 +73,13 @@ const chapterCharacters = site.characters.filter((character) =>
             {chapter.summary && <p class="chapter-deck">{chapter.summary}</p>}
             {(site.book.showAttribution || chapterCharacters.length > 0) && (
               <div class="chapter-credit-row">
-                {site.book.showAttribution && chapter.authors.length > 0 && (
-                  <span class="chapter-byline">by {chapter.authorLabels.join(" and ")}</span>
+                {site.book.showAttribution && chapter.primaryAuthor && (
+                  <span class="chapter-byline">by {chapter.primaryAuthor.label}</span>
+                )}
+                {site.book.showAttribution && chapter.contributors.length > 0 && (
+                  <span class="chapter-contributors">
+                    contributors {chapter.contributors.map((credit) => credit.label).join(", ")}
+                  </span>
                 )}
                 {chapterCharacters.map((character) => (
                   <a class="character-chip" href={character.href}>{character.name}</a>
@@ -87,8 +92,13 @@ const chapterCharacters = site.characters.filter((character) =>
             showFooter && (
               <footer class="chapter-footer">
                 {site.book.showRevision && <span>Revision {chapter.revision}</span>}
-                {site.book.showAttribution && chapter.authors.length > 0 && (
-                  <span>By {chapter.authorLabels.join(", ")}</span>
+                {site.book.showAttribution && chapter.primaryAuthor && (
+                  <span>By {chapter.primaryAuthor.label}</span>
+                )}
+                {site.book.showAttribution && chapter.contributors.length > 0 && (
+                  <span>
+                    Contributors: {chapter.contributors.map((credit) => credit.label).join(", ")}
+                  </span>
                 )}
               </footer>
             )

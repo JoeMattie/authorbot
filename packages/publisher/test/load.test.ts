@@ -36,6 +36,7 @@ interface ChapterSpec {
   file?: string;
   author?: string;
   authorName?: string;
+  contributors?: { actor: string; name?: string }[];
 }
 
 async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
@@ -68,6 +69,10 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
         "authors:",
         `  - actor: ${chapter.author ?? "github:someone"}`,
         ...(chapter.authorName === undefined ? [] : [`    name: ${chapter.authorName}`]),
+        ...(chapter.contributors ?? []).flatMap((contributor) => [
+          `  - actor: ${contributor.actor}`,
+          ...(contributor.name === undefined ? [] : [`    name: ${contributor.name}`]),
+        ]),
         "---",
         "",
         `<!-- authorbot:block id="${BLOCK}" -->`,
@@ -96,6 +101,38 @@ describe("loadSiteModel - chapter selection and ordering", () => {
       "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
     ]);
     expect(model.chapters[0]?.authorLabels).toEqual(["continuity-reader (agent)"]);
+  });
+
+  it("keeps the original author separate from later contributors", async () => {
+    const repo = await makeRepo([
+      {
+        id: CH[0],
+        slug: "collaborative",
+        order: 10,
+        status: "published",
+        author: "github:joe",
+        authorName: "Joe Mattie",
+        contributors: [
+          { actor: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f", name: "continuity-reader" },
+          { actor: "github:editor", name: "Casey Editor" },
+          { actor: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f", name: "duplicate" },
+        ],
+      },
+    ]);
+
+    const { model } = await loadSiteModel({ repoPath: repo });
+
+    expect(model.chapters[0]?.primaryAuthor).toEqual({
+      actor: "github:joe",
+      label: "Joe Mattie",
+    });
+    expect(model.chapters[0]?.contributors).toEqual([
+      {
+        actor: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
+        label: "continuity-reader (agent)",
+      },
+      { actor: "github:editor", label: "Casey Editor" },
+    ]);
   });
 
   it("includes only published chapters by default, sorted by order", async () => {
