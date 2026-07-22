@@ -35,6 +35,7 @@ import {
   type CoordinatorStore,
   type ProjectCoordinator,
 } from "./coordinator.js";
+import type { RepositorySourceReadResult } from "./deps.js";
 
 /** The `DurableObjectState` subset the coordinator uses. */
 export interface DurableObjectStateLike {
@@ -74,9 +75,16 @@ export interface CoordinatorDoOverrides {
 /** Storage key recording which project this instance was created for. */
 export const PROJECT_ID_KEY = "project-id";
 
-export type CoordinatorAction = "drain" | "refresh" | "sweep" | "stale" | "status";
+export type CoordinatorAction = "drain" | "refresh" | "source" | "sweep" | "stale" | "status";
 
-const ACTIONS: readonly CoordinatorAction[] = ["drain", "refresh", "sweep", "stale", "status"];
+const ACTIONS: readonly CoordinatorAction[] = [
+  "drain",
+  "refresh",
+  "source",
+  "sweep",
+  "stale",
+  "status",
+];
 
 function isAction(value: string): value is CoordinatorAction {
   return (ACTIONS as readonly string[]).includes(value);
@@ -159,6 +167,13 @@ export class ProjectCoordinatorDurableObject {
         return json(await coordinator.drainOutbox());
       case "refresh":
         return json(await coordinator.refreshProjection());
+      case "source": {
+        const path = url.searchParams.get("path");
+        if (path === null || path.length === 0 || path.length > 2048) {
+          return json({ error: "invalid repository source path" }, 400);
+        }
+        return json(await coordinator.readTextFile(path));
+      }
       case "sweep":
         return json(await coordinator.sweepLeases());
       case "stale": {
@@ -239,4 +254,33 @@ export async function callCoordinator(
     throw new Error(`coordinator ${action} failed with ${String(response.status)}`);
   }
   return (await response.json()) as unknown;
+}
+
+/** Read one repository file through the project's coordinator. */
+export async function callCoordinatorReadTextFile(
+  namespace: DurableObjectNamespaceLike,
+  projectId: string,
+  path: string,
+): Promise<RepositorySourceReadResult> {
+  const stub = coordinatorStub(namespace, projectId);
+  const url = new URL(
+    `${COORDINATOR_ORIGIN}/projects/${encodeURIComponent(projectId)}/source`,
+  );
+  url.searchParams.set("path", path);
+  const response = await stub.fetch(url.toString(), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`coordinator source failed with ${String(response.status)}`);
+  }
+  const body = (await response.json()) as unknown;
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("outcome" in body) ||
+    (body.outcome !== "not-found" &&
+      body.outcome !== "unavailable" &&
+      !(body.outcome === "found" && "source" in body && typeof body.source === "string"))
+  ) {
+    throw new Error("coordinator source returned an invalid response");
+  }
+  return body as RepositorySourceReadResult;
 }

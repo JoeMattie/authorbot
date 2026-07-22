@@ -12,6 +12,16 @@ import type { IdempotencyClaim } from "./idempotency.js";
 import type { BookRepoReader } from "./projection/reader.js";
 import type { ProjectionRefresher } from "./reconcile.js";
 
+export type RepositorySourceReadResult =
+  | { outcome: "found"; source: string }
+  | { outcome: "not-found" }
+  | { outcome: "unavailable" };
+
+/** Repository reads routed through the project coordinator in production. */
+export interface RepositorySourceReader {
+  readTextFile(projectId: string, path: string): Promise<RepositorySourceReadResult>;
+}
+
 export interface Clock {
   now(): Date;
 }
@@ -119,6 +129,8 @@ export interface AppDeps {
    * before Phase 5): rebuilds are skipped, reads still work.
    */
   reader?: BookRepoReader;
+  /** Production source-read seam owned by the per-project coordinator. */
+  repositorySourceReader?: RepositorySourceReader;
   /**
    * Called after any mutation that enqueued an outbox row - the
    * repo-coordinator processor is wired here later. Optional; a rejection is
@@ -163,6 +175,22 @@ export interface AppState {
 }
 
 export const SYSTEM_CLOCK: Clock = { now: () => new Date() };
+
+/** Read a repository file through the local reader or production seam. */
+export async function readRepositoryText(
+  deps: Pick<AppDeps, "reader" | "repositorySourceReader">,
+  projectId: string,
+  path: string,
+): Promise<RepositorySourceReadResult> {
+  if (deps.reader?.readTextFile !== undefined) {
+    const source = await deps.reader.readTextFile(path);
+    return source === null ? { outcome: "not-found" } : { outcome: "found", source };
+  }
+  if (deps.repositorySourceReader !== undefined) {
+    return deps.repositorySourceReader.readTextFile(projectId, path);
+  }
+  return { outcome: "unavailable" };
+}
 
 /** Hono environment: per-request variables set by middleware. */
 export type AppEnv = {

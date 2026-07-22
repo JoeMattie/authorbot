@@ -63,7 +63,7 @@ import type { WorkItemType } from "@authorbot/schemas";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
-import type { AppDeps, AppEnv, Clock } from "./deps.js";
+import { readRepositoryText, type AppDeps, type AppEnv, type Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import {
   expireLeaseForWorkItemStatements,
@@ -205,10 +205,8 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
 
   /** Chapter source via the configured reader (bundle + base verification). */
   const readChapterSource = async (chapter: ChapterProjectionRecord): Promise<string | null> => {
-    if (deps.reader?.readTextFile === undefined) {
-      return null;
-    }
-    return deps.reader.readTextFile(chapter.path);
+    const read = await readRepositoryText(deps, chapter.projectId, chapter.path);
+    return read.outcome === "found" ? read.source : null;
   };
 
   // ---- claim (contract §2, §3) ---------------------------------------------

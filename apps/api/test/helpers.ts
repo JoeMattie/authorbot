@@ -12,7 +12,12 @@ import {
 import type { Hono } from "hono";
 import type { Repositories } from "@authorbot/database";
 import { createApi, type AuthorbotApi } from "../src/app.js";
-import type { AppConfig, AppDeps, AppEnv } from "../src/deps.js";
+import type {
+  AppConfig,
+  AppDeps,
+  AppEnv,
+  RepositorySourceReader,
+} from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
 import { createGitHubIdentityProvider } from "../src/identity/github.js";
 import type { BookRepoReader, BookRepoSnapshot } from "../src/projection/reader.js";
@@ -115,6 +120,7 @@ export async function makeHarness(options: {
    * Present ⇒ the webhook hands the refresh over instead of rebuilding inline.
    */
   projectionRefresher?: ProjectionRefresher;
+  repositorySourceReader?: RepositorySourceReader;
 } = {}): Promise<TestHarness> {
   const db = openSqliteDatabase(":memory:");
   await applyMigrations(db, MIGRATIONS_DIR);
@@ -146,6 +152,9 @@ export async function makeHarness(options: {
     ...(options.clock !== undefined ? { clock: options.clock } : {}),
     ...(options.projectionRefresher !== undefined
       ? { projectionRefresher: options.projectionRefresher }
+      : {}),
+    ...(options.repositorySourceReader !== undefined
+      ? { repositorySourceReader: options.repositorySourceReader }
       : {}),
     onMutationCommitted: async (projectId) => {
       await mutationHook(projectId);

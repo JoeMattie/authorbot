@@ -49,7 +49,13 @@ import {
 import { normalizeBasePath } from "./base-path.js";
 import { csrfOriginAllowed, isValidReturnTo } from "./origins.js";
 import { randomBase64Url, sha256Hex, timingSafeEqual, hmacSha256Hex } from "./crypto.js";
-import { SYSTEM_CLOCK, type AppDeps, type AppEnv, type Clock } from "./deps.js";
+import {
+  readRepositoryText,
+  SYSTEM_CLOCK,
+  type AppDeps,
+  type AppEnv,
+  type Clock,
+} from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import { idempotency } from "./idempotency.js";
 import {
@@ -834,16 +840,17 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (chapter === null || chapter.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown chapter" });
     }
-    if (deps.reader?.readTextFile === undefined) {
+    const read = await readRepositoryText(deps, guard.project.id, chapter.path);
+    if (read.outcome === "unavailable") {
       return problem(c, "state-conflict", {
         detail:
           "this deployment has no repository reader configured, so chapter source cannot be read",
       });
     }
-    const source = await deps.reader.readTextFile(chapter.path);
-    if (source === null) {
+    if (read.outcome === "not-found") {
       return problem(c, "not-found", { detail: "chapter source not found at the branch head" });
     }
+    const source = read.source;
     const parsed = parseChapterMarkdown(source);
     const fm = chapterFrontmatterSchema.safeParse(parsed.frontmatter);
     if (!fm.success) {

@@ -33,6 +33,7 @@ import {
 import {
   ProjectCoordinatorDurableObject,
   callCoordinator,
+  callCoordinatorReadTextFile,
   COORDINATOR_ORIGIN,
   PROJECT_ID_KEY,
   type DurableObjectNamespaceLike,
@@ -622,6 +623,33 @@ describe("ProjectCoordinator Durable Object wrapper", () => {
     expect(await (await call("stale")).json()).toEqual({ stale: true });
     const project = await harness.repos.projects.getById(harness.projectId);
     expect(project?.projectionStale).toBe(true);
+    expect(await (await call("source?path=chapters%2Fmissing.md")).json()).toEqual({
+      outcome: "unavailable",
+    });
+  });
+
+  it("reads repository source through the Worker-to-coordinator boundary", async () => {
+    const source = "# A production draft\n";
+    const built = await makeGit({ "chapters/draft.md": source });
+    const configured = new ProjectCoordinatorDurableObject(
+      { storage: new FakeDoStorage() },
+      { DB: UNUSED_D1, PROJECT_REPO: FULL_NAME, DEFAULT_BRANCH: "main" },
+      { db: harness.db, git: built.git },
+    );
+    const namespace: DurableObjectNamespaceLike = {
+      idFromName: (name) => name,
+      get: () => ({
+        fetch: async (input: string, init?: { method?: string }) =>
+          configured.fetch(new Request(input, { method: init?.method ?? "GET" })),
+      }),
+    };
+
+    await expect(
+      callCoordinatorReadTextFile(namespace, harness.projectId, "chapters/draft.md"),
+    ).resolves.toEqual({ outcome: "found", source });
+    await expect(
+      callCoordinatorReadTextFile(namespace, harness.projectId, "chapters/absent.md"),
+    ).resolves.toEqual({ outcome: "not-found" });
   });
 
   it("404s an unknown action rather than guessing", async () => {

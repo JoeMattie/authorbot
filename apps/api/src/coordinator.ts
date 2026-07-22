@@ -46,7 +46,7 @@ import {
   type GitHubAppCredentials,
 } from "@authorbot/git-github";
 import type { BookRepoWriter, DrainRowOutcome } from "@authorbot/repo-coordinator";
-import type { Clock } from "./deps.js";
+import type { Clock, RepositorySourceReadResult } from "./deps.js";
 import { createDrainRunner, type DrainRunner } from "./drain.js";
 import { uuidv7 } from "./ids.js";
 import { sweepExpiredLeases, type SweepResult } from "./leases.js";
@@ -244,6 +244,8 @@ export interface ProjectCoordinator {
   alarm(): Promise<CoordinatorAlarmResult>;
   /** Schedule the first alarm if none is pending. Idempotent. */
   ensureAlarm(): Promise<number | null>;
+  /** Read one file from the configured repository branch. */
+  readTextFile(path: string): Promise<RepositorySourceReadResult>;
 }
 
 export function createProjectCoordinator(
@@ -375,6 +377,23 @@ export function createProjectCoordinator(
   const sweepLeases = (): Promise<SweepResult> =>
     serialize(() => sweepExpiredLeases(db, clock, leaseSweepLimit));
 
+  const readTextFile = (path: string): Promise<RepositorySourceReadResult> =>
+    serialize(async () => {
+      if (git === null) {
+        return { outcome: "unavailable" };
+      }
+      const project = await repos.projects.getById(projectId);
+      if (project === null) {
+        return { outcome: "unavailable" };
+      }
+      const reader = git.readerFor?.(project.defaultBranch) ?? git.reader;
+      if (reader.readTextFile === undefined) {
+        return { outcome: "unavailable" };
+      }
+      const source = await reader.readTextFile(path);
+      return source === null ? { outcome: "not-found" } : { outcome: "found", source };
+    });
+
   const scheduleNext = async (): Promise<number | null> => {
     if (alarms === null) {
       return null;
@@ -449,6 +468,7 @@ export function createProjectCoordinator(
     markProjectionStale,
     alarm,
     ensureAlarm,
+    readTextFile,
   };
 }
 
