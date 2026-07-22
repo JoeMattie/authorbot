@@ -266,7 +266,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
 
     const source = el("p", "ab-work-source");
     source.append(
-      document.createTextNode("Source: approved suggestion · created "),
+      document.createTextNode("Source: accepted annotation · created "),
       document.createTextNode(formatCreatedAt(item.createdAt)),
       document.createTextNode(" · "),
       el("span", "ab-work-support", tallySummary(tallyOrEmpty(item.support))),

@@ -127,6 +127,7 @@ export {
   reopenSuggestionCommandSchema,
 } from "./overrides.js";
 export type {
+  AnnotationPromotionDenialReason,
   CancelWorkItemCommand,
   ForceCreateWorkItemCommand,
   RejectSuggestionCommand,

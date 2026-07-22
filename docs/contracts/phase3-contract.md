@@ -61,6 +61,10 @@ aggregates (§26.1: aggregate-only), notifications.
   with `override_reason`: reject an open suggestion, cancel a `ready` work
   item, reopen a rejected suggestion, force-create a work item bypassing the
   rule (same uniqueness key, `rule_version: 0`).
+
+  Phase 11 supersedes the force-create part only: promotion now accepts any
+  open comment or suggestion and requires no reason. Reject, reopen, and cancel
+  retain this Phase 3 reason requirement.
 - Git artifacts via the Phase 2 outbox: `.authorbot/decisions/<id>.yml`
   (aggregate metrics only - no per-voter data, §26.1) and
   `.authorbot/work-items/<id>.md` per design §13: frontmatter per Phase 0
@@ -105,8 +109,9 @@ aggregates (§26.1: aggregate-only), notifications.
 3. Sticky semantics: crossing then dropping below threshold →
    `support_changed` set, work item still `ready`; support returning clears
    the flag; events emitted for each.
-4. Overrides: all four, maintainer-only, reason-required, audited; cancel
-   before integration works; force-create respects the uniqueness key.
+4. Overrides: all four, maintainer-only and audited; cancel before integration
+   works; force-create respects the uniqueness key. Phase 11 makes only
+   force-create reason-optional.
 5. Rebuild: fresh DB + projection rebuild restores decisions and work items
    from `.authorbot/` with statuses intact.
 6. SSE: a client receives vote/decision/work-item events live, resumes from

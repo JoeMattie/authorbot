@@ -474,10 +474,10 @@ and `human_maintainer_approvals`. Rules are declarative data - no code from the
 book repository is ever executed.
 
 A solo author can set thresholds to 1 and use the machinery purely for
-tracking, or skip voting entirely: **Promote to work** on any open suggestion
-creates a work item regardless of the tally, recording a reason alongside the
-tally you overrode. The inverse - rejecting a suggestion that did cross - works
-the same way. Thresholds only start mattering when other people arrive.
+tracking, or skip voting entirely: **Promote to work** on any open comment or
+suggestion creates a work item immediately, with no reason or confirmation
+step. Rejecting a suggestion remains separate and requires a recorded reason.
+Thresholds only start mattering when other people arrive.
 
 ---
 

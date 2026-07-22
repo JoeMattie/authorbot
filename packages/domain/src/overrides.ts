@@ -12,9 +12,10 @@ import { transitionWorkItem } from "./work-item-state.js";
 
 /**
  * Maintainer overrides (Phase 3 contract section 4; design section 11.2).
- * All four are maintainer-only, require a recorded `reason`, and are recorded
- * as decisions with `override_reason`. Force-create bypasses the rule but
- * respects the same uniqueness key `(source_annotation_id, action_type,
+ * Reject, reopen, and cancel require a recorded `reason`. Phase 11 makes
+ * promotion a one-click action for either annotation kind, so force-create
+ * accepts a legacy reason but does not require one. It still bypasses the rule
+ * and respects the same uniqueness key `(source_annotation_id, action_type,
  * rule_version)` with `rule_version: 0`.
  */
 
@@ -66,13 +67,17 @@ export type ReopenSuggestionCommand = z.infer<typeof reopenSuggestionCommandSche
  */
 export const forceCreateWorkItemCommandSchema = z.strictObject({
   annotationId: uuidv7Schema,
-  reason: overrideReasonSchema,
+  reason: overrideReasonSchema.optional(),
 });
 export type ForceCreateWorkItemCommand = z.infer<typeof forceCreateWorkItemCommandSchema>;
 
 export type SuggestionOverrideDenialReason =
   | "not-maintainer"
   | "not-a-suggestion"
+  | "illegal-transition";
+
+export type AnnotationPromotionDenialReason =
+  | "not-maintainer"
   | "illegal-transition";
 
 function requireMaintainer(
@@ -147,7 +152,7 @@ export function authorizeCancelWorkItem(input: {
 }
 
 /**
- * Force-create a work item for an open suggestion, bypassing the rule. The
+ * Promote any open annotation to a work item, bypassing the rule. The
  * annotation must still be able to make the `open -> work_item_created`
  * transition; uniqueness (one item per annotation/action/rule-version) is the
  * DB constraint's job.
@@ -156,15 +161,13 @@ export function authorizeForceCreateWorkItem(input: {
   actorRole: Role;
   annotationKind: AnnotationKind;
   annotationStatus: AnnotationStatus;
-}): Decision<SuggestionOverrideDenialReason> {
+}): Decision<AnnotationPromotionDenialReason> {
   const maintainer = requireMaintainer(input.actorRole);
   if (!maintainer.allowed) return maintainer;
-  const suggestion = requireSuggestion(input.annotationKind);
-  if (!suggestion.allowed) return suggestion;
   if (!canTransitionAnnotation(input.annotationStatus, "work_item_created")) {
     return denied(
       "illegal-transition",
-      `a suggestion with status "${input.annotationStatus}" cannot receive a work item (only "open")`,
+      `an annotation with status "${input.annotationStatus}" cannot receive a work item (only "open")`,
     );
   }
   return ALLOWED;

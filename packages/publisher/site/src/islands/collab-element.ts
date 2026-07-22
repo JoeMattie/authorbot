@@ -145,6 +145,8 @@ export class AuthorbotCollab extends HTMLElement {
   private gutter!: HTMLElement;
   private railHeader!: HTMLElement;
   private railCount!: HTMLElement;
+  private previousNoteBtn!: HTMLButtonElement;
+  private nextNoteBtn!: HTMLButtonElement;
   private drawer!: HTMLElement;
   private drawerPanel!: HTMLElement;
   private drawerToggle!: HTMLButtonElement;
@@ -239,8 +241,22 @@ export class AuthorbotCollab extends HTMLElement {
 
     this.railHeader = el("header", "ab-rail-head");
     this.railHeader.append(el("span", "ab-rail-eyebrow", "Notes on this chapter"));
-    this.railCount = el("span", "ab-rail-count", "0");
-    this.railHeader.append(this.railCount);
+    const noteNav = el("nav", "ab-note-nav");
+    noteNav.setAttribute("aria-label", "Navigate chapter notes");
+    this.previousNoteBtn = el("button", "ab-note-nav-btn", "‹");
+    this.previousNoteBtn.type = "button";
+    this.previousNoteBtn.setAttribute("aria-label", "Previous note");
+    this.previousNoteBtn.title = "Previous note";
+    this.previousNoteBtn.addEventListener("click", () => this.navigateAnnotation(-1));
+    this.railCount = el("span", "ab-rail-count", "0 / 0");
+    this.railCount.setAttribute("aria-live", "polite");
+    this.nextNoteBtn = el("button", "ab-note-nav-btn", "›");
+    this.nextNoteBtn.type = "button";
+    this.nextNoteBtn.setAttribute("aria-label", "Next note");
+    this.nextNoteBtn.title = "Next note";
+    this.nextNoteBtn.addEventListener("click", () => this.navigateAnnotation(1));
+    noteNav.append(this.previousNoteBtn, this.railCount, this.nextNoteBtn);
+    this.railHeader.append(noteNav);
 
     this.gutter = el("aside", "ab-gutter");
     this.gutter.setAttribute("aria-label", "Annotations");
@@ -397,10 +413,10 @@ export class AuthorbotCollab extends HTMLElement {
 
   private updateDrawer(): void {
     const count = this.visibleAnnotations().length;
-    this.railCount.textContent = String(count);
     this.drawerToggle.textContent = `Notes on this chapter (${count})`;
     this.drawerToggle.setAttribute("aria-expanded", String(this.drawerOpen));
     this.drawerPanel.hidden = !this.drawerOpen;
+    this.updateNoteNavigation();
   }
 
   // ---- data ---------------------------------------------------------------
@@ -529,20 +545,20 @@ export class AuthorbotCollab extends HTMLElement {
   /**
    * Run a force-promote / reject. Resolves to the message the control should
    * show in its alert node, or `null` on success. A 403/409 problem detail is
-   * surfaced VERBATIM - "a work item already exists for this suggestion" says
+   * surfaced VERBATIM - "a work item already exists for this annotation" says
    * exactly what happened, and inventing copy for it would be a lie.
    */
   private async runOverride(
     annotationId: string,
     action: OverrideAction,
-    reason: string,
+    reason?: string,
   ): Promise<string | null> {
     const control = this.overrideControls.get(annotationId);
     control?.setBusy(true);
     const result =
       action === "promote"
-        ? await this.api.promoteToWork(annotationId, reason)
-        : await this.api.rejectSuggestion(annotationId, reason);
+        ? await this.api.promoteToWork(annotationId)
+        : await this.api.rejectSuggestion(annotationId, reason ?? "");
     control?.setBusy(false);
     if (!result.ok) {
       return result.status === 0 || result.status === 401
@@ -550,6 +566,22 @@ export class AuthorbotCollab extends HTMLElement {
         : result.message;
     }
     this.overrideDrafts.delete(annotationId);
+    if (action === "promote") {
+      const annotation = this.annotations.find((entry) => entry.id === annotationId);
+      if (annotation !== undefined) {
+        annotation.status = result.value.status;
+        annotation.decision = {
+          id: result.value.decisionId,
+          actionType: "create_work_item",
+          result: "create_work_item",
+          supportChanged: false,
+          workItemId: result.value.workItemId ?? null,
+        };
+      }
+      this.openReplyFor = null;
+      this.replyParent = null;
+      this.renderAll();
+    }
     this.announce(
       action === "promote"
         ? "Promoted to work. A work item was created."
@@ -638,6 +670,14 @@ export class AuthorbotCollab extends HTMLElement {
     return this.me !== null && this.me.scopes.includes("votes:write");
   }
 
+  private canPromoteToWork(): boolean {
+    return isMaintainer(this.me) && this.me !== null && this.me.scopes.includes("work:claim");
+  }
+
+  private canRejectSuggestion(): boolean {
+    return isMaintainer(this.me) && this.me !== null && this.me.scopes.includes("annotations:write");
+  }
+
   /** Human copy for 401/403 write failures instead of raw problem details. */
   private friendlyWriteError(status: number, message: string): string {
     if (status === 401) {
@@ -698,7 +738,38 @@ export class AuthorbotCollab extends HTMLElement {
     if (moveFocus) {
       card?.focus();
     }
+    this.updateNoteNavigation();
     this.layout();
+  }
+
+  /** Move through the deterministic rail order and reveal the prose target. */
+  private navigateAnnotation(direction: -1 | 1): void {
+    const visible = this.visibleAnnotations();
+    if (visible.length === 0) return;
+    const current = visible.findIndex((annotation) => annotation.id === this.activeAnnotationId);
+    const origin = current === -1 ? (direction === 1 ? -1 : visible.length) : current;
+    const index = Math.min(Math.max(origin + direction, 0), visible.length - 1);
+    const annotation = visible[index];
+    if (annotation === undefined || index === current) return;
+
+    if (!this.isDesktop) {
+      this.drawerOpen = true;
+      this.updateDrawer();
+    }
+    this.activateAnnotation(annotation.id);
+    const block = this.blockFor(annotation);
+    block?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    this.cardEls.get(annotation.id)?.focus({ preventScroll: block !== null });
+    this.announce(`Note ${index + 1} of ${visible.length}.`);
+  }
+
+  private updateNoteNavigation(): void {
+    const visible = this.visibleAnnotations();
+    const index = visible.findIndex((annotation) => annotation.id === this.activeAnnotationId);
+    const position = index === -1 ? 0 : index + 1;
+    this.railCount.textContent = `${position} / ${visible.length}`;
+    this.previousNoteBtn.disabled = index <= 0;
+    this.nextNoteBtn.disabled = visible.length === 0 || index >= visible.length - 1;
   }
 
   private renderRangeHighlights(): void {
@@ -775,8 +846,7 @@ export class AuthorbotCollab extends HTMLElement {
     const order = new Map(this.blocks.map((block, index) => [block.id.slice(2), index]));
     return this.annotations
       .filter((annotation) => {
-        // `work_item_created` stays visible so the suggestion keeps its
-        // "Queued as work item" badge and live tally (Phase 3 contract §6).
+        // `work_item_created` stays visible as the compact accepted diff/note.
         if (
           annotation.status !== "open" &&
           annotation.status !== "pending_git" &&
@@ -1344,11 +1414,13 @@ export class AuthorbotCollab extends HTMLElement {
 
   private buildCard(annotation: Annotation): HTMLElement {
     const status = this.statusLabel(annotation);
+    const promoted = annotation.status === "work_item_created";
     const author = this.authorName(annotation.authorActorId);
     const quote = annotation.target?.textQuote?.exact;
     const card = el("section", "ab-card ab-card-shell");
     card.tabIndex = -1;
     card.classList.toggle("ab-active", annotation.id === this.activeAnnotationId);
+    card.classList.toggle("ab-promoted", promoted);
     const labelParts = [
       annotation.kind === "suggestion" ? "Suggestion" : "Comment",
       `by ${author}`,
@@ -1357,7 +1429,7 @@ export class AuthorbotCollab extends HTMLElement {
         : annotation.target !== null
           ? "on this block" // block-scoped: a concrete anchor, not the chapter
           : "on this chapter",
-      `(${status.label})`,
+      `(${promoted ? "Accepted" : status.label})`,
     ];
     card.setAttribute("aria-label", labelParts.join(" "));
 
@@ -1390,8 +1462,12 @@ export class AuthorbotCollab extends HTMLElement {
       el("span", `ab-chip ab-kind-${annotation.kind}`, annotation.kind),
       el("span", "ab-author", author),
       el("time", "ab-card-date", this.formattedDate(annotation.createdAt)),
-      el("span", `ab-chip ab-status-${status.label} ab-card-status`, status.label),
     );
+    if (promoted) {
+      header.append(el("span", "ab-chip ab-accepted-badge", "Accepted"));
+    } else {
+      header.append(el("span", `ab-chip ab-status-${status.label} ab-card-status`, status.label));
+    }
     card.append(header);
 
     card.addEventListener("click", (event) => {
@@ -1405,10 +1481,12 @@ export class AuthorbotCollab extends HTMLElement {
       block?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
     });
 
-    if (quote !== undefined) {
+    if (quote !== undefined && !(promoted && annotation.kind === "suggestion")) {
       card.append(el("blockquote", "ab-quote", truncate(quote, 120)));
     }
-    card.append(el("p", "ab-body", annotation.body));
+    if (!(promoted && annotation.kind === "suggestion" && quote !== undefined)) {
+      card.append(el("p", "ab-body", annotation.body));
+    }
     if (annotation.kind === "suggestion" && quote !== undefined) {
       const diff = el("div", "ab-suggestion-diff");
       diff.setAttribute("aria-label", "Suggested edit");
@@ -1420,6 +1498,13 @@ export class AuthorbotCollab extends HTMLElement {
     }
     if (status.hint !== null) {
       card.append(el("p", "ab-hint", status.hint));
+    }
+
+    // Promotion settles the feedback card. Keep only the accepted badge and
+    // its compact diff/note context; governance and conversation controls
+    // belong to the generated Work item now.
+    if (promoted) {
+      return card;
     }
 
     // Suggestions carry the vote control + live tally + decision badge
@@ -1435,23 +1520,28 @@ export class AuthorbotCollab extends HTMLElement {
       this.voteControls.set(annotation.id, control);
       card.append(control.root);
 
-      // Phase 6 contract §3.6: the maintainer overrides, offered only to a
-      // maintainer and only while the suggestion is open and not mid-commit.
-      if (
-        isMaintainer(this.me) &&
-        canOverride(annotation) &&
-        !this.annotationSync.has(annotation.id)
-      ) {
-        const draft = this.overrideDrafts.get(annotation.id) ?? { action: null, reason: "" };
-        const override = new OverrideControl({
-          draft,
-          onDraftChange: (next) => this.overrideDrafts.set(annotation.id, next),
-          onSubmit: (action, reason) => this.runOverride(annotation.id, action, reason),
-        });
-        override.update(annotation);
-        this.overrideControls.set(annotation.id, override);
-        card.append(override.root);
-      }
+    }
+
+    // Phase 11: a maintainer can promote either an open comment or suggestion
+    // in one click. Suggestion rejection remains a separate scoped action.
+    const canPromote = this.canPromoteToWork();
+    const canReject = annotation.kind === "suggestion" && this.canRejectSuggestion();
+    if (
+      (canPromote || canReject) &&
+      canOverride(annotation) &&
+      !this.annotationSync.has(annotation.id)
+    ) {
+      const draft = this.overrideDrafts.get(annotation.id) ?? { action: null, reason: "" };
+      const override = new OverrideControl({
+        draft,
+        canPromote,
+        canReject,
+        onDraftChange: (next) => this.overrideDrafts.set(annotation.id, next),
+        onSubmit: (action, reason) => this.runOverride(annotation.id, action, reason),
+      });
+      override.update(annotation);
+      this.overrideControls.set(annotation.id, override);
+      card.append(override.root);
     }
 
     const replies = this.repliesByAnnotation.get(annotation.id) ?? [];

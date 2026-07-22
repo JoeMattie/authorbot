@@ -422,7 +422,7 @@ export interface SettingsSaved {
 // ---- Phase 3 maintainer overrides ------------------------------------------
 
 /**
- * The 200/201 body of a suggestion override. `workItemId` is present only for
+ * The 200/201 body of an annotation override. `workItemId` is present only for
  * force-create; reject answers with the transitioned status alone.
  */
 export interface OverrideResult {
@@ -937,15 +937,15 @@ export class CollabApi {
   // ---- Phase 3 maintainer overrides, surfaced by Phase 6 §3.6 --------------
 
   /**
-   * Force-create a work item from a suggestion regardless of the tally. The
-   * reason is required by the API and is recorded on the decision, which is
-   * what makes an override auditable rather than silent.
+   * Promote a comment or suggestion to Work regardless of the tally. Phase 11
+   * sends `{}` for the one-click UI; `reason` remains optional for older
+   * callers whose rationale should continue to be retained.
    */
-  async promoteToWork(annotationId: string, reason: string): Promise<ApiResult<OverrideResult>> {
+  async promoteToWork(annotationId: string, reason?: string): Promise<ApiResult<OverrideResult>> {
     return this.jsonResult<OverrideResult>(
       this.post(
         this.projectUrl(`/annotations/${encodeURIComponent(annotationId)}/force-create-work-item`),
-        { reason },
+        reason === undefined ? {} : { reason },
       ),
       // 201: force-create makes a work item, so it answers "created" - unlike
       // reject, which only transitions the suggestion and answers 200.

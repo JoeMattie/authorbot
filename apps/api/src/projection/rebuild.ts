@@ -141,6 +141,17 @@ export async function rebuildProjection(
   const keptAnnotationIds = new Set(keptAnnotations.map((a) => a.record.id));
   const keptReplies = snapshot.replies.filter((r) => keptAnnotationIds.has(r.record.annotation_id));
   const keptReplyIds = new Set(keptReplies.map((r) => r.record.id));
+  const snapshotDecisions = snapshot.decisions ?? [];
+  // Releases before 0.1.32 committed the decision and work item but could
+  // leave the source annotation artifact at `open`. Repair that legacy split
+  // brain during projection: an open annotation with a durable
+  // create_work_item decision is already Work. Never overwrite a later
+  // terminal artifact status such as accepted, rejected, or withdrawn.
+  const workItemCreatedAnnotationIds = new Set(
+    snapshotDecisions
+      .filter(({ parsed }) => deriveDecisionActionType(parsed) === "create_work_item")
+      .map(({ parsed }) => parsed.artifact.source_annotation_id),
+  );
 
   // Observe the existing projection (ids + statuses only). Rows created
   // AFTER this read are always operational (`pending_git`) and are only ever
@@ -274,7 +285,10 @@ export async function rebuildProjection(
         target: record.scope === "chapter" ? null : record.target,
         authorActorId: authorId,
         body,
-        status: record.status,
+        status:
+          record.status === "open" && workItemCreatedAnnotationIds.has(record.id)
+            ? "work_item_created"
+            : record.status,
         gitOperationId: null,
         supersededBy: null,
         createdAt: record.created_at,
@@ -382,8 +396,6 @@ export async function rebuildProjection(
     (await repos.leases.listActiveWorkItemIds(project.id, now)) ?? [],
   );
   const snapshotWorkItems = snapshot.workItems ?? [];
-  const snapshotDecisions = snapshot.decisions ?? [];
-
   // The work item's `target` is a snapshot of the source annotation selector
   // (contract §4); the artifact carries only the quoted text, so reconstruct
   // the full selector from the restored annotation (null for chapter scope or

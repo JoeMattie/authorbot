@@ -1423,6 +1423,35 @@ main.ab-enabled {
   margin-bottom: 12px;
 }
 
+.ab-note-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ab-note-nav-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 7px;
+  background: var(--surface-card, var(--bg));
+  color: var(--text-body, var(--fg));
+  font: 700 19px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.ab-note-nav-btn:hover:not(:disabled),
+.ab-note-nav-btn:focus-visible {
+  border-color: var(--blue-500, var(--link));
+  outline: 0;
+}
+
+.ab-note-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .ab-rail-eyebrow,
 .ab-rail-count,
 .ab-card-date,
@@ -1436,7 +1465,7 @@ main.ab-enabled {
 }
 
 .ab-rail-count {
-  min-width: 24px;
+  min-width: 48px;
   padding: 3px 7px;
   border-radius: 999px;
   background: var(--surface-selected, var(--surface));
@@ -1573,6 +1602,54 @@ main.ab-enabled {
 .ab-diff-replacement {
   color: var(--green-400, #62c889);
   text-decoration: none;
+}
+
+/* Accepted into Work is a settled rail state. It is deliberately distinct
+   from the later prose-level `accepted` status: the card remains available as
+   context, but every governance/conversation control is gone. */
+.ab-card.ab-promoted,
+.ab-gutter .ab-card.ab-promoted,
+.ab-drawer-panel .ab-card.ab-promoted {
+  border-color: var(--green-400, #62c889);
+  background: color-mix(
+    in srgb,
+    var(--green-400, #62c889) 16%,
+    var(--surface-card, var(--bg))
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--green-400, #62c889) 20%, transparent);
+}
+
+.ab-card.ab-promoted:focus-visible,
+.ab-card.ab-promoted.ab-active {
+  border-color: var(--green-400, #62c889);
+  outline: 2px solid var(--green-400, #62c889);
+  outline-offset: 2px;
+}
+
+.ab-accepted-badge {
+  margin-left: auto;
+  background: var(--green-400, #62c889);
+  color: var(--gray-950, #101812);
+}
+
+.ab-card.ab-promoted .ab-suggestion-diff {
+  border-color: color-mix(in srgb, var(--green-400, #62c889) 48%, transparent);
+  background: color-mix(in srgb, var(--green-400, #62c889) 8%, transparent);
+}
+
+.ab-card.ab-promoted:not(.ab-active) > .ab-body {
+  display: block;
+}
+
+.ab-card.ab-promoted:not(.ab-active) > .ab-suggestion-diff {
+  display: grid;
+}
+
+@media (pointer: coarse) {
+  .ab-note-nav-btn {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .ab-inline-highlight {

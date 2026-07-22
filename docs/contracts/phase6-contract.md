@@ -234,10 +234,10 @@ every change, and that is their call to make.
 **Force-promote.** Phase 3 already implements a maintainer override that
 creates a work item regardless of the tally (recorded as a decision with
 `rule_version: 0`, subject to the same one-work-item uniqueness). This phase
-surfaces it: a "Promote to work" action on any open suggestion, requiring a
-reason, shown alongside the current tally so the author sees what they are
-overriding. The inverse - rejecting a suggestion that did cross the threshold
-- is the existing reject override and is surfaced the same way.
+originally surfaced it as a reason-required action on open suggestions. Phase
+11 supersedes that interaction: "Promote to work" is now a single click on any
+open comment or suggestion, with no reason or confirmation. Rejecting a
+suggestion remains reason-required.
 
 For a solo author the practical effect is that voting is optional: they
 promote what they want to work on, and the thresholds only start mattering
@@ -386,8 +386,9 @@ the repository, this replaces the separate OAuth App. Requirements:
 10. No CORS header is emitted under any configuration; a book deployed under a
    base path works end to end (site, API, sign-in, and islands).
 11. A maintainer changes the book's title, license, display options, and
-    governance thresholds entirely in the browser, and can promote or reject a
-    suggestion against its tally with a recorded reason; a suggestion reaching
+    governance thresholds entirely in the browser, and can promote a comment
+    or suggestion in one click or reject a suggestion with a recorded reason;
+    a suggestion reaching
     the numeric threshold without a human maintainer's approval does **not**
     become work under the default rule; each lands as a validated, attributed
     commit to `book.yml`, and guarded fields require confirmation while

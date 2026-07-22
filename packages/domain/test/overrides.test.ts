@@ -49,11 +49,10 @@ describe("overrideReasonSchema (contract section 4: reason required)", () => {
   });
 });
 
-describe("override command schemas (all four require a reason)", () => {
+describe("override command schemas", () => {
   const annotationCommands = {
     reject: rejectSuggestionCommandSchema,
     reopen: reopenSuggestionCommandSchema,
-    forceCreate: forceCreateWorkItemCommandSchema,
   } as const;
 
   for (const [name, schema] of Object.entries(annotationCommands)) {
@@ -75,6 +74,21 @@ describe("override command schemas (all four require a reason)", () => {
       );
     });
   }
+
+  it("force-create accepts a reasonless promotion and an optional legacy reason", () => {
+    expect(forceCreateWorkItemCommandSchema.parse({ annotationId: ID })).toEqual({
+      annotationId: ID,
+    });
+    expect(
+      forceCreateWorkItemCommandSchema.parse({ annotationId: ID, reason: "editorial call" }),
+    ).toEqual({ annotationId: ID, reason: "editorial call" });
+    expect(
+      forceCreateWorkItemCommandSchema.safeParse({ annotationId: ID, reason: "no" }).success,
+    ).toBe(false);
+    expect(
+      forceCreateWorkItemCommandSchema.safeParse({ annotationId: ID, force: true }).success,
+    ).toBe(false);
+  });
 
   it("cancel: keys on workItemId and requires the reason", () => {
     expect(cancelWorkItemCommandSchema.parse({ workItemId: ID, reason: "stale" }).workItemId).toBe(
@@ -239,14 +253,14 @@ describe("authorizeForceCreateWorkItem", () => {
     }
   });
 
-  it("denies comments", () => {
+  it("allows a maintainer force-creating from an open comment", () => {
     expect(
       authorizeForceCreateWorkItem({
         actorRole: "maintainer",
         annotationKind: "comment",
         annotationStatus: "open",
-      }),
-    ).toMatchObject({ allowed: false, reason: "not-a-suggestion" });
+      }).allowed,
+    ).toBe(true);
   });
 
   it("denies every non-open status (incl. work_item_created: uniqueness, not re-force)", () => {
