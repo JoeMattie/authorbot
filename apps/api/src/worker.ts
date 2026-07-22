@@ -17,7 +17,11 @@
 import { wrapD1Database, type D1DatabaseLike } from "@authorbot/database";
 import { createApi, type AuthorbotApi } from "./app.js";
 import { coordinatorAlarmMsFromEnv, gitIntegrationStatus } from "./coordinator.js";
-import { callCoordinator, type DurableObjectNamespaceLike } from "./coordinator-do.js";
+import {
+  callCoordinator,
+  callCoordinatorReadTextFile,
+  type DurableObjectNamespaceLike,
+} from "./coordinator-do.js";
 import type { AppConfig, AppDeps, MirrorMode } from "./deps.js";
 import { createDevIdentityProvider, type IdentityProvider } from "./identity/provider.js";
 import { createGitHubIdentityProvider } from "./identity/github.js";
@@ -265,6 +269,10 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
     };
   }
   if (coordinator !== undefined) {
+    deps.repositorySourceReader = {
+      readTextFile: async (projectId, path) =>
+        callCoordinatorReadTextFile(coordinator, projectId, path),
+    };
     // Webhook-driven reconciliation (contract §6) - wired whenever the
     // binding exists, independently of MIRROR_MODE, because a `push` must be
     // reconciled even on a deployment that still queues its own writes.

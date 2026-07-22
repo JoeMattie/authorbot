@@ -19,8 +19,19 @@ import {
 } from "@authorbot/markdown";
 import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { chapterValidationFindings, deriveSlug } from "../src/chapter-composer.js";
-import { CHAPTER_ID, devLogin, mintToken } from "./helpers.js";
-import { makePhase4Harness, type Phase4Harness } from "./phase4-helpers.js";
+import {
+  CHAPTER_ID,
+  FakeReader,
+  devLogin,
+  fixtureSnapshot,
+  makeHarness,
+  mintToken,
+} from "./helpers.js";
+import {
+  CHAPTER_SOURCE,
+  makePhase4Harness,
+  type Phase4Harness,
+} from "./phase4-helpers.js";
 import { uuidv7 } from "../src/ids.js";
 import { PROSE_OUTBOX_KINDS } from "../src/coordinator.js";
 import { createDrainRunner } from "../src/drain.js";
@@ -698,6 +709,42 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
     expect(String(body["body"])).not.toContain("---");
     expect(body["title"]).toBe("The Ridge");
     expect(body["status"]).toBe("draft");
+  });
+
+  it("uses the coordinator source reader when the Worker has no local Git reader", async () => {
+    const projectionReader = new FakeReader(fixtureSnapshot());
+    // The projected chapter is already in D1, while the request isolate has
+    // no direct GitHub `readTextFile` capability, matching production.
+    Object.defineProperty(projectionReader, "readTextFile", { value: undefined });
+    const calls: Array<{ projectId: string; path: string }> = [];
+    const remote = await makeHarness({
+      reader: projectionReader,
+      repositorySourceReader: {
+        readTextFile: async (projectId, path) => {
+          calls.push({ projectId, path });
+          return { outcome: "found", source: CHAPTER_SOURCE };
+        },
+      },
+    });
+    try {
+      const cookie = await devLogin(remote, "remote-editor", "editor");
+      const response = await remote.app.request(
+        `/v1/projects/${remote.projectId}/chapters/${CHAPTER_ID}/source`,
+        { headers: headers(cookie) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        chapterId: CHAPTER_ID,
+        title: "Baseline",
+        revision: 3,
+      });
+      expect(calls).toEqual([
+        { projectId: remote.projectId, path: "chapters/001-baseline.md" },
+      ]);
+    } finally {
+      remote.close();
+    }
   });
 
   it("returns the revision a revise must send back as baseRevision", async () => {
