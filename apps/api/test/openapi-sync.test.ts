@@ -28,6 +28,7 @@ const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
 interface Operation {
   operationId?: string;
+  description?: string;
   "x-implementation-status"?: string;
   responses?: Record<
     string,
@@ -225,6 +226,18 @@ describe("openapi.yaml is synced with the router", () => {
     expect(
       spec.components.schemas["CreateChapterReplacementProposal"]?.required,
     ).toEqual(expect.arrayContaining(["baseRevision", "baseContentHash"]));
+  });
+
+  it("documents canonical and legacy chapter authoring authorization accurately", () => {
+    const submission = spec.paths["/v1/projects/{projectId}/chapter-submissions"]?.post;
+    expect(submission?.description).toContain("canonical `chapters:write` capability");
+    expect(submission?.description).toContain("legacy `submissions:write` scope");
+    expect(submission?.description).toContain("editor or maintainer role");
+
+    const source = spec.paths["/v1/projects/{projectId}/chapters/{chapterId}/source"]?.get;
+    expect(source?.description).toContain("Canonical credentials require `chapters:read`");
+    expect(source?.description).toContain("legacy credentials use the historical");
+    expect(source?.description).toContain("not limited to editors and maintainers");
   });
 
   it("documents the exact canonical editorial capability vocabulary", () => {

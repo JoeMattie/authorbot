@@ -971,7 +971,8 @@ paths:
         title and Markdown prose; the server generates the chapter id, the
         block marker for every top-level block, the slug, the order (last
         existing + 10), `status: draft`, and the revision. Requires the
-        `submissions:write` scope AND the editor or maintainer role. Publishing
+        canonical `chapters:write` capability, or the legacy
+        `submissions:write` scope, AND the editor or maintainer role. Publishing
         is a separate action.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1017,8 +1018,11 @@ paths:
         The chapter's Markdown as an author wrote it: frontmatter removed and
         block markers stripped. Feeds the Phase 6 §3.5 composer, whose revise
         half requires a complete replacement body plus the current
-        `baseRevision` - send `revision` straight back as that value. Editor or
-        maintainer only, matching the write it feeds.
+        `baseRevision` and `baseContentHash` - send `revision` and `contentHash`
+        straight back as those values. Canonical credentials require
+        `chapters:read`; legacy credentials use the historical
+        `submissions:write` scope. This read is not limited to editors and
+        maintainers.
       responses:
         "200":
           description: The chapter's editable source.
