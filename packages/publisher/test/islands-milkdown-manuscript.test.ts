@@ -48,10 +48,16 @@ describe("Milkdown manuscript surface", () => {
     expect(root.textContent?.indexOf("Compose beside this beat.")).toBeLessThan(
       root.textContent?.indexOf("Review this beat.") ?? 0,
     );
+    const replacement = document.createElement("form");
+    replacement.textContent = "Replacement composer.";
+    first.notes.mountInlineNote(BLOCKS[0]!, replacement);
+    expect(root.querySelectorAll("form")).toHaveLength(1);
+    expect(root.textContent).not.toContain("Compose beside this beat.");
+    expect(root.textContent).toContain("Replacement composer.");
 
     const once = first.getMarkdown();
     expect(once).not.toContain("Review this beat.");
-    expect(once).not.toContain("Compose beside this beat.");
+    expect(once).not.toContain("Replacement composer.");
     await first.destroy();
 
     const secondRoot = document.createElement("div");

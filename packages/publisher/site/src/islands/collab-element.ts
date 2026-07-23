@@ -1671,6 +1671,7 @@ export class AuthorbotCollab extends HTMLElement {
 
   private renderComposer(): void {
     if (this.composerEl !== null) {
+      this.targetAdapter.closeComposer?.();
       this.composerEl.remove();
       this.composerEl = null;
     }

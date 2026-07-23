@@ -62,6 +62,7 @@ interface InlineWidget {
   key: string;
   blockId: string | null;
   node: HTMLElement;
+  composer: boolean;
 }
 
 interface NotesModel {
@@ -172,7 +173,9 @@ class DecorationsBridge {
       widget.node.contentEditable = "false";
       decorations.push(Decoration.widget(position, () => widget.node, {
         key: widget.key,
-        side: range === null ? -1 : 1,
+        side: widget.composer
+          ? (range === null ? -2 : 0)
+          : (range === null ? -1 : 1),
       }));
     }
     return DecorationSet.create(doc, decorations);
@@ -395,13 +398,22 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
   }
 
   mountInlineNote(blockId: string | null, note: HTMLElement): void {
+    const isForm = note.localName === "form";
+    if (isForm && this.bridge.model.widgets.some(({ composer }) => composer)) {
+      this.closeComposer();
+    }
+    const node = isForm ? document.createElement("div") : note;
+    if (isForm) {
+      node.className = "ab-milkdown-inline-composer";
+      node.append(note);
+    }
     const widget = {
       key: `authorbot-note-${++this.widgetSequence}`,
       blockId,
-      node: note,
+      node,
+      composer: isForm,
     };
-    if (note.localName === "form") this.bridge.model.widgets.unshift(widget);
-    else this.bridge.model.widgets.push(widget);
+    this.bridge.model.widgets.push(widget);
     this.bridge.refresh(this.view);
   }
 
@@ -437,6 +449,11 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
   }
 
   closeComposer(): void {
+    const widgets = this.bridge.model.widgets.filter(({ composer }) => !composer);
+    if (widgets.length !== this.bridge.model.widgets.length) {
+      this.bridge.model.widgets = widgets;
+      this.bridge.refresh(this.view);
+    }
     this.tooltip.close(this.view);
   }
 

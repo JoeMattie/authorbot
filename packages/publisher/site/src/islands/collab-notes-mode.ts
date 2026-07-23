@@ -70,7 +70,6 @@ export function createCollabNotesModeController(
     const attempt = ++activation;
     busy = true;
     deps.setBusy(true);
-    deps.setStatus("Loading the rich Notes view…");
     const editorReady = await deps.prepareEditor();
     if (!editorReady || !deps.current() || attempt !== activation) {
       busy = false;
