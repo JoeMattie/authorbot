@@ -1641,7 +1641,7 @@ a.story-outline-title:hover {
   }
 }
 
-/* Signed-in identity, shared by the full collaboration bundle and the tiny
+/* Signed-in identity, shared by the full collaboration bundle and the
    account-only story-page entry. */
 .site-header authorbot-account {
   display: block;

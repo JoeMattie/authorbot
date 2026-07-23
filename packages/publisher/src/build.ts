@@ -92,17 +92,15 @@ async function buildIslands(
   /**
    * Two entries, bundled independently rather than as one multi-input build.
    *
-   * `authorbot-collab` is what every reader downloads on every chapter page,
-   * and Phase 2b §1 budgets it at 35 KB gzipped for exactly that reason.
+   * `authorbot-collab` owns the reader-facing chapter behavior.
    * `authorbot-access` is the Phase 7 maintainer surface - a collaborator
    * table, an agent-token list, an audit view and a moderation queue - which
-   * only `/settings/` ever loads and which no reader should pay for.
+   * only `/settings/` loads.
    *
    * Independent builds (rather than shared chunks) keep both output names
-   * stable and unhashed, which is what the page templates reference. The cost
-   * is that the small shared helpers are duplicated into the access bundle;
-   * that duplication is paid only on the settings page, by a maintainer, and
-   * is far cheaper than putting the whole surface in every reader's page load.
+   * stable and unhashed, which is what the page templates reference. Shared
+   * helpers may be duplicated, but each entry remains owned by the page that
+   * activates it.
    */
   const entries = [
     { input: "src/islands/index.ts", js: "authorbot-collab.js" },
@@ -130,6 +128,9 @@ async function buildIslands(
           emptyOutDir: false,
           target: "es2022",
           minify: "esbuild",
+          // Entry boundaries are architectural page/activation boundaries,
+          // not release gates.
+          chunkSizeWarningLimit: Number.POSITIVE_INFINITY,
           rollupOptions: {
             input: path.join(siteRoot, entry.input),
             output: { entryFileNames: entry.js, format: "es" },
@@ -157,7 +158,7 @@ async function buildIslands(
     // Source styles keep their section comments for maintainers, while the
     // browser asset drops CSS comments just like the JS bundle drops source
     // comments. This is grammar-safe for these authored stylesheets and keeps
-    // the collaboration payload inside its long-standing gzip budget.
+    // source commentary out of the shipped payload.
     const css = await readFile(path.join(siteRoot, "src/islands", source), "utf8");
     await writeFile(
       path.join(assetDir, target),

@@ -211,22 +211,23 @@ try {
     "0010_phase11_capabilities_expand.sql",
     "0011_phase11_revision_proposals.sql",
     "0012_chapter_summaries.sql",
+    "0013_phase11_capabilities_backfill.sql",
   ];
   for (const name of required) {
     if (!migrations.includes(name)) {
       throw new Error(`installed @authorbot/api is missing migration ${name}`);
     }
   }
-  const beyondBoundary = migrations.find((name) => Number.parseInt(name.slice(0, 4), 10) > 12);
+  const beyondBoundary = migrations.find((name) => Number.parseInt(name.slice(0, 4), 10) > 13);
   if (beyondBoundary !== undefined) {
     throw new Error(
       `installed @authorbot/api unexpectedly contains ${beyondBoundary}; ` +
-        "v0.1.35 ends at migration 0012",
+        "v0.1.36 ends at migration 0013",
     );
   }
 
   console.log(`Migrations present: ${required.join(", ")}`);
-  console.log("Migration boundary: 0012.");
+  console.log("Migration boundary: 0013.");
   console.log("\nAPI tarball smoke passed. Nothing was published.");
 } finally {
   if (keep) {

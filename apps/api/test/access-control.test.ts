@@ -710,11 +710,41 @@ describe("approval-gated moderation (exit criterion 10)", () => {
     expect((await json(again)).code).toBe("moderation-already-reviewed");
   });
 
-  it("does not queue a maintainer's own annotations", async () => {
-    const response = await annotate({ Cookie: maintainer });
-    const body = await json(response);
-    expect(body.status).toBe("queued");
-    expect(await harness.repos.annotations.getById(body.annotationId)).not.toBeNull();
+  it("always treats a maintainer's chapter discussion as approved", async () => {
+    for (const policy of [
+      "open",
+      "approval-gated",
+      "collaborators-only",
+      "locked",
+    ] as const) {
+      await setPolicy(policy);
+      const response = await harness.app.request(
+        `/v1/projects/${harness.projectId}/chapters/${CHAPTER_ID}/annotations`,
+        jsonRequest(
+          "POST",
+          {
+            kind: "comment",
+            scope: "chapter",
+            chapterRevision: 3,
+            body: `Maintainer discussion under ${policy}.`,
+          },
+          { Cookie: maintainer },
+        ),
+      );
+      expect(response.status, policy).toBe(202);
+      const body = await json(response);
+      expect(body.status, policy).toBe("queued");
+      expect(body.annotationId, policy).toBeTruthy();
+      expect(body, policy).not.toHaveProperty("pendingId");
+
+      const annotation = await harness.repos.annotations.getById(body.annotationId);
+      expect(annotation, policy).toMatchObject({
+        kind: "comment",
+        scope: "chapter",
+        status: "pending_git",
+      });
+      expect(await harness.repos.pendingAnnotations.getById(body.annotationId), policy).toBeNull();
+    }
   });
 
   it("switching to a permissive mode does NOT retroactively approve the queue", async () => {

@@ -1,5 +1,13 @@
 /* Chapter-only history trigger and inline, diff-augmented time machine. */
 
+.chapter-page {
+  --ab-chapter-reading-measure: 700px;
+}
+
+.chapter-reading-column {
+  max-width: var(--ab-chapter-reading-measure);
+}
+
 authorbot-chapter-history {
   display: contents;
 }
@@ -43,6 +51,8 @@ authorbot-chapter-history {
 authorbot-chapter-history-panel {
   display: block;
   grid-column: 1 / -1;
+  justify-self: center;
+  width: min(100%, var(--ab-chapter-reading-measure));
   min-width: 0;
   outline: none;
 }
@@ -55,13 +65,12 @@ authorbot-chapter-history-panel[hidden] {
   position: relative;
   isolation: isolate;
   min-width: 0;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid color-mix(in srgb, var(--green-500, #35ab64) 38%, var(--border-default, #48423b));
   border-radius: 14px;
-  background:
-    radial-gradient(circle at 14% 30%, rgb(53 171 100 / 10%) 0 7%, transparent 28%),
-    radial-gradient(circle at 14% 30%, transparent 0 14%, rgb(53 171 100 / 5%) 14.5% 15%, transparent 15.5%),
-    var(--surface-card, #221f1b);
+  background: var(--surface-page, var(--bg, #1b1815));
+  color: var(--text-body, var(--fg, #c2bdb2));
+  font-family: var(--font-body, "Source Serif 4", Georgia, serif);
   box-shadow: 0 22px 70px rgb(0 0 0 / 22%);
 }
 
@@ -72,7 +81,7 @@ authorbot-chapter-history-panel[hidden] {
   justify-content: space-between;
   padding: 20px 22px 17px;
   border-bottom: 1px solid var(--border-subtle, #34302b);
-  background: linear-gradient(90deg, rgb(53 171 100 / 8%), transparent 45%);
+  background: var(--surface-raised, #282420);
 }
 
 .ab-history-eyebrow,
@@ -120,14 +129,14 @@ authorbot-chapter-history-panel[hidden] {
 
 .ab-history-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
 .ab-history-rail {
   min-width: 0;
   padding: 18px 0;
-  border-right: 1px solid var(--border-subtle, #34302b);
+  border-bottom: 1px solid var(--border-subtle, #34302b);
   background: rgb(0 0 0 / 8%);
 }
 
@@ -168,7 +177,7 @@ authorbot-chapter-history-panel[hidden] {
 
 .ab-history-list {
   position: relative;
-  max-height: min(66vh, 680px);
+  max-height: 42vh;
   margin: 0;
   padding: 0 10px 0 28px;
   overflow: auto;
@@ -360,7 +369,7 @@ authorbot-chapter-history-panel[hidden] {
   color: var(--text-body, #c2bdb2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 400 12px/1.6 var(--font-mono, monospace);
+  font: 400 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
 .ab-history-diff-heading {
@@ -402,7 +411,7 @@ authorbot-chapter-history-panel[hidden] {
   color: var(--text-body, #c2bdb2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 400 12px/1.55 var(--font-mono, monospace);
+  font: 400 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
 .ab-history-restore {
@@ -443,18 +452,34 @@ authorbot-chapter-history-panel[hidden] {
   outline-offset: 2px;
 }
 
-@media (max-width: 760px) {
+@media (min-width: 1436px) {
+  authorbot-chapter-history-panel {
+    width: min(
+      calc(var(--ab-chapter-reading-measure) + var(--ab-chapter-reading-measure)),
+      calc(100vw - 36px)
+    );
+  }
+
   .ab-history-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   }
 
   .ab-history-rail {
-    border-right: 0;
-    border-bottom: 1px solid var(--border-subtle, #34302b);
+    position: sticky;
+    top: 76px;
+    align-self: start;
+    max-height: calc(100vh - 92px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-right: 1px solid var(--border-subtle, #34302b);
+    border-bottom: 0;
+    scrollbar-gutter: stable;
   }
 
   .ab-history-list {
-    max-height: 42vh;
+    max-height: none;
+    overflow: visible;
+    scrollbar-gutter: auto;
   }
 }
 

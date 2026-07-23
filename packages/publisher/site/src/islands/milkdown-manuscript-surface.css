@@ -1,10 +1,37 @@
 .ab-manuscript-editor-root {
-  width: 100%;
+  width: min(100%, 64ch);
   min-height: 22rem;
-  border: 1px solid var(--border-default, var(--border));
-  border-radius: 12px;
-  background: var(--surface-card, var(--bg));
-  box-shadow: var(--shadow-md, 0 10px 28px rgba(0, 0, 0, 0.16));
+  color: var(--text-body, var(--fg));
+  background: transparent;
+  font: 19px/1.75 var(--font-body, "Source Serif 4", Georgia, "Iowan Old Style", serif);
+  text-wrap: pretty;
+}
+
+.ab-manuscript-editor-root .milkdown {
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--text-body, var(--fg));
+  --crepe-color-surface: var(--surface-card, var(--surface));
+  --crepe-color-surface-low: var(--surface-sunken, var(--bg));
+  --crepe-color-on-surface: var(--text-strong, var(--fg));
+  --crepe-color-on-surface-variant: var(--text-muted, var(--muted));
+  --crepe-color-outline: var(--border-strong, var(--border));
+  --crepe-color-primary: var(--text-link, var(--link));
+  --crepe-color-secondary: var(--surface-selected, var(--surface));
+  --crepe-color-on-secondary: var(--text-strong, var(--fg));
+  --crepe-color-inverse: var(--text-strong, var(--fg));
+  --crepe-color-on-inverse: var(--surface-page, var(--bg));
+  --crepe-color-inline-code: var(--text-body, var(--fg));
+  --crepe-color-error: var(--red-400, #f0736f);
+  --crepe-color-hover: var(--surface-raised, var(--surface));
+  --crepe-color-selected: var(--surface-selected, rgba(91, 116, 245, 0.16));
+  --crepe-color-inline-area: var(--surface-sunken, var(--bg));
+  --crepe-font-title: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  --crepe-font-default: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  --crepe-font-code: var(--font-mono, ui-monospace, monospace);
+
+  color: inherit;
+  background: transparent;
+  font: inherit;
 }
 
 .ab-manuscript-editor-root .milkdown,
@@ -16,9 +43,105 @@
 
 .ab-manuscript-editor-root .ProseMirror {
   min-height: 22rem;
-  padding: 2rem clamp(1.1rem, 5vw, 3rem);
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-wrap: inherit;
+}
+
+.ab-manuscript-editor-root .ProseMirror p {
+  margin: 0 0 1.35em;
+  padding: 0;
+  font: inherit;
+}
+
+.ab-manuscript-editor-root .ProseMirror h1,
+.ab-manuscript-editor-root .ProseMirror h2,
+.ab-manuscript-editor-root .ProseMirror h3,
+.ab-manuscript-editor-root .ProseMirror h4,
+.ab-manuscript-editor-root .ProseMirror h5,
+.ab-manuscript-editor-root .ProseMirror h6 {
+  margin: 1.5em 0 0.5em;
+  padding: 0;
+  color: var(--text-strong, var(--fg));
+  font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  font-weight: bold;
+  line-height: 1.15;
+}
+
+.ab-manuscript-editor-root .ProseMirror h1 {
+  font-size: 2em;
+}
+
+.ab-manuscript-editor-root .ProseMirror h2 {
+  font-size: 1.5em;
+}
+
+.ab-manuscript-editor-root .ProseMirror h3 {
+  font-size: 1.17em;
+}
+
+.ab-manuscript-editor-root .ProseMirror h4 {
+  font-size: 1em;
+}
+
+.ab-manuscript-editor-root .ProseMirror h5 {
+  font-size: 0.83em;
+}
+
+.ab-manuscript-editor-root .ProseMirror h6 {
+  font-size: 0.67em;
+}
+
+.ab-manuscript-editor-root .ProseMirror blockquote {
+  box-sizing: border-box;
+  margin: 1.5em 0;
+  padding: 0.2rem 0 0.2rem 1.1rem;
+  border-left: 3px solid var(--blue-500, var(--link));
+  color: var(--text-muted, var(--muted));
+  font-style: italic;
+}
+
+.ab-manuscript-editor-root .ProseMirror blockquote::before {
+  content: none;
+}
+
+.ab-manuscript-editor-root .ProseMirror pre {
+  overflow-x: auto;
+  padding: 16px 18px;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 7px;
   color: var(--text-body, var(--fg));
-  font: 400 18px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
+  background: var(--surface-sunken, var(--bg));
+  font: 12px/1.7 var(--font-mono, ui-monospace, monospace);
+}
+
+.ab-manuscript-editor-root .ProseMirror code,
+.ab-manuscript-editor-root .ProseMirror pre code {
+  display: inline;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.86em;
+  line-height: inherit;
+}
+
+.ab-manuscript-editor-root .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
+.ab-manuscript-editor-root .ProseMirror hr {
+  width: 8rem;
+  height: 0;
+  margin: 2rem auto;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--border-default, var(--border));
+  background: transparent;
 }
 
 .ab-manuscript-editor-root .ProseMirror:focus-visible {
@@ -48,10 +171,4 @@
   border-radius: 10px;
   background: var(--surface-raised, var(--surface));
   box-shadow: var(--shadow-md, 0 10px 28px rgba(0, 0, 0, 0.18));
-}
-
-@media (max-width: 639.9px) {
-  .ab-manuscript-editor-root .ProseMirror {
-    padding: 1.25rem 1rem;
-  }
 }

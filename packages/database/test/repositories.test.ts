@@ -47,13 +47,14 @@ describe("repositories", () => {
       ...overrides,
     });
 
-    // Existing callers omit both new fields. The repository deliberately
-    // writes that input as an unconverted legacy row.
+    // Existing callers may omit both new fields. Migration 0013 keeps the row
+    // legacy-authoritative but its persistent insert guard fills the exact
+    // canonical projection before the write returns.
     const legacy = token();
     await repos.agentTokens.insert(legacy);
     expect(await repos.agentTokens.getById(legacy.id)).toMatchObject({
       scopes: ["chapters:read", "work:read"],
-      capabilitiesV2: null,
+      capabilitiesV2: ["chapters:read", "work:read"],
       capabilityMode: "legacy",
     });
 

@@ -75,11 +75,13 @@ export async function createNodeDevApi(env: NodeJS.ProcessEnv = process.env): Pr
   const mirror =
     config.mirrorMode === "queue" ? null : createInlineMirror({ db, workTreePath: bookRepoPath });
 
+  const reader = new LocalFsBookRepoReader(bookRepoPath);
   const deps: AppDeps = {
     db,
     config,
     identityProvider,
-    reader: new LocalFsBookRepoReader(bookRepoPath),
+    reader,
+    repositoryHistoryReader: reader,
     ...(mirror !== null ? { onMutationCommitted: mirror.onMutationCommitted } : {}),
   };
   const api = createApi(deps);

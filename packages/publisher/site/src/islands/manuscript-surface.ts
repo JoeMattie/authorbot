@@ -1,6 +1,6 @@
 import type { ChapterNotesTargetAdapter } from "./chapter-notes-presentation.js";
 
-/** The two explicit interactions allowed to request the heavy editor chunk. */
+/** The two explicit interactions allowed to request the editor chunk. */
 export type ManuscriptActivation = "notes" | "edit";
 
 export interface ManuscriptSubmitRequest {

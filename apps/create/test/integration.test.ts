@@ -9,6 +9,7 @@
  */
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { TOOLCHAIN_VERSION } from "../src/scaffold/render.js";
 import { STAGE_NAMES, type StageName } from "../src/stages/names.js";
 import {
   FakeProcessRunner,
@@ -606,6 +607,25 @@ describe("upgrade delegates", () => {
     const code = await harness.run(["upgrade", "--dir", DIR, "--check"]);
     expect(code).not.toBe(0);
     expect(harness.out.all()).not.toMatch(/An upgrade is available/);
+  });
+
+  it("recovers an old CLI with the exact transient helper instead of dirtying the book", async () => {
+    const runner = happyRunner().on(["authorbot", "upgrade"], {
+      code: 2,
+      stdout: "",
+      stderr: 'authorbot: unknown command "upgrade"\n',
+    });
+    const harness = makeHarness({ directory: DIR, answers: HAPPY_ANSWERS, runner });
+    harness.fs.seed(`${DIR}/book.yml`, "schema: authorbot.book/v1\ntitle: T\nslug: t\n");
+
+    const code = await harness.run(["upgrade", "--dir", DIR]);
+    const output = said(harness);
+
+    expect(code).not.toBe(0);
+    expect(output).toContain(
+      `npx --yes @authorbot/cli@${TOOLCHAIN_VERSION} upgrade --to ${TOOLCHAIN_VERSION}`,
+    );
+    expect(output).not.toContain("npm install --save-dev");
   });
 });
 

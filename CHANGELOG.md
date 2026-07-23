@@ -9,6 +9,58 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.36
+
+- **Legacy agent-token rows now have a canonical capability projection.** D1
+  migration `0013_phase11_capabilities_backfill.sql` translates every
+  legacy-mode token after the v0.1.35 dual-writer release gate. Individual
+  books may safely skip straight from an older supported Worker. It leaves
+  `capability_mode` as `legacy`, keeps ordinary legacy scopes authoritative,
+  and does not change expiry or revocation state. Unknown and control-plane
+  scope names already stored are removed as an intentional authority reduction
+  and recorded in the audit trail; malformed legacy scope sets fail closed.
+  Historical mint replay bodies are updated to the corrected scopes without
+  rewriting the original audit event. A persistent database guard projects
+  safe old-Worker writes and rejects a later legacy write that still needs
+  scope sanitation, so a direct version skip or Worker rollback cannot reopen
+  a post-backfill gap or return a misleading success. The v0.1.36 Worker
+  sanitizes deprecated legacy mint requests before the write, so its response,
+  replay, mint audit, and stored row agree; the sanitation event preserves what
+  was removed.
+- **Chapter editing now feels like the published manuscript.** Milkdown uses
+  the reading view's measure, type, color, spacing, and background, and the
+  site's CSP permits its inlined font without widening network font access.
+  Note, suggestion, and reply entry stays hidden for the whole edit handoff;
+  an in-progress draft is restored losslessly when editing closes, including
+  after a failed write or editor teardown.
+- **Chapter history is a complete, responsive time machine.** The current
+  version stays on the reading page while the history rail starts with the
+  newest prior revision and loads the rest in the background. The pinned rail
+  has its own scroll, current and malformed cursor chains are bounded honestly,
+  and source events refresh without destroying the selected diff, keyboard
+  focus, or layout preference. Diffs use word-level matching for manuscript
+  paragraphs, omit line and hunk numbers, offer inline or side-by-side views
+  when space permits, and collapse to the normal reading measure on narrower
+  screens. Node local development now exposes the same contained, bounded Git
+  history reads as the deployed coordinator path.
+- **Approved chapter discussions no longer look like pending votes.** Once a
+  chapter-wide comment is visible, its approve/reject/abstain control is gone;
+  maintainer comments continue to bypass moderation under every comment
+  policy.
+- Frontend entry boundaries and lazy editor/diff loading remain, but compressed
+  byte ceilings are no longer release gates and Vite's chunk-size warning is
+  disabled. Bundle size is not a product requirement for this release.
+- The authorization migration in this release is the Phase 3B backfill only.
+  It includes no book-format migration and does not retire legacy
+  authorization semantics, remove the legacy compatibility endpoint, or
+  remove legacy storage. The compatibility guard remains until Phase 3C,
+  which is separately gated by its compatibility and rollback window.
+- Books already on 0.1.35 can run the ordinary `npx authorbot upgrade`. A book
+  on 0.1.34 or earlier needs one explicit
+  `npx --yes @authorbot/cli@0.1.36 upgrade --to 0.1.36`. After the resulting PR
+  is merged and the checkout is installed, ordinary `npx authorbot upgrade`
+  owns later handoffs automatically.
+
 ## 0.1.35
 
 - **Legacy agent-token requests now maintain the canonical projection.** The

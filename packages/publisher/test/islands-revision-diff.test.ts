@@ -86,10 +86,45 @@ describe("revision diff core", () => {
     expect(rendered).not.toMatch(/<img\b/i);
     expect(rendered).not.toMatch(/<script\b/i);
   });
+
+  it("uses Diff2Html word matching for granular highlights inside changed lines", () => {
+    const diff = [
+      "--- a/chapter.md",
+      "+++ b/chapter.md",
+      "@@ -1 +1 @@",
+      "-She would organise the old archive before sunrise.",
+      "+She would organize the new archive before sunrise.",
+      "",
+    ].join("\n");
+    const rendered = renderRevisionDiffHtml(diff, "line-by-line");
+    expect(rendered).toContain('<del class="d2h-change">organise</del>');
+    expect(rendered).toContain('<ins class="d2h-change">organize</ins>');
+    expect(rendered).toContain("<del>old</del>");
+    expect(rendered).toContain("<ins>new</ins>");
+  });
+
+  it("keeps word matching for prose lines beyond Diff2Html's 200-character default", () => {
+    const paragraph = (lead: string): string =>
+      `${lead} ${"archive corridor evidence remained carefully catalogued for the winter hearing. ".repeat(4)}`;
+    const diff = [
+      "--- a/chapter.md",
+      "+++ b/chapter.md",
+      "@@ -1,2 +1,2 @@",
+      `-${paragraph("Alpha")}organise the old archive before sunrise.`,
+      `-${paragraph("Beta")}measure the western annex before sunset.`,
+      `+${paragraph("Beta")}measure the eastern annex before sunset.`,
+      `+${paragraph("Alpha")}organize the new archive before sunrise.`,
+      "",
+    ].join("\n");
+
+    const rendered = renderRevisionDiffHtml(diff, "line-by-line");
+    expect(rendered).toContain('<del class="d2h-change">western</del>');
+    expect(rendered).toContain('<ins class="d2h-change">eastern</ins>');
+  });
 });
 
 describe("revision diff progressive renderer", () => {
-  it("shows a labelled, exact plain-text fallback before the lazy core resolves", () => {
+  it("keeps exact snapshots available to assistive technology while enhancement is pending", () => {
     let resolveCore!: (core: { renderRevisionDiffHtml: typeof renderRevisionDiffHtml }) => void;
     const pending = new Promise<{ renderRevisionDiffHtml: typeof renderRevisionDiffHtml }>(
       (resolve) => {
@@ -107,6 +142,8 @@ describe("revision diff progressive renderer", () => {
     const snapshots = node.querySelectorAll<HTMLElement>(".ab-revision-diff-snapshot");
     expect(node.getAttribute("aria-label")).toBe("Draft 9");
     expect(fallback?.open).toBe(true);
+    expect(fallback?.classList.contains("ab-revision-diff-fallback-accessible")).toBe(true);
+    expect(fallback?.querySelector<HTMLElement>("summary")?.tabIndex).toBe(-1);
     expect(snapshots[0]?.getAttribute("aria-label")).toBe("Before");
     expect(snapshots[1]?.getAttribute("aria-label")).toBe("After");
     expect(snapshots[0]?.querySelector("code")?.textContent).toBe(HOSTILE);
@@ -117,9 +154,10 @@ describe("revision diff progressive renderer", () => {
     return handle.ready;
   });
 
-  it("loads once, chooses side-by-side on wide screens, and redraws line-by-line on mobile", async () => {
+  it("offers both layouts, forces inline when compact, and restores a wide preference", async () => {
     const media = new FakeMedia();
     const layouts: string[] = [];
+    const preferred: string[] = [];
     const coreLoader = vi.fn(async () => ({
       renderRevisionDiffHtml: (_diff: string, layout: string) => {
         layouts.push(layout);
@@ -130,7 +168,11 @@ describe("revision diff progressive renderer", () => {
     const handle = renderRevisionDiff(
       node,
       { unifiedDiff: UNIFIED, before: "Before.", after: "After." },
-      { ...mediaOptions(media), coreLoader } as RevisionDiffRenderOptions,
+      {
+        ...mediaOptions(media),
+        coreLoader,
+        onPreferredLayoutChange: (layout) => preferred.push(layout),
+      } as RevisionDiffRenderOptions,
     );
 
     await expect(handle.ready).resolves.toBe("enhanced");
@@ -139,17 +181,95 @@ describe("revision diff progressive renderer", () => {
     expect(node.querySelector<HTMLElement>(".ab-revision-diff-visual")?.dataset.layout).toBe(
       "side-by-side",
     );
+    const inline = node.querySelector<HTMLButtonElement>(
+      '.ab-revision-diff-layout-button[data-layout="line-by-line"]',
+    )!;
+    const sideBySide = node.querySelector<HTMLButtonElement>(
+      '.ab-revision-diff-layout-button[data-layout="side-by-side"]',
+    )!;
+    const controls = node.querySelector<HTMLElement>(".ab-revision-diff-layout")!;
+    expect(controls.hidden).toBe(false);
+    expect(inline.textContent).toBe("Inline");
+    expect(sideBySide.textContent).toBe("Side by side");
+    expect(sideBySide.getAttribute("aria-pressed")).toBe("true");
+    expect(sideBySide.disabled).toBe(false);
 
-    media.setMobile(true);
+    sideBySide.click();
+    expect(layouts).toEqual(["side-by-side"]);
+    inline.click();
     expect(layouts).toEqual(["side-by-side", "line-by-line"]);
+    expect(inline.getAttribute("aria-pressed")).toBe("true");
+    expect(preferred).toEqual(["side-by-side", "line-by-line"]);
+
+    // A compact viewport always stays inline and makes side-by-side
+    // unavailable. Returning wide keeps the explicit inline preference.
+    media.setMobile(true);
+    expect(layouts).toEqual(["side-by-side", "line-by-line", "line-by-line"]);
     expect(node.querySelector<HTMLElement>(".ab-revision-diff-visual")?.dataset.layout).toBe(
       "line-by-line",
     );
+    expect(sideBySide.disabled).toBe(true);
+    expect(controls.hidden).toBe(true);
+    media.setMobile(false);
+    expect(layouts.at(-1)).toBe("line-by-line");
+    expect(controls.hidden).toBe(false);
+
+    // A wide side-by-side choice is temporarily overridden, not discarded,
+    // when the viewport can no longer fit two reading measures.
+    sideBySide.click();
+    expect(layouts.at(-1)).toBe("side-by-side");
+    expect(preferred).toEqual(["side-by-side", "line-by-line", "side-by-side"]);
+    media.setMobile(true);
+    expect(layouts.at(-1)).toBe("line-by-line");
+    expect(sideBySide.disabled).toBe(true);
+    media.setMobile(false);
+    expect(layouts.at(-1)).toBe("side-by-side");
+    expect(sideBySide.disabled).toBe(false);
     expect(coreLoader).toHaveBeenCalledTimes(1);
 
     handle.destroy();
-    media.setMobile(false);
-    expect(layouts).toHaveLength(2);
+    const count = layouts.length;
+    media.setMobile(true);
+    expect(layouts).toHaveLength(count);
+  });
+
+  it("removes line-number gutters and keeps exact snapshots screen-reader-only after enhancement", async () => {
+    const numbered = [
+      "--- a/chapter.md",
+      "+++ b/chapter.md",
+      "@@ -12 +12 @@",
+      "-Before.",
+      "+After.",
+      "",
+    ].join("\n");
+    const node = host();
+    const handle = renderRevisionDiff(
+      node,
+      {
+        unifiedDiff: numbered,
+        before: "Before.",
+        after: "After.",
+      },
+      // Force the real side-by-side template: its hunk row uses
+      // `.d2h-code-side-line`, unlike the compact inline template.
+      mediaOptions(new FakeMedia()),
+    );
+
+    await expect(handle.ready).resolves.toBe("enhanced");
+    expect(
+      node.querySelector(".d2h-code-linenumber, .d2h-code-side-linenumber"),
+    ).toBeNull();
+    expect(node.querySelector(".ab-revision-diff-visual")?.textContent).not.toContain(
+      "@@ -12 +12 @@",
+    );
+    const fallback = node.querySelector<HTMLDetailsElement>(".ab-revision-diff-fallback")!;
+    expect(fallback.open).toBe(true);
+    expect(fallback.hasAttribute("hidden")).toBe(false);
+    expect(fallback.classList.contains("ab-revision-diff-fallback-accessible")).toBe(true);
+    expect(fallback.querySelector<HTMLElement>("summary")?.tabIndex).toBe(-1);
+    expect(
+      Array.from(fallback.querySelectorAll("code"), (code) => code.textContent),
+    ).toEqual(["Before.", "After."]);
   });
 
   it("sanitizes hostile renderer markup before inserting the supplemental visual diff", async () => {
@@ -187,6 +307,7 @@ describe("revision diff progressive renderer", () => {
     await expect(noDiffHandle.ready).resolves.toBe("fallback");
     expect(withoutDiffLoader).not.toHaveBeenCalled();
     expect(noDiff.querySelector<HTMLDetailsElement>("details")?.open).toBe(true);
+    expect(noDiff.querySelector("summary")?.hasAttribute("tabindex")).toBe(false);
 
     const failed = host();
     const failedHandle = renderRevisionDiff(
@@ -195,7 +316,10 @@ describe("revision diff progressive renderer", () => {
       { coreLoader: async () => Promise.reject(new TypeError("chunk unavailable")) },
     );
     await expect(failedHandle.ready).resolves.toBe("fallback");
-    expect(failed.querySelector<HTMLDetailsElement>("details")?.open).toBe(true);
+    const fallback = failed.querySelector<HTMLDetailsElement>("details");
+    expect(fallback?.open).toBe(true);
+    expect(fallback?.classList.contains("ab-revision-diff-fallback-accessible")).toBe(false);
+    expect(fallback?.querySelector("summary")?.hasAttribute("tabindex")).toBe(false);
     expect(failed.querySelector('[role="status"]')?.textContent).toContain(
       "plain-text comparison",
     );

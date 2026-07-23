@@ -18,6 +18,7 @@ import {
   type ChapterHistoryComparison,
   type ChapterHistoryDetail,
   type ChapterHistoryPage,
+  type ChapterHistoryRevision,
   type ChapterHistoryRestoreAccepted,
   type ChapterProjection,
   type ChapterRevisionProposalCommand,
@@ -351,11 +352,24 @@ const CONNECTION_RETRY_MAX_MS = 30_000;
 const MAX_WORK_ITEM_PAGES = 10;
 const COMPLETED_WORK_ITEM_PAGE_SIZE = 20;
 const MAX_REVISION_PROPOSAL_PAGES = 10;
-const MAX_CHAPTER_HISTORY_ROWS = 50;
+const CHAPTER_HISTORY_PAGE_SIZE = 50;
+const CHAPTER_HISTORY_PAGE_OVERLAP_ALLOWANCE = 2;
 const MAX_CHAPTER_HISTORY_DETAILS = 8;
 const MAX_OPERATION_SETTLEMENT_RETRIES = 4;
 
-/** Planning writes live in the lazy store chunk, not the 35 KB reader entry. */
+type ChapterHistoryLoadMode = "ensure" | "full" | "shallow";
+
+/** Only these feed rows can change the immutable chapter-source history. */
+const CHAPTER_HISTORY_SOURCE_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "chapter_created",
+  "chapter_revised",
+  "chapter_published",
+  "chapter_unpublished",
+  "revision_proposal_applied",
+  "work_item_completed",
+]);
+
+/** Planning writes live in the lazy store chunk, not the reader entry. */
 class ProjectStoreApiClient extends CollabApi implements ProjectStoreApi {
   async repositoryDocumentSource(
     kind: RepositoryDocumentKind,
@@ -390,6 +404,24 @@ export function chapterHistoryDetailKey(
   return JSON.stringify([chapterId, revision, compare]);
 }
 
+/** Cursor pages can overlap while Git history is moving; the newest read wins. */
+function mergeChapterHistoryRows(
+  existing: readonly ChapterHistoryRevision[],
+  incoming: readonly ChapterHistoryRevision[],
+  current: ChapterHistoryPage["current"],
+): ChapterHistoryRevision[] {
+  const rows = new Map<number, ChapterHistoryRevision>();
+  for (const item of existing) rows.set(item.revision, item);
+  for (const item of incoming) rows.set(item.revision, item);
+  rows.set(current.revision, current);
+  return Array.from(rows.values())
+    .map((item) => ({
+      ...item,
+      isCurrent: item.revision === current.revision,
+    }))
+    .sort((left, right) => right.revision - left.revision);
+}
+
 export function createProjectStore(
   config: ProjectStoreConfig,
   api: ProjectStoreApi = new ProjectStoreApiClient(config.apiBase, config.project),
@@ -412,6 +444,7 @@ export function createProjectStore(
   let editorPublicationsRequest: Promise<void> | null = null;
   const chapterHistoryRequests = new Map<string, Promise<void>>();
   const chapterHistoryQueuedRequests = new Map<string, Promise<void>>();
+  const chapterHistoryQueuedModes = new Map<string, Exclude<ChapterHistoryLoadMode, "ensure">>();
   const chapterHistoryDetailRequests = new Map<string, Promise<void>>();
   const chapterHistoryDetailQueuedRequests = new Map<string, Promise<void>>();
   let connectionUsers = 0;
@@ -576,6 +609,7 @@ export function createProjectStore(
     revisionProposalQueuedRequests.clear();
     editorPublicationsRequest = null;
     chapterHistoryQueuedRequests.clear();
+    chapterHistoryQueuedModes.clear();
     chapterHistoryDetailQueuedRequests.clear();
     clearConnectionRetry();
     authoritativeReady = false;
@@ -1105,7 +1139,7 @@ export function createProjectStore(
             jobs.push(loadRevisionProposal(proposalId, true));
           }
           for (const chapterId of reload.history) {
-            jobs.push(loadChapterHistory(chapterId, true));
+            jobs.push(loadChapterHistory(chapterId, "full"));
           }
           for (const detail of reload.historyDetails) {
             jobs.push(
@@ -1768,28 +1802,48 @@ export function createProjectStore(
     return request;
   };
 
-  const loadChapterHistory = (chapterId: string, force: boolean): Promise<void> => {
+  const loadChapterHistory = (
+    chapterId: string,
+    mode: ChapterHistoryLoadMode,
+  ): Promise<void> => {
     const state = store.getState();
-    if (!force && state.chapterHistoryStatusByChapter[chapterId] === "ready") {
+    // A shallow refresh may have been queued while a full walk still looked
+    // healthy. Re-check at execution time so a later-page failure cannot be
+    // hidden by that queued first-page refresh.
+    const effectiveMode: ChapterHistoryLoadMode =
+      mode === "shallow" && state.chapterHistoryErrorByChapter[chapterId] != null
+        ? "full"
+        : mode;
+    if (
+      effectiveMode === "ensure" &&
+      state.chapterHistoryStatusByChapter[chapterId] === "ready"
+    ) {
       return Promise.resolve();
     }
     const active = chapterHistoryRequests.get(chapterId);
     if (active !== undefined) {
-      if (!force) return active;
+      if (effectiveMode === "ensure") return active;
       const queuedActive = chapterHistoryQueuedRequests.get(chapterId);
-      if (queuedActive !== undefined) return queuedActive;
+      if (queuedActive !== undefined) {
+        if (effectiveMode === "full") chapterHistoryQueuedModes.set(chapterId, "full");
+        return queuedActive;
+      }
       const generation = authorizationGeneration;
+      const requestedMode = effectiveMode;
       let queued!: Promise<void>;
       const refresh = (): Promise<void> => {
+        const queuedMode = chapterHistoryQueuedModes.get(chapterId) ?? requestedMode;
         if (chapterHistoryQueuedRequests.get(chapterId) === queued) {
           chapterHistoryQueuedRequests.delete(chapterId);
+          chapterHistoryQueuedModes.delete(chapterId);
         }
         return generation === authorizationGeneration
-          ? loadChapterHistory(chapterId, true)
+          ? loadChapterHistory(chapterId, queuedMode)
           : Promise.resolve();
       };
       queued = active.then(refresh, refresh);
       chapterHistoryQueuedRequests.set(chapterId, queued);
+      chapterHistoryQueuedModes.set(chapterId, requestedMode);
       return queued;
     }
     const read = api.chapterHistory;
@@ -1809,39 +1863,140 @@ export function createProjectStore(
     const generation = authorizationGeneration;
     const request = Promise.resolve()
       .then(async () => {
-        const result = await read.call(api, chapterId);
-        if (generation !== authorizationGeneration) return;
-        const current = store.getState();
-        if (!result.ok) {
+        let cursor: string | undefined;
+        let firstPage = true;
+        let pageCount = 0;
+        let maxPages = 1;
+        const requestedCursors = new Set<string>();
+        const stopPagination = (message: string): void => {
+          const latest = store.getState();
+          const loaded = latest.chapterHistoryByChapter[chapterId];
           store.setState({
+            ...(loaded === undefined
+              ? {}
+              : {
+                  chapterHistoryByChapter: {
+                    ...latest.chapterHistoryByChapter,
+                    [chapterId]: { ...loaded, nextCursor: null },
+                  },
+                }),
+            chapterHistoryErrorByChapter: {
+              ...latest.chapterHistoryErrorByChapter,
+              [chapterId]: message,
+            },
+          });
+        };
+        for (;;) {
+          const result = await read.call(api, chapterId, cursor);
+          if (generation !== authorizationGeneration) return;
+          const current = store.getState();
+          if (!result.ok) {
+            if (firstPage) {
+              const retained = current.chapterHistoryByChapter[chapterId];
+              if (effectiveMode === "shallow" && retained !== undefined) {
+                store.setState({
+                  chapterHistoryStatusByChapter: {
+                    ...current.chapterHistoryStatusByChapter,
+                    [chapterId]: "ready",
+                  },
+                  chapterHistoryErrorByChapter: {
+                    ...current.chapterHistoryErrorByChapter,
+                    [chapterId]: `Revision history could not refresh: ${result.message}`,
+                  },
+                });
+              } else {
+                store.setState({
+                  chapterHistoryStatusByChapter: {
+                    ...current.chapterHistoryStatusByChapter,
+                    [chapterId]: "error",
+                  },
+                  chapterHistoryErrorByChapter: {
+                    ...current.chapterHistoryErrorByChapter,
+                    [chapterId]: result.message,
+                  },
+                });
+              }
+            } else {
+              stopPagination(`Older revisions could not finish loading: ${result.message}`);
+            }
+            return;
+          }
+
+          const retained = current.chapterHistoryByChapter[chapterId];
+          if (firstPage) {
+            const revision = result.value.current.revision;
+            const revisionPages =
+              Number.isSafeInteger(revision) && revision > 0
+                ? Math.ceil(revision / CHAPTER_HISTORY_PAGE_SIZE)
+                : 1;
+            maxPages = revisionPages + CHAPTER_HISTORY_PAGE_OVERLAP_ALLOWANCE;
+          }
+          const retainedItems =
+            firstPage && effectiveMode !== "shallow" ? [] : (retained?.items ?? []);
+          const pageCurrent =
+            firstPage || effectiveMode === "shallow"
+              ? result.value.current
+              : (retained?.current ?? result.value.current);
+          const mergedItems = mergeChapterHistoryRows(
+            retainedItems,
+            result.value.items,
+            pageCurrent,
+          );
+          const addedRows = mergedItems.length - retainedItems.length;
+          const page: ChapterHistoryPage =
+            effectiveMode === "shallow" && retained !== undefined
+              ? {
+                  items: mergedItems,
+                  current: pageCurrent,
+                  nextCursor: retained.nextCursor,
+                }
+              : {
+                  items: mergedItems,
+                  current: pageCurrent,
+                  nextCursor: result.value.nextCursor,
+                };
+          store.setState({
+            chapterHistoryByChapter: {
+              ...current.chapterHistoryByChapter,
+              [chapterId]: page,
+            },
             chapterHistoryStatusByChapter: {
               ...current.chapterHistoryStatusByChapter,
-              [chapterId]: "error",
+              [chapterId]: "ready",
             },
             chapterHistoryErrorByChapter: {
               ...current.chapterHistoryErrorByChapter,
-              [chapterId]: result.message,
+              [chapterId]: null,
             },
           });
-          return;
+          firstPage = false;
+          pageCount += 1;
+
+          if (effectiveMode === "shallow") return;
+
+          const nextCursor = result.value.nextCursor;
+          if (nextCursor === null) return;
+          if (addedRows === 0) {
+            stopPagination(
+              "Older revisions stopped loading because a page made no metadata progress.",
+            );
+            return;
+          }
+          if (requestedCursors.has(nextCursor)) {
+            stopPagination(
+              "Older revisions stopped loading because the server repeated a cursor.",
+            );
+            return;
+          }
+          if (pageCount >= maxPages) {
+            stopPagination(
+              `Older revisions stopped loading after the bounded ${maxPages}-page history window.`,
+            );
+            return;
+          }
+          requestedCursors.add(nextCursor);
+          cursor = nextCursor;
         }
-        store.setState({
-          chapterHistoryByChapter: {
-            ...current.chapterHistoryByChapter,
-            [chapterId]: {
-              ...result.value,
-              items: result.value.items.slice(0, MAX_CHAPTER_HISTORY_ROWS),
-            },
-          },
-          chapterHistoryStatusByChapter: {
-            ...current.chapterHistoryStatusByChapter,
-            [chapterId]: "ready",
-          },
-          chapterHistoryErrorByChapter: {
-            ...current.chapterHistoryErrorByChapter,
-            [chapterId]: null,
-          },
-        });
       })
       .finally(() => {
         chapterHistoryRequests.delete(chapterId);
@@ -1854,7 +2009,10 @@ export function createProjectStore(
       },
       chapterHistoryErrorByChapter: {
         ...state.chapterHistoryErrorByChapter,
-        [chapterId]: null,
+        [chapterId]:
+          effectiveMode === "shallow"
+            ? (state.chapterHistoryErrorByChapter[chapterId] ?? null)
+            : null,
       },
     });
     return request;
@@ -2006,7 +2164,7 @@ export function createProjectStore(
         jobs.push(loadEditorPublications());
       }
       for (const chapterId of requiredHistoryChapters) {
-        jobs.push(loadChapterHistory(chapterId, true));
+        jobs.push(loadChapterHistory(chapterId, "full"));
       }
       for (const detail of requiredHistoryDetails) {
         jobs.push(
@@ -2331,9 +2489,15 @@ export function createProjectStore(
     if (store.getState().chaptersStatus !== "idle") void loadChapters(true);
     if (
       chapterId !== null &&
+      CHAPTER_HISTORY_SOURCE_EVENT_TYPES.has(event.type) &&
       store.getState().chapterHistoryStatusByChapter[chapterId] !== undefined
     ) {
-      void loadChapterHistory(chapterId, true);
+      const historyError = store.getState().chapterHistoryErrorByChapter[chapterId] ?? null;
+      // A partial background load deliberately closes its cursor and retains
+      // the rows it did fetch. Do not let a later first-page refresh erase
+      // that warning while leaving the suffix incomplete: the next source
+      // change is also an opportunity to retry the full walk.
+      void loadChapterHistory(chapterId, historyError === null ? "shallow" : "full");
     }
     if (
       (revisionProposalId !== null || event.type.startsWith("revision_proposal_")) &&
@@ -3797,7 +3961,7 @@ export function createProjectStore(
     if (!result.ok) {
       if (!shouldReplay(result)) settleCommand(fingerprint);
       if (result.status === 409) {
-        void loadChapterHistory(chapterId, true);
+        void loadChapterHistory(chapterId, "full");
       }
       return actionFailure(result);
     }
@@ -3911,8 +4075,8 @@ export function createProjectStore(
       delete editors[targetKey];
       store.setState({ editorRevisionsByTargetKey: editors });
     },
-    ensureChapterHistory: (chapterId) => loadChapterHistory(chapterId, false),
-    refreshChapterHistory: (chapterId) => loadChapterHistory(chapterId, true),
+    ensureChapterHistory: (chapterId) => loadChapterHistory(chapterId, "ensure"),
+    refreshChapterHistory: (chapterId) => loadChapterHistory(chapterId, "full"),
     ensureChapterHistoryRevision: (chapterId, revision, compare) =>
       loadChapterHistoryRevision(chapterId, revision, compare, false),
     refreshChapterHistoryRevision: (chapterId, revision, compare) =>

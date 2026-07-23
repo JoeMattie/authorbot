@@ -36,10 +36,12 @@ import type {
   ManuscriptSubmitResult,
   ManuscriptSurfaceSession,
 } from "./manuscript-surface.js";
-import type { ProjectStore } from "./project-store.js";
+import type { ProjectStore, StoreActionResult } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 
 export const CHAPTER_REVISION_SUBMIT_EVENT = "authorbot:chapter-revision-submit";
+
+const CHAPTER_EDIT_ACTIVE_ATTRIBUTE = "data-chapter-edit-active";
 
 export interface ChapterRevisionDraft {
   chapterId: string;
@@ -63,6 +65,11 @@ interface Config {
   project: string;
   chapterId: string;
   chapterTitle: string;
+}
+
+interface ChapterCollabElement extends HTMLElement {
+  prepareForExternalMode?: () => Promise<boolean>;
+  setChapterEditMode?: (active: boolean) => void;
 }
 
 function parseConfig(host: HTMLElement): Config | null {
@@ -136,6 +143,9 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
   private unsubscribeStore: (() => void) | null = null;
   private releaseConnection: (() => void) | null = null;
   private closingAcceptedEditor = false;
+  private editModeAnnounced = false;
+  /** Exact island told to suppress entry, retained even if its subtree detaches. */
+  private editModeCollab: ChapterCollabElement | null = null;
   private readonly beforeUnload = (event: BeforeUnloadEvent): void => {
     if (!this.isDirty() && !this.needsRecoveryWarning()) return;
     event.preventDefault();
@@ -245,32 +255,66 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.busy = true;
     this.editButton.disabled = true;
     this.setLauncherStatus("Loading chapter editor…");
-    const collab = [...document.querySelectorAll<HTMLElement>("authorbot-collab")]
-      .find((candidate) => candidate.dataset.chapterId === this.cfg.chapterId) as
-        | (HTMLElement & { prepareForExternalMode?: () => Promise<boolean> })
-        | undefined;
-    if (collab?.prepareForExternalMode !== undefined) {
-      const ready = await collab.prepareForExternalMode();
-      if (!ready || !this.current(generation)) {
-        this.busy = false;
-        this.editButton.disabled = false;
-        this.setLauncherStatus(ready ? "" : "The Notes view is still switching modes.", !ready);
+    // Suppress collaboration entry for the entire handoff, including closing
+    // the rich Notes surface and loading source. Any suspended composer remains
+    // in the collaboration element's state and is restored if launch aborts.
+    const collab = this.chapterCollab();
+    this.setEditModeAnnounced(true, collab);
+    try {
+      if (collab?.prepareForExternalMode !== undefined) {
+        const ready = await collab.prepareForExternalMode();
+        if (!ready || !this.current(generation)) {
+          if (this.current(generation)) {
+            this.abortEditorLaunch(
+              ready ? "" : "The Notes view is still switching modes.",
+              !ready,
+            );
+          } else {
+            this.setEditModeAnnounced(false);
+          }
+          return;
+        }
+      }
+    } catch (caught) {
+      if (!this.current(generation)) {
+        this.setEditModeAnnounced(false);
         return;
       }
+      this.abortEditorLaunch(
+        `The chapter editor could not open: ${
+          caught instanceof Error ? caught.message : String(caught)
+        }`,
+        true,
+      );
+      return;
     }
-    const read = await this.store.getState().readChapterSource(this.cfg.chapterId);
-    if (!this.current(generation)) return;
+    let read: StoreActionResult<ChapterSource>;
+    try {
+      read = await this.store.getState().readChapterSource(this.cfg.chapterId);
+    } catch (caught) {
+      if (!this.current(generation)) {
+        this.setEditModeAnnounced(false);
+        return;
+      }
+      this.abortEditorLaunch(
+        `The chapter editor could not open: ${
+          caught instanceof Error ? caught.message : String(caught)
+        }`,
+        true,
+      );
+      return;
+    }
+    if (!this.current(generation)) {
+      this.setEditModeAnnounced(false);
+      return;
+    }
     if (!read.ok) {
-      this.busy = false;
-      this.editButton.disabled = false;
-      this.setLauncherStatus(`The chapter editor could not open: ${read.message}`, true);
+      this.abortEditorLaunch(`The chapter editor could not open: ${read.message}`, true);
       return;
     }
     const contentHash = sourceContentHash(read.value);
     if (read.value.chapterId !== this.cfg.chapterId || contentHash === null) {
-      this.busy = false;
-      this.editButton.disabled = false;
-      this.setLauncherStatus(
+      this.abortEditorLaunch(
         "The chapter editor could not open: the source response did not include the exact chapter identity and content hash.",
         true,
       );
@@ -282,6 +326,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       stored !== null &&
       (stored.baseRevision !== read.value.revision || stored.baseContentHash !== contentHash)
     ) {
+      this.setEditModeAnnounced(false);
       this.renderStaleDraftChoice(read.value, stored, contentHash, generation);
       return;
     }
@@ -293,6 +338,13 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       false,
       generation,
     );
+  }
+
+  private abortEditorLaunch(message: string, error = false): void {
+    this.setEditModeAnnounced(false);
+    this.busy = false;
+    if (this.editButton !== null) this.editButton.disabled = false;
+    this.setLauncherStatus(message, error);
   }
 
   private renderStaleDraftChoice(
@@ -404,7 +456,10 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     staleBase: boolean,
     generation: number,
   ): Promise<void> {
-    if (this.editButton === null || this.prose === null) return;
+    if (this.editButton === null || this.prose === null) {
+      this.setEditModeAnnounced(false);
+      return;
+    }
     this.busy = true;
     this.editButton.disabled = true;
     this.source = source;
@@ -476,6 +531,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.append(shell);
     this.prose.hidden = true;
     this.editButton.setAttribute("aria-expanded", "true");
+    this.setEditModeAnnounced(true);
 
     try {
       const blockIds = [...this.prose.children]
@@ -655,29 +711,67 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
 
   private async destroySession(restoreFocus: boolean): Promise<void> {
     window.removeEventListener("beforeunload", this.beforeUnload);
-    this.busy = false;
+    this.busy = true;
     this.applyImmediately = false;
     const session = this.session;
     this.session = null;
-    if (session !== null) await session.destroy();
-    this.editorShell?.remove();
-    this.editorShell = null;
-    this.editorRoot = null;
-    this.summaryInput = null;
-    this.notesInput = null;
-    this.errorLine = null;
-    this.statusLine = null;
-    this.source = null;
-    this.baseRevision = null;
-    this.baseContentHash = null;
-    this.recoveryPanel?.remove();
-    this.recoveryPanel = null;
-    if (this.prose !== null) this.prose.hidden = false;
-    if (this.editButton !== null) {
-      this.editButton.setAttribute("aria-expanded", "false");
-      if (restoreFocus) this.editButton.focus();
+    try {
+      if (session !== null) await session.destroy();
+    } catch {
+      // The editor shell and static manuscript are owned here, not by the lazy
+      // surface. Teardown must remain fail-safe even if a third-party editor
+      // plugin rejects while destroying itself.
+    } finally {
+      this.editorShell?.remove();
+      this.editorShell = null;
+      this.editorRoot = null;
+      this.summaryInput = null;
+      this.notesInput = null;
+      this.errorLine = null;
+      this.statusLine = null;
+      this.source = null;
+      this.baseRevision = null;
+      this.baseContentHash = null;
+      this.recoveryPanel?.remove();
+      this.recoveryPanel = null;
+      if (this.prose !== null) this.prose.hidden = false;
+      if (this.editButton !== null) {
+        this.editButton.setAttribute("aria-expanded", "false");
+      }
+      this.busy = false;
+      // Re-enable annotation/suggestion entry only after the editor shell is
+      // gone and the static manuscript is visible again.
+      this.setEditModeAnnounced(false);
+      this.syncNavigationWarning();
+      if (restoreFocus) this.editButton?.focus();
     }
-    this.syncNavigationWarning();
+  }
+
+  private setEditModeAnnounced(
+    active: boolean,
+    collab = this.chapterCollab(),
+  ): void {
+    if (active) {
+      this.setAttribute(CHAPTER_EDIT_ACTIVE_ATTRIBUTE, "true");
+    } else {
+      this.removeAttribute(CHAPTER_EDIT_ACTIVE_ATTRIBUTE);
+    }
+    if (this.editModeAnnounced === active) return;
+    this.editModeAnnounced = active;
+    if (active) {
+      this.editModeCollab = collab ?? null;
+      collab?.setChapterEditMode?.(true);
+      return;
+    }
+    const announcedCollab = this.editModeCollab;
+    this.editModeCollab = null;
+    announcedCollab?.setChapterEditMode?.(false);
+    if (collab !== announcedCollab) collab?.setChapterEditMode?.(false);
+  }
+
+  private chapterCollab(): ChapterCollabElement | undefined {
+    return [...document.querySelectorAll<ChapterCollabElement>("authorbot-collab")]
+      .find((candidate) => candidate.dataset.chapterId === this.cfg.chapterId);
   }
 
   private currentLifecycle(): EditorRevisionState | undefined {

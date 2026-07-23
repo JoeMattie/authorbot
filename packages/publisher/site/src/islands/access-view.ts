@@ -3,11 +3,9 @@
  * contract: Seeing, Restricting, Moderating, Revoking).
  *
  * Mounted beneath `<authorbot-settings>` on `/settings/`, and shipped as its
- * OWN bundle rather than inside `authorbot-collab.js`. That is not an
- * optimisation detail, Phase 2b §1 budgets the collaboration islands at 35 KB
- * gzipped because that is what every reader downloads on every chapter page,
- * and a moderation queue nobody but a maintainer can open has no business in
- * that number. See `buildIslands` in src/build.ts.
+ * OWN bundle rather than inside `authorbot-collab.js`. The reader entry loads
+ * on every chapter page, while a moderation queue nobody but a maintainer can
+ * open belongs only on `/settings/`. See `buildIslands` in src/build.ts.
  *
  * Four ideas do most of the work.
  *

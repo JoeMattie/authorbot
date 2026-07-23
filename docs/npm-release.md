@@ -14,20 +14,15 @@ number promises to the people who pinned it.
 | `@authorbot/cli` | the `authorbot` binary - `validate`, `build`, `upgrade` | author CI, local use |
 | `@authorbot/api` | prebuilt Worker entry, Durable Object, and D1 migrations | `wrangler.jsonc` `main` |
 | `@authorbot/create` | the setup wizard | `npx @authorbot/create` |
+| `authorbot` | the unscoped alias forwarding to `@authorbot/cli` | `npx authorbot` |
 
-`@authorbot/create` does not exist yet - Phase 6 §1 builds it. Whoever adds
-`apps/create` must also add it to `scripts/publishable.mjs` and give it the
-same packaging fields as the rest; see *Adding a package to the release* at the
-bottom. Until then it is listed here because ADR-0022 names it, not because it
-ships.
-
-Seven more packages - `schemas`, `markdown`, `domain`, `rule-engine`,
+Eight supporting packages - `schemas`, `markdown`, `domain`, `rule-engine`,
 `database`, `repo-coordinator`, `git-github`, `publisher` - are published
-because the three above depend on them. **They are not a public contract.**
-Their exports may change in any release, including a patch. Do not import them
-directly; if you need something they hold, ask for it to be re-exported from
-`@authorbot/cli` or `@authorbot/api`, where it will be covered by the promises
-below.
+because the public entry packages depend on them. **They are not a public
+contract.** Their exports may change in any release, including a patch. Do not
+import them directly; if you need something they hold, ask for it to be
+re-exported from `@authorbot/cli` or `@authorbot/api`, where it will be covered
+by the promises below.
 
 The publishable set lives in one place, `scripts/publishable.mjs`, which the
 packaging check, the version check, and the packer all read.
@@ -69,6 +64,21 @@ running*, because author CI applies migrations before deploying and the old
 code keeps serving in between. Dropping a column or tightening a constraint
 therefore takes two releases: expand in one, contract in the next. There is no
 way to shortcut this without giving some author a broken deploy window.
+
+Release tags are skippable too. A one-shot backfill must be safe when a book
+upgrades from an older supported Worker straight to the new tag. If that old
+Worker can write rows the backfill would miss, install a compatible database
+guard before transforming existing rows and retain it through the rollback
+window. Documentation that merely asks every author to deploy an intermediate
+tag is not a sufficient release gate.
+
+**Pre-1 release train.** While Authorbot remains on the `0.1.x` line, the
+patch component is the next ordered release, and may contain backward-compatible
+features or expand-phase migrations. The compatibility classes below still
+govern what may ship and how it rolls out, but they map to SemVer components
+only after the 1.0 contract is declared. This records the existing pre-1
+practice explicitly instead of making a `0.1.x` migration look like an
+accidental exception.
 
 **Choosing a number**, in the terms above:
 
@@ -272,10 +282,14 @@ toolchain reading files a newer one rewrote (ADR-0021 §5).
   touching prose. `--rollback` does **not** do this for you - it names the
   migrations that ran between the two versions and leaves the revert to you,
   because reverting prose is a decision, not a side effect of a pin change.
-- **Database:** there is no automatic down-migration. Expand/contract is what
-  makes this survivable - the previous Worker can run against the expanded
-  schema, so rolling the Worker back is enough and the extra column is
-  harmless.
+- **Database:** there is no automatic down-migration. Applied D1 migrations
+  remain in place when the toolchain pin moves backward. Expand/contract makes
+  this survivable: the previous Worker can run against the expanded schema.
+  For v0.1.36, the persistent capability-projection triggers also remain. They
+  project safe legacy writes made by an old Worker and reject a write that
+  would still need scope sanitation, avoiding a successful response that
+  disagrees with storage. They are the rollback guard, not state that the
+  rollback removes.
 
 Re-validate after any rollback. `authorbot upgrade` does this for you in both
 directions.

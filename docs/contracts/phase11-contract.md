@@ -321,13 +321,14 @@ retire across releases because author CI applies a migration before deploying
 its matching Worker. A migration must never leave the still-running prior
 Worker unable to understand active token rows.
 
-**Slice 3A dual-write gate status:** v0.1.34 deployed the dual-reader, but its
+**Slice 3B release gate status:** v0.1.34 deployed the dual-reader, but its
 deprecated `{scopes}` mint request still wrote a null canonical projection.
-That is not sufficient for a one-shot backfill because author CI applies the
-migration before deploying its matching Worker. v0.1.35 therefore adds the
-missing legacy-request dual write and deliberately does not package
-`0013_phase11_capabilities_backfill.sql`. Slice 3B is reserved for v0.1.36 and
-can ship only after this writer is deployed and verified healthy.
+That was not sufficient for a one-shot backfill because author CI applies the
+migration before deploying its matching Worker. v0.1.35 added the missing
+legacy-request dual write without packaging
+`0013_phase11_capabilities_backfill.sql`; that Worker is now deployed and
+verified healthy. v0.1.36 can therefore carry the Slice 3B backfill while
+leaving legacy mode authoritative.
 
 1. **Expand and dual-write gate releases.** Add a nullable `capabilities_v2`
    column and a `capability_mode` column defaulting to `legacy` on
@@ -343,22 +344,43 @@ can ship only after this writer is deployed and verified healthy.
    legacy shadow containing only grants whose old meaning cannot exceed the
    canonical set. A prior Worker during deployment or rollback may deny a
    newly-granular action, but it must never grant a broader one.
-2. **Backfill release (v0.1.36).** Only after the dual-read, legacy dual-write
-   Worker is deployed, an idempotent migration fills null `capabilities_v2`
-   values from legacy scopes but leaves those rows in legacy mode and leaves
-   their ordinary legacy scopes intact. The deployed expand Worker can serve
-   before, during, and after this migration. The migration removes
-   control-plane and unknown
-   names from the legacy column as an intentional security reduction and
-   records an audit event. Revoked and expired tokens remain revoked or
-   expired.
+2. **Backfill release (v0.1.36).** The v0.1.35 dual-read, legacy dual-write
+   Worker is the normal-path release gate and must be deployed and verified
+   before v0.1.36 is published. An individual book may still upgrade directly
+   from any supported older Worker. The idempotent migration fills null or
+   stale `capabilities_v2` values from legacy scopes but leaves those rows in
+   legacy mode and leaves their ordinary legacy scopes intact. The deployed
+   expand Worker can serve before, during, and after this migration. The
+   migration removes control-plane and unknown names from the legacy column as
+   an intentional security reduction and records an audit event. It also
+   corrects stored redacted mint-replay bodies that named those removed scopes;
+   the original mint audit remains immutable and the sanitation event records
+   the correction. Revoked and expired tokens remain revoked or expired.
+   Because books may skip versions or roll a Worker back, the migration first
+   installs a persistent database guard. It projects safe legacy inserts and
+   authority-field updates, but aborts a write that contains malformed,
+   control-plane, or unknown scopes. That makes an old Worker fail and retry
+   instead of returning or auditing a successful grant different from storage.
+   The v0.1.36 Worker sanitizes deprecated input before writing, so valid
+   compatibility requests continue normally. The guard stays in place until
+   Slice 3C retires legacy mode.
 3. **Retire releases.** Legacy-mode endpoint semantics remain until the
    maintainer explicitly converts a token or a documented major-version
    contract window permits their removal. After all supported rows are
    canonical, stop the legacy read fallback while continuing the shadow write
    for one release. A later contract migration may remove the old column or
    shadow only after the already-deployed Worker no longer reads it. There is
-   no same-release rewrite-and-drop shortcut.
+   no same-release rewrite-and-drop shortcut. The Slice 3C contract migration
+   must remove the compatibility shield before rebuilding or removing the
+   legacy columns, in this order:
+
+   1. `DROP TRIGGER IF EXISTS agent_tokens_phase11_legacy_insert;`
+   2. `DROP TRIGGER IF EXISTS agent_tokens_phase11_legacy_update;`
+   3. `DROP VIEW IF EXISTS _phase11_legacy_token_projection;`
+
+   That teardown is permitted only after the compatibility and rollback window
+   has closed and no supported old writer remains. Rolling a Worker back across
+   that completed Slice 3C boundary is unsupported.
 
 Legacy translation preserves only authority a capability actually exercised:
 `annotations:read` becomes `comments:read` + `suggestions:read`;
@@ -461,10 +483,10 @@ and stripped control-plane authority can never reactivate.
 - Show Edit only to editor and maintainer roles that also hold the required
   `revisions:write` capability. The API remains the authorization boundary.
 - Use Milkdown Crepe as the in-place Markdown editing surface. Load its editor
-  code and styles only after Edit is activated so ordinary chapter reading does
-  not pay the editor bundle cost. Configure its supported schema and output so
-  submitted content round-trips through Authorbot's safe canonical Markdown
-  path without introducing raw HTML or browser-only document state.
+  code and styles only after Edit is activated, leaving ordinary chapter
+  reading on the static published HTML. Configure its supported schema and
+  output so submitted content round-trips through Authorbot's safe canonical
+  Markdown path without introducing raw HTML or browser-only document state.
 - Use the same Milkdown-backed manuscript surface for collaboration when an
   authenticated reader activates Notes. An Authorbot-owned Milkdown plugin
   maps durable block and range anchors to ProseMirror decorations and selection

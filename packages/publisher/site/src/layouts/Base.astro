@@ -1,6 +1,7 @@
 ---
 import { site } from "virtual:authorbot-site";
 import Icon from "../components/Icon.astro";
+import { SITE_CSP } from "../lib/csp.js";
 import "../styles/site.css";
 
 const {
@@ -33,7 +34,7 @@ const accountScriptHref =
 const effectiveCsp =
   csp ??
   (accountScriptHref
-    ? "default-src 'self'; connect-src 'self'; img-src 'self' data:"
+    ? SITE_CSP
     : undefined);
 // Astro escapes attribute quotes but keeps `<`/`>` inside attribute values;
 // dropping them here guarantees the built output never contains a literal

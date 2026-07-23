@@ -134,18 +134,125 @@ describe("Phase 11 agent-token capabilities", () => {
     ]);
   });
 
-  it("dual-writes the canonical projection for every legacy mint scope", async () => {
-    const scopes = [...LEGACY_AGENT_SCOPES];
-    const { tokenId } = await mintToken(h, maintainer, scopes);
-    const stored = await h.repos.agentTokens.getById(tokenId);
+  it("sanitizes a legacy mint before its response, storage, idempotency claim, and audits", async () => {
+    const scopes = [...LEGACY_AGENT_SCOPES].reverse();
+    const sanitizedScopes = [...LEGACY_AGENT_SCOPES].filter(
+      (scope) => scope !== "tokens:manage" && scope !== "members:manage",
+    );
+    const key = "phase11-legacy-mint-sanitized";
+    const request = () =>
+      h.app.request(
+        `/v1/projects/${h.projectId}/agent-tokens`,
+        jsonRequest(
+          "POST",
+          { name: "legacy-agent", scopes },
+          { Cookie: maintainer, "Idempotency-Key": key },
+        ),
+      );
+    const response = await request();
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as CanonicalMintBody;
+    const grantedCapabilities = translateLegacyScopes(sanitizedScopes);
+
+    expect(body).toMatchObject({
+      capabilityMode: "legacy",
+      scopes: sanitizedScopes,
+      grantedCapabilities,
+    });
+
+    const stored = await h.repos.agentTokens.getById(body.id);
 
     expect(stored).toMatchObject({
       capabilityMode: "legacy",
-      scopes,
-      capabilitiesV2: translateLegacyScopes(scopes),
+      scopes: sanitizedScopes,
+      capabilitiesV2: grantedCapabilities,
     });
     expect(stored?.capabilitiesV2).not.toContain("members:manage");
     expect(stored?.capabilitiesV2).not.toContain("tokens:manage");
+
+    const sanitationAudits = await h.db
+      .prepare(
+        `SELECT actor_id, metadata FROM audit_events
+          WHERE action = 'agent_token.legacy_scopes.sanitized'
+            AND target_id = ?
+          ORDER BY rowid`,
+      )
+      .bind(body.id)
+      .all<{ actor_id: string | null; metadata: string }>();
+    expect(sanitationAudits).toHaveLength(1);
+    const sanitationAudit = sanitationAudits[0];
+    const maintainerActor = await h.repos.actors.getByExternalIdentity(
+      "github:phase11-maintainer",
+    );
+    expect(maintainerActor).not.toBeNull();
+    expect(sanitationAudit?.actor_id).toBe(maintainerActor?.id);
+    expect(JSON.parse(sanitationAudit?.metadata ?? "null")).toMatchObject({
+      source: "legacy-mint",
+      capabilityMode: "legacy",
+      reason: "control-plane-or-unknown-scope",
+      removedScopes: ["members:manage", "tokens:manage"],
+      retainedScopes: sanitizedScopes,
+    });
+
+    const mintAudit = await h.db
+      .prepare(
+        `SELECT actor_id, metadata FROM audit_events
+          WHERE action = 'agent_token.mint'
+            AND target_id = ?`,
+      )
+      .bind(body.id)
+      .first<{ actor_id: string | null; metadata: string }>();
+    expect(mintAudit?.actor_id).toBe(maintainerActor?.id);
+    expect(JSON.parse(mintAudit?.metadata ?? "null")).toMatchObject({
+      capabilityMode: "legacy",
+      capabilities: grantedCapabilities,
+      legacyScopes: sanitizedScopes,
+    });
+
+    const replay = await request();
+    expect(replay.status).toBe(201);
+    expect(replay.headers.get("x-idempotency-replayed")).toBe("true");
+    const replayBody = (await replay.json()) as Record<string, unknown>;
+    expect(replayBody).toMatchObject({
+      id: body.id,
+      scopes: sanitizedScopes,
+      grantedCapabilities,
+      tokenRedacted: true,
+    });
+    expect(replayBody).not.toHaveProperty("token");
+    const finalSanitationCount = await h.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_events
+          WHERE action = 'agent_token.legacy_scopes.sanitized'
+            AND target_id = ?`,
+      )
+      .bind(body.id)
+      .first<{ count: number }>();
+    expect(finalSanitationCount?.count).toBe(1);
+  });
+
+  it("rejects duplicate legacy scope names before minting", async () => {
+    const response = await h.app.request(
+      `/v1/projects/${h.projectId}/agent-tokens`,
+      jsonRequest(
+        "POST",
+        {
+          name: "duplicate-legacy-agent",
+          scopes: ["chapters:read", "chapters:read"],
+        },
+        { Cookie: maintainer, "Idempotency-Key": "phase11-duplicate-legacy-scope" },
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      title: "Request validation failed",
+    });
+    expect(
+      await h.db
+        .prepare(`SELECT COUNT(*) AS count FROM agent_tokens WHERE name = ?`)
+        .bind("duplicate-legacy-agent")
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("dual-reads legacy rows and identifies preserved actions by source", async () => {
@@ -160,9 +267,10 @@ describe("Phase 11 agent-token capabilities", () => {
       .bind(record.actorId)
       .run();
 
-    // Model a token created before the dual-write gate. Legacy scopes remain
-    // authoritative until 3C, so the deployed reader must behave identically
-    // before and after the later 3B backfill populates this projection.
+    // Model a database before 0013 installs its persistent update guard. Legacy
+    // scopes remain authoritative until 3C, so the reader must behave
+    // identically before and after the backfill populates this projection.
+    await h.db.exec("DROP TRIGGER agent_tokens_phase11_legacy_update");
     await h.db
       .prepare(`UPDATE agent_tokens SET capabilities_v2 = NULL WHERE id = ?`)
       .bind(tokenId)
@@ -201,9 +309,9 @@ describe("Phase 11 agent-token capabilities", () => {
       ],
     });
 
-    // Slice 3B will populate this projection but deliberately leave
-    // mode=legacy. The deployed dual-reader must keep legacy scopes
-    // authoritative before, during, and after that later migration.
+    // The v0.1.36 Slice 3B migration populates this projection but deliberately
+    // leaves mode=legacy. The already-deployed v0.1.35 dual-reader and writer
+    // must keep legacy scopes authoritative before, during, and after it.
     await h.db
       .prepare(`UPDATE agent_tokens SET capabilities_v2 = ? WHERE id = ?`)
       .bind(

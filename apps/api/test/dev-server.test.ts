@@ -87,6 +87,34 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
       const chapterPage = (await chapters.json()) as { items: { id: string }[] };
       expect(chapterPage.items.length).toBeGreaterThanOrEqual(3);
 
+      // The same local checkout is also the chapter-history source. This
+      // catches the Node-only wiring seam that Playwright exercises: without
+      // repositoryHistoryReader the route answers state-conflict even though
+      // the current projection reader is configured.
+      const historyLogin = await fetch(`${base}/v1/dev/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: base },
+        body: JSON.stringify({ login: "history-editor", role: "editor" }),
+      });
+      expect(historyLogin.status).toBe(200);
+      const historyCookie = (historyLogin.headers.get("set-cookie") ?? "").split(";")[0] as string;
+      const history = await fetch(
+        `${base}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_1.id}/history?limit=1`,
+        { headers: { Cookie: historyCookie } },
+      );
+      expect(history.status).toBe(200);
+      await expect(history.json()).resolves.toMatchObject({
+        items: [
+          {
+            revision: CHAPTER_1.revision,
+            commitSha: expect.stringMatching(/^[0-9a-f]{40}$/u),
+            isCurrent: true,
+          },
+        ],
+        current: { revision: CHAPTER_1.revision },
+        nextCursor: null,
+      });
+
       // A mutation is committed to the work tree by the inline mirror.
       const create = await fetch(
         `${base}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_1.id}/annotations`,

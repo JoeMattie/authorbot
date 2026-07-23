@@ -80,6 +80,7 @@ const CARD_GAP = 12;
 const DISCUSSION_PAGE_SIZE = 20;
 const REPLY_HYDRATION_CONCURRENCY = 4;
 const NOTE_FRAGMENT_PREFIX = "authorbot-note-";
+const CHAPTER_EDIT_ACTIVE_ATTRIBUTE = "data-chapter-edit-active";
 const REFRESH_HINT = "Still syncing; refresh the page to see the final state.";
 const STALE_PAGE_HINT =
   "This chapter has changed since this page was published; " +
@@ -192,6 +193,12 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
+function chapterEditorIsActive(chapterId: string): boolean {
+  return [...document.querySelectorAll<HTMLElement>(
+    `authorbot-manuscript-editor[${CHAPTER_EDIT_ACTIVE_ATTRIBUTE}="true"]`,
+  )].some((candidate) => candidate.dataset.chapterId === chapterId);
+}
+
 type SyncPhase = "syncing" | "stale" | "failed";
 
 interface LocalSync {
@@ -263,6 +270,7 @@ export class AuthorbotCollab extends HTMLElement {
   private notesMode: CollabNotesModeController | null = null;
   private notesModeRequest: Promise<CollabNotesModeController | null> | null = null;
   private notesModeActive = false;
+  private chapterEditModeActive = false;
 
   private mql!: MediaQueryList;
   private started = false;
@@ -296,6 +304,10 @@ export class AuthorbotCollab extends HTMLElement {
       return; // misconfigured build: stay inert, prose remains readable
     }
     this.cfg = cfg;
+    // A collab island may be detached and reattached while the editor is
+    // tearing down. Reconcile from DOM-owned state instead of retaining a
+    // stale suppression latch across custom-element lifecycles.
+    this.chapterEditModeActive = chapterEditorIsActive(cfg.chapterId);
     this.mainEl = main as HTMLElement;
     this.proseEl = prose;
     this.api = new CollabApi(cfg.apiBase, cfg.project);
@@ -326,6 +338,7 @@ export class AuthorbotCollab extends HTMLElement {
 
   disconnectedCallback(): void {
     this.started = false;
+    this.chapterEditModeActive = false;
     this.mountGeneration += 1;
     this.unsubscribeStore?.();
     this.unsubscribeStore = null;
@@ -673,7 +686,12 @@ export class AuthorbotCollab extends HTMLElement {
             this.renderAll();
           },
           onDeactivated: () => {
-            if (this.composer.phase !== "closed") this.closeComposer();
+            // A chapter-edit handoff suspends an in-progress annotation
+            // losslessly. A user-requested return to the static Notes surface
+            // keeps the existing cancel-on-close behavior.
+            if (!this.chapterEditModeActive && this.composer.phase !== "closed") {
+              this.closeComposer();
+            }
             this.stopTargetVisibility?.();
             this.stopTargetVisibility = null;
             this.notesModeActive = false;
@@ -1492,8 +1510,19 @@ export class AuthorbotCollab extends HTMLElement {
     this.selectionTimer = window.setTimeout(() => this.checkSelection(), 120);
   };
 
+  setChapterEditMode(active: boolean): void {
+    this.chapterEditModeActive = active;
+    if (!this.scaffolded) return;
+    this.hideSelTool();
+    this.renderAll();
+  }
+
   private checkSelection(): void {
-    if (!this.canWrite() || this.composer.phase !== "closed") {
+    if (
+      this.chapterEditModeActive ||
+      !this.canWrite() ||
+      this.composer.phase !== "closed"
+    ) {
       this.hideSelTool();
       return;
     }
@@ -1527,6 +1556,7 @@ export class AuthorbotCollab extends HTMLElement {
   }
 
   private openComposer(draft: ComposerDraft, returnFocus: HTMLElement): void {
+    if (this.chapterEditModeActive) return;
     if (
       (draft.kind === "comment" && !this.canComment()) ||
       (draft.kind === "suggestion" && !this.canSuggest())
@@ -1666,7 +1696,9 @@ export class AuthorbotCollab extends HTMLElement {
     this.composer = composerReduce(restored, { type: "rejected", message });
     this.composerReturnFocus = returnFocus;
     this.renderComposer();
-    this.composerEl?.querySelector("textarea")?.focus();
+    if (!this.chapterEditModeActive) {
+      this.composerEl?.querySelector("textarea")?.focus();
+    }
   }
 
   private renderComposer(): void {
@@ -1676,7 +1708,12 @@ export class AuthorbotCollab extends HTMLElement {
       this.composerEl = null;
     }
     const state = this.composer;
-    if (state.phase === "closed" || state.phase === "synced" || state.draft === null) {
+    if (
+      this.chapterEditModeActive ||
+      state.phase === "closed" ||
+      state.phase === "synced" ||
+      state.draft === null
+    ) {
       this.layout();
       return;
     }
@@ -1845,7 +1882,7 @@ export class AuthorbotCollab extends HTMLElement {
     // Write affordances are gated (§2.2): pencils stay for signed-out
     // visitors (they lead to sign-in) but disappear for signed-in read-only
     // roles, whose Post could only ever fail.
-    const showPencils = this.me === null || this.canWrite();
+    const showPencils = !this.chapterEditModeActive && (this.me === null || this.canWrite());
     const commentSelection = this.selTool.querySelector<HTMLButtonElement>(".ab-select-comment");
     const suggestionSelection = this.selTool.querySelector<HTMLButtonElement>(".ab-select-suggestion");
     if (commentSelection !== null) commentSelection.hidden = !this.canComment();
@@ -1929,7 +1966,8 @@ export class AuthorbotCollab extends HTMLElement {
       : `Load ${all.length - visible.length} more discussions`;
     // Signed-out readers get a useful sign-in affordance. Once authenticated,
     // the button reflects the exact comment-write capability projection.
-    this.discussionStart.hidden = this.me !== null && !this.canComment();
+    this.discussionStart.hidden =
+      this.chapterEditModeActive || (this.me !== null && !this.canComment());
   }
 
   /**
@@ -2195,15 +2233,22 @@ export class AuthorbotCollab extends HTMLElement {
       return card;
     }
 
-    const control = new VoteControl({
-      canVote: this.canVoteOn(annotation),
-      signedIn: this.me !== null,
-      onVote: (value) => void this.castVoteOn(annotation.id, value),
-      onSignIn: () => this.promptSignIn(),
-    });
-    control.update(annotation);
-    this.voteControls.set(annotation.id, control);
-    card.append(control.root);
+    // Chapter-wide comments on this surface are already approved annotations.
+    // Approval-gated submissions live in the separate moderation queue until
+    // accepted, so approve/reject/abstain here would misleadingly suggest a
+    // second approval round. Passage notes and suggestions keep governance
+    // voting exactly as before.
+    if (!(surface === "discussion" && annotation.kind === "comment")) {
+      const control = new VoteControl({
+        canVote: this.canVoteOn(annotation),
+        signedIn: this.me !== null,
+        onVote: (value) => void this.castVoteOn(annotation.id, value),
+        onSignIn: () => this.promptSignIn(),
+      });
+      control.update(annotation);
+      this.voteControls.set(annotation.id, control);
+      card.append(control.root);
+    }
 
     // Phase 11: a maintainer can promote either an open comment or suggestion
     // in one click. Suggestion rejection remains a separate scoped action.
@@ -2233,10 +2278,15 @@ export class AuthorbotCollab extends HTMLElement {
     }
 
     const actions = el("div", "ab-actions");
-    if (this.canReplyTo(annotation) && status.label !== "failed") {
+    if (
+      !this.chapterEditModeActive &&
+      this.canReplyTo(annotation) &&
+      status.label !== "failed"
+    ) {
       const reply = el("button", "ab-btn", "Reply");
       reply.type = "button";
       reply.addEventListener("click", () => {
+        if (this.chapterEditModeActive) return;
         this.openReplyFor = this.openReplyFor === annotation.id ? null : annotation.id;
         this.replyParent = null;
         this.replyDraft = ""; // a fresh form starts empty
@@ -2280,7 +2330,11 @@ export class AuthorbotCollab extends HTMLElement {
       card.append(actions);
     }
 
-    if (this.openReplyFor === annotation.id && this.canReplyTo(annotation)) {
+    if (
+      !this.chapterEditModeActive &&
+      this.openReplyFor === annotation.id &&
+      this.canReplyTo(annotation)
+    ) {
       card.append(this.buildReplyForm(annotation));
     }
     return card;
@@ -2317,10 +2371,15 @@ export class AuthorbotCollab extends HTMLElement {
         item.append(el("p", "ab-hint", sync.message));
       }
       const actions = el("div", "ab-actions ab-reply-actions");
-      if (reply.status !== "withdrawn" && this.canReplyTo(annotation)) {
+      if (
+        !this.chapterEditModeActive &&
+        reply.status !== "withdrawn" &&
+        this.canReplyTo(annotation)
+      ) {
         const replyBtn = el("button", "ab-btn ab-btn-small", "Reply");
         replyBtn.type = "button";
         replyBtn.addEventListener("click", () => {
+          if (this.chapterEditModeActive) return;
           this.openReplyFor = annotation.id;
           this.replyParent = reply.id;
           this.replyDraft = "";
@@ -2450,7 +2509,9 @@ export class AuthorbotCollab extends HTMLElement {
           this.replyDraft = body;
           this.replyError = this.friendlyWriteError(result.status, result.message);
           this.renderAll();
-          this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
+          if (!this.chapterEditModeActive) {
+            this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
+          }
           return;
         }
         const replyId = result.value.replyId;
