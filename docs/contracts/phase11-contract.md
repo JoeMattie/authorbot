@@ -321,6 +321,14 @@ retire across releases because author CI applies a migration before deploying
 its matching Worker. A migration must never leave the still-running prior
 Worker unable to understand active token rows.
 
+**Slice 3B release gate:** migration
+`0013_phase11_capabilities_backfill.sql` must not be packaged or applied until
+the slice 3A dual-read Worker has been deployed and verified healthy. For the
+current release train, that means v0.1.34 must be live before a later release
+may contain 0013. It cannot ride in v0.1.34: author CI would apply it while the
+pre-3A Worker could still write new legacy rows after the one-shot backfill.
+The migration, its tests, and the release review must all preserve this gate.
+
 1. **Expand release.** Add a nullable `capabilities_v2` column and a
    `capability_mode` column defaulting to `legacy` on `agent_tokens`. The old
    Worker ignores both. The matching new Worker reads canonical capabilities

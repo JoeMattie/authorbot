@@ -149,7 +149,8 @@ describe("Phase 11 agent-token capabilities", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(me.status).toBe(200);
-    expect(await me.json()).toMatchObject({
+    const beforeBackfill = (await me.json()) as Record<string, unknown>;
+    expect(beforeBackfill).toMatchObject({
       capabilityMode: "legacy",
       grantedCapabilities: [
         "comments:write",
@@ -176,6 +177,28 @@ describe("Phase 11 agent-token capabilities", () => {
         },
       ],
     });
+
+    // Slice 3B populates this projection but deliberately leaves mode=legacy.
+    // The already-deployed 3A dual-reader must keep the legacy scopes
+    // authoritative before, during, and after that migration.
+    await h.db
+      .prepare(`UPDATE agent_tokens SET capabilities_v2 = ? WHERE id = ?`)
+      .bind(
+        JSON.stringify([
+          "comments:write",
+          "suggestions:write",
+          "replies:write",
+          "feedback:withdraw-own",
+          "work:claim",
+        ]),
+        tokenId,
+      )
+      .run();
+    const afterBackfill = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(afterBackfill.status).toBe(200);
+    expect(await afterBackfill.json()).toEqual(beforeBackfill);
   });
 
   it("fails closed for unknown and malformed canonical grant sets", async () => {
