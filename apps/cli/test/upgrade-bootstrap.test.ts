@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   UpgradeBootstrapPort,
   UpgradeBootstrapRequest,
+  UpgradeBootstrapResult,
 } from "../src/upgrade/ports.js";
 import { renderTransientBootstrapCommand } from "../src/upgrade/bootstrap.js";
 import { runUpgrade } from "../src/upgrade/upgrade.js";
@@ -30,6 +31,7 @@ function fakeBootstrap(options: {
   result?: number;
   warning?: string;
   error?: Error;
+  handoff?: (request: UpgradeBootstrapRequest) => Promise<UpgradeBootstrapResult>;
 }): FakeBootstrap {
   const requests: UpgradeBootstrapRequest[] = [];
   return {
@@ -40,6 +42,9 @@ function fakeBootstrap(options: {
       requests.push(request);
       if (options.error !== undefined) {
         throw options.error;
+      }
+      if (options.handoff !== undefined) {
+        return options.handoff(request);
       }
       return {
         exitCode: options.result ?? 0,
@@ -313,5 +318,111 @@ describe("authorbot upgrade self-bootstrap", () => {
     ).toBe(0);
 
     expect(bootstrap.requests[0]?.targetVersion).toBe("1.0.0");
+  });
+
+  it("continues in the exact target child and repairs an interrupted equal-version upgrade", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0", apiPin: "1.0.0" });
+    await nodeFs.writeFile(
+      path.join(repoPath, "package-lock.json"),
+      `${JSON.stringify(
+        {
+          name: "my-book",
+          version: "0.0.0",
+          lockfileVersion: 3,
+          packages: {
+            "": {
+              devDependencies: {
+                "@authorbot/api": "1.0.0",
+                "@authorbot/cli": "1.0.0",
+              },
+            },
+            "node_modules/@authorbot/api": { version: "1.0.0" },
+            "node_modules/@authorbot/cli": { version: "1.0.0" },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const git = fakeGit();
+    const io = captureIo();
+    const childBootstrap = fakeBootstrap({
+      running: "1.1.0",
+      requested: "1.1.0",
+    });
+    const migrations = [
+      {
+        id: "0001-interrupted-repair",
+        from: "1.0.0",
+        to: "1.1.0",
+        description: "Mark the repaired book",
+        async apply(repo: {
+          exists(relativePath: string): Promise<boolean>;
+          read(relativePath: string): Promise<string>;
+          write(relativePath: string, contents: string): Promise<void>;
+        }) {
+          const current = await repo.read("README.md");
+          const marker = "<!-- repaired by target helper -->";
+          if (current.includes(marker)) {
+            return [];
+          }
+          await repo.write("README.md", `${current.trimEnd()}\n\n${marker}\n`);
+          return ["README.md"];
+        },
+      },
+    ];
+    const parentBootstrap = fakeBootstrap({
+      running: "0.9.0",
+      async handoff(request) {
+        const exitCode = await runUpgrade(
+          [...request.args],
+          io.io,
+          makeDeps({
+            git,
+            bootstrap: childBootstrap,
+            releases: fakeReleases(["1.0.0", "1.1.0"]),
+            migrations,
+          }),
+        );
+        return { exitCode };
+      },
+    });
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--to", "1.1.0"],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: parentBootstrap,
+          releases: fakeReleases(["1.0.0", "1.1.0"]),
+          migrations,
+        }),
+      ),
+    ).toBe(0);
+
+    expect(parentBootstrap.requests).toHaveLength(1);
+    expect(parentBootstrap.requests[0]?.targetVersion).toBe("1.1.0");
+    expect(childBootstrap.requests).toEqual([]);
+    expect(git.branches[0]).toMatch(/^authorbot\/repair-1\.1\.0-/);
+    expect(git.commits).toHaveLength(2);
+    expect(git.commits[0]?.message).toContain("repair toolchain at 1.1.0");
+    expect(git.commits[1]?.paths).toEqual(["README.md"]);
+    expect(git.pullRequest?.title).toBe("Repair Authorbot 1.1.0 toolchain");
+    expect(git.pullRequest?.body).toContain("migration baseline");
+
+    const manifest = JSON.parse(
+      await nodeFs.readFile(path.join(repoPath, "package.json")),
+    ) as { devDependencies: Record<string, string> };
+    expect(manifest.devDependencies["@authorbot/cli"]).toBe("1.1.0");
+    expect(manifest.devDependencies["@authorbot/api"]).toBe("1.1.0");
+    const lock = JSON.parse(
+      await nodeFs.readFile(path.join(repoPath, "package-lock.json")),
+    ) as { packages: Record<string, { version?: string }> };
+    expect(lock.packages["node_modules/@authorbot/cli"]?.version).toBe("1.1.0");
+    expect(lock.packages["node_modules/@authorbot/api"]?.version).toBe("1.1.0");
+    expect(await nodeFs.readFile(path.join(repoPath, "README.md"))).toContain(
+      "<!-- repaired by target helper -->",
+    );
   });
 });

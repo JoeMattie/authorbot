@@ -4,8 +4,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CommandError,
+  createNodeLockfile,
   createNodeUpgradeBootstrap,
+  createWranglerCli,
   nodeLockfile,
+  resolveExecutableInvocation,
 } from "../src/upgrade/node-ports.js";
 
 const tempDirs: string[] = [];
@@ -30,7 +33,158 @@ function restoreEnvironment(name: string, previous: string | undefined): void {
   }
 }
 
+describe("Windows package-manager executable resolution", () => {
+  const env = {
+    npm_node_execpath: "C:\\Attacker\\node.exe",
+    npm_execpath: "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+  };
+
+  it("runs npm's JavaScript entry point through node.exe without a shell", () => {
+    expect(
+      resolveExecutableInvocation(
+        "npm",
+        ["install", "name with spaces", "value&still-one-argument"],
+        env,
+        "win32",
+        "C:\\Trusted\\node.exe",
+        () => true,
+      ),
+    ).toEqual({
+      file: "C:\\Trusted\\node.exe",
+      args: [
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "install",
+        "name with spaces",
+        "value&still-one-argument",
+      ],
+    });
+  });
+
+  it("maps npx to the sibling npx CLI and keeps every argument discrete", () => {
+    expect(
+      resolveExecutableInvocation(
+        "npx.cmd",
+        ["--no-install", "wrangler", "d1", "apply", "db & not syntax"],
+        env,
+        "win32",
+        "C:\\Trusted\\node.exe",
+        () => true,
+      ),
+    ).toEqual({
+      file: "C:\\Trusted\\node.exe",
+      args: [
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js",
+        "--no-install",
+        "wrangler",
+        "d1",
+        "apply",
+        "db & not syntax",
+      ],
+    });
+  });
+
+  it("uses an existence-checked bundled npm fallback without trusting npm_node_execpath", () => {
+    expect(
+      resolveExecutableInvocation(
+        "npm",
+        ["install"],
+        { npm_node_execpath: "D:\\Attacker\\node.exe" },
+        "win32",
+        "D:\\Trusted\\node.exe",
+        (target) =>
+          target ===
+          "D:\\Trusted\\node_modules\\npm\\bin\\npm-cli.js",
+      ),
+    ).toEqual({
+      file: "D:\\Trusted\\node.exe",
+      args: [
+        "D:\\Trusted\\node_modules\\npm\\bin\\npm-cli.js",
+        "install",
+      ],
+    });
+  });
+
+  it("rejects missing or untrusted launchers instead of enabling a shell", () => {
+    expect(() =>
+      resolveExecutableInvocation(
+        "npm",
+        ["install"],
+        { npm_execpath: "D:\\Node\\node_modules\\npm\\bin\\npm-cli.js" },
+        "win32",
+        "D:\\Trusted\\node.exe",
+        () => false,
+      ),
+    ).toThrow(/will not enable a command shell/);
+  });
+
+  it("leaves non-Windows commands unchanged", () => {
+    expect(
+      resolveExecutableInvocation(
+        "npm",
+        ["install"],
+        env,
+        "linux",
+        "/usr/bin/node",
+      ),
+    ).toEqual({ file: "npm", args: ["install"] });
+  });
+});
+
 describe("nodeLockfile", () => {
+  it("relocks through npm's JS entry point under simulated Windows", async () => {
+    const repo = await tempDirectory();
+    const npmCli = path.join(repo, "npm-cli.cjs");
+    const marker = path.join(repo, "windows-npm.json");
+    await writeFile(
+      path.join(repo, "package.json"),
+      JSON.stringify({ name: "windows-book", version: "1.0.0", private: true }),
+    );
+    await writeFile(
+      npmCli,
+      `const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(process.env.AUTHORBOT_WINDOWS_NPM_MARKER, JSON.stringify({
+  args: process.argv.slice(2),
+  poison: process.env.npm_config_allow_scripts,
+  offline: process.env.npm_config_offline
+}));
+fs.writeFileSync(path.join(process.cwd(), "package-lock.json"), JSON.stringify({
+  lockfileVersion: 3,
+  packages: { "": { name: "windows-book", version: "1.0.0" } }
+}));
+`,
+    );
+    const lockfile = createNodeLockfile(
+      {
+        ...process.env,
+        npm_node_execpath: process.execPath,
+        npm_execpath: npmCli,
+        npm_config_allow_scripts: "outer-poison",
+        npm_config_offline: "true",
+        AUTHORBOT_WINDOWS_NPM_MARKER: marker,
+      },
+      "win32",
+    );
+
+    await lockfile.relock(repo);
+
+    const invocation = JSON.parse(await readFile(marker, "utf8")) as {
+      args: string[];
+      poison?: string;
+      offline?: string;
+    };
+    expect(invocation.args).toEqual([
+      "install",
+      "--package-lock-only",
+      "--package-lock=true",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+    ]);
+    expect(invocation.poison).toBeUndefined();
+    expect(invocation.offline).toBe("true");
+  });
+
   it("relocks beneath npx without inheriting the outer npm allow-scripts config", async () => {
     const repo = await tempDirectory();
     await writeFile(
@@ -263,18 +417,18 @@ process.exitCode = 11;
     },
   );
 
-  it.runIf(process.platform !== "win32")(
-    "acquires an exact target and preserves its exit status when cleanup fails",
+  it(
+    "acquires an exact target under simulated Windows and preserves cleanup exit status",
     async () => {
       const repo = await tempDirectory();
       const fakeBin = path.join(repo, "fake-bin");
       await mkdir(fakeBin);
+      const npmCli = path.join(fakeBin, "npm-cli.cjs");
       const npmMarker = path.join(repo, "npm.json");
       const childMarker = path.join(repo, "child.json");
       await writeFile(
-        path.join(fakeBin, "npm"),
-        `#!/usr/bin/env node
-const fs = require("node:fs");
+        npmCli,
+        `const fs = require("node:fs");
 const path = require("node:path");
 const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const version = manifest.dependencies["@authorbot/cli"];
@@ -307,7 +461,6 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
 ].join("\\n"));
 `,
       );
-      await chmod(path.join(fakeBin, "npm"), 0o755);
 
       const staleRoot = path.join(repo, "node_modules", "@authorbot", "cli");
       await mkdir(path.join(staleRoot, "dist"), { recursive: true });
@@ -324,7 +477,8 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
       const bootstrap = await createNodeUpgradeBootstrap(
         {
           ...process.env,
-          PATH: `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`,
+          npm_node_execpath: process.execPath,
+          npm_execpath: npmCli,
           npm_config_allow_scripts: "poison-from-outer-npx",
           npm_config_offline: "true",
           npm_config_cache: "/intentional/bootstrap-cache",
@@ -337,6 +491,7 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
         async () => {
           throw new Error("simulated cleanup denial");
         },
+        "win32",
       );
       const result = await bootstrap.handoff({
         targetVersion: "0.1.34",
@@ -394,4 +549,58 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
       expect(stale.version).toBe("0.1.29");
     },
   );
+});
+
+describe("Windows npx Wrangler execution", () => {
+  it("runs migrations and deploy through npx-cli.js without a shell", async () => {
+    const repo = await tempDirectory();
+    const npmCli = path.join(repo, "npm-cli.cjs");
+    const npxCli = path.join(repo, "npx-cli.cjs");
+    const marker = path.join(repo, "npx-calls.json");
+    await writeFile(npmCli, "throw new Error('npm entry point should not run');\n");
+    await writeFile(
+      npxCli,
+      `const fs = require("node:fs");
+const calls = fs.existsSync(process.env.AUTHORBOT_WINDOWS_NPX_MARKER)
+  ? JSON.parse(fs.readFileSync(process.env.AUTHORBOT_WINDOWS_NPX_MARKER, "utf8"))
+  : [];
+const args = process.argv.slice(2);
+calls.push(args);
+fs.writeFileSync(process.env.AUTHORBOT_WINDOWS_NPX_MARKER, JSON.stringify(calls));
+if (args.includes("deploy")) {
+  console.log("https://windows-book.example.workers.dev");
+} else {
+  process.stderr.write("0012_windows_test.sql\\n");
+}
+`,
+    );
+    const wrangler = createWranglerCli(
+      {
+        ...process.env,
+        npm_node_execpath: process.execPath,
+        npm_execpath: npmCli,
+        AUTHORBOT_WINDOWS_NPX_MARKER: marker,
+      },
+      "win32",
+    );
+
+    // The adapter's responsibility is shell-free launcher selection and
+    // discrete argv. Assert those through a durable child-process side effect;
+    // Wrangler output parsing is unchanged by the adapter.
+    await wrangler.applyD1Migrations(repo, "book db & still one arg");
+    await wrangler.deploy(repo);
+    const calls = JSON.parse(await readFile(marker, "utf8")) as string[][];
+    expect(calls).toEqual([
+      [
+        "--no-install",
+        "wrangler",
+        "d1",
+        "migrations",
+        "apply",
+        "book db & still one arg",
+        "--remote",
+      ],
+      ["--no-install", "wrangler", "deploy"],
+    ]);
+  });
 });

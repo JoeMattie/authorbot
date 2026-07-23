@@ -76,9 +76,11 @@ prose and configuration before accepting it, and `git revert` is the undo
 button. Book-repo migrations are committed separately from content so they
 can be reverted independently.
 
-`--dry-run` prints the plan and changes nothing. `--check` reports whether an
-upgrade is available and whether it would require a format migration, for use
-in a scheduled job.
+`--dry-run` runs every pre-branch gate in throwaway copies, including
+validation, migration idempotency, npm relocking, and exact lock verification,
+then prints the plan and changes nothing. `--check` reports whether a version
+upgrade or interrupted-state repair is required and whether it would require a
+format migration, for use in a scheduled job.
 
 The handoff in step 1 is a safety boundary, not an optimization. Plain
 `npx authorbot` prefers the local executable, and `node_modules` can lag behind
@@ -106,6 +108,25 @@ The nested npm call preserves the author's intentional offline, cache,
 registry, userconfig, and authentication settings. It removes only npm
 configuration known to be invalid when inherited from the outer `npx`
 process, currently `allow_scripts`.
+
+On Windows, npm and npx are command scripts which cannot be launched by
+`execFile` without a shell. The helper does not enable one. It validates npm's
+absolute JavaScript launcher path, or an existing launcher in npm's standard
+location beside `node.exe`, and runs that file with `process.execPath` while
+preserving argv as an array. Environment-provided Node executable paths are
+never trusted.
+
+An interrupted run may leave `package.json` on the target release while its
+API pin or lockfile is still older. Equal manifest and target versions are
+therefore not automatically a no-op. The target helper repairs that state
+through the same clean-tree, validation, migration, verified-relock, and pull
+request path as a forward upgrade. The only evidence allowed to lower the
+book-format migration baseline is an internally coherent committed CLI lock
+tuple: a parseable root `@authorbot/cli` spec and an exact resolved version
+which satisfies it and is not newer than the target. API pins, the running
+helper, and `node_modules` are alignment inputs, not format evidence. Missing,
+malformed, contradictory, or newer lock evidence blocks unchanged rather than
+guessing which migrations already ran.
 
 No release can change an executable which was already published before this
 bootstrap existed. A book whose installed helper predates this behavior needs

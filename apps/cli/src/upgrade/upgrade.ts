@@ -46,7 +46,13 @@ import {
   rewriteAuthorbotPins,
   UpgradeRepoError,
 } from "./repo.js";
-import { compareVersions, parseVersion, renderPin, type SemVer } from "./semver.js";
+import {
+  compareVersions,
+  parsePin,
+  parseVersion,
+  renderPin,
+  type SemVer,
+} from "./semver.js";
 
 export const UPGRADE_USAGE = `Usage: authorbot upgrade [path] [options]
 
@@ -243,6 +249,12 @@ function parseArgs(args: string[], io: CliIo): UpgradeOptions | number {
     io.err(`authorbot: --check and --dry-run are alternatives, not a combination\n\n${UPGRADE_USAGE}`);
     return 2;
   }
+  if (options.json && !options.check && !options.dryRun) {
+    io.err(
+      `authorbot: --json is only supported with --check or --dry-run\n\n${UPGRADE_USAGE}`,
+    );
+    return 2;
+  }
   if (options.rollback !== undefined && options.check) {
     io.err(
       `authorbot: --check reports on upgrades, not rollbacks; use --rollback --dry-run\n\n${UPGRADE_USAGE}`,
@@ -265,7 +277,11 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
     repoPath: options.repoPath,
     ...(options.to === undefined ? {} : { to: options.to }),
   });
-  const migrationRequired = plan.migrations.length > 0;
+  const targetSpec = upgradeTargetSpec(plan, options.to !== undefined);
+  const audit = await auditToolchain(plan, deps, targetSpec);
+  const effectivePlan = planFromAudit(plan, audit, deps);
+  const actionRequired = plan.upgradeAvailable || audit.repairRequired;
+  const migrationRequired = effectivePlan.migrations.length > 0;
 
   if (options.json) {
     io.out(
@@ -274,8 +290,14 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
           current: plan.current.raw,
           target: plan.target.raw,
           upgradeAvailable: plan.upgradeAvailable,
+          actionRequired,
+          repairRequired: audit.repairRequired,
+          repairBlocked: audit.blockedReason !== undefined,
+          repairIssues: audit.repairRequired ? audit.issues : [],
+          migrationBaseline: audit.repairRequired ? audit.baseline?.raw ?? null : plan.current.raw,
+          repairBlockReason: audit.blockedReason ?? null,
           formatMigrationRequired: migrationRequired,
-          migrations: plan.migrations.map(({ migration }) => ({
+          migrations: effectivePlan.migrations.map(({ migration }) => ({
             id: migration.id,
             from: migration.from,
             to: migration.to,
@@ -287,6 +309,29 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
         2,
       ),
     );
+  } else if (audit.blockedReason !== undefined) {
+    io.err(`authorbot: toolchain repair is required at ${plan.target.raw}, but it is blocked:`);
+    for (const issue of audit.issues) {
+      io.err(`  - ${issue}`);
+    }
+    io.err(`authorbot: ${audit.blockedReason}`);
+    io.err("authorbot: no repository files were changed.");
+  } else if (audit.repairRequired) {
+    io.out(`authorbot: toolchain repair required at ${plan.target.raw}:`);
+    for (const issue of audit.issues) {
+      io.out(`  - ${issue}`);
+    }
+    if (migrationRequired) {
+      io.out(
+        `authorbot: ${describeMigrationCount(effectivePlan.migrations)} would be checked ` +
+          `from evidenced version ${effectivePlan.current.raw}:`,
+      );
+      for (const { migration } of effectivePlan.migrations) {
+        io.out(`  ${migration.id} (${migration.from} -> ${migration.to}): ${migration.description}`);
+      }
+    } else {
+      io.out("authorbot: no book-format migration needs checking");
+    }
   } else if (!plan.upgradeAvailable) {
     io.out(`authorbot: up to date (${plan.current.raw})`);
     if (plan.newerMajor !== undefined) {
@@ -298,8 +343,8 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
   } else {
     io.out(`authorbot: upgrade available: ${plan.current.raw} -> ${plan.target.raw}`);
     if (migrationRequired) {
-      io.out(`authorbot: ${describeMigrationCount(plan.migrations)} would run:`);
-      for (const { migration } of plan.migrations) {
+      io.out(`authorbot: ${describeMigrationCount(effectivePlan.migrations)} would run:`);
+      for (const { migration } of effectivePlan.migrations) {
         io.out(`  ${migration.id} (${migration.from} -> ${migration.to}): ${migration.description}`);
       }
     } else {
@@ -310,7 +355,10 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
     }
   }
 
-  if (!plan.upgradeAvailable) {
+  if (audit.blockedReason !== undefined) {
+    return 2;
+  }
+  if (!actionRequired) {
     return CHECK_EXIT_NONE;
   }
   return migrationRequired ? CHECK_EXIT_MIGRATION : CHECK_EXIT_AVAILABLE;
@@ -344,12 +392,12 @@ function parseJsonObject(contents: string, fileName: string): Record<string, unk
     parsed = JSON.parse(contents);
   } catch (error) {
     throw new Error(
-      `${fileName} is not valid JSON after relocking: ` +
+      `${fileName} is not valid JSON: ` +
         (error instanceof Error ? error.message : String(error)),
     );
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`${fileName} is not a JSON object after relocking`);
+    throw new Error(`${fileName} is not a JSON object`);
   }
   return parsed as Record<string, unknown>;
 }
@@ -375,6 +423,188 @@ function directDependency(
     }
   }
   return undefined;
+}
+
+interface ToolchainAudit {
+  /** Repository facts which differ from the selected target. */
+  readonly issues: readonly string[];
+  /**
+   * Whether the manifest already names the target but its committed toolchain
+   * state is only partially aligned.
+   */
+  readonly repairRequired: boolean;
+  /**
+   * Book-format baseline supported by committed CLI state. API pins, the
+   * running helper, and node_modules are deliberately excluded: none can
+   * prove which migrations the repository has already received.
+   */
+  readonly baseline?: SemVer;
+  /** Equal-version repair cannot proceed when committed CLI evidence conflicts. */
+  readonly blockedReason?: string;
+}
+
+function pinAllowsVersion(spec: string, version: SemVer): boolean {
+  const pin = parsePin(spec);
+  if (pin === undefined || compareVersions(version, pin.version) < 0) {
+    return false;
+  }
+  if (pin.kind === "exact") {
+    return compareVersions(version, pin.version) === 0;
+  }
+  if (pin.spec.startsWith("~")) {
+    return version.major === pin.version.major && version.minor === pin.version.minor;
+  }
+  if (pin.version.major > 0) {
+    return version.major === pin.version.major;
+  }
+  if (pin.version.minor > 0) {
+    return version.major === 0 && version.minor === pin.version.minor;
+  }
+  return (
+    version.major === 0 &&
+    version.minor === 0 &&
+    version.patch === pin.version.patch
+  );
+}
+
+/**
+ * Inspect persisted toolchain alignment before deciding that an equal
+ * manifest version means "nothing to do".
+ *
+ * A normal forward upgrade gets its migration baseline from package.json,
+ * which is the version the author chose. Equal-version repair is different:
+ * package.json may be the one file an interrupted run already changed. In
+ * that case only an internally coherent package-lock CLI tuple can establish
+ * an older baseline: root CLI spec plus an exact resolved version satisfying
+ * it. Any ambiguity blocks before validation, relocking, git, or mutation.
+ */
+async function auditToolchain(
+  plan: UpgradePlan,
+  deps: UpgradeDeps,
+  targetSpec: string,
+): Promise<ToolchainAudit> {
+  const issues: string[] = [];
+  const manifest = parseJsonObject(plan.pinLocation.packageJsonText, "package.json");
+  for (const packageName of AUTHORBOT_RUNTIME_PACKAGES) {
+    const dependency = directDependency(manifest, packageName);
+    if (dependency === undefined) {
+      continue;
+    }
+    if (dependency.spec !== targetSpec) {
+      issues.push(
+        `package.json pins ${packageName} to ${dependency.spec}, not ${targetSpec}`,
+      );
+    }
+  }
+
+  const lockPath = path.join(plan.repoPath, "package-lock.json");
+  let lock: Record<string, unknown> | undefined;
+  let packages: Record<string, unknown> | undefined;
+  let root: Record<string, unknown> | undefined;
+  if (!(await deps.fs.exists(lockPath))) {
+    issues.push("package-lock.json is missing");
+  } else {
+    try {
+      lock = parseJsonObject(await deps.fs.readFile(lockPath), "package-lock.json");
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : String(error));
+    }
+    packages = lock === undefined ? undefined : objectField(lock, "packages");
+    root = packages === undefined ? undefined : objectField(packages, "");
+    if (lock !== undefined && (packages === undefined || root === undefined)) {
+      issues.push("package-lock.json has no npm packages root");
+    }
+    for (const packageName of AUTHORBOT_RUNTIME_PACKAGES) {
+      const dependency = directDependency(manifest, packageName);
+      if (dependency === undefined) {
+        continue;
+      }
+      const lockedSpec =
+        root === undefined
+          ? undefined
+          : objectField(root, dependency.field)?.[packageName];
+      if (lockedSpec !== targetSpec) {
+        issues.push(
+          `package-lock.json records ${packageName} as ${String(lockedSpec)}, not ${targetSpec}`,
+        );
+      }
+      const resolved =
+        packages === undefined
+          ? undefined
+          : objectField(packages, `node_modules/${packageName}`)?.["version"];
+      if (resolved !== plan.target.raw) {
+        issues.push(
+          `package-lock.json resolves ${packageName} to ${String(resolved)}, ` +
+            `not ${plan.target.raw}`,
+        );
+      }
+    }
+  }
+
+  const sameVersion = compareVersions(plan.current, plan.target) === 0;
+  const repairRequired = sameVersion && issues.length > 0;
+  if (!repairRequired) {
+    return { issues, repairRequired: false, baseline: plan.current };
+  }
+
+  const rootCliSpec = objectField(root ?? {}, plan.pinLocation.field)?.[
+    "@authorbot/cli"
+  ];
+  const resolvedCliRaw = objectField(
+    packages ?? {},
+    "node_modules/@authorbot/cli",
+  )?.["version"];
+  if (typeof rootCliSpec !== "string" || parsePin(rootCliSpec) === undefined) {
+    return {
+      issues,
+      repairRequired,
+      blockedReason:
+        "package-lock.json does not contain a parseable root @authorbot/cli spec, " +
+        "so Authorbot cannot prove the book-format baseline.",
+    };
+  }
+  if (typeof resolvedCliRaw !== "string" || parseVersion(resolvedCliRaw) === undefined) {
+    return {
+      issues,
+      repairRequired,
+      blockedReason:
+        "package-lock.json does not contain an exact resolved @authorbot/cli version, " +
+        "so Authorbot cannot prove the book-format baseline.",
+    };
+  }
+  const resolvedCli = parseVersion(resolvedCliRaw);
+  if (resolvedCli === undefined || !pinAllowsVersion(rootCliSpec, resolvedCli)) {
+    return {
+      issues,
+      repairRequired,
+      blockedReason:
+        `package-lock.json's resolved @authorbot/cli ${resolvedCliRaw} does not satisfy ` +
+        `its root spec ${rootCliSpec}; refusing to guess which migrations already ran.`,
+    };
+  }
+  if (compareVersions(resolvedCli, plan.target) > 0) {
+    return {
+      issues,
+      repairRequired,
+      blockedReason:
+        `package-lock.json resolves @authorbot/cli to ${resolvedCli.raw}, newer than the ` +
+        `selected target ${plan.target.raw}; refusing to migrate from an invented baseline.`,
+    };
+  }
+  return { issues, repairRequired, baseline: resolvedCli };
+}
+
+function planFromAudit(
+  plan: UpgradePlan,
+  audit: ToolchainAudit,
+  deps: UpgradeDeps,
+): UpgradePlan {
+  const baseline = audit.baseline ?? plan.current;
+  return {
+    ...plan,
+    current: baseline,
+    migrations: selectMigrations(deps.migrations, baseline, plan.target),
+  };
 }
 
 /**
@@ -552,8 +782,41 @@ async function runUpgradeFlow(
     repoPath: options.repoPath,
     ...(options.to === undefined ? {} : { to: options.to }),
   });
+  const targetSpec = upgradeTargetSpec(plan, options.to !== undefined);
+  const audit = await auditToolchain(plan, deps, targetSpec);
+  const effectivePlan = planFromAudit(plan, audit, deps);
 
-  if (!plan.upgradeAvailable) {
+  if (audit.blockedReason !== undefined) {
+    if (options.json) {
+      io.out(
+        JSON.stringify(
+          {
+            upgraded: false,
+            current: plan.current.raw,
+            target: plan.target.raw,
+            actionRequired: true,
+            repairRequired: true,
+            repairBlocked: true,
+            repairIssues: audit.issues,
+            migrationBaseline: null,
+            reason: audit.blockedReason,
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      io.err(`authorbot: toolchain repair is required at ${plan.target.raw}, but it is blocked:`);
+      for (const issue of audit.issues) {
+        io.err(`  - ${issue}`);
+      }
+      io.err(`authorbot: ${audit.blockedReason}`);
+      io.err("authorbot: no validation, relocking, branch, or repository change was attempted.");
+    }
+    return 2;
+  }
+
+  if (!plan.upgradeAvailable && !audit.repairRequired) {
     if (options.json) {
       io.out(JSON.stringify({ upgraded: false, current: plan.current.raw, reason: "up-to-date" }, null, 2));
     } else {
@@ -568,14 +831,27 @@ async function runUpgradeFlow(
     return 0;
   }
 
-  io.out(`authorbot: ${plan.current.raw} -> ${plan.target.raw}`);
-  if (plan.target.major > plan.current.major) {
-    io.out("authorbot: this crosses a major version; read the release notes before merging");
+  const machineDryRun = options.dryRun && options.json;
+  if (!machineDryRun) {
+    if (audit.repairRequired) {
+      io.out(
+        `authorbot: repairing an interrupted ${plan.target.raw} toolchain state ` +
+          `(migration baseline ${effectivePlan.current.raw})`,
+      );
+      for (const issue of audit.issues) {
+        io.out(`  - ${issue}`);
+      }
+    } else {
+      io.out(`authorbot: ${plan.current.raw} -> ${plan.target.raw}`);
+    }
+    if (!audit.repairRequired && plan.target.major > plan.current.major) {
+      io.out("authorbot: this crosses a major version; read the release notes before merging");
+    }
+    describePlan(effectivePlan, io, audit.repairRequired);
   }
-  describePlan(plan, io);
 
   if (options.dryRun) {
-    return runDryRun(plan, options, io, deps);
+    return runDryRun(effectivePlan, plan, audit, targetSpec, options, io, deps);
   }
 
   // Step 3 gate, plus the requirement that we have a clean tree to branch
@@ -590,11 +866,12 @@ async function runUpgradeFlow(
   }
   const originalBranch = await deps.git.currentBranch(plan.repoPath);
 
-  const outcome = await migrateWorkingCopy(plan, deps, io);
+  const outcome = await migrateWorkingCopy(effectivePlan, deps, io);
   if (outcome.newErrors.length > 0) {
     io.err(
       `authorbot: UPGRADE ABORTED. ${plan.target.raw} would introduce ` +
-        `${outcome.newErrors.length} validation error(s) that ${plan.current.raw} did not report.`,
+        `${outcome.newErrors.length} validation error(s) that ` +
+        `${effectivePlan.current.raw} did not report.`,
     );
     renderFindings(outcome.newErrors, io);
     io.err(
@@ -606,16 +883,52 @@ async function runUpgradeFlow(
   }
   reportValidation(outcome, io);
 
-  const newSpec = upgradeTargetSpec(plan, options.to !== undefined);
   let toolchainFiles: PreparedToolchainFiles;
   try {
-    toolchainFiles = await prepareToolchainFiles(plan, deps, newSpec);
+    toolchainFiles = await prepareToolchainFiles(plan, deps, targetSpec);
   } catch (error) {
     reportRelockFailure(io, error);
     return 1;
   }
 
-  const branch = branchName("upgrade", plan.target, deps.now());
+  const lockPath = path.join(plan.repoPath, "package-lock.json");
+  const originalLock = (await deps.fs.exists(lockPath))
+    ? await deps.fs.readFile(lockPath)
+    : undefined;
+  const toolchainChanged =
+    toolchainFiles.packageJson !== plan.pinLocation.packageJsonText ||
+    toolchainFiles.packageLock !== originalLock;
+  if (!toolchainChanged && outcome.changed.length === 0) {
+    io.err(
+      "authorbot: the planned operation produced no diff after validation and verified relocking. " +
+        "Refusing to create an empty branch or pull request.",
+    );
+    return 1;
+  }
+
+  // Migration and registry-backed relocking can take long enough for an
+  // editor, hook, or another terminal to change the checkout after the first
+  // clean-tree gate. Recheck both facts immediately before branching.
+  if (!(await deps.git.isClean(plan.repoPath))) {
+    io.err(
+      "authorbot: the working tree changed while the operation was being prepared. " +
+        "Nothing from the prepared copy was written and no branch was created; commit or " +
+        "stash the new changes, then run the command again.",
+    );
+    return 2;
+  }
+  const branchBeforeCreate = await deps.git.currentBranch(plan.repoPath);
+  if (branchBeforeCreate !== originalBranch) {
+    io.err(
+      `authorbot: the current branch changed from ${originalBranch} to ${branchBeforeCreate} ` +
+        "while the operation was being prepared. No branch or repository change was made; " +
+        "return to the intended branch and run the command again.",
+    );
+    return 2;
+  }
+
+  const operation = audit.repairRequired ? "repair" : "upgrade";
+  const branch = branchName(operation, plan.target, deps.now());
   const base = options.base ?? (await readDefaultBranch(deps.fs, plan.repoPath));
   const completed: string[] = [];
 
@@ -623,19 +936,29 @@ async function runUpgradeFlow(
     await deps.git.createBranch(plan.repoPath, branch);
     completed.push(`created branch ${branch}`);
 
-    // Commit 1: the toolchain pin, alone. Reverting this commit rolls the
-    // toolchain back without touching prose (ADR-0021 §5).
-    await deps.fs.writeFile(path.join(plan.repoPath, "package.json"), toolchainFiles.packageJson);
-    await deps.fs.writeFile(path.join(plan.repoPath, "package-lock.json"), toolchainFiles.packageLock);
-    await deps.git.commit(plan.repoPath, {
-      message:
-        `chore(authorbot): upgrade toolchain ${plan.current.raw} -> ${plan.target.raw}\n\n` +
-        `Pins the book's direct Authorbot packages to ${newSpec}.\n` +
-        "Reverting this commit rolls the toolchain back; it does NOT undo any\n" +
-        "book-format migration (ADR-0021 §5).",
-      paths: ["package.json", "package-lock.json"],
-    });
-    completed.push("committed the toolchain pin");
+    if (toolchainChanged) {
+      // Commit 1: toolchain alignment, alone. Reverting this commit rolls the
+      // toolchain back without touching prose (ADR-0021 §5).
+      await deps.fs.writeFile(path.join(plan.repoPath, "package.json"), toolchainFiles.packageJson);
+      await deps.fs.writeFile(path.join(plan.repoPath, "package-lock.json"), toolchainFiles.packageLock);
+      await deps.git.commit(plan.repoPath, {
+        message: audit.repairRequired
+          ? `chore(authorbot): repair toolchain at ${plan.target.raw}\n\n` +
+            `Aligns the book's direct Authorbot packages and verified lockfile at ${targetSpec}.\n` +
+            `The committed CLI lock tuple evidenced ${effectivePlan.current.raw} as the ` +
+            "book-format migration baseline."
+          : `chore(authorbot): upgrade toolchain ${plan.current.raw} -> ${plan.target.raw}\n\n` +
+            `Pins the book's direct Authorbot packages to ${targetSpec}.\n` +
+            "Reverting this commit rolls the toolchain back; it does NOT undo any\n" +
+            "book-format migration (ADR-0021 §5).",
+        paths: ["package.json", "package-lock.json"],
+      });
+      completed.push(
+        audit.repairRequired
+          ? "committed the repaired toolchain alignment"
+          : "committed the toolchain pin",
+      );
+    }
 
     // Commit 2: the format migration, alone, for the same reason in reverse.
     if (outcome.changed.length > 0) {
@@ -661,13 +984,15 @@ async function runUpgradeFlow(
     const url = await deps.git.openPullRequest(plan.repoPath, {
       branch,
       base,
-      title: `Upgrade Authorbot ${plan.current.raw} -> ${plan.target.raw}`,
-      body: pullRequestBody(plan, outcome, newSpec),
+      title: audit.repairRequired
+        ? `Repair Authorbot ${plan.target.raw} toolchain`
+        : `Upgrade Authorbot ${plan.current.raw} -> ${plan.target.raw}`,
+      body: pullRequestBody(plan, effectivePlan, audit, outcome, targetSpec),
     });
     completed.push("opened the pull request");
     io.out(`authorbot: pull request opened: ${url}`);
   } catch (error) {
-    reportPartial(io, completed, branch, originalBranch, error);
+    reportPartial(io, completed, branch, originalBranch, error, operation);
     return 1;
   }
 
@@ -684,12 +1009,15 @@ async function runUpgradeFlow(
   return runDeploySteps(options, plan.repoPath, io, deps);
 }
 
-function describePlan(plan: UpgradePlan, io: CliIo): void {
+function describePlan(plan: UpgradePlan, io: CliIo, repair = false): void {
   if (plan.migrations.length === 0) {
     io.out("authorbot: no book-format migration is needed for this upgrade");
     return;
   }
-  io.out(`authorbot: ${describeMigrationCount(plan.migrations)} will run:`);
+  io.out(
+    `authorbot: ${describeMigrationCount(plan.migrations)} ` +
+      `${repair ? "will be evaluated idempotently from the evidenced baseline" : "will run"}:`,
+  );
   for (const { migration } of plan.migrations) {
     io.out(`  ${migration.id} (${migration.from} -> ${migration.to}): ${migration.description}`);
   }
@@ -701,26 +1029,49 @@ function describeMigrationCount(migrations: readonly SelectedMigration[]): strin
 
 async function runDryRun(
   plan: UpgradePlan,
+  manifestPlan: UpgradePlan,
+  audit: ToolchainAudit,
+  targetSpec: string,
   options: UpgradeOptions,
   io: CliIo,
   deps: UpgradeDeps,
 ): Promise<number> {
-  // A dry run does the genuinely informative half of the work - migrate a
-  // throwaway copy and validate it - so that "no new errors" is a result
-  // rather than a hope. The author's repository is never opened for writing.
-  const outcome = await migrateWorkingCopy(plan, deps, io);
+  // A dry run performs every pre-branch gate against throwaway copies:
+  // migration, before/after validation, lock regeneration, and exact
+  // manifest/lock verification. The author's repository is never opened for
+  // writing.
+  try {
+    await prepareToolchainFiles(manifestPlan, deps, targetSpec);
+  } catch (error) {
+    reportRelockFailure(io, error);
+    return 1;
+  }
+  const outcome = await migrateWorkingCopy(
+    plan,
+    deps,
+    options.json ? { out: () => undefined, err: io.err } : io,
+  );
   const base = options.base ?? (await readDefaultBranch(deps.fs, plan.repoPath));
   const d1 = await readD1Binding(deps.fs, plan.repoPath);
-  const newSpec = upgradeTargetSpec(plan, options.to !== undefined);
 
   if (options.json) {
     io.out(
       JSON.stringify(
         {
           dryRun: true,
-          current: plan.current.raw,
+          current: manifestPlan.current.raw,
           target: plan.target.raw,
-          pin: { from: plan.pinLocation.pin.spec, to: newSpec, field: plan.pinLocation.field },
+          upgradeAvailable: manifestPlan.upgradeAvailable,
+          actionRequired: true,
+          repairRequired: audit.repairRequired,
+          repairIssues: audit.repairRequired ? audit.issues : [],
+          migrationBaseline: plan.current.raw,
+          pin: {
+            from: manifestPlan.pinLocation.pin.spec,
+            to: targetSpec,
+            field: manifestPlan.pinLocation.field,
+          },
+          toolchainRelockVerified: true,
           migrations: outcome.applied,
           changedFiles: outcome.changed,
           validation: {
@@ -741,10 +1092,17 @@ async function runDryRun(
 
   io.out("");
   io.out("Plan (nothing below has been done):");
-  io.out(
-    `  1. align direct Authorbot packages: ${plan.pinLocation.pin.spec} -> ${newSpec}, ` +
-      "then regenerate package-lock.json",
-  );
+  if (audit.repairRequired) {
+    io.out(
+      `  1. repair direct Authorbot packages at ${targetSpec}, then regenerate and verify ` +
+        "package-lock.json",
+    );
+  } else {
+    io.out(
+      `  1. align direct Authorbot packages: ${manifestPlan.pinLocation.pin.spec} -> ` +
+        `${targetSpec}, then regenerate package-lock.json and verify it`,
+    );
+  }
   if (outcome.changed.length === 0) {
     io.out("  2. book-format migrations: none change any file");
   } else {
@@ -762,7 +1120,10 @@ async function runDryRun(
     io.err("authorbot: this upgrade WOULD BE REFUSED - the migration introduces new errors.");
     return 1;
   }
-  io.out(`  4. open a pull request against ${base} with two commits (pin, then migrations)`);
+  io.out(
+    `  4. open a ${audit.repairRequired ? "repair" : "upgrade"} pull request against ${base} ` +
+      "with separate toolchain and migration commits when both have changes",
+  );
   io.out(
     d1 === undefined
       ? "  5. apply D1 migrations: skipped, no d1_databases binding in wrangler config"
@@ -778,19 +1139,37 @@ async function runDryRun(
 
 function pullRequestBody(
   plan: UpgradePlan,
+  migrationPlan: UpgradePlan,
+  audit: ToolchainAudit,
   outcome: WorkingCopyOutcome,
   targetSpec: string,
 ): string {
-  const lines = [
-    `Upgrades the Authorbot toolchain from **${plan.current.raw}** to **${plan.target.raw}**.`,
+  const lines = audit.repairRequired
+    ? [
+        `Repairs an interrupted Authorbot **${plan.target.raw}** toolchain alignment.`,
+        "",
+        `The committed CLI lock tuple establishes **${migrationPlan.current.raw}** as the ` +
+          "book-format migration baseline. API pins and the running helper were not used " +
+          "as format evidence.",
+        "",
+        "Detected repository state:",
+        "",
+        ...audit.issues.map((issue) => `- ${issue}`),
+      ]
+    : [
+        `Upgrades the Authorbot toolchain from **${plan.current.raw}** to **${plan.target.raw}**.`,
+      ];
+  lines.push(
     "",
     "Opened by `authorbot upgrade` (ADR-0021 §3). Nothing was pushed to your",
     "default branch; merging this pull request is the decision.",
     "",
     "### Commits",
     "",
-    `1. **Toolchain pin** - \`@authorbot/cli\` ${plan.pinLocation.pin.spec} → ${targetSpec}; any existing \`@authorbot/api\` pin moves to the same release, and \`package-lock.json\` is regenerated with them.`,
-  ];
+    audit.repairRequired
+      ? `1. **Toolchain repair** - direct Authorbot packages align at ${targetSpec}, and \`package-lock.json\` is regenerated and verified with them.`
+      : `1. **Toolchain pin** - \`@authorbot/cli\` ${plan.pinLocation.pin.spec} → ${targetSpec}; any existing \`@authorbot/api\` pin moves to the same release, and \`package-lock.json\` is regenerated with them.`,
+  );
   if (outcome.changed.length > 0) {
     lines.push(
       `2. **Book-format migrations** - ${outcome.changed.length} file(s) rewritten.`,
@@ -808,8 +1187,20 @@ function pullRequestBody(
         lines.push(`  - \`${file}\``);
       }
     }
+  } else if (migrationPlan.migrations.length > 0) {
+    lines.push(
+      "",
+      `${describeMigrationCount(migrationPlan.migrations)} were evaluated idempotently from ` +
+        `the evidenced ${migrationPlan.current.raw} baseline and were already satisfied. ` +
+        "No book-format migration commit was needed.",
+    );
   } else {
-    lines.push("", "No book-format migration was needed: only the pin changed.");
+    lines.push(
+      "",
+      audit.repairRequired
+        ? "No book-format migration was selected: this pull request only repairs toolchain alignment."
+        : "No book-format migration was needed: only the pin changed.",
+    );
   }
   lines.push(
     "",
@@ -862,8 +1253,12 @@ function reportPartial(
   branch: string,
   originalBranch: string,
   error: unknown,
+  operation = "upgrade",
 ): void {
-  io.err(`authorbot: upgrade did not complete: ${error instanceof Error ? error.message : String(error)}`);
+  io.err(
+    `authorbot: ${operation} did not complete: ` +
+      `${error instanceof Error ? error.message : String(error)}`,
+  );
   if (completed.length === 0) {
     io.err("authorbot: nothing was changed.");
     return;

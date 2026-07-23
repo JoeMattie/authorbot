@@ -60,6 +60,14 @@ always the same commit.
   published Outline views, contributors link to the accepted revisions that
   credited them, and authorized collaborators can browse, compare, and propose
   restoring earlier chapter versions.
+- **The upgrade helper now survives stale installs and interrupted upgrades.**
+  It hands forward upgrades to the exact target CLI before mutation, repairs
+  partially aligned same-version manifests through a normal reviewable pull
+  request, and derives any repair migrations only from coherent committed CLI
+  lock evidence. Dry runs also regenerate and verify the lockfile in a
+  throwaway copy. Windows runs npm, npx, and Wrangler through validated
+  JavaScript launchers under the current Node executable, without enabling a
+  command shell.
 - This release includes D1 migrations `0010_phase11_capabilities_expand.sql`,
   `0011_phase11_revision_proposals.sql`, and
   `0012_chapter_summaries.sql`. The capability backfill deliberately remains a

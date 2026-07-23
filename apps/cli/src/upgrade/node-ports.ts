@@ -9,7 +9,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -77,14 +77,95 @@ export class CommandError extends Error {
   }
 }
 
+export interface ExecutableInvocation {
+  readonly file: string;
+  readonly args: readonly string[];
+}
+
+/**
+ * Resolve npm's JavaScript entry point on Windows instead of asking
+ * `execFile` to launch npm.cmd or npx.cmd. Node deliberately does not execute
+ * command scripts without a shell, and enabling `shell: true` here would turn
+ * repository-derived arguments into command-line syntax.
+ *
+ * `npm_execpath` is supplied by npm and npx. Only an absolute path to npm's
+ * documented JavaScript launcher is accepted. The launcher always runs under
+ * this process's own Node executable; environment-provided executable paths
+ * are not trusted. Arguments remain an array.
+ */
+export function resolveExecutableInvocation(
+  file: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  defaultNodeExecutable: string = process.execPath,
+  fileExists: (target: string) => boolean = existsSync,
+): ExecutableInvocation {
+  const commandPath = platform === "win32" ? path.win32 : path;
+  const base = commandPath.basename(file).replace(/\.(cmd|exe)$/i, "").toLowerCase();
+  if (platform !== "win32" || (base !== "npm" && base !== "npx")) {
+    return { file, args };
+  }
+
+  const suppliedExecPath = env["npm_execpath"]?.trim();
+  const npmCliPattern = /^(?:npm|npx)-cli\.(?:c?js|mjs)$/i;
+  // A leading slash is absolute on the POSIX host used by the simulated
+  // Windows process tests, but is only drive-relative under Windows. Real
+  // Windows npm launchers are drive-qualified or UNC paths.
+  const suppliedLooksWindows =
+    suppliedExecPath !== undefined &&
+    (/^[A-Za-z]:[\\/]/.test(suppliedExecPath) || /^\\\\/.test(suppliedExecPath));
+  const suppliedPath =
+    suppliedLooksWindows ? path.win32 : path;
+  const suppliedDirectory =
+    suppliedExecPath !== undefined &&
+    suppliedPath.isAbsolute(suppliedExecPath) &&
+    npmCliPattern.test(suppliedPath.basename(suppliedExecPath))
+      ? suppliedPath.dirname(suppliedExecPath)
+      : undefined;
+  const suppliedScript =
+    suppliedDirectory === undefined
+      ? undefined
+      : suppliedPath.join(
+          suppliedDirectory,
+          `${base}-cli${suppliedPath.extname(suppliedExecPath ?? "")}`,
+        );
+  const bundledScript = path.win32.join(
+    path.win32.dirname(defaultNodeExecutable),
+    "node_modules",
+    "npm",
+    "bin",
+    `${base}-cli.js`,
+  );
+  const script =
+    suppliedScript !== undefined && fileExists(suppliedScript)
+      ? suppliedScript
+      : fileExists(bundledScript)
+        ? bundledScript
+        : undefined;
+  if (script === undefined) {
+    throw new Error(
+      `cannot run ${base} safely on Windows: npm_execpath did not identify an existing ` +
+        `${base} JavaScript launcher, and ${bundledScript} was not found beside node.exe. ` +
+        "Authorbot will not enable a command shell.",
+    );
+  }
+  return {
+    file: defaultNodeExecutable,
+    args: [script, ...args],
+  };
+}
+
 async function run(
   file: string,
   args: string[],
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<{ stdout: string; stderr: string }> {
   try {
-    const result = await execFileAsync(file, args, {
+    const invocation = resolveExecutableInvocation(file, args, env, platform);
+    const result = await execFileAsync(invocation.file, invocation.args, {
       cwd,
       encoding: "utf8",
       env: childEnvironment(env, file),
@@ -153,29 +234,38 @@ export const nodeFs: UpgradeFs = {
   },
 };
 
-export const nodeLockfile: LockfilePort = {
-  async relock(repoPath) {
-    // `--package-lock-only` rewrites the lockfile from package.json without
-    // touching node_modules: this runs inside a temporary working copy, and
-    // installing there would be minutes of work thrown away. It still needs
-    // the registry to resolve new versions. Failure is fatal: opening an
-    // upgrade pull request with a stale lockfile would knowingly break its
-    // `npm ci`. Let CommandError propagate so npm's exact diagnostic reaches
-    // the author.
-    await run(
-      "npm",
-      [
-        "install",
-        "--package-lock-only",
-        "--package-lock=true",
-        "--ignore-scripts",
-        "--no-audit",
-        "--no-fund",
-      ],
-      repoPath,
-    );
-  },
-};
+export function createNodeLockfile(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): LockfilePort {
+  return {
+    async relock(repoPath) {
+      // `--package-lock-only` rewrites the lockfile from package.json without
+      // touching node_modules: this runs inside a temporary working copy, and
+      // installing there would be minutes of work thrown away. It still needs
+      // the registry to resolve new versions. Failure is fatal: opening an
+      // upgrade pull request with a stale lockfile would knowingly break its
+      // `npm ci`. Let CommandError propagate so npm's exact diagnostic reaches
+      // the author.
+      await run(
+        "npm",
+        [
+          "install",
+          "--package-lock-only",
+          "--package-lock=true",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+        ],
+        repoPath,
+        env,
+        platform,
+      );
+    },
+  };
+}
+
+export const nodeLockfile: LockfilePort = createNodeLockfile();
 
 interface CliPackage {
   readonly version: string;
@@ -309,6 +399,7 @@ async function runInherited(
 async function installBootstrapCli(
   targetVersion: string,
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
 ): Promise<{
   readonly root: string;
   readonly bin: string;
@@ -336,7 +427,7 @@ async function installBootstrapCli(
       "--no-fund",
       "--prefer-offline",
     ];
-    await run("npm", commonArgs, root, env);
+    await run("npm", commonArgs, root, env, platform);
     const bin = await exactInstalledCliBin(
       path.join(root, "node_modules", "@authorbot", "cli"),
       targetVersion,
@@ -373,6 +464,7 @@ export async function createNodeUpgradeBootstrap(
   env: NodeJS.ProcessEnv = process.env,
   removeTemporary: (target: string) => Promise<void> = async (target) =>
     rm(target, { recursive: true, force: true }),
+  platform: NodeJS.Platform = process.platform,
 ): Promise<UpgradeBootstrapPort> {
   const ownPackage = parseCliPackage(
     await readFile(new URL("../../package.json", import.meta.url), "utf8"),
@@ -396,7 +488,11 @@ export async function createNodeUpgradeBootstrap(
       let temporaryRoot: string | undefined;
       let bin = localBin;
       if (bin === undefined) {
-        const installed = await installBootstrapCli(request.targetVersion, env);
+        const installed = await installBootstrapCli(
+          request.targetVersion,
+          env,
+          platform,
+        );
         temporaryRoot = installed.root;
         bin = installed.bin;
       }
@@ -524,30 +620,45 @@ export const npmReleases: ReleasesPort = {
 
 const D1_MIGRATION_RE = /\b(\d{4}_[\w.-]+\.sql)\b/g;
 
-export const wranglerCli: WranglerPort = {
-  async applyD1Migrations(repo, databaseName) {
-    const { stdout, stderr } = await run(
-      "npx",
-      ["--no-install", "wrangler", "d1", "migrations", "apply", databaseName, "--remote"],
-      repo,
-    );
-    const applied = new Set<string>();
-    for (const match of `${stdout}\n${stderr}`.matchAll(D1_MIGRATION_RE)) {
-      const name = match[1];
-      if (name !== undefined) {
-        applied.add(name);
+export function createWranglerCli(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): WranglerPort {
+  return {
+    async applyD1Migrations(repo, databaseName) {
+      const { stdout, stderr } = await run(
+        "npx",
+        ["--no-install", "wrangler", "d1", "migrations", "apply", databaseName, "--remote"],
+        repo,
+        env,
+        platform,
+      );
+      const applied = new Set<string>();
+      for (const match of `${stdout}\n${stderr}`.matchAll(D1_MIGRATION_RE)) {
+        const name = match[1];
+        if (name !== undefined) {
+          applied.add(name);
+        }
       }
-    }
-    const result: D1MigrationResult = { applied: [...applied].sort() };
-    return result;
-  },
-  async deploy(repo) {
-    const { stdout, stderr } = await run("npx", ["--no-install", "wrangler", "deploy"], repo);
-    const url = /https:\/\/[\w.-]+\.workers\.dev\S*|https:\/\/\S+/.exec(`${stdout}\n${stderr}`);
-    const result: DeployResult = url === null ? {} : { url: url[0].replace(/[).,]+$/, "") };
-    return result;
-  },
-};
+      const result: D1MigrationResult = { applied: [...applied].sort() };
+      return result;
+    },
+    async deploy(repo) {
+      const { stdout, stderr } = await run(
+        "npx",
+        ["--no-install", "wrangler", "deploy"],
+        repo,
+        env,
+        platform,
+      );
+      const url = /https:\/\/[\w.-]+\.workers\.dev\S*|https:\/\/\S+/.exec(`${stdout}\n${stderr}`);
+      const result: DeployResult = url === null ? {} : { url: url[0].replace(/[).,]+$/, "") };
+      return result;
+    },
+  };
+}
+
+export const wranglerCli: WranglerPort = createWranglerCli();
 
 export const httpHealth: HealthPort = {
   async check(url) {

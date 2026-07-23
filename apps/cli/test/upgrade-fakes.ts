@@ -61,6 +61,12 @@ export async function makeBookRepo(options: MakeRepoOptions = {}): Promise<strin
   const repo = path.join(dir, "book");
   await cp(exampleRepo, repo, { recursive: true });
   if (options.withoutPackageJson !== true) {
+    const cliPin = options.pin ?? "1.0.0";
+    const devDependencies = {
+      ...(options.apiPin === undefined ? {} : { "@authorbot/api": options.apiPin }),
+      "@authorbot/cli": cliPin,
+      wrangler: "^4.0.0",
+    };
     await writeFile(
       path.join(repo, "package.json"),
       `${JSON.stringify(
@@ -69,11 +75,35 @@ export async function makeBookRepo(options: MakeRepoOptions = {}): Promise<strin
           version: "0.0.0",
           private: true,
           scripts: { validate: "authorbot validate .", upgrade: "authorbot upgrade" },
-          devDependencies: {
-            ...(options.apiPin === undefined ? {} : { "@authorbot/api": options.apiPin }),
-            "@authorbot/cli": options.pin ?? "1.0.0",
-            wrangler: "^4.0.0",
-          },
+          devDependencies,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const packages: Record<string, unknown> = {
+      "": {
+        name: "my-book",
+        version: "0.0.0",
+        devDependencies,
+      },
+      "node_modules/@authorbot/cli": { version: cliPin.replace(/^[~^]/, "") },
+    };
+    if (options.apiPin !== undefined) {
+      packages["node_modules/@authorbot/api"] = {
+        version: options.apiPin.replace(/^[~^]/, ""),
+      };
+    }
+    await writeFile(
+      path.join(repo, "package-lock.json"),
+      `${JSON.stringify(
+        {
+          name: "my-book",
+          version: "0.0.0",
+          lockfileVersion: 3,
+          requires: true,
+          packages,
         },
         null,
         2,
