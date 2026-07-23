@@ -34,6 +34,7 @@ import {
   ProjectCoordinatorDurableObject,
   callCoordinator,
   callCoordinatorListFileHistory,
+  callCoordinatorListTextFiles,
   callCoordinatorReadTextFile,
   callCoordinatorReadTextFileAtCommit,
   COORDINATOR_ORIGIN,
@@ -631,6 +632,9 @@ describe("ProjectCoordinator Durable Object wrapper", () => {
     expect(await (await call("history?path=chapters%2Fmissing.md")).json()).toEqual({
       outcome: "unavailable",
     });
+    expect(await (await call("source-page?glob=story%2Fcharacters%2F*.md&limit=5")).json()).toEqual({
+      outcome: "unavailable",
+    });
   });
 
   it("reads repository source through the Worker-to-coordinator boundary", async () => {
@@ -655,6 +659,56 @@ describe("ProjectCoordinator Durable Object wrapper", () => {
     await expect(
       callCoordinatorReadTextFile(namespace, harness.projectId, "chapters/absent.md"),
     ).resolves.toEqual({ outcome: "not-found" });
+  });
+
+  it("pages configured-glob sources through one coordinator action", async () => {
+    const built = await makeGit({
+      "story/characters/a.md": "A\n",
+      "story/characters/b.md": "B\n",
+      "story/characters/c.md": "C\n",
+    });
+    const configured = new ProjectCoordinatorDurableObject(
+      { storage: new FakeDoStorage() },
+      { DB: UNUSED_D1, PROJECT_REPO: FULL_NAME, DEFAULT_BRANCH: "main" },
+      { db: harness.db, git: built.git },
+    );
+    const namespace: DurableObjectNamespaceLike = {
+      idFromName: (name) => name,
+      get: () => ({
+        fetch: async (input: string, init?: { method?: string }) =>
+          configured.fetch(new Request(input, { method: init?.method ?? "GET" })),
+      }),
+    };
+
+    const first = await callCoordinatorListTextFiles(
+      namespace,
+      harness.projectId,
+      "story/characters/*.md",
+      { limit: 2 },
+    );
+    expect(first).toMatchObject({
+      outcome: "found",
+      files: [
+        { path: "story/characters/a.md", source: "A\n" },
+        { path: "story/characters/b.md", source: "B\n" },
+      ],
+      nextAfter: "story/characters/b.md",
+    });
+    if (first.outcome !== "found" || first.nextAfter === null) {
+      throw new Error("expected a second source page");
+    }
+    await expect(
+      callCoordinatorListTextFiles(
+        namespace,
+        harness.projectId,
+        "story/characters/*.md",
+        { after: first.nextAfter, limit: 2 },
+      ),
+    ).resolves.toMatchObject({
+      outcome: "found",
+      files: [{ path: "story/characters/c.md", source: "C\n" }],
+      nextAfter: null,
+    });
   });
 
   it("pages history metadata and reads only the selected historical snapshot", async () => {

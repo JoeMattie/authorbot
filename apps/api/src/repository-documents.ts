@@ -44,6 +44,30 @@ export function isSafeRepositoryDocumentPath(path: string): boolean {
   return !parts.some((part) => part === "" || part === "." || part === "..");
 }
 
+/** Minimal contained glob matcher for configured repository documents. */
+export function repositoryPathMatchesGlob(path: string, glob: string): boolean {
+  if (!isSafeRepositoryDocumentPath(path) || !isSafeRepositoryDocumentPath(glob)) {
+    return false;
+  }
+  let pattern = "^";
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index] as string;
+    if (char === "*") {
+      if (glob[index + 1] === "*") {
+        pattern += ".*";
+        index += 1;
+      } else {
+        pattern += "[^/]*";
+      }
+    } else if (char === "?") {
+      pattern += "[^/]";
+    } else {
+      pattern += char.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
+    }
+  }
+  return new RegExp(`${pattern}$`, "u").test(path);
+}
+
 export async function validateRepositoryDocument(input: {
   kind: RepositoryDocumentKind;
   path: string;

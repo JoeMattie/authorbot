@@ -87,6 +87,7 @@ import { problem } from "./problems.js";
 import { proseWriteBlocked } from "./reconcile.js";
 import { sha256Hex } from "./crypto.js";
 import type { ProjectSerializer } from "./serializer.js";
+import { storyApiLinks } from "./story-bible.js";
 
 /** Outbox kind the submission command enqueues (repo-coordinator vocabulary). */
 export const SUBMISSION_APPLY_KIND = "submission.apply";
@@ -379,6 +380,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
           annotationBody: annotation?.body ?? "",
           chapterSummary: fm.data.summary ?? fm.data.title,
           storyRefs: [...(fm.data.character_refs ?? []), ...(fm.data.timeline_refs ?? [])],
+          storyApi: storyApiLinks(deps.config.basePath, guard.project.id),
         },
         submissionSchema: submissionType === null ? null : SUBMISSION_SCHEMA_IDS[submissionType],
       };

@@ -29,6 +29,7 @@ export {
   type RepoAnnotationSnapshot,
   type RepoChapterSnapshot,
   type RepoReplySnapshot,
+  type RepoTextFilePage,
 } from "./projection/reader.js";
 export { rebuildProjection, type RebuildResult } from "./projection/rebuild.js";
 export { seedProject } from "./seed.js";

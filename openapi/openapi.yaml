@@ -1122,83 +1122,90 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: getStoryOutline
-      x-implementation-status: planned
       tags: [chapters]
-      summary: Return the story graph (authorbot.story-graph/v1 projection).
+      summary: Read the configured, validated story outline.
+      description: >-
+        Requires the exact `chapters:read` capability. The path comes only
+        from the projected book.yml planning configuration (or its canonical
+        default); callers cannot supply an arbitrary repository path.
       responses:
         "200":
-          description: The story graph.
+          description: Validated outline at the repository branch head.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StoryGraph"
+                $ref: "#/components/schemas/StoryOutlineResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/story/timeline:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: getStoryTimeline
-      x-implementation-status: planned
       tags: [chapters]
-      summary: Return the timeline (authorbot.timeline/v1 projection).
+      summary: Read the configured, validated story timeline.
+      description: Requires the exact `chapters:read` capability.
       responses:
         "200":
-          description: The timeline.
+          description: Validated timeline at the repository branch head.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Timeline"
+                $ref: "#/components/schemas/StoryTimelineResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/story/characters:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: listStoryCharacters
-      x-implementation-status: planned
       tags: [chapters]
-      summary: List character records.
+      summary: Page through configured, validated character documents.
+      description: >-
+        Requires the exact `chapters:read` capability. Each page reads at most
+        20 configured character blobs through the per-project coordinator;
+        it never fans out over every file in one Worker invocation.
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 20
       responses:
         "200":
-          description: A page of characters.
+          description: Bounded page of validated character records and Markdown bodies.
           content:
             application/json:
               schema:
-                type: object
-                required: [items, nextCursor]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Character"
-                  nextCursor:
-                    $ref: "#/components/schemas/NextCursor"
+                $ref: "#/components/schemas/StoryCharacterPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/chapters/{chapterId}/annotations:
     parameters:
@@ -5781,6 +5788,7 @@ components:
         context:
           type: object
           description: Untrusted project data assembled for the claimant.
+          required: [annotationBody, chapterSummary, storyRefs, storyApi]
           properties:
             annotationBody:
               type: string
@@ -5790,6 +5798,8 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/StoryNodeId"
+            storyApi:
+              $ref: "#/components/schemas/StoryApiLinks"
         submissionSchema:
           oneOf:
             - type: string
@@ -5815,7 +5825,7 @@ components:
           type: array
           items:
             type: object
-            required: [id, type]
+            required: [id, type, order]
             properties:
               id:
                 $ref: "#/components/schemas/StoryNodeId"
@@ -5824,23 +5834,37 @@ components:
                 enum: [premise, arc, part, chapter, scene, beat, custom]
               title:
                 type: string
+              summary:
+                type: string
               parent:
                 $ref: "#/components/schemas/StoryNodeId"
               order:
                 type: number
-              chapterId:
+              tags:
+                type: array
+                items: { type: string }
+              chapter_id:
                 $ref: "#/components/schemas/Uuid"
+              status:
+                type: string
+                enum: [draft, published, archived]
+              goal:
+                type: string
+              conflict:
+                type: string
+              outcome:
+                type: string
         links:
           type: array
           items:
             type: object
-            required: [from, to, kind]
+            required: [from, to, type]
             properties:
               from:
                 $ref: "#/components/schemas/StoryNodeId"
               to:
                 $ref: "#/components/schemas/StoryNodeId"
-              kind:
+              type:
                 type: string
 
     Timeline:
@@ -5851,17 +5875,24 @@ components:
         schema:
           type: string
           const: authorbot.timeline/v1
+        calendar:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: { type: string }
+            epoch_label: { type: string }
         events:
           type: array
           items:
             type: object
-            required: [id, sortKey, displayTime, title]
+            required: [id, sort_key, display_time, title]
             properties:
               id:
                 $ref: "#/components/schemas/StoryNodeId"
-              sortKey:
+              sort_key:
                 type: number
-              displayTime:
+              display_time:
                 type: string
               title:
                 type: string
@@ -5873,7 +5904,7 @@ components:
                 type: array
                 items:
                   $ref: "#/components/schemas/StoryNodeId"
-              chapterRefs:
+              chapter_refs:
                 type: array
                 items:
                   $ref: "#/components/schemas/Uuid"
@@ -5885,8 +5916,12 @@ components:
     Character:
       type: object
       description: Character record projection (authorbot.character/v1).
-      required: [id, name]
+      additionalProperties: false
+      required: [schema, id, name]
       properties:
+        schema:
+          type: string
+          const: authorbot.character/v1
         id:
           $ref: "#/components/schemas/StoryNodeId"
         name:
@@ -5899,9 +5934,71 @@ components:
           type: string
         status:
           type: string
+
+    StoryApiLinks:
+      type: object
+      additionalProperties: false
+      required: [outline, timeline, characters]
+      description: Canonical same-origin API paths; claimants follow these instead of guessing routes.
+      properties:
+        outline: { type: string }
+        timeline: { type: string }
+        characters: { type: string }
+
+    StoryOutlineResponse:
+      type: object
+      additionalProperties: false
+      required: [path, contentHash, outline, links]
+      properties:
+        path: { type: string }
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+        outline:
+          $ref: "#/components/schemas/StoryGraph"
+        links:
+          $ref: "#/components/schemas/StoryApiLinks"
+
+    StoryTimelineResponse:
+      type: object
+      additionalProperties: false
+      required: [path, contentHash, timeline, links]
+      properties:
+        path: { type: string }
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+        timeline:
+          $ref: "#/components/schemas/Timeline"
+        links:
+          $ref: "#/components/schemas/StoryApiLinks"
+
+    StoryCharacterItem:
+      type: object
+      additionalProperties: false
+      required: [path, contentHash, character, body]
+      properties:
+        path: { type: string }
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+        character:
+          $ref: "#/components/schemas/Character"
         body:
           type: string
-          description: Markdown body of the character file. Untrusted content.
+          description: Validated Markdown body with raw HTML and forbidden URL schemes rejected.
+
+    StoryCharacterPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, links]
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/StoryCharacterItem"
+        nextCursor:
+          $ref: "#/components/schemas/NextCursor"
+        links:
+          $ref: "#/components/schemas/StoryApiLinks"
 
     Event:
       type: object

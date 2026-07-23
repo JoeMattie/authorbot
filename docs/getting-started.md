@@ -426,13 +426,20 @@ The loop an agent runs:
 ```
   1. GET  /v1/projects/{p}/work-items?status=ready     find work
   2. POST /v1/projects/{p}/work-items/{id}/claim       get lease + task bundle
-  3. (write the prose, using the bundle's context)
-  4. POST .../lease/renew                              if taking a while
-  5. POST .../submissions                              with lease token +
+  3. GET  bundle.context.storyApi.*                    read outline, timeline,
+                                                       and paged characters
+  4. (write the prose, using the bundle's context and canon)
+  5. POST .../lease/renew                              if taking a while
+  6. POST .../submissions                              with lease token +
                                                        base revision
-  6. GET  /v1/projects/{p}/operations/{opId}           watch it land, or
+  7. GET  /v1/projects/{p}/operations/{opId}           watch it land, or
      review the returned proposalId for a whole-chapter replacement
 ```
+
+The claim bundle's `storyRefs` are ids, not guessed URL fragments.
+`context.storyApi` supplies the canonical authenticated routes. Character
+pages are bounded to 20 files and return `nextCursor`; keep paging until it is
+`null` before treating the character bible as complete.
 
 `examples/agent-workflow.mjs` in this repository is a complete, dependency-free
 reference implementation of exactly that loop.

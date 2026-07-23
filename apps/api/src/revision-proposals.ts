@@ -29,6 +29,7 @@ import { problem } from "./problems.js";
 import { proseWriteBlocked } from "./reconcile.js";
 import {
   isSafeRepositoryDocumentPath,
+  repositoryPathMatchesGlob,
   validateRepositoryDocument,
   type RepositoryDocumentKind,
   type ValidatedRepositoryDocument,
@@ -1321,31 +1322,6 @@ function targetLabel(proposal: RevisionProposalRecord): string {
     return id || "Character";
   }
   return "Chapter revision";
-}
-
-/** Minimal contained glob matcher for configured character documents. */
-function repositoryPathMatchesGlob(path: string, glob: string): boolean {
-  if (!isSafeRepositoryDocumentPath(path) || !isSafeRepositoryDocumentPath(glob)) {
-    return false;
-  }
-  let pattern = "^";
-  for (let index = 0; index < glob.length; index += 1) {
-    const char = glob[index] as string;
-    if (char === "*") {
-      if (glob[index + 1] === "*") {
-        pattern += ".*";
-        index += 1;
-      } else {
-        pattern += "[^/]*";
-      }
-    } else if (char === "?") {
-      pattern += "[^/]";
-    } else {
-      pattern += char.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
-    }
-  }
-  pattern += "$";
-  return new RegExp(pattern, "u").test(path);
 }
 
 function proposedContentFindings(content: string): string[] {

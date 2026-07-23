@@ -38,6 +38,7 @@ import {
 import type {
   RepositoryHistoryListResult,
   RepositorySourceReadResult,
+  RepositoryTextFilePageResult,
 } from "./deps.js";
 
 /** The `DurableObjectState` subset the coordinator uses. */
@@ -84,6 +85,7 @@ export type CoordinatorAction =
   | "history-source"
   | "refresh"
   | "source"
+  | "source-page"
   | "sweep"
   | "stale"
   | "status";
@@ -94,6 +96,7 @@ const ACTIONS: readonly CoordinatorAction[] = [
   "history-source",
   "refresh",
   "source",
+  "source-page",
   "sweep",
   "stale",
   "status",
@@ -219,6 +222,28 @@ export class ProjectCoordinatorDurableObject {
         }
         return json(await coordinator.readTextFile(path));
       }
+      case "source-page": {
+        const glob = url.searchParams.get("glob");
+        const after = url.searchParams.get("after");
+        const limit = Number(url.searchParams.get("limit") ?? "20");
+        if (
+          glob === null ||
+          glob.length === 0 ||
+          glob.length > 2048 ||
+          (after !== null && (after.length === 0 || after.length > 2048)) ||
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 20
+        ) {
+          return json({ error: "invalid repository source-page request" }, 400);
+        }
+        return json(
+          await coordinator.listTextFiles(glob, {
+            limit,
+            ...(after === null ? {} : { after }),
+          }),
+        );
+      }
       case "sweep":
         return json(await coordinator.sweepLeases());
       case "stale": {
@@ -330,6 +355,31 @@ export async function callCoordinatorReadTextFile(
   return body as RepositorySourceReadResult;
 }
 
+/** Read one validated, bounded configured-glob source page. */
+export async function callCoordinatorListTextFiles(
+  namespace: DurableObjectNamespaceLike,
+  projectId: string,
+  glob: string,
+  options: { after?: string; limit?: number } = {},
+): Promise<RepositoryTextFilePageResult> {
+  const stub = coordinatorStub(namespace, projectId);
+  const url = new URL(
+    `${COORDINATOR_ORIGIN}/projects/${encodeURIComponent(projectId)}/source-page`,
+  );
+  url.searchParams.set("glob", glob);
+  url.searchParams.set("limit", String(options.limit ?? 20));
+  if (options.after !== undefined) url.searchParams.set("after", options.after);
+  const response = await stub.fetch(url.toString(), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`coordinator source-page failed with ${String(response.status)}`);
+  }
+  const body = (await response.json()) as unknown;
+  if (!validTextFilePageResult(body, options.limit ?? 20)) {
+    throw new Error("coordinator source-page returned an invalid response");
+  }
+  return body;
+}
+
 /** List one validated, bounded repository file-history page. */
 export async function callCoordinatorListFileHistory(
   namespace: DurableObjectNamespaceLike,
@@ -385,6 +435,33 @@ function validSourceResult(body: unknown): body is RepositorySourceReadResult {
     (body.outcome === "not-found" ||
       body.outcome === "unavailable" ||
       (body.outcome === "found" && "source" in body && typeof body.source === "string"))
+  );
+}
+
+function validTextFilePageResult(
+  body: unknown,
+  requestedLimit: number,
+): body is RepositoryTextFilePageResult {
+  if (typeof body !== "object" || body === null || !("outcome" in body)) return false;
+  if (body.outcome === "unavailable") return true;
+  if (body.outcome !== "found") return false;
+  if (!("files" in body) || !Array.isArray(body.files) || body.files.length > requestedLimit) {
+    return false;
+  }
+  return (
+    "headCommit" in body &&
+    (body.headCommit === null || typeof body.headCommit === "string") &&
+    "nextAfter" in body &&
+    (body.nextAfter === null || typeof body.nextAfter === "string") &&
+    body.files.every(
+      (file) =>
+        typeof file === "object" &&
+        file !== null &&
+        "path" in file &&
+        typeof file.path === "string" &&
+        "source" in file &&
+        typeof file.source === "string",
+    )
   );
 }
 

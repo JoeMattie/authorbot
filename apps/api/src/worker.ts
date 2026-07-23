@@ -19,6 +19,7 @@ import { createApi, type AuthorbotApi } from "./app.js";
 import { coordinatorAlarmMsFromEnv, gitIntegrationStatus } from "./coordinator.js";
 import {
   callCoordinator,
+  callCoordinatorListTextFiles,
   callCoordinatorListFileHistory,
   callCoordinatorReadTextFile,
   callCoordinatorReadTextFileAtCommit,
@@ -274,6 +275,8 @@ function defaultBuildApi(bindings: WorkerBindings): AuthorbotApi {
     deps.repositorySourceReader = {
       readTextFile: async (projectId, path) =>
         callCoordinatorReadTextFile(coordinator, projectId, path),
+      listTextFiles: async (projectId, glob, options) =>
+        callCoordinatorListTextFiles(coordinator, projectId, glob, options),
     };
     deps.repositoryHistoryReader = {
       listFileHistory: async (projectId, path, options) =>

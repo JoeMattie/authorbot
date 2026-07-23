@@ -172,6 +172,11 @@ describe("claim (contract §2/§3)", () => {
       expect(context["annotationBody"]).toBe("Consider tightening this opening line.");
       expect(context["chapterSummary"]).toBe("The anomaly is first sighted.");
       expect(Array.isArray(context["storyRefs"])).toBe(true);
+      expect(context["storyApi"]).toEqual({
+        outline: `/v1/projects/${harness.projectId}/story/outline`,
+        timeline: `/v1/projects/${harness.projectId}/story/timeline`,
+        characters: `/v1/projects/${harness.projectId}/story/characters`,
+      });
       expect(body["submissionSchema"]).toBe("authorbot.submission/range-replacement/v1");
 
       // The token is stored hash-only.

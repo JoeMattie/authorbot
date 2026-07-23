@@ -14,7 +14,7 @@ import type {
 import type { ApiScope, CapabilityProjection } from "./api-scopes.js";
 import type { IdentityProvider } from "./identity/provider.js";
 import type { IdempotencyClaim } from "./idempotency.js";
-import type { BookRepoReader } from "./projection/reader.js";
+import type { BookRepoReader, RepoTextFilePage } from "./projection/reader.js";
 import type { ProjectionRefresher } from "./reconcile.js";
 
 export type RepositorySourceReadResult =
@@ -22,9 +22,18 @@ export type RepositorySourceReadResult =
   | { outcome: "not-found" }
   | { outcome: "unavailable" };
 
+export type RepositoryTextFilePageResult =
+  | ({ outcome: "found" } & RepoTextFilePage)
+  | { outcome: "unavailable" };
+
 /** Repository reads routed through the project coordinator in production. */
 export interface RepositorySourceReader {
   readTextFile(projectId: string, path: string): Promise<RepositorySourceReadResult>;
+  listTextFiles?(
+    projectId: string,
+    glob: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<RepositoryTextFilePageResult>;
 }
 
 export interface RepositoryHistoryEntry {
@@ -233,6 +242,22 @@ export async function readRepositoryText(
   }
   if (deps.repositorySourceReader !== undefined) {
     return deps.repositorySourceReader.readTextFile(projectId, path);
+  }
+  return { outcome: "unavailable" };
+}
+
+/** Read one bounded configured-glob page through the local reader or coordinator. */
+export async function readRepositoryTextPage(
+  deps: Pick<AppDeps, "reader" | "repositorySourceReader">,
+  projectId: string,
+  glob: string,
+  options: { after?: string; limit?: number } = {},
+): Promise<RepositoryTextFilePageResult> {
+  if (deps.reader?.listTextFiles !== undefined) {
+    return { outcome: "found", ...(await deps.reader.listTextFiles(glob, options)) };
+  }
+  if (deps.repositorySourceReader?.listTextFiles !== undefined) {
+    return deps.repositorySourceReader.listTextFiles(projectId, glob, options);
   }
   return { outcome: "unavailable" };
 }

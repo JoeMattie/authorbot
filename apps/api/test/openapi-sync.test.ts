@@ -186,9 +186,8 @@ describe("openapi.yaml is synced with the router", () => {
   });
 
   it("keeps `planned` markers only on genuinely deferred Phase 5 work", () => {
-    // Contract §1 "Out": write_chapter submission flows, fuzzy re-anchor, and
-    // the story read endpoints are Phase 5. If something else acquires a
-    // marker, it needs a deliberate decision, not a silent one.
+    // Fuzzy re-anchor remains deferred. If something else acquires a marker,
+    // it needs a deliberate decision, not a silent one.
     const planned = specOperations()
       .filter((op) => op.planned)
       .map((op) => op.operationId)
@@ -196,12 +195,7 @@ describe("openapi.yaml is synced with the router", () => {
     // `createChapterSubmission` left this list in Phase 6: contract §3.5's
     // direct authoring path is implemented, along with the separate
     // publish/unpublish actions.
-    expect(planned).toEqual([
-      "getStoryOutline",
-      "getStoryTimeline",
-      "listStoryCharacters",
-      "reanchorAnnotation",
-    ]);
+    expect(planned).toEqual(["reanchorAnnotation"]);
   });
 
   it("documents the submission types the domain actually accepts", () => {
@@ -333,6 +327,24 @@ describe("openapi.yaml is synced with the router", () => {
       "baseContentHash",
       "proposedContent",
     ]);
+  });
+
+  it("documents authenticated, bounded story-bible reads and claim-bundle links", () => {
+    expect(responseSchema("/v1/projects/{projectId}/story/outline", "get")?.$ref).toBe(
+      "#/components/schemas/StoryOutlineResponse",
+    );
+    expect(responseSchema("/v1/projects/{projectId}/story/timeline", "get")?.$ref).toBe(
+      "#/components/schemas/StoryTimelineResponse",
+    );
+    expect(responseSchema("/v1/projects/{projectId}/story/characters", "get")?.$ref).toBe(
+      "#/components/schemas/StoryCharacterPage",
+    );
+    expect(spec.components.schemas["StoryCharacterPage"]?.properties?.["items"]?.maxItems)
+      .toBe(20);
+    expect(
+      spec.components.schemas["TaskBundle"]?.properties?.["context"]?.properties?.["storyApi"]
+        ?.$ref,
+    ).toBe("#/components/schemas/StoryApiLinks");
   });
 
   it("documents capability-filtered chapter activity with the exact optional counts", () => {

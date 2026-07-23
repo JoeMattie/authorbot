@@ -27,6 +27,7 @@ import {
   isContainedRepoPath,
   isSnapshotPath,
   MAX_BLOB_CONCURRENCY,
+  MAX_TEXT_FILE_BYTES,
   stripFrontmatter,
   TruncatedTreeError,
   type BookRepoReader,
@@ -273,6 +274,62 @@ describe("readTextFile", () => {
     });
 
     await expect(reader.readTextFile("book.yml")).rejects.toMatchObject({ code: "missing-ref" });
+  });
+});
+
+describe("bounded text-file pages", () => {
+  it("fetches only the requested character page and reuses the head tree", async () => {
+    const characters = Object.fromEntries(
+      Array.from({ length: 47 }, (_, index) => [
+        `story/characters/${String(index).padStart(3, "0")}.md`,
+        `Character ${String(index)}\n`,
+      ]),
+    );
+    const fake = await seededFake(characters);
+    const reader = readerFor(fake);
+
+    const first = await reader.listTextFiles("story/characters/*.md", { limit: 5 });
+    expect(first.files).toHaveLength(5);
+    expect(first.nextAfter).toBe("story/characters/004.md");
+    expect(first.headCommit).toBe(fake.state.getRef(fake.defaultBranch));
+    expect(fake.countRequests("GET", (path) => path.includes("/git/blobs/"))).toBe(5);
+    expect(fake.requests).toHaveLength(8); // ref + commit + tree + exactly five blobs
+    const treeReads = fake.countRequests("GET", (path) => path.includes("/git/trees/"));
+    if (first.nextAfter === null) throw new Error("expected another character page");
+
+    const second = await reader.listTextFiles("story/characters/*.md", {
+      after: first.nextAfter,
+      limit: 5,
+    });
+    expect(second.files.map((file) => file.path)).toEqual([
+      "story/characters/005.md",
+      "story/characters/006.md",
+      "story/characters/007.md",
+      "story/characters/008.md",
+      "story/characters/009.md",
+    ]);
+    expect(fake.countRequests("GET", (path) => path.includes("/git/blobs/"))).toBe(10);
+    expect(fake.countRequests("GET", (path) => path.includes("/git/trees/"))).toBe(treeReads);
+    expect(fake.requests).toHaveLength(14); // cached tree: ref + five more blobs
+  });
+
+  it("rejects unsafe globs and oversized page files before fetching a blob", async () => {
+    const fake = await seededFake({
+      "story/characters/huge.md": "x".repeat(MAX_TEXT_FILE_BYTES + 1),
+    });
+    const reader = readerFor(fake);
+    const before = fake.requests.length;
+    await expect(reader.listTextFiles("../*.md")).resolves.toEqual({
+      headCommit: null,
+      files: [],
+      nextAfter: null,
+    });
+    expect(fake.requests.length).toBe(before);
+
+    await expect(reader.listTextFiles("story/characters/*.md", { limit: 1 })).rejects.toMatchObject({
+      code: "file-budget-exceeded",
+    });
+    expect(fake.countRequests("GET", (path) => path.includes("/git/blobs/"))).toBe(0);
   });
 });
 

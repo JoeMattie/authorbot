@@ -50,6 +50,7 @@ import type {
   Clock,
   RepositoryHistoryListResult,
   RepositorySourceReadResult,
+  RepositoryTextFilePageResult,
 } from "./deps.js";
 import { createDrainRunner, type DrainRunner } from "./drain.js";
 import { uuidv7 } from "./ids.js";
@@ -250,6 +251,11 @@ export interface ProjectCoordinator {
   ensureAlarm(): Promise<number | null>;
   /** Read one file from the configured repository branch. */
   readTextFile(path: string): Promise<RepositorySourceReadResult>;
+  /** Read one bounded configured-glob source page. */
+  listTextFiles(
+    glob: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<RepositoryTextFilePageResult>;
   /** List one bounded commit page for a repository file. */
   listFileHistory(
     path: string,
@@ -425,6 +431,19 @@ export function createProjectCoordinator(
       return source === null ? { outcome: "not-found" } : { outcome: "found", source };
     });
 
+  const listTextFiles = (
+    glob: string,
+    readOptions: { after?: string; limit?: number } = {},
+  ): Promise<RepositoryTextFilePageResult> =>
+    serialize(async () => {
+      if (git === null) return { outcome: "unavailable" };
+      const project = await repos.projects.getById(projectId);
+      if (project === null) return { outcome: "unavailable" };
+      const reader = git.readerFor?.(project.defaultBranch) ?? git.reader;
+      if (reader.listTextFiles === undefined) return { outcome: "unavailable" };
+      return { outcome: "found", ...(await reader.listTextFiles(glob, readOptions)) };
+    });
+
   const historyReader = async (): Promise<HistoryCapableReader | null> => {
     if (git === null) return null;
     const project = await repos.projects.getById(projectId);
@@ -529,6 +548,7 @@ export function createProjectCoordinator(
     alarm,
     ensureAlarm,
     readTextFile,
+    listTextFiles,
     listFileHistory,
     readTextFileAtCommit,
   };

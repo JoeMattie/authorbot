@@ -12,8 +12,15 @@
  * would silently corrupt serving state (design §14.5 marks such repos
  * invalid instead).
  */
-import { readdir, readFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import {
+  isContainedRepoPath,
+  MAX_TEXT_FILE_BYTES,
+  MAX_TEXT_FILE_PAGE_SIZE,
+  repoPathMatchesGlob,
+} from "@authorbot/git-github";
 import { parseChapterMarkdown } from "@authorbot/markdown";
 import {
   parseDecisionArtifact,
@@ -28,6 +35,7 @@ import type {
   RepoChapterSnapshot,
   RepoDecisionSnapshot,
   RepoReplySnapshot,
+  RepoTextFilePage,
   RepoWorkItemSnapshot,
 } from "./reader.js";
 
@@ -94,6 +102,75 @@ export class LocalFsBookRepoReader implements BookRepoReader {
       }
       throw error;
     }
+  }
+
+  /** Local-dev counterpart to the coordinator's bounded configured-glob read. */
+  async listTextFiles(
+    glob: string,
+    options: { after?: string; limit?: number } = {},
+  ): Promise<RepoTextFilePage> {
+    if (!isContainedRepoPath(glob) ||
+        (options.after !== undefined && !isContainedRepoPath(options.after))) {
+      return { headCommit: null, files: [], nextAfter: null };
+    }
+    const limit = Math.max(
+      1,
+      Math.min(MAX_TEXT_FILE_PAGE_SIZE, Math.trunc(options.limit ?? MAX_TEXT_FILE_PAGE_SIZE)),
+    );
+    const paths = await this.listMatchingPaths(glob);
+    const after = options.after;
+    const remaining = after === undefined ? paths : paths.filter((path) => path > after);
+    const pagePaths = remaining.slice(0, limit);
+    const files: Array<{ path: string; source: string }> = [];
+    for (const path of pagePaths) {
+      const size = await stat(resolve(this.root, path));
+      if (size.size > MAX_TEXT_FILE_BYTES) {
+        throw new Error(
+          `file ${path} is ${String(size.size)} bytes, above the ${String(MAX_TEXT_FILE_BYTES)}-byte source limit`,
+        );
+      }
+      const source = await this.readTextFile(path);
+      if (source !== null) files.push({ path, source });
+    }
+    return {
+      headCommit: null,
+      files,
+      nextAfter:
+        remaining.length > pagePaths.length && pagePaths.length > 0
+          ? (pagePaths[pagePaths.length - 1] as string)
+          : null,
+    };
+  }
+
+  /** Walk only below the glob's fixed directory prefix and never follow symlinks. */
+  private async listMatchingPaths(glob: string): Promise<string[]> {
+    const segments = glob.split("/");
+    const wildcard = segments.findIndex((segment) => /[*?]/u.test(segment));
+    const fixed = segments.slice(0, wildcard === -1 ? Math.max(0, segments.length - 1) : wildcard);
+    const startRelative = fixed.join("/");
+    const start = resolve(this.root, startRelative);
+    if (start !== this.root && !start.startsWith(this.root + sep)) return [];
+    const paths: string[] = [];
+    const walk = async (directory: string, relative: string): Promise<void> => {
+      let entries: Dirent[];
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        const childRelative = relative === "" ? entry.name : `${relative}/${entry.name}`;
+        const child = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await walk(child, childRelative);
+        } else if (entry.isFile() && repoPathMatchesGlob(childRelative, glob)) {
+          paths.push(childRelative);
+        }
+      }
+    };
+    await walk(start, startRelative);
+    return paths.sort();
   }
 
   async readSnapshot(): Promise<BookRepoSnapshot> {

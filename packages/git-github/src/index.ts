@@ -78,7 +78,10 @@ export {
   isGitHubReadError,
   isSnapshotPath,
   MAX_BLOB_CONCURRENCY,
+  MAX_TEXT_FILE_PAGE_SIZE,
+  MAX_TEXT_FILE_BYTES,
   normalizeRepoPath,
+  repoPathMatchesGlob,
   stripFrontmatter,
   TruncatedTreeError,
   type BookRepoReader,
@@ -91,6 +94,7 @@ export {
   type RepoDecisionSnapshot,
   type RepoFileHistoryEntry,
   type RepoFileHistoryPage,
+  type RepoTextFilePage,
   type RepoReplySnapshot,
   type RepoWorkItemSnapshot,
 } from "./reader.js";

@@ -42,6 +42,7 @@ import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
 import { registerChapterSubmissionRoutes } from "./chapter-submissions.js";
 import { registerRevisionProposalRoutes } from "./revision-proposals.js";
 import { registerChapterHistoryRoutes } from "./chapter-history.js";
+import { registerStoryBibleRoutes } from "./story-bible.js";
 import {
   pendingAnnotationJson,
   registerPhase7Routes,
@@ -2194,6 +2195,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     parseLimit,
     now,
   });
+
+  // ---- authenticated story bible (bounded repository reads) --------------
+  registerStoryBibleRoutes({ app, deps, repos, services, auth });
 
   // ---- Phase 6 routes (book settings + governance, contract §3.6) ---------
   registerSettingsRoutes({

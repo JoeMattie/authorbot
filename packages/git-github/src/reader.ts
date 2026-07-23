@@ -84,6 +84,17 @@ export interface BookRepoSnapshot {
 export interface BookRepoReader {
   readSnapshot(): Promise<BookRepoSnapshot>;
   readTextFile?(path: string): Promise<string | null>;
+  listTextFiles?(
+    glob: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<RepoTextFilePage>;
+}
+
+/** One bounded source page. The caller turns `nextAfter` into its public cursor. */
+export interface RepoTextFilePage {
+  headCommit: string | null;
+  files: Array<{ path: string; source: string }>;
+  nextAfter: string | null;
 }
 
 /** Bounded metadata for one commit that changed a repository file. */
@@ -233,6 +244,32 @@ export function normalizeRepoPath(path: string): string {
     .join("/");
 }
 
+/**
+ * Match the small repository-relative glob vocabulary accepted by book.yml.
+ * `*` and `?` stay within one segment; `**` may cross directory boundaries.
+ * Both inputs must be contained before a regular expression is constructed.
+ */
+export function repoPathMatchesGlob(path: string, glob: string): boolean {
+  if (!isContainedRepoPath(path) || !isContainedRepoPath(glob)) return false;
+  let pattern = "^";
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index] as string;
+    if (char === "*") {
+      if (glob[index + 1] === "*") {
+        pattern += ".*";
+        index += 1;
+      } else {
+        pattern += "[^/]*";
+      }
+    } else if (char === "?") {
+      pattern += "[^/]";
+    } else {
+      pattern += char.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
+    }
+  }
+  return new RegExp(`${pattern}$`, "u").test(path);
+}
+
 const CHAPTER_PATH = /^chapters\/[^/]+\.md$/;
 const DECISION_PATH = /^\.authorbot\/decisions\/([^/]+)\.yml$/;
 const WORK_ITEM_PATH = /^\.authorbot\/work-items\/([^/]+)\.md$/;
@@ -350,6 +387,9 @@ export interface GitHubBookRepoReaderOptions {
 }
 
 export const MAX_BLOB_CONCURRENCY = 8;
+/** 3 metadata requests + this many blobs stays safely below Worker subrequest ceilings. */
+export const MAX_TEXT_FILE_PAGE_SIZE = 20;
+export const MAX_TEXT_FILE_BYTES = 512 * 1024;
 const DEFAULT_MAX_FILES = 2000;
 
 export class GitHubBookRepoReader implements BookRepoReader {
@@ -518,6 +558,61 @@ export class GitHubBookRepoReader implements BookRepoReader {
     const entry = entries.get(normalized);
     if (entry === undefined) return null;
     return this.#readBlobText(entry.sha);
+  }
+
+  /**
+   * Read one lexically paginated file page from a single branch-head tree.
+   * The tree index is commit-cached and only the returned page's blobs are
+   * fetched, so a page makes at most 3 metadata requests plus 20 blob reads.
+   */
+  async listTextFiles(
+    glob: string,
+    options: { after?: string; limit?: number } = {},
+  ): Promise<RepoTextFilePage> {
+    if (!isContainedRepoPath(glob) ||
+        (options.after !== undefined && !isContainedRepoPath(options.after))) {
+      return { headCommit: null, files: [], nextAfter: null };
+    }
+    const limit = Math.max(
+      1,
+      Math.min(MAX_TEXT_FILE_PAGE_SIZE, Math.trunc(options.limit ?? MAX_TEXT_FILE_PAGE_SIZE)),
+    );
+    const headCommit = await this.readHeadCommit();
+    const { entries } = await this.#indexFor(headCommit);
+    const matching = [...entries.keys()].filter((path) => repoPathMatchesGlob(path, glob)).sort();
+    if (matching.length > this.maxFiles) {
+      throw new GitHubReadError(
+        "file-budget-exceeded",
+        `glob ${glob} matched ${matching.length} files, above the ${this.maxFiles} limit`,
+      );
+    }
+    const remaining =
+      options.after === undefined
+        ? matching
+        : matching.filter((path) => path > (options.after as string));
+    const pagePaths = remaining.slice(0, limit);
+    for (const path of pagePaths) {
+      const size = entries.get(path)?.size ?? 0;
+      if (size > MAX_TEXT_FILE_BYTES) {
+        throw new GitHubReadError(
+          "file-budget-exceeded",
+          `file ${path} is ${size} bytes, above the ${MAX_TEXT_FILE_BYTES}-byte source limit`,
+        );
+      }
+    }
+    const bytes = await this.#fetchAll(pagePaths, entries);
+    const files = pagePaths.map((path) => ({
+      path,
+      source: decodeUtf8(bytes.get(path) as Uint8Array),
+    }));
+    return {
+      headCommit,
+      files,
+      nextAfter:
+        remaining.length > pagePaths.length && pagePaths.length > 0
+          ? (pagePaths[pagePaths.length - 1] as string)
+          : null,
+    };
   }
 
   /**
