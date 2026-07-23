@@ -23,6 +23,7 @@ import type {
   LockfilePort,
   PullRequestRequest,
   ReleasesPort,
+  UpgradeBootstrapPort,
   UpgradeDeps,
   WranglerPort,
 } from "../src/upgrade/ports.js";
@@ -265,6 +266,7 @@ export interface DepsOverrides {
   health?: HealthPort;
   migrations?: readonly BookRepoMigration[];
   validate?: (repoPath: string) => Promise<ValidationReport>;
+  bootstrap?: UpgradeBootstrapPort;
 }
 
 export function makeDeps(overrides: DepsOverrides = {}): UpgradeDeps {
@@ -327,6 +329,7 @@ export function makeDeps(overrides: DepsOverrides = {}): UpgradeDeps {
     validate: overrides.validate ?? validateBookRepo,
     migrations: overrides.migrations ?? [],
     now: () => new Date("2026-07-20T09:30:00.000Z"),
+    ...(overrides.bootstrap === undefined ? {} : { bootstrap: overrides.bootstrap }),
   };
 }
 

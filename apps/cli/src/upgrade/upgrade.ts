@@ -28,6 +28,7 @@ import path from "node:path";
 import type { CliIo } from "../cli.js";
 import type { Finding, ValidationReport } from "../validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "../validate/index.js";
+import { ensureUpgradeBootstrap } from "./bootstrap.js";
 import {
   applyMigrations,
   BOOK_REPO_MIGRATIONS,
@@ -52,7 +53,8 @@ export const UPGRADE_USAGE = `Usage: authorbot upgrade [path] [options]
 Move a book repository to a newer release of the Authorbot toolchain
 (ADR-0021 §3). Migrations run against a working copy, validation runs before
 and after, and the result arrives as a PULL REQUEST - never a push to your
-default branch.
+default branch. Before any change, a stale local helper hands the operation to
+the exact CLI release whose migrations and package rules must own it.
 
 Options:
   --check           report whether an upgrade is available and whether it
@@ -123,6 +125,7 @@ async function defaultDeps(): Promise<UpgradeDeps> {
     validate: validateBookRepo,
     migrations: BOOK_REPO_MIGRATIONS,
     now: () => new Date(),
+    bootstrap: await ports.createNodeUpgradeBootstrap(),
   };
 }
 
@@ -138,6 +141,10 @@ export async function runUpgrade(
   const deps = injected ?? (await defaultDeps());
 
   try {
+    const delegated = await ensureUpgradeBootstrap(parsed, args, io, deps);
+    if (delegated !== undefined) {
+      return delegated;
+    }
     if (parsed.finish) {
       return await runFinish(parsed, io, deps);
     }

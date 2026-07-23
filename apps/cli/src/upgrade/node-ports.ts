@@ -8,7 +8,7 @@
  * shells out to git, and never deploys anything.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -22,11 +22,14 @@ import type {
   LockfilePort,
   HealthResult,
   ReleasesPort,
+  UpgradeBootstrapPort,
+  UpgradeBootstrapRequest,
   UpgradeFs,
   WranglerPort,
 } from "./ports.js";
 
 const execFileAsync = promisify(execFile);
+const BOOTSTRAP_REQUEST_ENV = "AUTHORBOT_UPGRADE_BOOTSTRAP_VERSION";
 
 /** Directories a book-repo migration must never see or copy. */
 const EXCLUDED_DIRS = new Set([".git", "node_modules"]);
@@ -77,12 +80,13 @@ async function run(
   file: string,
   args: string[],
   cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ stdout: string; stderr: string }> {
   try {
     const result = await execFileAsync(file, args, {
       cwd,
       encoding: "utf8",
-      env: childEnvironment(process.env, file),
+      env: childEnvironment(env, file),
       maxBuffer: 32 * 1024 * 1024,
     });
     return { stdout: result.stdout, stderr: result.stderr };
@@ -171,6 +175,209 @@ export const nodeLockfile: LockfilePort = {
     );
   },
 };
+
+interface CliPackage {
+  readonly version: string;
+  readonly bin: string | Record<string, string>;
+}
+
+function parseCliPackage(contents: string): CliPackage | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  const version = record["version"];
+  const bin = record["bin"];
+  if (
+    typeof version !== "string" ||
+    (typeof bin !== "string" &&
+      (typeof bin !== "object" || bin === null || Array.isArray(bin)))
+  ) {
+    return undefined;
+  }
+  if (typeof bin === "string") {
+    return { version, bin };
+  }
+  const entries = Object.entries(bin as Record<string, unknown>);
+  if (entries.some((entry): entry is [string, string] => typeof entry[1] === "string")) {
+    return {
+      version,
+      bin: Object.fromEntries(
+        entries.filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      ),
+    };
+  }
+  return undefined;
+}
+
+async function exactInstalledCliBin(
+  packageRoot: string,
+  targetVersion: string,
+): Promise<string | undefined> {
+  const packageJsonPath = path.join(packageRoot, "package.json");
+  let metadata: CliPackage | undefined;
+  try {
+    metadata = parseCliPackage(await readFile(packageJsonPath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (metadata === undefined || metadata.version !== targetVersion) {
+    return undefined;
+  }
+  const relativeBin =
+    typeof metadata.bin === "string"
+      ? metadata.bin
+      : metadata.bin["authorbot"] ?? Object.values(metadata.bin)[0];
+  if (relativeBin === undefined) {
+    return undefined;
+  }
+  const absoluteRoot = path.resolve(packageRoot);
+  const absoluteBin = path.resolve(absoluteRoot, relativeBin);
+  if (
+    absoluteBin !== absoluteRoot &&
+    !absoluteBin.startsWith(`${absoluteRoot}${path.sep}`)
+  ) {
+    return undefined;
+  }
+  try {
+    await access(absoluteBin, constants.F_OK);
+    return absoluteBin;
+  } catch {
+    return undefined;
+  }
+}
+
+async function runInherited(
+  file: string,
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, [...args], {
+      cwd,
+      env,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code !== null) {
+        resolve(code);
+        return;
+      }
+      reject(new Error(`child process exited from signal ${signal ?? "unknown"}`));
+    });
+  });
+}
+
+async function installBootstrapCli(
+  targetVersion: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{
+  readonly root: string;
+  readonly bin: string;
+}> {
+  const root = await mkdtemp(path.join(os.tmpdir(), "authorbot-cli-bootstrap-"));
+  try {
+    await writeFile(
+      path.join(root, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "authorbot-upgrade-bootstrap",
+          private: true,
+          dependencies: { "@authorbot/cli": targetVersion },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const commonArgs = [
+      "install",
+      "--package-lock=false",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--prefer-offline",
+    ];
+    await run("npm", commonArgs, root, env);
+    const bin = await exactInstalledCliBin(
+      path.join(root, "node_modules", "@authorbot", "cli"),
+      targetVersion,
+    );
+    if (bin === undefined) {
+      throw new Error(
+        `npm completed without installing an exact, runnable @authorbot/cli@${targetVersion}`,
+      );
+    }
+    return { root, bin };
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/**
+ * The real self-bootstrap port.
+ *
+ * It never installs into the book. An exact local target is used directly;
+ * otherwise npm resolves it into a throwaway directory with lifecycle scripts
+ * disabled. If npm is offline and has no usable cache, the acquisition fails
+ * before the target CLI starts and the book stays byte-identical.
+ */
+export async function createNodeUpgradeBootstrap(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<UpgradeBootstrapPort> {
+  const ownPackage = parseCliPackage(
+    await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+  );
+  if (ownPackage === undefined) {
+    throw new Error("could not read the running @authorbot/cli package version");
+  }
+  return {
+    runningVersion: ownPackage.version,
+    ...(env[BOOTSTRAP_REQUEST_ENV] === undefined
+      ? {}
+      : { requestedVersion: env[BOOTSTRAP_REQUEST_ENV] }),
+    async handoff(request: UpgradeBootstrapRequest) {
+      const localRoot = path.join(
+        request.repoPath,
+        "node_modules",
+        "@authorbot",
+        "cli",
+      );
+      const localBin = await exactInstalledCliBin(localRoot, request.targetVersion);
+      let temporaryRoot: string | undefined;
+      let bin = localBin;
+      if (bin === undefined) {
+        const installed = await installBootstrapCli(request.targetVersion, env);
+        temporaryRoot = installed.root;
+        bin = installed.bin;
+      }
+      try {
+        return await runInherited(
+          process.execPath,
+          [bin, "upgrade", ...request.args],
+          request.cwd,
+          {
+            ...env,
+            [BOOTSTRAP_REQUEST_ENV]: request.targetVersion,
+          },
+        );
+      } finally {
+        if (temporaryRoot !== undefined) {
+          await rm(temporaryRoot, { recursive: true, force: true });
+        }
+      }
+    },
+  };
+}
 
 export const nodeGit: GitPort = {
   async isClean(repo) {

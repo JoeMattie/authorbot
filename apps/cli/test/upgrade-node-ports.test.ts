@@ -2,7 +2,11 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CommandError, nodeLockfile } from "../src/upgrade/node-ports.js";
+import {
+  CommandError,
+  createNodeUpgradeBootstrap,
+  nodeLockfile,
+} from "../src/upgrade/node-ports.js";
 
 const tempDirs: string[] = [];
 
@@ -111,6 +115,167 @@ exit 23
           "--no-fund failed: " +
           "exact diagnostic: ordinary env survives\nsecond line",
       );
+    },
+  );
+});
+
+describe("node upgrade bootstrap", () => {
+  it("runs an exact book-local target without invoking npm", async () => {
+    const repo = await tempDirectory();
+    const packageRoot = path.join(repo, "node_modules", "@authorbot", "cli");
+    const dist = path.join(packageRoot, "dist");
+    await mkdir(dist, { recursive: true });
+    await writeFile(
+      path.join(packageRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          name: "@authorbot/cli",
+          version: "9.8.7",
+          type: "module",
+          bin: { authorbot: "./dist/bin.mjs" },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      path.join(dist, "bin.mjs"),
+      `import { writeFileSync } from "node:fs";
+writeFileSync(process.env.AUTHORBOT_BOOTSTRAP_TEST_MARKER, JSON.stringify({
+  args: process.argv.slice(2),
+  cwd: process.cwd(),
+  requested: process.env.AUTHORBOT_UPGRADE_BOOTSTRAP_VERSION
+}));
+process.exitCode = 11;
+`,
+    );
+    const marker = path.join(repo, "child.json");
+    const bootstrap = await createNodeUpgradeBootstrap({
+      ...process.env,
+      AUTHORBOT_BOOTSTRAP_TEST_MARKER: marker,
+      PATH: "",
+    });
+
+    expect(
+      await bootstrap.handoff({
+        targetVersion: "9.8.7",
+        repoPath: repo,
+        cwd: repo,
+        args: [".", "--check", "--json"],
+      }),
+    ).toBe(11);
+
+    const child = JSON.parse(await readFile(marker, "utf8")) as {
+      args: string[];
+      cwd: string;
+      requested: string;
+    };
+    expect(child).toEqual({
+      args: ["upgrade", ".", "--check", "--json"],
+      cwd: repo,
+      requested: "9.8.7",
+    });
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "acquires an exact target in a throwaway directory when the local install is stale",
+    async () => {
+      const repo = await tempDirectory();
+      const fakeBin = path.join(repo, "fake-bin");
+      await mkdir(fakeBin);
+      const npmMarker = path.join(repo, "npm.json");
+      const childMarker = path.join(repo, "child.json");
+      await writeFile(
+        path.join(fakeBin, "npm"),
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+const version = manifest.dependencies["@authorbot/cli"];
+fs.writeFileSync(process.env.AUTHORBOT_BOOTSTRAP_NPM_MARKER, JSON.stringify({
+  args: process.argv.slice(2),
+  cwd: process.cwd(),
+  poison: process.env.npm_config_allow_scripts
+}));
+const root = path.join(process.cwd(), "node_modules", "@authorbot", "cli");
+fs.mkdirSync(path.join(root, "dist"), { recursive: true });
+fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+  name: "@authorbot/cli",
+  version,
+  type: "module",
+  bin: { authorbot: "./dist/bin.mjs" }
+}));
+fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
+  'import { writeFileSync } from "node:fs";',
+  'writeFileSync(process.env.AUTHORBOT_BOOTSTRAP_CHILD_MARKER, JSON.stringify({',
+  '  args: process.argv.slice(2),',
+  '  cwd: process.cwd(),',
+  '  requested: process.env.AUTHORBOT_UPGRADE_BOOTSTRAP_VERSION',
+  '}));',
+  'process.exitCode = 12;'
+].join("\\n"));
+`,
+      );
+      await chmod(path.join(fakeBin, "npm"), 0o755);
+
+      const staleRoot = path.join(repo, "node_modules", "@authorbot", "cli");
+      await mkdir(path.join(staleRoot, "dist"), { recursive: true });
+      await writeFile(
+        path.join(staleRoot, "package.json"),
+        JSON.stringify({
+          name: "@authorbot/cli",
+          version: "0.1.29",
+          bin: { authorbot: "./dist/bin.js" },
+        }),
+      );
+      await writeFile(path.join(staleRoot, "dist", "bin.js"), "process.exitCode = 99;\n");
+
+      const bootstrap = await createNodeUpgradeBootstrap({
+        ...process.env,
+        PATH: `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`,
+        npm_config_allow_scripts: "poison-from-outer-npx",
+        AUTHORBOT_BOOTSTRAP_NPM_MARKER: npmMarker,
+        AUTHORBOT_BOOTSTRAP_CHILD_MARKER: childMarker,
+      });
+      expect(
+        await bootstrap.handoff({
+          targetVersion: "0.1.34",
+          repoPath: repo,
+          cwd: repo,
+          args: [".", "--to", "0.1.34"],
+        }),
+      ).toBe(12);
+
+      const npm = JSON.parse(await readFile(npmMarker, "utf8")) as {
+        args: string[];
+        cwd: string;
+        poison?: string;
+      };
+      expect(npm.args).toEqual([
+        "install",
+        "--package-lock=false",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "--prefer-offline",
+      ]);
+      expect(npm.cwd).toContain("authorbot-cli-bootstrap-");
+      expect(npm.poison).toBeUndefined();
+
+      const child = JSON.parse(await readFile(childMarker, "utf8")) as {
+        args: string[];
+        cwd: string;
+        requested: string;
+      };
+      expect(child).toEqual({
+        args: ["upgrade", ".", "--to", "0.1.34"],
+        cwd: repo,
+        requested: "0.1.34",
+      });
+      const stale = JSON.parse(
+        await readFile(path.join(staleRoot, "package.json"), "utf8"),
+      ) as { version: string };
+      expect(stale.version).toBe("0.1.29");
     },
   );
 });

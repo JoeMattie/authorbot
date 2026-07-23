@@ -126,6 +126,22 @@ To upgrade, run `npx authorbot upgrade`, which opens a pull request rather
 than pushing (ADR-0021 §3). To do it by hand:
 `npm install --save-dev @authorbot/cli@<version>` and commit both files.
 
+The command checks its own version before it changes anything. If
+`node_modules` is stale, or the upgrade needs migrations that only exist in
+the target release, it hands the operation to that exact CLI release. It uses
+an exact matching local install first and otherwise asks npm to acquire one in
+a throwaway directory, never inside the book. That release aligns the direct
+`@authorbot/cli` and existing `@authorbot/api` pins, regenerates
+`package-lock.json`, and verifies all resolved versions before it branches. If
+the release is unavailable while offline, the command stops with the
+repository unchanged. Install the version named in the error and rerun the
+same command.
+
+If the installed helper is from before self-bootstrap support existed, give
+npm the package explicitly once:
+`npx --yes @authorbot/cli@<target> upgrade --to <target>`. After that upgrade,
+the normal `npx authorbot upgrade` command handles stale installs itself.
+
 The safety net is unaffected. This adds two small files to a repository that
 is otherwise prose; the book is still Markdown and YAML that reads perfectly
 well with no tooling at all.

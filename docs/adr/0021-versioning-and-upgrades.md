@@ -62,7 +62,8 @@ remains the default and the recommendation for a book that matters.
 One command, and it must be safe to run on a book that matters:
 
 ```
-  1. resolve current pin → target release; show what changed
+  1. resolve current pin → target release; hand off to that exact CLI release
+     before changing anything, then show what changed
   2. run the target's book-repo migrations against a working copy
   3. validate BEFORE and AFTER; abort on any new error
   4. open a PULL REQUEST - never push to main
@@ -78,6 +79,33 @@ can be reverted independently.
 `--dry-run` prints the plan and changes nothing. `--check` reports whether an
 upgrade is available and whether it would require a format migration, for use
 in a scheduled job.
+
+The handoff in step 1 is a safety boundary, not an optimization. Plain
+`npx authorbot` prefers the local executable, and `node_modules` can lag behind
+the exact pin in `package.json` after an interrupted or script-blocked install.
+That stale executable does not know migrations or package-alignment rules
+which shipped later. The helper therefore selects the exact release which must
+own the operation, uses an exact matching book-local install when one exists,
+or acquires that release with npm in a throwaway directory. The book is not an
+installation target.
+
+A bootstrap child carries the exact version its parent requested. If npm or
+PATH starts anything else, or a second handoff would be needed, the command
+fails before repository mutation instead of recursing. This also makes the
+offline behavior explicit: an exact local install works without downloading;
+a populated npm cache may satisfy acquisition; and an unavailable release
+stops the operation with the repository unchanged.
+
+No release can change an executable which was already published before this
+bootstrap existed. A book whose installed helper predates this behavior needs
+one explicit launch of a new package:
+
+```
+npx --yes @authorbot/cli@<target> upgrade --to <target>
+```
+
+After that pull request is merged and installed, ordinary
+`npx authorbot upgrade` owns every later handoff automatically.
 
 ### 4. CI applies database migrations
 

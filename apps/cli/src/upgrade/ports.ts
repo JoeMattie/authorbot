@@ -121,6 +121,41 @@ export interface LockfilePort {
   relock(repoPath: string): Promise<void>;
 }
 
+export interface UpgradeBootstrapRequest {
+  /** Exact published CLI release which must own the upgrade. */
+  readonly targetVersion: string;
+  /** Book repository used to look for an already-installed exact match. */
+  readonly repoPath: string;
+  /** Original process cwd. Relative argv paths must keep the same meaning. */
+  readonly cwd: string;
+  /** Original arguments after `authorbot upgrade`. */
+  readonly args: readonly string[];
+}
+
+/**
+ * Start the release which is about to be installed before the current helper
+ * can mutate the book.
+ *
+ * A book's package.json and node_modules can disagree after an interrupted
+ * install. The executable npm selects for plain `npx authorbot` is then the
+ * stale one. Upgrades cannot safely continue with that executable because it
+ * may not know the target release's migrations or package alignment rules.
+ */
+export interface UpgradeBootstrapPort {
+  /** Version of the CLI package which owns this running process. */
+  readonly runningVersion: string;
+  /**
+   * Version requested by the parent handoff, when this process is a child.
+   * Its presence prevents an npm or PATH resolution error from recursing.
+   */
+  readonly requestedVersion?: string;
+  /**
+   * Run an exact installed copy, or acquire it in a throwaway directory and
+   * run that. Returns the child CLI's exit code.
+   */
+  handoff(request: UpgradeBootstrapRequest): Promise<number>;
+}
+
 export interface UpgradeDeps {
   readonly fs: UpgradeFs;
   readonly git: GitPort;
@@ -132,4 +167,9 @@ export interface UpgradeDeps {
   readonly migrations: readonly BookRepoMigration[];
   /** Injected so branch names are deterministic under test. */
   readonly now: () => Date;
+  /**
+   * Present in the real CLI and injectable in bootstrap tests. Ordinary
+   * upgrade tests omit it so every other effect remains fully fake.
+   */
+  readonly bootstrap?: UpgradeBootstrapPort;
 }
