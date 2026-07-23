@@ -94,8 +94,11 @@ Everything below runs on a clean checkout of `main` with a green workspace.
 ### 1. Set the version
 
 ```bash
-pnpm -r exec npm version 1.5.0 --no-git-tag-version
+node scripts/bump-version.mjs 1.5.0
 ```
+
+This updates every publishable package, the create wizard's toolchain version,
+and the generated book template pin as one operation.
 
 Then commit it on its own:
 
