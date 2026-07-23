@@ -466,13 +466,28 @@ describe("openapi.yaml is synced with the router", () => {
 
   it("documents optional authentication for the public event-poll representation", () => {
     const events = spec.paths["/v1/projects/{projectId}/events"]?.["get"] as
-      | { security?: Record<string, never[]>[] }
+      | { description?: string; security?: Record<string, never[]>[] }
       | undefined;
     expect(events?.security).toEqual([
       { githubSession: [] },
       { agentToken: [] },
       {},
     ]);
+    expect(events?.description).toContain("exact effective read");
+    expect(events?.description).toContain("capabilities, with an explicit");
+    expect(events?.description).toContain("field projection");
+    expect(events?.description).toContain("malformed,");
+    expect(events?.description).toContain("control-plane event types fail closed");
+  });
+
+  it("documents capability-scoped operation reads for agent tokens", () => {
+    const operation = spec.paths[
+      "/v1/projects/{projectId}/operations/{operationId}"
+    ]?.["get"];
+    expect(operation?.description).toContain("uniquely owns it");
+    expect(operation?.description).toContain("exact read capability");
+    expect(operation?.description).toContain("Control-plane");
+    expect(operation?.description).toContain("fail closed");
   });
 });
 

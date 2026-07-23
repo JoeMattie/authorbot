@@ -155,6 +155,15 @@ describe("reviewed work-submission proposals", () => {
       revisionProposalId: proposal.id,
       revision: 3,
     });
+    expect(await eventPayload("revision_proposal_applied")).toMatchObject({
+      revisionProposalId: proposal.id,
+      chapterId: seed.chapterId,
+      targetKind: "chapter",
+      proposalType: "chapter_replacement",
+      workItemId: apply.workItemId,
+      submissionId: apply.submissionId,
+      commitSha: COMMIT_SHA,
+    });
   });
 
   it("finalizes a committed conflict and exposes the proposal id in the conflict event", async () => {
@@ -177,6 +186,14 @@ describe("reviewed work-submission proposals", () => {
       submissionId: apply.submissionId,
       revisionProposalId: proposal.id,
     });
+    expect(await eventPayload("revision_proposal_conflicted")).toMatchObject({
+      revisionProposalId: proposal.id,
+      chapterId: seed.chapterId,
+      targetKind: "chapter",
+      proposalType: "chapter_replacement",
+      workItemId: apply.workItemId,
+      submissionId: apply.submissionId,
+    });
   });
 
   it("marks the proposal conflicted when the apply operation fails terminally", async () => {
@@ -197,6 +214,14 @@ describe("reviewed work-submission proposals", () => {
     expect(await eventPayload("work_item_conflict")).toMatchObject({
       submissionId: apply.submissionId,
       revisionProposalId: proposal.id,
+    });
+    expect(await eventPayload("revision_proposal_conflicted")).toMatchObject({
+      revisionProposalId: proposal.id,
+      chapterId: seed.chapterId,
+      targetKind: "chapter",
+      proposalType: "chapter_replacement",
+      workItemId: apply.workItemId,
+      submissionId: apply.submissionId,
     });
   });
 
@@ -340,6 +365,18 @@ describe("reviewed direct chapter writes", () => {
       revisionProposalId: queued.proposal?.id,
       revision: 3,
     });
+    expect(await eventPayload("revision_proposal_applied")).toMatchObject({
+      revisionProposalId: queued.proposal?.id,
+      chapterId: seed.chapterId,
+      targetKind: "chapter",
+      proposalType: "chapter_replacement",
+      commitSha: COMMIT_SHA,
+    });
+    expect(await eventPayload("operation_completed")).toMatchObject({
+      operationId: queued.operationId,
+      kind: "chapter.write",
+      revisionProposalId: queued.proposal?.id,
+    });
   });
 
   it("keeps legacy chapter.write payloads and event shapes unchanged", async () => {
@@ -359,6 +396,10 @@ describe("reviewed direct chapter writes", () => {
       status: "draft",
       revision: 3,
       path: "chapters/01-signal.md",
+    });
+    expect(await eventPayload("operation_completed")).toMatchObject({
+      directChapterWrite: true,
+      kind: "chapter.write",
     });
   });
 
@@ -384,6 +425,13 @@ describe("reviewed direct chapter writes", () => {
       status: "conflicted",
       resultingRevision: null,
       commitSha: null,
+    });
+    expect(await eventPayload("revision_proposal_conflicted")).toMatchObject({
+      revisionProposalId: queued.proposal?.id,
+      chapterId: seed.chapterId,
+      targetKind: "chapter",
+      proposalType: "chapter_replacement",
+      reason: "base revision is stale",
     });
   });
 

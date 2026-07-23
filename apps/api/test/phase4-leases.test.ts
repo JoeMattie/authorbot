@@ -286,6 +286,13 @@ describe("claim (contract §2/§3)", () => {
     try {
       const first = await devLogin(harness, "first", "editor");
       const second = await devLogin(harness, "second", "editor");
+      const minter = await devLogin(harness, "lease-event-minter", "maintainer");
+      const workReader = await mintCanonicalToken(
+        harness,
+        minter,
+        ["work:read"],
+        "lease-event-observer",
+      );
       const { workItemId } = await createReadyWorkItem(harness);
       const claimed = await claimWorkItem(harness, { cookie: first }, workItemId);
       expect(claimed.status).toBe(201);
@@ -295,6 +302,7 @@ describe("claim (contract §2/§3)", () => {
       const held = await claimWorkItem(harness, { cookie: second }, workItemId);
       expect(held.status).toBe(409);
 
+      const beforeExpiry = await harness.repos.events.latestId(harness.projectId);
       harness.clock.advanceMs(31 * MINUTE);
       const takeover = await claimWorkItem(harness, { cookie: second }, workItemId);
       expect(takeover.status).toBe(201);
@@ -305,6 +313,15 @@ describe("claim (contract §2/§3)", () => {
       const types = await eventTypes(harness);
       expect(types.filter((t) => t === "work_item_leased")).toHaveLength(2);
       expect(types).toContain("lease_expired");
+      const feed = await harness.app.request(
+        `/v1/projects/${harness.projectId}/events?poll=1&after=${beforeExpiry}`,
+        { headers: { Authorization: `Bearer ${workReader.token}` } },
+      );
+      expect(feed.status).toBe(200);
+      const expired = ((await feed.json()) as {
+        items: { type: string; payload: Record<string, unknown> }[];
+      }).items.find((event) => event.type === "lease_expired");
+      expect(expired?.payload).toEqual({ leaseId: staleLeaseId, workItemId });
     } finally {
       harness.close();
     }

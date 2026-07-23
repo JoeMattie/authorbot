@@ -348,6 +348,7 @@ export async function reanchorChapterFromSource(
           payload: {
             annotationId: a.id,
             chapterId: workItem.chapterId,
+            annotationKind: a.kind,
             revision: newRevision,
             algorithmVersion: REANCHOR_ALGORITHM_VERSION,
           },
@@ -449,6 +450,12 @@ async function recordConflictProblem(
   if (operation === null || operation.error !== null) {
     return; // already recorded (crash-recovery replay)
   }
+  const sourceAnnotation = await repos.annotations.getById(workItem.sourceAnnotationId);
+  if (sourceAnnotation === null || sourceAnnotation.projectId !== workItem.projectId) {
+    throw new Error(
+      `work item ${workItem.id} has no project-owned source annotation ${workItem.sourceAnnotationId}`,
+    );
+  }
   const siblings = await repos.workItems.listBySourceAnnotation(workItem.sourceAnnotationId);
   const conflictItem = siblings.find((w) => w.type === "resolve_conflict" && w.status === "ready");
   const problem = {
@@ -475,6 +482,7 @@ async function recordConflictProblem(
         payload: {
           workItemId: conflictItem.id,
           annotationId: conflictItem.sourceAnnotationId,
+          annotationKind: sourceAnnotation.kind,
           chapterId: conflictItem.chapterId,
           type: "resolve_conflict",
           baseRevision: conflictItem.baseRevision,

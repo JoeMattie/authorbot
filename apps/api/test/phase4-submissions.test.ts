@@ -554,6 +554,17 @@ ${BLOCK_2_TEXT}
       const types = await eventTypes(harness);
       expect(types).toContain("work_item_conflict");
       expect(types).toContain("work_item_created");
+      const conflictCreated = (
+        await harness.repos.events.listAfter(harness.projectId, 0, 500)
+      ).find(
+        (event) =>
+          event.type === "work_item_created" &&
+          (event.payload as Record<string, unknown>)["workItemId"] === conflictItem?.id,
+      );
+      expect(conflictCreated?.payload).toMatchObject({
+        annotationId: ctx.annotationId,
+        annotationKind: "suggestion",
+      });
     } finally {
       harness.close();
     }

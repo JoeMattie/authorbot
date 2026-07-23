@@ -2241,6 +2241,14 @@ paths:
       operationId: getOperation
       tags: [operations]
       summary: Return the state of an asynchronous Git operation.
+      description: >-
+        Human project members may read project operations. Agent tokens may
+        read an operation only when the token actor uniquely owns it or the
+        token has the exact read capability for the operation's authoritative
+        resource (`comments:read`, `suggestions:read`, `work:read`,
+        `chapters:read`, or `revisions:read`). Control-plane, unknown,
+        malformed, dangling, and ambiguously linked operations fail closed for
+        agent tokens.
       responses:
         "200":
           description: The operation.
@@ -2328,8 +2336,11 @@ paths:
         refetch authoritative resources after reconnecting. Resume without loss
         via `Last-Event-ID` (or the `after` query parameter).
 
-        Authenticated project members may use the full stream. Anonymous
-        readers and signed-in non-members admitted by an open or
+        Human-session project members may use the full stream. Agent-token
+        members receive only events authorized by their exact effective read
+        capabilities, with an explicit field projection; unknown, malformed,
+        and control-plane event types fail closed. Anonymous readers and signed-in
+        non-members admitted by an open or
         approval-gated annotation policy may use only the `poll=1`
         representation. It is filtered to explicitly reviewed public
         collaboration subtypes: conflict Work creation and Work cancellation

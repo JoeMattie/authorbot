@@ -65,6 +65,7 @@ import {
   streamClientKey,
 } from "./sse.js";
 import { adjustTally, tallyJson, tallyToMetrics, type Voter, type VoterActorType } from "./tally.js";
+import { createTokenEventProjector } from "./token-event-visibility.js";
 
 /**
  * Outbox kinds Phase 3 emits, matching the @authorbot/repo-coordinator
@@ -538,6 +539,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       appendEventStatement(project.id, "decision_created", {
         decisionId,
         annotationId: annotation.id,
+        annotationKind: annotation.kind,
+        decisionActionType: input.actionType,
         result: "create_work_item",
         rule: input.ruleName,
         ruleVersion: input.ruleVersion,
@@ -546,6 +549,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       appendEventStatement(project.id, "work_item_created", {
         workItemId,
         annotationId: annotation.id,
+        annotationKind: annotation.kind,
         chapterId: annotation.chapterId,
         type: workItemType,
         baseRevision,
@@ -724,6 +728,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
           appendEventStatement(guard.project.id, "vote_aggregate", {
             annotationId: annotation.id,
             chapterId: annotation.chapterId,
+            annotationKind: annotation.kind,
             votes: tallyJson(tally),
           }),
         );
@@ -822,6 +827,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
                 appendEventStatement(guard.project.id, DECISION_SUPPORT_CHANGED_EVENT, {
                   decisionId: existing.id,
                   annotationId: annotation.id,
+                  annotationKind: annotation.kind,
                   supportChanged: outcome.supportChanged,
                   transition: outcome.transition,
                 }),
@@ -1039,6 +1045,9 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             appendEventStatement(guard.project.id, "decision_created", {
               decisionId: override.decisionId,
               annotationId: annotation.id,
+              annotationKind: annotation.kind,
+              decisionActionType:
+                action === "reject" ? "reject_suggestion" : "reopen_suggestion",
               result: action === "reject" ? "rejected" : "overridden",
               override: action,
             }),
@@ -1241,6 +1250,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       if (workItem === null || workItem.projectId !== guard.project.id) {
         return problem(c, "not-found", { detail: "unknown work item" });
       }
+      const sourceAnnotation = await repos.annotations.getById(workItem.sourceAnnotationId);
+      if (sourceAnnotation === null || sourceAnnotation.projectId !== guard.project.id) {
+        throw new Error(
+          `work item ${workItem.id} has no project-owned source annotation ${workItem.sourceAnnotationId}`,
+        );
+      }
       const a = authOf(c);
       const decision = authorizeCancelWorkItem({
         actorRole: a.role ?? "reader",
@@ -1292,6 +1307,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         appendEventStatement(guard.project.id, "decision_created", {
           decisionId: override.decisionId,
           annotationId: workItem.sourceAnnotationId,
+          annotationKind: sourceAnnotation.kind,
+          decisionActionType: "cancel_work_item",
           result: "overridden",
           override: "cancel",
           workItemId: workItem.id,
@@ -1435,8 +1452,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     const requestAuth = c.get("auth");
     // Open and approval-gated books admit signed-in non-members to annotation
     // reads. A credential alone therefore does not authorize the operational
-    // feed: only a current project membership does.
+    // feed. Human members retain its lossless representation; agent-token
+    // members receive only capability-authorized, field-projected events.
     const publicOnly = requestAuth === undefined || requestAuth.membership === null;
+    const tokenProjector = requestAuth?.kind === "token"
+      ? createTokenEventProjector(requestAuth.effectiveCapabilities)
+      : null;
 
     if (c.req.query("poll") === "1") {
       // JSON fallback for simple agents (§26.1). Public-only readers
@@ -1455,7 +1476,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             const projected = projectPublicReaderEvent(event);
             return projected === null ? [] : [projected];
           })
-        : items;
+        : tokenProjector === null
+          ? items
+          : items.flatMap((event) => {
+              const projected = tokenProjector(event);
+              return projected === null ? [] : [projected];
+            });
       return c.json({ items: visible.map(eventJson), latestId: latest });
     }
 
@@ -1497,6 +1523,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     return sseResponse(
       {
         listAfter: (afterId, limit) => repos.events.listAfter(project.id, afterId, limit),
+        ...(tokenProjector === null ? {} : { projectEvent: tokenProjector }),
         initialCursor,
         pollMs: deps.config.ssePollMs ?? DEFAULT_SSE_POLL_MS,
         heartbeatMs: deps.config.sseHeartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS,

@@ -486,6 +486,7 @@ export function registerChapterHistoryRoutes(ctx: ChapterHistoryContext): void {
             payload: {
               proposalId,
               chapterId: chapter.id,
+              targetKind: "chapter",
               proposalType: proposal.proposalType,
               origin: proposal.origin,
               authorActorId: actor.actor.id,

@@ -326,7 +326,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   };
 
   /**
-   * Resolve the exact read capability for one canonical-token operation.
+   * Resolve the exact read capabilities for one agent-token operation.
    *
    * `git_operations` deliberately contains only execution state. Its single
    * durable domain link is the outbox row inserted in the same batch. The
@@ -335,14 +335,13 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * record before it can authorize a read. Unknown, malformed, dangling, and
    * control-plane kinds return null and therefore fail closed.
    *
-   * This costs one bounded outbox query plus at most two primary-key lookups
-   * (decision -> source annotation, or submission -> work item). It never
-   * fans out with project size.
+   * The query materializes at most two outbox links; domain resolution then
+   * uses primary-key lookups instead of loading project-sized collections.
    */
   const operationReadCapability = async (
     projectId: string,
     operationId: string,
-  ): Promise<EditorialCapability | null> => {
+  ): Promise<readonly EditorialCapability[] | null> => {
     const links = await deps.db
       .prepare(
         `SELECT kind, payload FROM outbox
@@ -369,7 +368,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         if (annotationId === null) return null;
         const annotation = await repos.annotations.getById(annotationId);
         if (annotation === null || annotation.projectId !== projectId) return null;
-        return feedbackReadCapability(annotation.kind);
+        return [feedbackReadCapability(annotation.kind)];
       }
       case "reply.create":
       case "reply.withdraw": {
@@ -386,7 +385,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         }
         const annotation = await repos.annotations.getById(reply.annotationId);
         if (annotation === null || annotation.projectId !== projectId) return null;
-        return feedbackReadCapability(annotation.kind);
+        return [feedbackReadCapability(annotation.kind)];
       }
       case "decision.create":
       case "decision.update": {
@@ -396,7 +395,31 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         if (decision === null || decision.projectId !== projectId) return null;
         const annotation = await repos.annotations.getById(decision.sourceAnnotationId);
         if (annotation === null || annotation.projectId !== projectId) return null;
-        return feedbackReadCapability(annotation.kind);
+        const feedbackRead = feedbackReadCapability(annotation.kind);
+        if (
+          decision.actionType === "reject_suggestion" ||
+          decision.actionType === "reopen_suggestion"
+        ) {
+          return decision.workItemId === null ? [feedbackRead] : null;
+        }
+        if (
+          decision.actionType !== "create_work_item" &&
+          decision.actionType !== "cancel_work_item"
+        ) {
+          return null;
+        }
+        if (decision.workItemId === null) return null;
+        const workItem = await repos.workItems.getById(decision.workItemId);
+        if (
+          workItem === null ||
+          workItem.projectId !== projectId ||
+          workItem.sourceAnnotationId !== annotation.id
+        ) {
+          return null;
+        }
+        return decision.actionType === "cancel_work_item"
+          ? ["work:read"]
+          : [feedbackRead, "work:read"];
       }
       case "submission.apply": {
         const submissionId = objectString(payload, "submissionId");
@@ -415,20 +438,39 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         ) {
           return null;
         }
-        return "work:read";
+        return ["work:read"];
       }
       case "chapter.write": {
         const chapterId = objectString(payload, "chapterId");
-        if (chapterId === null) return null;
+        const action = objectString(payload, "action");
+        if (
+          chapterId === null ||
+          action === null ||
+          !["create", "revise", "publish", "unpublish"].includes(action)
+        ) {
+          return null;
+        }
         const hasProposalId =
           payload !== null &&
           typeof payload === "object" &&
           !Array.isArray(payload) &&
           Object.prototype.hasOwnProperty.call(payload, "revisionProposalId");
-        if (!hasProposalId) return "chapters:read";
+        if (!hasProposalId) {
+          const chapter = await repos.chapters.getById(chapterId);
+          // A create is intentionally linked before its chapter projection
+          // exists; every other direct action must resolve the durable chapter.
+          if (action === "create") {
+            return chapter === null || chapter.projectId === projectId
+              ? ["chapters:read"]
+              : null;
+          }
+          return chapter !== null && chapter.projectId === projectId
+            ? ["chapters:read"]
+            : null;
+        }
 
         const proposalId = objectString(payload, "revisionProposalId");
-        if (proposalId === null) return null;
+        if (proposalId === null || action !== "revise") return null;
         const proposal = await repos.revisionProposals.getById(proposalId);
         if (
           proposal === null ||
@@ -439,7 +481,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         ) {
           return null;
         }
-        return "revisions:read";
+        return ["revisions:read"];
       }
       case "repository_document.write": {
         const proposalId = objectString(payload, "revisionProposalId");
@@ -452,7 +494,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         ) {
           return null;
         }
-        return "revisions:read";
+        return ["revisions:read"];
       }
       default:
         return null;
@@ -2034,14 +2076,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
     const requestAuth = authOf(c);
     if (requestAuth.kind === "token") {
-      const requiredCapability = await operationReadCapability(
+      const requiredCapabilities = await operationReadCapability(
         guard.project.id,
         operation.id,
       );
       // A missing/ambiguous domain link and control-plane operations have no
       // delegable editorial read capability. Do not let actor attribution
       // turn either case into token authority.
-      if (requiredCapability === null) {
+      if (requiredCapabilities === null) {
         return problem(c, "forbidden", {
           detail: "actor is not authorized to read this operation",
         });
@@ -2056,10 +2098,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       // umbrella scope and reopen the cross-domain read this route is closing.
       const hasDomainRead =
         requestAuth.capabilityMode === "legacy"
-          ? requestAuth.effectiveCapabilities.includes(requiredCapability)
-          : hasEditorialAuthority(requestAuth, null, {
-              capabilities: [requiredCapability],
-            });
+          ? requiredCapabilities.some((capability) =>
+              requestAuth.effectiveCapabilities.includes(capability),
+            )
+          : requiredCapabilities.some((capability) =>
+              hasEditorialAuthority(requestAuth, null, {
+                capabilities: [capability],
+              }),
+            );
       if (!ownsOperation && !hasDomainRead) {
         return problem(c, "forbidden", {
           detail: "actor is not authorized to read this operation",

@@ -1137,6 +1137,8 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
             submissionId,
             workItemId: workItem.id,
             chapterId: workItem.chapterId,
+            targetKind: "chapter",
+            proposalType: "chapter_replacement",
             correlationId,
           }),
           appendEventStatement(guard.project.id, "submission_received", {

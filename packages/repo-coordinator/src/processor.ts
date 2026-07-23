@@ -510,7 +510,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           const sync = await buildSyncStatements(row, op.commitSha);
           await db.batch([
             ...sync,
-            completionEventStatement(row, op),
+            await completionEventStatement(row, op),
             repos.outbox.markDoneStatement(row.id, now()),
           ]);
           return outcome(row, "committed", op.commitSha === null ? {} : { commitSha: op.commitSha });
@@ -619,7 +619,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
               error: null,
             }),
             ...(await buildSyncStatements(row, commitSha)),
-            completionEventStatement(row, op),
+            await completionEventStatement(row, op),
             repos.outbox.markDoneStatement(row.id, ts),
           ]);
           return outcome(row, "committed", { commitSha });
@@ -700,7 +700,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       );
     }
     statements.push(...(await releaseFailedApplyStatements(row, ts, error)));
-    statements.push(...(await releaseFailedChapterWriteStatements(row, ts)));
+    statements.push(...(await releaseFailedChapterWriteStatements(row, ts, error)));
     statements.push(...(await releaseFailedRepositoryDocumentStatements(row, ts, error)));
     statements.push(...(await releaseFailedBookConfigStatements(row, ts)));
     statements.push(repos.outbox.markFailedStatement(row.id, ts));
@@ -795,13 +795,27 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       proposal.workItemId === payload.workItemId &&
       proposal.status === "applying" &&
       proposal.gitOperationId === row.gitOperationId;
-    const proposalStatements =
+    const proposalStatements: SqlStatement[] =
       !proposalMatches
         ? []
         : [
             repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
               status: "conflicted",
               updatedAt: ts,
+            }),
+            repos.events.appendStatement({
+              projectId: row.projectId,
+              type: "revision_proposal_conflicted",
+              payload: {
+                revisionProposalId: proposal.id,
+                chapterId: proposal.chapterId,
+                targetKind: "chapter",
+                proposalType: proposal.proposalType,
+                submissionId: payload.submissionId,
+                workItemId: payload.workItemId,
+                reason: error,
+              },
+              createdAt: ts,
             }),
           ];
     const workItem = await repos.workItems.getById(payload.workItemId);
@@ -837,6 +851,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   async function releaseFailedChapterWriteStatements(
     row: OutboxRecord,
     ts: string,
+    error: string,
   ): Promise<SqlStatement[]> {
     if (row.kind !== "chapter.write") return [];
     let payload: ChapterWritePayload;
@@ -860,6 +875,18 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       repos.revisionProposals.finalizeStatement(proposal.id, "applying", {
         status: "conflicted",
         updatedAt: ts,
+      }),
+      repos.events.appendStatement({
+        projectId: row.projectId,
+        type: "revision_proposal_conflicted",
+        payload: {
+          revisionProposalId: proposal.id,
+          chapterId: proposal.chapterId,
+          targetKind: "chapter",
+          proposalType: proposal.proposalType,
+          reason: error,
+        },
+        createdAt: ts,
       }),
     ];
   }
@@ -900,6 +927,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           targetKind: proposal.targetKind,
           targetId: proposal.targetId,
           targetPath: proposal.targetPath,
+          proposalType: proposal.proposalType,
           reason: error,
         },
         createdAt: ts,
@@ -1477,6 +1505,22 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         },
         createdAt: ts,
       }),
+      ...(proposal === null
+        ? []
+        : [
+            repos.events.appendStatement({
+              projectId: row.projectId,
+              type: "revision_proposal_applied",
+              payload: {
+                revisionProposalId: proposal.id,
+                chapterId: proposal.chapterId,
+                targetKind: "chapter",
+                proposalType: proposal.proposalType,
+                commitSha,
+              },
+              createdAt: ts,
+            }),
+          ]),
     ];
   }
 
@@ -1774,6 +1818,24 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           createdAt: ts,
         }),
       );
+      if (proposal !== null) {
+        statements.push(
+          repos.events.appendStatement({
+            projectId: row.projectId,
+            type: "revision_proposal_applied",
+            payload: {
+              revisionProposalId: proposal.id,
+              chapterId: proposal.chapterId,
+              targetKind: "chapter",
+              proposalType: proposal.proposalType,
+              submissionId: payload.submissionId,
+              workItemId: workItem.id,
+              commitSha,
+            },
+            createdAt: ts,
+          }),
+        );
+      }
       return statements;
     }
     const outcome = resolved.outcome;
@@ -1809,6 +1871,24 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         createdAt: ts,
       }),
     );
+    if (proposal !== null) {
+      statements.push(
+        repos.events.appendStatement({
+          projectId: row.projectId,
+          type: "revision_proposal_conflicted",
+          payload: {
+            revisionProposalId: proposal.id,
+            chapterId: proposal.chapterId,
+            targetKind: "chapter",
+            proposalType: proposal.proposalType,
+            submissionId: payload.submissionId,
+            workItemId: workItem.id,
+            reason: outcome.reason,
+          },
+          createdAt: ts,
+        }),
+      );
+    }
     return statements;
   }
 
@@ -1834,6 +1914,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
           targetKind: proposal.targetKind,
           targetId: proposal.targetId,
           targetPath: proposal.targetPath,
+          proposalType: proposal.proposalType,
           commitSha,
         },
         createdAt: ts,
@@ -1844,13 +1925,59 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
   /**
    * The `operation_completed` feed event (contract §5): appended in the same
    * finalize batch that marks the operation committed and the outbox row done,
-   * so the stream reflects `pending_git → committed` transitions.
+   * so the stream reflects `pending_git → committed` transitions. Subtype
+   * metadata is resolved from the authoritative linked records rather than
+   * copied from caller-controlled input; token event projection uses it to
+   * keep adjacent editorial capabilities independent.
    */
-  function completionEventStatement(row: OutboxRecord, op: GitOperationRecord): SqlStatement {
+  async function completionEventStatement(
+    row: OutboxRecord,
+    op: GitOperationRecord,
+  ): Promise<SqlStatement> {
+    const kind = parseKind(row);
+    let subtype: Record<string, unknown> = {};
+    if (kind === "annotation.create" || kind === "annotation.withdraw") {
+      const annotation = await mustAnnotation(parseAnnotationPayload(row).annotationId);
+      if (annotation.projectId !== row.projectId) {
+        throw new Error(`outbox row ${row.id}: linked annotation is outside project`);
+      }
+      subtype = { annotationKind: annotation.kind };
+    } else if (kind === "reply.create" || kind === "reply.withdraw") {
+      const reply = await repos.replies.getById(parseReplyPayload(row).replyId);
+      if (reply === null || reply.projectId !== row.projectId) {
+        throw new Error(`outbox row ${row.id}: linked reply not found in project`);
+      }
+      const annotation = await mustAnnotation(reply.annotationId);
+      if (annotation.projectId !== row.projectId) {
+        throw new Error(`outbox row ${row.id}: linked reply annotation is outside project`);
+      }
+      subtype = { annotationKind: annotation.kind };
+    } else if (kind === "decision.create" || kind === "decision.update") {
+      const decision = await mustDecision(parseDecisionPayload(row).decisionId);
+      const annotation = await mustAnnotation(decision.sourceAnnotationId);
+      if (decision.projectId !== row.projectId || annotation.projectId !== row.projectId) {
+        throw new Error(`outbox row ${row.id}: linked decision is outside project`);
+      }
+      subtype = {
+        annotationKind: annotation.kind,
+        decisionActionType: decision.actionType,
+      };
+    } else if (kind === "chapter.write") {
+      const payload = parseChapterWritePayload(row);
+      if (payload.revisionProposalId === undefined) {
+        subtype = { directChapterWrite: true };
+      } else {
+        const proposal = await linkedChapterRevisionProposal(row, payload);
+        if (proposal === null) {
+          throw new Error(`outbox row ${row.id}: linked chapter proposal is missing`);
+        }
+        subtype = { revisionProposalId: proposal.id };
+      }
+    }
     return repos.events.appendStatement({
       projectId: row.projectId,
       type: "operation_completed",
-      payload: { operationId: op.id, kind: row.kind },
+      payload: { operationId: op.id, kind: row.kind, ...subtype },
       createdAt: now(),
     });
   }

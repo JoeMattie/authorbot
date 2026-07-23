@@ -23,6 +23,7 @@ import {
   devLogin,
   jsonRequest,
   makeHarness,
+  mintCanonicalToken,
   mintToken,
   validAnnotationPayload,
   type TestHarness,
@@ -782,6 +783,12 @@ describe("revocation is effective on the next request (exit criterion 7)", () =>
   it("invalidates sessions, releases the lease, and keeps the contributions", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     const editor = await devLogin(harness, "departing-editor", "editor");
+    const workReader = await mintCanonicalToken(
+      harness,
+      maintainer,
+      ["work:read"],
+      "revocation-event-observer",
+    );
     const editorActor = (await harness.repos.actors.getByExternalIdentity(
       "github:departing-editor",
     ))!;
@@ -824,6 +831,7 @@ describe("revocation is effective on the next request (exit criterion 7)", () =>
       revokedAt: null,
     });
 
+    const beforeRemoval = await harness.repos.events.latestId(harness.projectId);
     const remove = await harness.app.request(
       `/v1/projects/${harness.projectId}/collaborators/${editorActor.id}`,
       jsonRequest("DELETE", { reason: "left the project" }, { Cookie: maintainer }),
@@ -842,6 +850,16 @@ describe("revocation is effective on the next request (exit criterion 7)", () =>
     // not in four hours.
     expect((await harness.repos.leases.getById(leaseId))!.revokedAt).not.toBeNull();
     expect((await harness.repos.workItems.getById(workItemId))!.status).toBe("ready");
+    const feed = await harness.app.request(
+      `/v1/projects/${harness.projectId}/events?poll=1&after=${beforeRemoval}`,
+      { headers: { Authorization: `Bearer ${workReader.token}` } },
+    );
+    expect(feed.status).toBe(200);
+    const revoked = ((await json(feed)).items as {
+      type: string;
+      payload: Record<string, unknown>;
+    }[]).find((event) => event.type === "lease_revoked");
+    expect(revoked?.payload).toEqual({ leaseId, workItemId });
 
     // And their prior contribution is untouched: attribution and history are
     // permanent records, not access grants.

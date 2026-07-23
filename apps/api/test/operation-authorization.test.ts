@@ -174,11 +174,11 @@ describe("operation read authorization", () => {
       id: decisionId,
       projectId: h.projectId,
       sourceAnnotationId: annotationId,
-      actionType: "create_work_item",
+      actionType: "reject_suggestion",
       rule: "test-rule",
       ruleVersion: 1,
       metrics: { net: 1 },
-      result: "create_work_item",
+      result: "rejected",
       supportChanged: false,
       overrideReason: null,
       workItemId: null,
@@ -206,6 +206,91 @@ describe("operation read authorization", () => {
     expect((await readOperation(operationId, commentReader.token)).status).toBe(200);
     expect((await readOperation(operationId, suggestionReader.token)).status).toBe(403);
     expect((await readOperation(operationId, workReader.token)).status).toBe(403);
+  });
+
+  it("classifies Work creation and cancellation decisions by their linked domain", async () => {
+    const annotationId = await insertAnnotation("comment");
+    const workItemId = uuidv7();
+    await h.repos.workItems.insert({
+      id: workItemId,
+      projectId: h.projectId,
+      type: "revise_chapter",
+      status: "ready",
+      sourceAnnotationId: annotationId,
+      chapterId: CHAPTER_ID,
+      baseRevision: 3,
+      target: null,
+      priority: "normal",
+      createdAt: AT,
+      updatedAt: AT,
+    });
+
+    const createDecisionId = uuidv7();
+    await h.repos.decisions.insert({
+      id: createDecisionId,
+      projectId: h.projectId,
+      sourceAnnotationId: annotationId,
+      actionType: "create_work_item",
+      rule: "test-rule",
+      ruleVersion: 1,
+      metrics: { net: 1 },
+      result: "create_work_item",
+      supportChanged: false,
+      overrideReason: null,
+      workItemId,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    const createOperation = await insertOperation({
+      actorId: maintainerActorId,
+      kind: "decision.create",
+      payload: { decisionId: createDecisionId },
+      targetType: "decision",
+      targetId: createDecisionId,
+    });
+
+    const cancelDecisionId = uuidv7();
+    await h.repos.decisions.insert({
+      id: cancelDecisionId,
+      projectId: h.projectId,
+      sourceAnnotationId: annotationId,
+      actionType: "cancel_work_item",
+      rule: "maintainer-override",
+      ruleVersion: 0,
+      metrics: { net: 1 },
+      result: "overridden",
+      supportChanged: false,
+      overrideReason: "No longer needed.",
+      workItemId,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    const cancelOperation = await insertOperation({
+      actorId: maintainerActorId,
+      kind: "decision.create",
+      payload: { decisionId: cancelDecisionId },
+      targetType: "decision",
+      targetId: cancelDecisionId,
+    });
+
+    const commentReader = await mintCanonicalToken(h, maintainer, ["comments:read"]);
+    const allFeedbackReader = await mintCanonicalToken(h, maintainer, [
+      "comments:read",
+      "suggestions:read",
+    ]);
+    const workReader = await mintCanonicalToken(h, maintainer, ["work:read"]);
+
+    expect((await readOperation(createOperation.operationId, commentReader.token)).status).toBe(
+      200,
+    );
+    expect((await readOperation(createOperation.operationId, workReader.token)).status).toBe(200);
+    expect((await readOperation(cancelOperation.operationId, commentReader.token)).status).toBe(
+      403,
+    );
+    expect(
+      (await readOperation(cancelOperation.operationId, allFeedbackReader.token)).status,
+    ).toBe(403);
+    expect((await readOperation(cancelOperation.operationId, workReader.token)).status).toBe(200);
   });
 
   it("uses safe legacy domain translation while preserving owner polling", async () => {
@@ -284,6 +369,15 @@ describe("operation read authorization", () => {
     expect((await readOperation(chapterOperation.operationId, revisionReader.token)).status).toBe(
       403,
     );
+
+    const pendingCreate = await insertOperation({
+      actorId: maintainerActorId,
+      kind: "chapter.write",
+      payload: { chapterId: uuidv7(), action: "create" },
+      action: "chapter.create",
+      targetType: "chapter",
+    });
+    expect((await readOperation(pendingCreate.operationId, chapterReader.token)).status).toBe(200);
 
     const chapterProposalId = uuidv7();
     const chapterProposalOperation = await insertOperation({
@@ -425,6 +519,7 @@ describe("operation read authorization", () => {
   it("fails closed for control, duplicate-domain, and ambiguous-owner linkage", async () => {
     const owner = await mintCanonicalToken(h, maintainer, [], "operation-owner-no-reads");
     const commentReader = await mintCanonicalToken(h, maintainer, ["comments:read"]);
+    const chapterReader = await mintCanonicalToken(h, maintainer, ["chapters:read"]);
 
     const control = await insertOperation({
       actorId: owner.actorId,
@@ -435,6 +530,30 @@ describe("operation read authorization", () => {
       targetId: h.projectId,
     });
     expect((await readOperation(control.operationId, owner.token)).status).toBe(403);
+
+    const malformedChapter = await insertOperation({
+      actorId: owner.actorId,
+      kind: "chapter.write",
+      payload: { chapterId: CHAPTER_ID, action: "future-private-action" },
+      action: "chapter.future",
+      targetType: "chapter",
+      targetId: CHAPTER_ID,
+    });
+    expect((await readOperation(malformedChapter.operationId, owner.token)).status).toBe(403);
+    expect((await readOperation(malformedChapter.operationId, chapterReader.token)).status).toBe(
+      403,
+    );
+
+    const danglingChapter = await insertOperation({
+      actorId: maintainerActorId,
+      kind: "chapter.write",
+      payload: { chapterId: uuidv7(), action: "revise" },
+      action: "chapter.revise",
+      targetType: "chapter",
+    });
+    expect((await readOperation(danglingChapter.operationId, chapterReader.token)).status).toBe(
+      403,
+    );
 
     const annotationId = await insertAnnotation("comment");
     const duplicate = await insertOperation({
