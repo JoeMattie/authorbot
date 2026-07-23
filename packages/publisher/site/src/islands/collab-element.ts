@@ -76,6 +76,7 @@ interface FocusRestore {
 const DESKTOP_QUERY = "(min-width: 960px)";
 const CARD_GAP = 12;
 const DISCUSSION_PAGE_SIZE = 20;
+const REPLY_HYDRATION_CONCURRENCY = 4;
 const NOTE_FRAGMENT_PREFIX = "authorbot-note-";
 const REFRESH_HINT = "Still syncing; refresh the page to see the final state.";
 const STALE_PAGE_HINT =
@@ -627,17 +628,10 @@ export class AuthorbotCollab extends HTMLElement {
     } else {
       this.connectGlobalListeners();
     }
-    if (this.me !== null) {
-      const expectedSession = this.me;
-      const memberNames = await this.api.memberNames();
-      if (
-        !this.isCurrentMount(generation) ||
-        !sameSession(expectedSession, store.getState().session)
-      ) {
-        return;
-      }
-      this.memberNames = memberNames;
-    }
+    const expectedSession = this.me;
+    // Start attribution lookup alongside annotations, but never make either
+    // it or reply fan-out a prerequisite for the first useful Notes render.
+    const memberNamesRequest = expectedSession === null ? null : this.api.memberNames();
     if (this.me !== null || cfg.showPublic) {
       if (!(await this.loadAnnotations(generation, store, cfg))) return;
     }
@@ -645,8 +639,45 @@ export class AuthorbotCollab extends HTMLElement {
     this.renderAll();
     if (this.me !== null || cfg.showPublic) {
       if (!this.isCurrentMount(generation)) return;
-      this.releaseConnection ??= store.getState().retainConnection();
+      // Match the existing connection ordering: the first authoritative reply
+      // pass completes before SSE recovery starts. The pass is now bounded and
+      // progressive, so it no longer blocks the already-rendered Notes UI.
+      void this.finishInitialReplyHydration(generation, store);
     }
+    if (memberNamesRequest !== null && expectedSession !== null) {
+      void this.finishMemberNames(memberNamesRequest, expectedSession, generation, store);
+    }
+  }
+
+  private async finishMemberNames(
+    request: Promise<Map<string, string>>,
+    expectedSession: Me,
+    generation: number,
+    store: ProjectStore,
+  ): Promise<void> {
+    let memberNames: Map<string, string>;
+    try {
+      memberNames = await request;
+    } catch {
+      return;
+    }
+    if (
+      !this.isCurrentMount(generation) ||
+      !sameSession(expectedSession, store.getState().session)
+    ) {
+      return;
+    }
+    this.memberNames = memberNames;
+    this.renderAll();
+  }
+
+  private async finishInitialReplyHydration(
+    generation: number,
+    store: ProjectStore,
+  ): Promise<void> {
+    if (!(await this.loadReplies(generation, store))) return;
+    if (!this.isCurrentMount(generation)) return;
+    this.releaseConnection ??= store.getState().retainConnection();
   }
 
   private async loadAnnotations(
@@ -676,7 +707,6 @@ export class AuthorbotCollab extends HTMLElement {
     ) {
       this.activeAnnotationId = this.visibleNotes()[0]?.id ?? null;
     }
-    if (!(await this.loadReplies(generation, store))) return false;
     // Cards for server-side pending records show "syncing" and poll (§2.5).
     for (const annotation of this.presentableAnnotations()) {
       if (
@@ -696,11 +726,7 @@ export class AuthorbotCollab extends HTMLElement {
     const added = this.visibleDiscussionThreads().slice(before);
     if (added.length > 0) {
       const generation = this.mountGeneration;
-      for (const annotation of added) {
-        await this.store.getState().ensureReplies(annotation.id);
-        if (!this.isCurrentMount(generation)) return;
-      }
-      this.syncRepliesFromStore(added);
+      if (!(await this.loadReplies(generation, this.store, added))) return;
     }
     this.renderAll();
     this.discussionThreadsHost
@@ -708,20 +734,28 @@ export class AuthorbotCollab extends HTMLElement {
       ?.focus();
   }
 
-  private syncRepliesFromStore(annotations: readonly Annotation[]): void {
+  private syncRepliesFromStore(annotations: readonly Annotation[]): boolean {
     const state = this.store.getState();
+    let changed = false;
     for (const annotation of annotations) {
       const replyIds = state.replyIdsByAnnotation[annotation.id] ?? [];
-      this.repliesByAnnotation.set(
-        annotation.id,
-        replyIds.flatMap((id) => state.repliesById[id] ?? []),
-      );
+      const next = replyIds.flatMap((id) => state.repliesById[id] ?? []);
+      const current = this.repliesByAnnotation.get(annotation.id) ?? [];
+      if (
+        next.length !== current.length ||
+        next.some((reply, index) => !sameReply(current[index], reply))
+      ) {
+        this.repliesByAnnotation.set(annotation.id, next);
+        changed = true;
+      }
     }
+    return changed;
   }
 
   private async loadReplies(
     generation = this.mountGeneration,
     store = this.store,
+    requestedAnnotations?: readonly Annotation[],
   ): Promise<boolean> {
     // Attempted whenever annotations loaded (signed-in, or the anonymous
     // public read): a 401/403 simply yields no fetched replies.
@@ -729,28 +763,39 @@ export class AuthorbotCollab extends HTMLElement {
       return true;
     }
     // Notes retain their existing reply behavior. Chapter-wide threads are
-    // hydrated one visible page at a time so a long discussion cannot fan out
-    // one browser request per historical thread on first paint.
-    const annotations = [...this.visibleNotes(), ...this.visibleDiscussionThreads()];
-    for (const annotation of annotations) {
-      await store.getState().ensureReplies(annotation.id);
-      if (!this.isCurrentMount(generation)) return false;
-      const state = store.getState();
-      if (state.replyStatusByAnnotation[annotation.id] !== "ready") {
-        const status = state.replyErrorStatusByAnnotation[annotation.id];
-        if (status === 404 || status === 405) {
-          this.repliesSupported = false;
+    // hydrated one visible page at a time. A small worker pool prevents one
+    // slow thread from serially blocking every other card without fanning out
+    // one request per historical thread.
+    const annotations = requestedAnnotations === undefined
+      ? [...this.visibleNotes(), ...this.visibleDiscussionThreads()]
+      : [...requestedAnnotations];
+    let nextIndex = 0;
+    const worker = async (): Promise<boolean> => {
+      while (this.repliesSupported) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const annotation = annotations[index];
+        if (annotation === undefined) return true;
+        await store.getState().ensureReplies(annotation.id);
+        if (!this.isCurrentMount(generation)) return false;
+        const state = store.getState();
+        if (state.replyStatusByAnnotation[annotation.id] !== "ready") {
+          const status = state.replyErrorStatusByAnnotation[annotation.id];
+          if (status === 404 || status === 405) {
+            this.repliesSupported = false;
+            return true;
+          }
+          continue;
         }
-        return true;
+        if (this.syncRepliesFromStore([annotation])) this.renderAll();
       }
-      this.repliesByAnnotation.set(
-        annotation.id,
-        (state.replyIdsByAnnotation[annotation.id] ?? []).flatMap(
-          (id) => state.repliesById[id] ?? [],
-        ),
-      );
-    }
-    return true;
+      return true;
+    };
+    const workers = Array.from(
+      { length: Math.min(REPLY_HYDRATION_CONCURRENCY, annotations.length) },
+      () => worker(),
+    );
+    return (await Promise.all(workers)).every(Boolean);
   }
 
   private async refetch(): Promise<void> {
@@ -759,6 +804,7 @@ export class AuthorbotCollab extends HTMLElement {
     if (!(await this.loadAnnotations(generation, store))) return;
     if (!this.isCurrentMount(generation)) return;
     this.renderAll();
+    void this.loadReplies(generation, store);
   }
 
   /** Compatibility adapter while card/form state remains local to the island. */

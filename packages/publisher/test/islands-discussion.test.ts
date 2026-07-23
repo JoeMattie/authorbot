@@ -84,6 +84,7 @@ function stub(options: {
   replies?: Record<string, unknown[]>;
   pendingCreate?: Promise<Response>;
   pendingPromote?: Promise<Response>;
+  replyResponse?: (annotationId: string) => Response | Promise<Response>;
   calls?: Call[];
   replyCalls?: string[];
 }): void {
@@ -101,6 +102,8 @@ function stub(options: {
     const replyMatch = /\/annotations\/([^/]+)\/replies\?/.exec(url);
     if (replyMatch !== null && method === "GET") {
       options.replyCalls?.push(replyMatch[1]!);
+      const response = options.replyResponse?.(replyMatch[1]!);
+      if (response !== undefined) return response;
       return json(200, { items: options.replies?.[replyMatch[1]!] ?? [], nextCursor: null });
     }
     if (url.endsWith(`/chapters/${CHAPTER}/annotations`) && method === "POST") {
@@ -317,5 +320,67 @@ describe("chapter-wide Discussion", () => {
     }));
     await expect.poll(() => calls.filter((call) => call.url.includes("/annotations?")).length)
       .toBeGreaterThan(1);
+  });
+
+  it("renders notes before replies settle and hydrates threads with bounded concurrency", async () => {
+    const annotations = [
+      annotation("1", "block"),
+      annotation("2", "block"),
+      annotation("3"),
+      annotation("4"),
+      annotation("5"),
+      annotation("6"),
+    ];
+    const replyCalls: string[] = [];
+    const resolvers = new Map<string, (response: Response) => void>();
+    const resolved = new Set<string>();
+    stub({
+      session: me(["chapters:read", "comments:read"]),
+      annotations,
+      replyCalls,
+      replyResponse: (annotationId) => new Promise<Response>((resolve) => {
+        resolvers.set(annotationId, resolve);
+      }),
+    });
+    mount();
+
+    // The manuscript annotations are useful immediately even though every
+    // reply request is intentionally still pending.
+    await expect.poll(() => document.querySelectorAll(".ab-card").length).toBe(6);
+    expect(
+      [...document.querySelectorAll<HTMLElement>(".ab-card")]
+        .map((card) => card.dataset.annotationId),
+    ).toEqual(["1", "2", "3", "4", "5", "6"]);
+    await expect.poll(() => replyCalls.length).toBe(4);
+    expect(new Set(replyCalls).size).toBe(4);
+
+    const resolveReply = (annotationId: string): void => {
+      if (resolved.has(annotationId)) return;
+      resolved.add(annotationId);
+      resolvers.get(annotationId)?.(json(200, {
+        items: [{
+          id: `reply-${annotationId}`,
+          annotationId,
+          parentReplyId: null,
+          authorActorId: "actor-2",
+          body: `Reply for ${annotationId}`,
+          status: "open",
+          createdAt: "2026-07-20T00:01:00Z",
+        }],
+        nextCursor: null,
+      }));
+    };
+
+    const first = replyCalls[0]!;
+    resolveReply(first);
+    await expect.poll(() => replyCalls.length).toBe(5);
+    await expect.poll(
+      () => document.querySelector(`[data-annotation-id='${first}'] .ab-reply`)?.textContent,
+    ).toContain(`Reply for ${first}`);
+
+    for (const annotationId of [...replyCalls]) resolveReply(annotationId);
+    await expect.poll(() => replyCalls.length).toBe(6);
+    for (const annotationId of [...replyCalls]) resolveReply(annotationId);
+    await expect.poll(() => document.querySelectorAll(".ab-reply").length).toBe(6);
   });
 });

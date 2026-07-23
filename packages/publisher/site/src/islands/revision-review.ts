@@ -6,7 +6,7 @@ import {
   type RevisionProposalSummary,
 } from "./api.js";
 import { el } from "./dom.js";
-import type { ProjectStore } from "./project-store.js";
+import type { ProjectStore, ResourceStatus } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 import {
   isRevisionProposalDetail,
@@ -55,6 +55,52 @@ function linkedProposalId(): string | null {
   return value === undefined || value.length === 0 || value.length > 200 ? null : value;
 }
 
+interface RevisionListProjection {
+  sessionStatus: ResourceStatus;
+  session: Me | null;
+  status: ResourceStatus;
+  error: string | null;
+  ids: readonly string[];
+  proposals: readonly (RevisionProposalSummary | undefined)[];
+}
+
+interface RevisionDetailProjection {
+  proposalId: string | null;
+  session: Me | null;
+  status: string | undefined;
+  error: string | null | undefined;
+  proposal: RevisionProposalSummary | undefined;
+}
+
+function sameValues<T>(left: readonly T[], right: readonly T[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameListProjection(
+  left: RevisionListProjection | null,
+  right: RevisionListProjection,
+): boolean {
+  return left !== null &&
+    left.sessionStatus === right.sessionStatus &&
+    left.session === right.session &&
+    left.status === right.status &&
+    left.error === right.error &&
+    sameValues(left.ids, right.ids) &&
+    sameValues(left.proposals, right.proposals);
+}
+
+function sameDetailProjection(
+  left: RevisionDetailProjection | null,
+  right: RevisionDetailProjection,
+): boolean {
+  return left !== null &&
+    left.proposalId === right.proposalId &&
+    left.session === right.session &&
+    left.status === right.status &&
+    left.error === right.error &&
+    left.proposal === right.proposal;
+}
+
 export class AuthorbotRevisionReview extends HTMLElement {
   private store!: ProjectStore;
   private cfg!: RevisionReviewConfig;
@@ -70,6 +116,10 @@ export class AuthorbotRevisionReview extends HTMLElement {
   private detail!: HTMLElement;
   private live!: HTMLParagraphElement;
   private scaffolded = false;
+  private listProjection: RevisionListProjection | null = null;
+  private detailProjection: RevisionDetailProjection | null = null;
+  /** Local form state must survive authoritative revision refreshes. */
+  private rejectionDrafts = new Map<string, string>();
 
   connectedCallback(): void {
     if (this.started) return;
@@ -132,6 +182,8 @@ export class AuthorbotRevisionReview extends HTMLElement {
   }
 
   private scaffold(): void {
+    this.listProjection = null;
+    this.detailProjection = null;
     this.textContent = "";
     const layout = el("div", "ab-revision-layout");
     const queue = el("aside", "ab-revision-queue");
@@ -154,26 +206,82 @@ export class AuthorbotRevisionReview extends HTMLElement {
     this.scaffolded = true;
   }
 
-  private sync(): void {
+  private sync(force = false): void {
     if (!this.scaffolded || !this.isCurrent()) return;
     const state = this.store.getState();
     const me = state.session;
+    const ids = this.listedProposalIds();
+    const nextListProjection: RevisionListProjection = {
+      sessionStatus: state.sessionStatus,
+      session: me,
+      status: state.revisionProposalsStatus,
+      error: state.revisionProposalsError,
+      ids,
+      proposals: ids.map((id) => state.revisionProposalsById[id]),
+    };
+    const listChanged = force || !sameListProjection(this.listProjection, nextListProjection);
+    if (!listChanged) {
+      const nextDetailProjection = this.currentDetailProjection(me);
+      if (sameDetailProjection(this.detailProjection, nextDetailProjection)) return;
+    }
+    this.listProjection = nextListProjection;
     if (state.sessionStatus === "error") {
-      this.showUnavailable("Revision review is unavailable. Sign in again to continue.");
+      if (listChanged || force) {
+        this.detailProjection = null;
+        this.showUnavailable("Revision review is unavailable. Sign in again to continue.");
+      }
       return;
     }
     if (state.sessionStatus !== "ready") return;
     if (me === null) {
-      this.showUnavailable("Sign in as a maintainer to review revisions.");
+      if (listChanged || force) {
+        this.detailProjection = null;
+        this.showUnavailable("Sign in as a maintainer to review revisions.");
+      }
       return;
     }
     if (!canReadRevisions(me)) {
-      this.showUnavailable("Your credential cannot read revision proposals.");
+      if (listChanged || force) {
+        this.detailProjection = null;
+        this.showUnavailable("Your credential cannot read revision proposals.");
+      }
       return;
     }
-    this.renderList();
     this.ensureSelection();
-    this.renderDetail(me);
+    if (listChanged) this.renderList();
+    const nextDetailProjection = this.currentDetailProjection(me);
+    if (force || !sameDetailProjection(this.detailProjection, nextDetailProjection)) {
+      this.detailProjection = nextDetailProjection;
+      this.renderDetail(me);
+    }
+  }
+
+  private listedProposalIds(): readonly string[] {
+    const state = this.store.getState();
+    const linked = this.linkedProposalId === null
+      ? undefined
+      : state.revisionProposalsById[this.linkedProposalId];
+    return linked === undefined || state.revisionProposalIds.includes(linked.id)
+      ? state.revisionProposalIds
+      : [linked.id, ...state.revisionProposalIds];
+  }
+
+  private currentDetailProjection(me: Me | null): RevisionDetailProjection {
+    const state = this.store.getState();
+    const proposalId = this.selectedProposalId;
+    return {
+      proposalId,
+      session: me,
+      status: proposalId === null
+        ? undefined
+        : state.revisionProposalDetailStatusById[proposalId],
+      error: proposalId === null
+        ? undefined
+        : state.revisionProposalDetailErrorById[proposalId],
+      proposal: proposalId === null
+        ? undefined
+        : state.revisionProposalsById[proposalId],
+    };
   }
 
   private showUnavailable(message: string): void {
@@ -199,12 +307,7 @@ export class AuthorbotRevisionReview extends HTMLElement {
         `Revision queue unavailable: ${state.revisionProposalsError ?? "request failed"}`;
       return;
     }
-    const linked = this.linkedProposalId === null
-      ? undefined
-      : state.revisionProposalsById[this.linkedProposalId];
-    const proposalIds = linked === undefined || state.revisionProposalIds.includes(linked.id)
-      ? state.revisionProposalIds
-      : [linked.id, ...state.revisionProposalIds];
+    const proposalIds = this.listedProposalIds();
     if (proposalIds.length === 0) {
       this.listStatus.hidden = false;
       this.listStatus.textContent = "No revisions are waiting for review.";
@@ -239,8 +342,7 @@ export class AuthorbotRevisionReview extends HTMLElement {
       );
       button.addEventListener("click", () => {
         this.selectedProposalId = proposal.id;
-        this.renderList();
-        this.renderDetail(this.store.getState().session);
+        this.sync(true);
         void this.store.getState().ensureRevisionProposal(proposal.id);
       });
       item.append(button);
@@ -269,6 +371,11 @@ export class AuthorbotRevisionReview extends HTMLElement {
   }
 
   private renderDetail(me: Me | null): void {
+    const active = document.activeElement;
+    const restoreReasonFocus =
+      active instanceof HTMLTextAreaElement &&
+      active.classList.contains("ab-revision-reason") &&
+      this.detail.contains(active);
     this.diffHandle?.destroy();
     this.diffHandle = null;
     const proposalId = this.selectedProposalId;
@@ -394,6 +501,12 @@ export class AuthorbotRevisionReview extends HTMLElement {
       );
     }
     this.detail.replaceChildren(body);
+    if (restoreReasonFocus) {
+      const note = this.detail.querySelector<HTMLTextAreaElement>(".ab-revision-reason");
+      note?.focus();
+      const end = note?.value.length ?? 0;
+      note?.setSelectionRange(end, end);
+    }
   }
 
   private meta(list: HTMLDListElement, label: string, value: string): void {
@@ -421,6 +534,10 @@ export class AuthorbotRevisionReview extends HTMLElement {
     const note = el("textarea", "ab-revision-reason");
     note.rows = 2;
     note.placeholder = "Why this version should not be applied";
+    note.value = this.rejectionDrafts.get(proposal.id) ?? "";
+    note.addEventListener("input", () => {
+      this.rejectionDrafts.set(proposal.id, note.value);
+    });
     noteLabel.append(note);
     const buttons = el("div", "ab-revision-buttons");
     const approve = el("button", "ab-btn ab-primary ab-revision-approve", copy.approveLabel);
@@ -456,6 +573,7 @@ export class AuthorbotRevisionReview extends HTMLElement {
       this.detail.prepend(error);
       return;
     }
+    this.rejectionDrafts.delete(proposalId);
     this.live.textContent =
       decision === "approve"
         ? "Revision approved and queued for validated application."

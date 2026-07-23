@@ -4,7 +4,10 @@ import type {
   RevisionProposalDetail,
   RevisionProposalSummary,
 } from "../site/src/islands/api.js";
-import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
+import {
+  getProjectStore,
+  resetProjectStoresForTests,
+} from "../site/src/islands/project-store.js";
 import { AuthorbotRevisionReview } from "../site/src/islands/revision-review.js";
 
 const API = "http://api.test";
@@ -285,6 +288,50 @@ describe("maintainer revision review element", () => {
     expect(text).not.toContain("Base revisionnull");
     expect(document.querySelector(".ab-revision-warning")).toBeNull();
     expect(document.querySelector(".ab-revision-approve")?.textContent).toBe("Apply changes");
+  });
+
+  it("preserves a typed rejection draft and focus across store updates", async () => {
+    stubApi();
+    mount();
+
+    await expect.poll(
+      () => document.querySelector<HTMLTextAreaElement>(".ab-revision-reason"),
+    ).toBeTruthy();
+    const original = document.querySelector<HTMLTextAreaElement>(".ab-revision-reason")!;
+    original.value = "The last image needs one more beat.";
+    original.dispatchEvent(new Event("input", { bubbles: true }));
+    original.focus();
+
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    store.setState({
+      connection: {
+        transport: "sse",
+        status: "live",
+        cursor: 42,
+        lastError: null,
+      },
+    });
+
+    // Connection cursors and unrelated SSE-backed slices must not rebuild a
+    // live decision form or steal its keyboard focus.
+    expect(document.querySelector(".ab-revision-reason")).toBe(original);
+    expect(original.value).toBe("The last image needs one more beat.");
+    expect(document.activeElement).toBe(original);
+
+    const current = store.getState().revisionProposalsById[PROPOSAL]!;
+    store.setState({
+      revisionProposalsById: {
+        ...store.getState().revisionProposalsById,
+        [PROPOSAL]: { ...current, updatedAt: "2026-07-22T18:01:00Z" },
+      },
+    });
+
+    // An authoritative proposal change may rebuild the detail, but local
+    // unsent text and focus still belong to the maintainer.
+    const replacement = document.querySelector<HTMLTextAreaElement>(".ab-revision-reason")!;
+    expect(replacement).not.toBe(original);
+    expect(replacement.value).toBe("The last image needs one more beat.");
+    expect(document.activeElement).toBe(replacement);
   });
 
   it("does not require a rejection note and withholds decisions without review authority", async () => {
