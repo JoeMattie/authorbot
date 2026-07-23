@@ -46,15 +46,16 @@ function defineLazyElement(
 }
 
 // History exists only on chapter pages and has its own second, click-lazy
-// panel chunk. Keep even its small capability-gated launcher out of the shared
-// reader entry used by the home, Work, Write, and Revisions pages.
+// panel chunk. Its capability-gated launcher stays chapter-specific rather
+// than joining the shared entry used by the home, Work, Write, and Revisions
+// pages.
 defineLazyElement("authorbot-chapter-history", "authorbot-chapter-history", () =>
   import("./chapter-history-entry.js").then((module) => module.AuthorbotChapterHistory),
 );
 
-// The launcher handles authorization and source loading, but it is still
-// chapter-only behavior. The much larger Milkdown surface remains behind the
-// launcher's explicit Edit or Notes activation.
+// The launcher handles authorization and source loading as chapter-only
+// behavior. The Milkdown surface remains behind explicit Edit or Notes
+// activation.
 defineLazyElement("authorbot-manuscript-editor", "authorbot-manuscript-editor", () =>
   import("./manuscript-editor-element.js").then((module) => module.AuthorbotManuscriptEditor),
 );
@@ -67,15 +68,14 @@ defineLazyElement("authorbot-chapter-summary-editor", "authorbot-chapter-summary
   ),
 );
 
-// The claim editor is substantial and appears only on /work/. Keep it out of
-// every chapter reader's entry payload while preserving the same custom
-// element contract on the page that mounts it.
+// The claim editor appears only on /work/. Keep that behavior owned by the
+// page that mounts it while preserving the same custom-element contract.
 defineLazyElement("authorbot-work-queue", "authorbot-work-queue", () =>
   import("./work-queue.js").then((module) => module.AuthorbotWorkQueue),
 );
 
-// The diff queue is maintainer-only and substantially larger than the reader
-// islands. Load it only on /revisions/, preserving the chapter bundle budget.
+// The diff queue is maintainer-only. Load it only on /revisions/ so the reader
+// entry does not acquire revision-review behavior.
 defineLazyElement("authorbot-revision-review", "authorbot-revision-review", () =>
   import("./revision-review.js").then((module) => module.AuthorbotRevisionReview),
 );

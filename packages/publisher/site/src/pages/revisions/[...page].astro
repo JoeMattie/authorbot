@@ -1,6 +1,7 @@
 ---
 /** Maintainer-only progressive revision queue (Phase 11 slice 4). */
 import Base from "../../layouts/Base.astro";
+import { SITE_CSP } from "../../lib/csp.js";
 import { site } from "virtual:authorbot-site";
 
 export function getStaticPaths() {
@@ -12,10 +13,7 @@ if (collab === null) {
   throw new Error("revision review page rendered without collaboration config");
 }
 
-const csp =
-  "default-src 'self'; " +
-  "connect-src 'self'; " +
-  "img-src 'self' data:";
+const csp = SITE_CSP;
 const collabStylesHref = `${site.basePath}_astro/authorbot-collab.css`;
 const reviewStylesHref = `${site.basePath}_astro/authorbot-revisions.css`;
 const src = `${site.basePath}_astro/authorbot-collab.js`;

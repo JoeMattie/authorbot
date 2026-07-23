@@ -1552,9 +1552,13 @@ export class CollabApi {
 
   // ---- Phase 11 §6: chapter history --------------------------------------
 
-  /** Latest 50 immutable revision records, newest first and without prose. */
-  async chapterHistory(chapterId: string): Promise<ApiResult<ChapterHistoryPage>> {
+  /** One bounded page of immutable revision records, newest first and without prose. */
+  async chapterHistory(
+    chapterId: string,
+    cursor?: string,
+  ): Promise<ApiResult<ChapterHistoryPage>> {
     const query = new URLSearchParams({ limit: "50" });
+    if (cursor !== undefined) query.set("cursor", cursor);
     return this.jsonResult<ChapterHistoryPage>(
       (async () =>
         this.get(

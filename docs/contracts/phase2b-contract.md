@@ -10,8 +10,7 @@ UI are Phase 3.
 - The UI ships as **framework-free TypeScript islands** inside the publisher
   site (design §1.1 "small interactive islands"): custom elements, compiled by
   the existing Astro build, hydrated only on chapter pages and only when the
-  build is given an API base. Total shipped JS ≤ 35 KB gzipped; no runtime
-  dependencies.
+  build is given an API base, with no runtime dependencies.
 - `authorbot build` gains `--api-url <url>` (and `publication.api_url` in
   `book.yml` as the durable form; the flag overrides). Without either, the
   site builds exactly as today - **zero JS, byte-comparable output**.

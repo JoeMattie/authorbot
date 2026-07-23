@@ -26,4 +26,7 @@ export const SITE_CSP =
   "default-src 'self'; " +
   // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
   "connect-src 'self'; " +
-  "img-src 'self' data:";
+  "img-src 'self' data:; " +
+  // The editor's UI can emit an inlined WOFF2 asset. Keep every other font
+  // source same-origin while permitting that single asset shape.
+  "font-src 'self' data:";

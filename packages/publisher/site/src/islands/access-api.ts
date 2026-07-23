@@ -4,14 +4,11 @@
  * removal, revocation, moderation).
  *
  * It lives in its own module, as a SUBCLASS of `CollabApi` rather than as more
- * methods on it, for a reason the bundle sizes make concrete. `CollabApi` ships
- * in `authorbot-collab.js`, which every reader downloads on every chapter page;
- * class methods cannot be tree-shaken, so sixteen maintainer-only routes added
- * to it would be ~400 bytes gzipped of code no reader can ever call, paid on
- * every page view forever. Here, they are loaded by `/settings/` and nowhere
- * else - and the shared request plumbing (`projectUrl`, `get`, `post`,
- * `mutate`, `jsonResult`) is inherited rather than reimplemented, so there is
- * one CSRF/idempotency/problem-parsing path in the codebase, not two.
+ * methods on it. `CollabApi` ships in `authorbot-collab.js`, while these
+ * maintainer-only routes belong to `/settings/` and nowhere else. The shared
+ * request plumbing (`projectUrl`, `get`, `post`, `mutate`, `jsonResult`) is
+ * inherited rather than reimplemented, so there is one
+ * CSRF/idempotency/problem-parsing path in the codebase, not two.
  *
  * Nothing here can return an agent token's value after the fact.
  * `agentTokens()` reads metadata, and no route re-displays a token once minted

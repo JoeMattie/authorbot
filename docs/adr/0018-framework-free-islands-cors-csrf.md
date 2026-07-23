@@ -12,8 +12,7 @@ Constraints in tension:
 
 - Design §16.1 and ADR-0013 make no-JavaScript readability a hard rule; the
   2b contract §1 tightens it to **byte-comparable output** when no API base
-  is configured, with total shipped JS ≤ 35 KB gzipped and no runtime
-  dependencies.
+  is configured and requires no runtime dependencies.
 - Annotation and reply bodies are untrusted user content rendered in the
   reader's browser (contract §3; design §19.4 forbids raw-HTML injection).
 - The site may be served cross-origin from the API (the GitHub Pages case)
@@ -41,8 +40,8 @@ Constraints in tension:
   island insertions and the two assets.
 - Enablement is `--api-url <url>` on `authorbot build` (durable form:
   `publication.api_url` in `book.yml`; the flag overrides). Only chapter
-  pages hydrate; index/story/character pages are untouched. Shipped size is
-  ~8 KB gzipped JS + ~2 KB CSS against the 35 KB budget.
+  pages hydrate; index/story/character pages are untouched. Maintainer-only
+  views stay in page-specific bundles rather than the reader entry.
 
 ### Plain-text bodies, CSP-compatible rendering (contract §3)
 

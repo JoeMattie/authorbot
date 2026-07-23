@@ -28,10 +28,9 @@ export function resetProjectStoreModuleLoaderForTests(): void {
 }
 
 /**
- * Load the larger collaboration state machine only on pages that actually
- * connect to an API. Keeping this tiny boundary in the entry bundle preserves
- * the reader-facing payload budgets while every island still resolves the
- * same global project store.
+ * Load the collaboration state machine only on pages that actually connect to
+ * an API. This boundary preserves one global project store without activating
+ * it on pages that do not use it.
  */
 export async function loadProjectStore(
   config: ProjectStoreConfig,

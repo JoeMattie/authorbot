@@ -27,11 +27,34 @@ always the same commit.
   sanitizes deprecated legacy mint requests before the write, so its response,
   replay, mint audit, and stored row agree; the sanitation event preserves what
   was removed.
-- This is the Phase 3B backfill only. It includes no book-format migration and
-  does not retire legacy authorization semantics, remove the legacy
-  compatibility endpoint, or remove legacy storage. The compatibility guard
-  remains until Phase 3C, which is separately gated by its compatibility and
-  rollback window.
+- **Chapter editing now feels like the published manuscript.** Milkdown uses
+  the reading view's measure, type, color, spacing, and background, and the
+  site's CSP permits its inlined font without widening network font access.
+  Note, suggestion, and reply entry stays hidden for the whole edit handoff;
+  an in-progress draft is restored losslessly when editing closes, including
+  after a failed write or editor teardown.
+- **Chapter history is a complete, responsive time machine.** The current
+  version stays on the reading page while the history rail starts with the
+  newest prior revision and loads the rest in the background. The pinned rail
+  has its own scroll, current and malformed cursor chains are bounded honestly,
+  and source events refresh without destroying the selected diff, keyboard
+  focus, or layout preference. Diffs use word-level matching for manuscript
+  paragraphs, omit line and hunk numbers, offer inline or side-by-side views
+  when space permits, and collapse to the normal reading measure on narrower
+  screens. Node local development now exposes the same contained, bounded Git
+  history reads as the deployed coordinator path.
+- **Approved chapter discussions no longer look like pending votes.** Once a
+  chapter-wide comment is visible, its approve/reject/abstain control is gone;
+  maintainer comments continue to bypass moderation under every comment
+  policy.
+- Frontend entry boundaries and lazy editor/diff loading remain, but compressed
+  byte ceilings are no longer release gates and Vite's chunk-size warning is
+  disabled. Bundle size is not a product requirement for this release.
+- The authorization migration in this release is the Phase 3B backfill only.
+  It includes no book-format migration and does not retire legacy
+  authorization semantics, remove the legacy compatibility endpoint, or
+  remove legacy storage. The compatibility guard remains until Phase 3C,
+  which is separately gated by its compatibility and rollback window.
 - Books already on 0.1.35 can run the ordinary `npx authorbot upgrade`. A book
   on 0.1.34 or earlier needs one explicit
   `npx --yes @authorbot/cli@0.1.36 upgrade --to 0.1.36`. After the resulting PR

@@ -37,7 +37,14 @@ describe("CollabApi chapter history transport", () => {
           return json({
             items: [revision(3, true), revision(2)],
             current: { ...revision(3, true), status: "published" },
-            nextCursor: "revision-2",
+            nextCursor: "2",
+          });
+        }
+        if (url.endsWith("/history?limit=50&cursor=2")) {
+          return json({
+            items: [revision(1)],
+            current: { ...revision(3, true), status: "published" },
+            nextCursor: null,
           });
         }
         if (url.endsWith("/history/2?compare=current")) {
@@ -69,7 +76,11 @@ describe("CollabApi chapter history transport", () => {
     const api = new CollabApi(API, PROJECT);
     await expect(api.chapterHistory(CHAPTER)).resolves.toMatchObject({
       ok: true,
-      value: { nextCursor: "revision-2" },
+      value: { nextCursor: "2" },
+    });
+    await expect(api.chapterHistory(CHAPTER, "2")).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{ revision: 1 }], nextCursor: null },
     });
     await expect(api.chapterHistoryRevision(CHAPTER, 2, "current")).resolves.toMatchObject({
       ok: true,
@@ -88,10 +99,11 @@ describe("CollabApi chapter history transport", () => {
 
     expect(calls.map(({ url }) => url)).toEqual([
       `${API}/v1/projects/${PROJECT}/chapters/chapter%2Fone/history?limit=50`,
+      `${API}/v1/projects/${PROJECT}/chapters/chapter%2Fone/history?limit=50&cursor=2`,
       `${API}/v1/projects/${PROJECT}/chapters/chapter%2Fone/history/2?compare=current`,
       `${API}/v1/projects/${PROJECT}/chapters/chapter%2Fone/history/2/restore`,
     ]);
-    const restore = calls[2]?.init;
+    const restore = calls[3]?.init;
     expect(restore?.method).toBe("POST");
     expect(restore?.body).toBe("{}");
     expect(new Headers(restore?.headers).get("idempotency-key")).toBe("restore-key");

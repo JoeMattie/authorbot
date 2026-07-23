@@ -4,6 +4,44 @@
   display: block;
   min-width: 0;
   color: var(--text-body, #c2bdb2);
+  font-family: var(--font-body, "Source Serif 4", Georgia, serif);
+}
+
+.ab-revision-diff-layout {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 3px;
+  border: 1px solid var(--border-subtle, #34302b);
+  border-radius: 9px;
+  background: var(--surface-page, var(--bg, #1b1815));
+}
+
+.ab-revision-diff-layout-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted, #989289);
+  font: 600 11px/1.35 var(--font-display, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.ab-revision-diff-layout-button[aria-pressed="true"] {
+  border-color: var(--border-default, #332f2a);
+  background: var(--surface-raised, #282420);
+  color: var(--text-strong, #f1efea);
+}
+
+.ab-revision-diff-layout-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.ab-revision-diff-layout-button:focus-visible {
+  outline: 2px solid var(--blue-500, #5b74f5);
+  outline-offset: 2px;
 }
 
 .ab-revision-diff-visual {
@@ -12,12 +50,26 @@
   overflow-x: auto;
   border: 1px solid var(--border-default, #332f2a);
   border-radius: 8px;
-  background: var(--surface-sunken, #141210);
+  background: var(--surface-page, var(--bg, #1b1815));
   scrollbar-gutter: stable;
 }
 
 .ab-revision-diff-visual .d2h-wrapper,
 .ab-revision-diff-visual .d2h-file-wrapper {
+  --d2h-dark-bg-color: var(--surface-page, var(--bg, #1b1815));
+  --d2h-dark-color: var(--text-body, #c2bdb2);
+  --d2h-dark-border-color: var(--border-default, #332f2a);
+  --d2h-dark-line-border-color: var(--border-subtle, #282420);
+  --d2h-dark-file-header-bg-color: var(--surface-raised, #282420);
+  --d2h-dark-file-header-border-color: var(--border-default, #332f2a);
+  --d2h-dark-empty-placeholder-bg-color: var(--surface-sunken, #141210);
+  --d2h-dark-empty-placeholder-border-color: var(--border-subtle, #282420);
+  --d2h-dark-ins-bg-color: var(--tint-success, rgb(70 164 112 / 14%));
+  --d2h-dark-ins-highlight-bg-color: rgb(70 164 112 / 36%);
+  --d2h-dark-del-bg-color: var(--tint-danger, rgb(224 85 79 / 14%));
+  --d2h-dark-del-highlight-bg-color: rgb(224 85 79 / 34%);
+  --d2h-dark-info-bg-color: var(--surface-sunken, #141210);
+  --d2h-dark-info-border-color: var(--border-subtle, #282420);
   margin: 0;
   border: 0;
   border-radius: inherit;
@@ -29,11 +81,30 @@
   color: var(--text-muted, #989289);
 }
 
-.ab-revision-diff-visual .d2h-code-line-ctn,
-.ab-revision-diff-visual .d2h-code-side-line {
-  font-family: var(--font-mono, "JetBrains Mono", monospace);
+.ab-revision-diff-visual .d2h-diff-table,
+.ab-revision-diff-visual .d2h-code-line,
+.ab-revision-diff-visual .d2h-code-side-line,
+.ab-revision-diff-visual .d2h-code-line-ctn {
+  font-family: var(--font-body, "Source Serif 4", Georgia, serif);
+  font-size: 19px;
+  line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.ab-revision-diff-visual .d2h-code-line,
+.ab-revision-diff-visual .d2h-code-side-line {
+  display: block;
+  width: 100%;
+  padding: 3px 12px;
+}
+
+/* The prose comparison does not need source-code gutters. These are also
+   removed from the sanitized DOM, and the CSS keeps that contract if a future
+   Diff2Html template changes when the sanitizer runs. */
+.ab-revision-diff-visual .d2h-code-linenumber,
+.ab-revision-diff-visual .d2h-code-side-linenumber {
+  display: none !important;
 }
 
 .ab-revision-diff-fallback {
@@ -41,6 +112,19 @@
   border: 1px solid var(--border-default, #332f2a);
   border-radius: 8px;
   background: var(--surface-sunken, #141210);
+}
+
+.ab-revision-diff-fallback-accessible {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  border: 0 !important;
+  white-space: nowrap !important;
 }
 
 .ab-revision-diff-fallback summary {
@@ -69,7 +153,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-body, #c2bdb2);
-  font: 400 12px/1.55 var(--font-mono, monospace);
+  font: 400 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
 .ab-revision-diff-status {
@@ -78,17 +162,16 @@
   font: 400 12px/1.5 var(--font-display, system-ui, sans-serif);
 }
 
-@media (max-width: 719px) {
+@media (max-width: 1435px) {
   .ab-revision-diff-visual {
     border-radius: 6px;
   }
 
-  .ab-revision-diff-visual .d2h-file-header {
-    position: static;
+  .ab-revision-diff-layout {
+    display: none;
   }
 
-  .ab-revision-diff-visual .d2h-code-linenumber {
-    width: 3.5em;
-    min-width: 3.5em;
+  .ab-revision-diff-visual .d2h-file-header {
+    position: static;
   }
 }

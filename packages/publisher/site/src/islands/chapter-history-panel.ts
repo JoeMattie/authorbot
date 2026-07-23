@@ -12,9 +12,14 @@ import {
   chapterHistoryDetailKey,
   type ProjectStore,
   type ProjectStoreState,
+  type ResourceStatus,
 } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
-import { renderRevisionDiff, type RevisionDiffHandle } from "./revision-diff.js";
+import {
+  renderRevisionDiff,
+  type RevisionDiffHandle,
+  type RevisionDiffLayout,
+} from "./revision-diff.js";
 
 interface ChapterHistoryConfig {
   apiBase: string;
@@ -86,6 +91,27 @@ function shortCommit(value: string | null): string {
   return value === null ? "commit not recorded" : `commit ${value.slice(0, 10)}`;
 }
 
+/** The live reading page already represents current, so the rail is prior revisions only. */
+function priorRevisions(page: ChapterHistoryPage): ChapterHistoryRevision[] {
+  return page.items
+    .filter((item) => item.revision < page.current.revision && !item.isCurrent)
+    .sort((left, right) => right.revision - left.revision);
+}
+
+interface RenderedDetailState {
+  key: string | null;
+  status: ResourceStatus | undefined;
+  detail: ChapterHistoryDetail | undefined;
+  error: string | null | undefined;
+  metadata: ChapterHistoryRevision | undefined;
+  currentRevision: number;
+  currentStatus: string;
+  session: Me | null;
+  restoringRevision: number | null;
+  restoreSuccess: string | undefined;
+  restoreError: { revision: number; message: string; ambiguous: boolean } | null;
+}
+
 export class AuthorbotChapterHistoryPanel extends HTMLElement {
   static get observedAttributes(): string[] {
     return ["hidden"];
@@ -100,6 +126,8 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
   private selectedRevision: number | null = null;
   private comparison: ChapterHistoryComparison = "previous";
   private diffHandle: RevisionDiffHandle | null = null;
+  private diffLayoutPreference: RevisionDiffLayout | null = null;
+  private renderedDetailState: RenderedDetailState | null = null;
   private renderedListSignature = "";
   private pendingListFocus: number | null = null;
   private pendingComparisonFocus: ChapterHistoryComparison | null = null;
@@ -136,6 +164,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     this.removeEventListener("keydown", this.onKeydown);
     this.diffHandle?.destroy();
     this.diffHandle = null;
+    this.renderedDetailState = null;
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.releaseConnection?.();
@@ -147,6 +176,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     if (after !== null) {
       this.diffHandle?.destroy();
       this.diffHandle = null;
+      this.renderedDetailState = null;
     } else {
       this.sync();
     }
@@ -169,6 +199,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
 
   private scaffold(): void {
     this.textContent = "";
+    this.renderedListSignature = "";
     this.setAttribute("role", "region");
     const shell = el("section", "ab-history-panel-shell");
     const header = el("header", "ab-history-panel-header");
@@ -304,19 +335,21 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       this.status.hidden = false;
       this.status.textContent = "Loading revision history…";
       this.list.textContent = "";
-      this.renderDetailPlaceholder("Loading the current snapshot…");
+      this.renderedListSignature = "";
+      this.renderedDetailState = null;
+      this.renderDetailPlaceholder("Loading revision history…");
       return;
     }
     this.status.hidden = true;
     if (this.selectedRevision === null || this.selectedRevision > page.current.revision) {
-      this.selectedRevision = page.current.revision;
+      this.selectedRevision = priorRevisions(page)[0]?.revision ?? null;
       this.comparison = "previous";
     }
     this.renderCurrentClarity(page);
     this.ensureSelectedDetail(page);
     this.renderList(page);
     this.updateStepper(page);
-    this.renderDetail(page, state.session);
+    this.renderDetailIfChanged(page, state.session);
   }
 
   private showFatal(message: string): void {
@@ -324,8 +357,10 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     this.status.textContent = message;
     this.status.setAttribute("role", "alert");
     this.list.textContent = "";
+    this.renderedListSignature = "";
     this.olderButton.disabled = true;
     this.newerButton.disabled = true;
+    this.renderedDetailState = null;
     this.renderDetailPlaceholder(message);
   }
 
@@ -334,6 +369,8 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     this.status.setAttribute("role", "alert");
     this.status.textContent = `Revision history unavailable: ${message}`;
     this.list.textContent = "";
+    this.renderedListSignature = "";
+    this.renderedDetailState = null;
     this.renderDetailPlaceholder("The chapter remains readable while history is unavailable.");
     const retry = el("button", "ab-btn ab-history-retry", "Retry history");
     retry.type = "button";
@@ -402,13 +439,21 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
             chapterHistoryDetailKey(this.cfg.chapterId, selected, this.comparison)
           ];
     const listed = page.items.some((item) => item.revision === selected);
+    const visible = priorRevisions(page);
     const rows =
-      !listed && selectedDetail !== undefined
-        ? [...page.items, selectedDetail.selected]
-        : page.items;
+      !listed &&
+      selectedDetail !== undefined &&
+      selectedDetail.selected.revision < page.current.revision
+        ? [...visible, selectedDetail.selected].sort(
+            (left, right) => right.revision - left.revision,
+          )
+        : visible;
+    const backgroundError =
+      this.store?.getState().chapterHistoryErrorByChapter[this.cfg.chapterId] ?? null;
     const signature = JSON.stringify([
       page.current.revision,
       page.nextCursor,
+      backgroundError,
       rows.map((item) => [item.revision, item.changeSummary, item.isCurrent]),
     ]);
     if (signature === this.renderedListSignature) {
@@ -421,20 +466,38 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     for (const item of rows) this.list.append(this.revisionRow(item, page));
     if (page.nextCursor !== null) {
       const note = el("li", "ab-history-list-limit");
-      note.textContent =
-        "The direct list shows the latest 50 revisions. Keep using Older revision to walk back to the original.";
+      note.textContent = "Loading older revisions…";
       this.list.append(note);
+    } else if (backgroundError !== null) {
+      const note = el("li", "ab-history-list-limit", backgroundError);
+      note.setAttribute("role", "status");
+      this.list.append(note);
+    } else if (rows.length === 0) {
+      this.list.append(
+        el(
+          "li",
+          "ab-history-list-limit ab-history-list-empty",
+          "No earlier revisions yet.",
+        ),
+      );
     }
     this.updateListSelection();
     this.focusPendingList();
   }
 
   private updateListSelection(): void {
-    for (const button of this.list.querySelectorAll<HTMLButtonElement>("button[data-revision]")) {
+    const buttons = Array.from(
+      this.list.querySelectorAll<HTMLButtonElement>("button[data-revision]"),
+    );
+    const selected =
+      buttons.find((button) => button.dataset.revision === String(this.selectedRevision)) ??
+      buttons[0];
+    for (const button of buttons) {
       button.setAttribute(
         "aria-current",
         button.dataset.revision === String(this.selectedRevision) ? "true" : "false",
       );
+      button.tabIndex = button === selected ? 0 : -1;
     }
   }
 
@@ -457,6 +520,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     button.dataset.revision = String(item.revision);
     button.id = `authorbot-history-revision-${String(item.revision)}`;
     button.setAttribute("aria-current", item.revision === this.selectedRevision ? "true" : "false");
+    button.tabIndex = item.revision === this.selectedRevision ? 0 : -1;
     button.setAttribute(
       "aria-label",
       `Revision ${item.revision} of ${page.current.revision}${item.isCurrent ? ", current" : ""}. ${
@@ -489,7 +553,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     revision: number,
     page: ChapterHistoryPage,
   ): void {
-    const revisions = page.items.map((item) => item.revision);
+    const revisions = priorRevisions(page).map((item) => item.revision);
     const index = revisions.indexOf(revision);
     let target: number | undefined;
     if (event.key === "ArrowDown" && index >= 0) target = revisions[index + 1];
@@ -513,8 +577,60 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     ];
     this.olderButton.disabled = previous === undefined || previous.comparison === null;
     this.olderButton.dataset.revision = String(previous?.comparison?.revision ?? "");
-    this.newerButton.disabled = selected >= page.current.revision;
-    this.newerButton.dataset.revision = String(Math.min(selected + 1, page.current.revision));
+    const newestPriorRevision = priorRevisions(page)[0]?.revision ?? null;
+    this.newerButton.disabled =
+      newestPriorRevision === null || selected >= newestPriorRevision;
+    this.newerButton.dataset.revision = String(
+      newestPriorRevision === null ? "" : Math.min(selected + 1, newestPriorRevision),
+    );
+  }
+
+  private renderDetailIfChanged(page: ChapterHistoryPage, me: Me | null): void {
+    const selected = this.selectedRevision;
+    const state = this.store?.getState();
+    const key =
+      state === undefined || selected === null
+        ? null
+        : chapterHistoryDetailKey(this.cfg.chapterId, selected, this.comparison);
+    const status = key === null ? undefined : state?.chapterHistoryDetailStatusByKey[key];
+    const detail = key === null ? undefined : state?.chapterHistoryDetailByKey[key];
+    const next: RenderedDetailState = {
+      key,
+      status,
+      detail,
+      error: key === null ? undefined : state?.chapterHistoryDetailErrorByKey[key],
+      metadata:
+        detail !== undefined || selected === null
+          ? undefined
+          : page.items.find((item) => item.revision === selected),
+      currentRevision: page.current.revision,
+      currentStatus: page.current.status,
+      session: me,
+      restoringRevision: this.restoringRevision,
+      restoreSuccess:
+        selected === null ? undefined : this.restoreSuccess.get(selected),
+      restoreError: this.restoreError,
+    };
+    const before = this.renderedDetailState;
+    if (
+      before !== null &&
+      before.key === next.key &&
+      before.status === next.status &&
+      before.detail === next.detail &&
+      before.error === next.error &&
+      before.metadata === next.metadata &&
+      before.currentRevision === next.currentRevision &&
+      before.currentStatus === next.currentStatus &&
+      before.session === next.session &&
+      before.restoringRevision === next.restoringRevision &&
+      before.restoreSuccess === next.restoreSuccess &&
+      before.restoreError === next.restoreError
+    ) {
+      this.focusPendingComparison();
+      return;
+    }
+    this.renderedDetailState = next;
+    this.renderDetail(page, me);
   }
 
   private renderDetail(page: ChapterHistoryPage, me: Me | null): void {
@@ -522,7 +638,9 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     this.diffHandle = null;
     const selected = this.selectedRevision;
     if (this.store === null || selected === null) {
-      this.renderDetailPlaceholder("Choose a revision.");
+      this.renderDetailPlaceholder(
+        "There are no earlier revisions yet. The current version is already on this page.",
+      );
       return;
     }
     const state = this.store.getState();
@@ -607,6 +725,11 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
             ? detail.selected.content
             : detail.comparison.content,
         label: comparisonHeading,
+      }, {
+        preferredLayout: this.diffLayoutPreference,
+        onPreferredLayoutChange: (layout) => {
+          this.diffLayoutPreference = layout;
+        },
       });
       this.detail.append(this.restoreAction(detail, page, me));
       this.focusPendingComparison();

@@ -12,6 +12,7 @@
  * would silently corrupt serving state (design §14.5 marks such repos
  * invalid instead).
  */
+import { execFile } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
@@ -19,6 +20,7 @@ import {
   isContainedRepoPath,
   MAX_TEXT_FILE_BYTES,
   MAX_TEXT_FILE_PAGE_SIZE,
+  normalizeRepoPath,
   repoPathMatchesGlob,
 } from "@authorbot/git-github";
 import { parseChapterMarkdown } from "@authorbot/markdown";
@@ -29,6 +31,12 @@ import {
 import { annotationSchema, chapterFrontmatterSchema, replySchema } from "@authorbot/schemas";
 import { sha256Hex } from "../crypto.js";
 import type {
+  RepositoryHistoryEntry,
+  RepositoryHistoryListResult,
+  RepositoryHistoryReader,
+  RepositorySourceReadResult,
+} from "../deps.js";
+import type {
   BookRepoReader,
   BookRepoSnapshot,
   RepoAnnotationSnapshot,
@@ -38,6 +46,14 @@ import type {
   RepoTextFilePage,
   RepoWorkItemSnapshot,
 } from "./reader.js";
+
+const MAX_HISTORY_PAGE_SIZE = 50;
+const MAX_HISTORY_OUTPUT_BYTES = 2 * 1024 * 1024;
+
+interface GitResult {
+  code: number;
+  stdout: string;
+}
 
 /** Strip a leading YAML frontmatter block; returns the Markdown body. */
 export function stripFrontmatter(source: string): string {
@@ -63,7 +79,7 @@ async function listDir(path: string): Promise<string[]> {
   }
 }
 
-export class LocalFsBookRepoReader implements BookRepoReader {
+export class LocalFsBookRepoReader implements BookRepoReader, RepositoryHistoryReader {
   /** Absolute, normalized repository root - the containment base. */
   private readonly root: string;
 
@@ -102,6 +118,140 @@ export class LocalFsBookRepoReader implements BookRepoReader {
       }
       throw error;
     }
+  }
+
+  /**
+   * One bounded, newest-first page of commits that changed exactly one file.
+   *
+   * The path is validated before spawning Git, is passed after `--`, and Git
+   * runs with literal pathspecs so a repository path can never turn into an
+   * option or pathspec expression. `limit + 1` is the only lookahead retained
+   * in memory; commit output is capped independently as a second bound.
+   *
+   * `projectId` is intentionally ignored: one Node dev process is wired to
+   * exactly one `BOOK_REPO_PATH`.
+   */
+  async listFileHistory(
+    _projectId: string,
+    path: string,
+    options: { page?: number; limit?: number } = {},
+  ): Promise<RepositoryHistoryListResult> {
+    const page = safeHistoryPage(options.page);
+    const limit = safeHistoryLimit(options.limit);
+    if (!isSafeGitPath(path)) {
+      return { outcome: "found", entries: [], page, hasMore: false };
+    }
+    const offset = (page - 1) * limit;
+    if (!Number.isSafeInteger(offset)) {
+      return { outcome: "found", entries: [], page, hasMore: false };
+    }
+    const normalized = normalizeRepoPath(path);
+    let result: GitResult;
+    try {
+      result = await this.git(
+        [
+          "--no-pager",
+          "--literal-pathspecs",
+          "log",
+          `--max-count=${String(limit + 1)}`,
+          `--skip=${String(offset)}`,
+          "--format=%H%x00%aI%x00%cI%x00%an%x00%P%x00%B%x00",
+          "--",
+          normalized,
+        ],
+        MAX_HISTORY_OUTPUT_BYTES,
+      );
+    } catch {
+      return { outcome: "unavailable" };
+    }
+    if (result.code !== 0) {
+      return { outcome: "unavailable" };
+    }
+    const entries = parseHistoryEntries(result.stdout);
+    return {
+      outcome: "found",
+      entries: entries.slice(0, limit),
+      page,
+      hasMore: entries.length > limit,
+    };
+  }
+
+  /**
+   * Read a contained text file from one immutable commit.
+   *
+   * Both the object id and path are validated before Git sees them. A size
+   * preflight keeps the blob read under the same source bound as configured
+   * local file pages. Missing commits and paths are reported as not found;
+   * repository/spawn failures stay distinguishable as unavailable.
+   */
+  async readTextFileAtCommit(
+    _projectId: string,
+    path: string,
+    commitSha: string,
+  ): Promise<RepositorySourceReadResult> {
+    if (!isSafeGitPath(path) || !/^[0-9a-f]{40}$/u.test(commitSha)) {
+      return { outcome: "not-found" };
+    }
+    const object = `${commitSha}:${normalizeRepoPath(path)}`;
+    let sizeResult: GitResult;
+    try {
+      sizeResult = await this.git(
+        ["--no-pager", "cat-file", "-s", object],
+        64 * 1024,
+      );
+    } catch {
+      return { outcome: "unavailable" };
+    }
+    if (sizeResult.code !== 0) {
+      return { outcome: "not-found" };
+    }
+    const size = Number(sizeResult.stdout.trim());
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_TEXT_FILE_BYTES) {
+      return { outcome: "unavailable" };
+    }
+    let sourceResult: GitResult;
+    try {
+      sourceResult = await this.git(
+        ["--no-pager", "cat-file", "blob", object],
+        MAX_TEXT_FILE_BYTES + 64 * 1024,
+      );
+    } catch {
+      return { outcome: "unavailable" };
+    }
+    return sourceResult.code === 0
+      ? { outcome: "found", source: sourceResult.stdout }
+      : { outcome: "unavailable" };
+  }
+
+  private git(args: readonly string[], maxBuffer: number): Promise<GitResult> {
+    return new Promise((resolveCommand, rejectCommand) => {
+      execFile(
+        "git",
+        args,
+        {
+          cwd: this.root,
+          env: {
+            ...process.env,
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_SYSTEM: "/dev/null",
+            GIT_OPTIONAL_LOCKS: "0",
+            LC_ALL: "C",
+          },
+          encoding: "utf8",
+          maxBuffer,
+        },
+        (error, stdout) => {
+          if (error !== null && typeof error.code !== "number") {
+            rejectCommand(error);
+            return;
+          }
+          resolveCommand({
+            code: error === null ? 0 : Number(error.code),
+            stdout,
+          });
+        },
+      );
+    });
   }
 
   /** Local-dev counterpart to the coordinator's bounded configured-glob read. */
@@ -289,4 +439,46 @@ export class LocalFsBookRepoReader implements BookRepoReader {
     }
     return { annotations, replies };
   }
+}
+
+function isSafeGitPath(path: string): boolean {
+  return !path.includes("\0") && isContainedRepoPath(path);
+}
+
+function safeHistoryPage(value: number | undefined): number {
+  const candidate = Math.trunc(value ?? 1);
+  return Number.isSafeInteger(candidate) && candidate >= 1 ? candidate : 1;
+}
+
+function safeHistoryLimit(value: number | undefined): number {
+  const candidate = Math.trunc(value ?? 25);
+  return Number.isFinite(candidate)
+    ? Math.max(1, Math.min(MAX_HISTORY_PAGE_SIZE, candidate))
+    : 25;
+}
+
+function parseHistoryEntries(stdout: string): RepositoryHistoryEntry[] {
+  const fields = stdout.split("\0");
+  const entries: RepositoryHistoryEntry[] = [];
+  for (let index = 0; index + 5 < fields.length; index += 6) {
+    const commitSha = (fields[index] ?? "").replace(/^[\r\n]+/u, "");
+    if (!/^[0-9a-f]{40}$/u.test(commitSha)) continue;
+    const authoredAt = fields[index + 1] ?? "";
+    const committedAt = fields[index + 2] ?? "";
+    const authorName = fields[index + 3] ?? "";
+    const parents = fields[index + 4] ?? "";
+    const message = fields[index + 5] ?? "";
+    entries.push({
+      commitSha,
+      message: message.trimEnd(),
+      authoredAt: authoredAt === "" ? null : authoredAt,
+      committedAt: committedAt === "" ? null : committedAt,
+      authorName: authorName === "" ? null : authorName,
+      authorLogin: null,
+      parentShas: parents
+        .split(/\s+/u)
+        .filter((sha) => /^[0-9a-f]{40}$/u.test(sha)),
+    });
+  }
+  return entries;
 }

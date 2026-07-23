@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import ContributorCredits from "../components/ContributorCredits.astro";
 import Icon from "../components/Icon.astro";
+import { SITE_CSP } from "../lib/csp.js";
 import { site } from "virtual:authorbot-site";
 
 // Phase 6 contract §3.5: the "New chapter" button belongs where an author
@@ -10,12 +11,7 @@ import { site } from "virtual:authorbot-site";
 // an API base: without one this page keeps its byte-comparable, script-free
 // output (no CSP meta, no stylesheet link, no script tag).
 const collab = site.collab;
-const csp = collab
-  ? "default-src 'self'; " +
-    // Same-origin only (ADR-0019 §1): `'self'` is the whole story.
-    "connect-src 'self'; " +
-    "img-src 'self' data:"
-  : undefined;
+const csp = collab ? SITE_CSP : undefined;
 const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;
 const src = `${site.basePath}_astro/authorbot-collab.js`;
 const publishedDates = site.chapters

@@ -136,7 +136,8 @@ When enabled, **chapter pages only** gain four insertions (index, story, and
 character pages are untouched):
 
 - a CSP `<meta>` tag: `default-src 'self'; connect-src 'self'; img-src 'self'
-  data:` - same-origin only, so `'self'` covers the API too (ADR-0019 §1); no
+  data:; font-src 'self' data:` - same-origin only, so `'self'` covers the API
+  too (ADR-0019 §1); no
   `'unsafe-inline'` needed, since the islands touch styles via the CSSOM only;
 - a `<link>` to `_astro/authorbot-collab.css`;
 - the mount element (see contract below);
@@ -146,8 +147,7 @@ The islands are **framework-free custom elements** (ADR-0018) in
 `site/src/islands/`, bundled by an explicit Vite step (`buildIslands()`) run
 only when enabled, with stable asset names - deliberately outside Astro's
 script pipeline, which would emit chunks even into disabled builds. No
-runtime dependencies; ~8 KB gzipped JS + ~2 KB CSS against the contract's
-35 KB budget. Annotation/reply bodies render as plain text (`textContent` +
+runtime dependencies. Annotation/reply bodies render as plain text (`textContent` +
 `white-space: pre-wrap`; the bundle contains no `innerHTML` - asserted by
 test); no client-side Markdown.
 
@@ -226,18 +226,19 @@ Phase 6 `<authorbot-settings>` form over `book.yml`, and Phase 7's
 control surface (collaborators, agent tokens, the audit view, the annotation
 policy, freeze, pause-agents, the approval queue, and the revocations).
 
-**It is a second bundle, not more of the first.** `buildIslands()` runs Vite
-twice, emitting `_astro/authorbot-access.js|.css` alongside
+**It is a separate bundle, not more of the reader bundle.** `buildIslands()`
+runs Vite independently for each entry, emitting
+`_astro/authorbot-access.js|.css` alongside
 `authorbot-collab.js|.css`, and only `/settings/` links it. The reason is the
-contract's 35 KB budget: that number exists because `authorbot-collab.js` is
-what *every reader* downloads on *every chapter page*, and a collaborator
-table, a token list, an audit log and a moderation queue are maintainer-only.
+reader/maintainer boundary: `authorbot-collab.js` is what *every reader*
+downloads on *every chapter page*, while a collaborator table, a token list,
+an audit log and a moderation queue are maintainer-only.
 For the same reason the Phase 7 routes live on `AccessApi extends CollabApi`
 in `site/src/islands/access-api.ts` rather than on `CollabApi` itself - class
-methods do not tree-shake, so putting them on the shared client would cost
-every reader ~400 bytes gzipped of code they can never call. Both bundles are
-regression-tested: the collab bundle must not contain the access view, and an
-api-url-less build emits neither.
+methods do not tree-shake, so putting them on the shared client would erase the
+reader/maintainer boundary. Both bundles are regression-tested: the collab
+bundle must not contain the access view, and an api-url-less build emits
+neither.
 
 Author-facing wording lives in `site/src/islands/access-model.ts` (pure, no
 DOM), so it is unit-testable and so the rules the contract cares about are

@@ -483,10 +483,10 @@ and stripped control-plane authority can never reactivate.
 - Show Edit only to editor and maintainer roles that also hold the required
   `revisions:write` capability. The API remains the authorization boundary.
 - Use Milkdown Crepe as the in-place Markdown editing surface. Load its editor
-  code and styles only after Edit is activated so ordinary chapter reading does
-  not pay the editor bundle cost. Configure its supported schema and output so
-  submitted content round-trips through Authorbot's safe canonical Markdown
-  path without introducing raw HTML or browser-only document state.
+  code and styles only after Edit is activated, leaving ordinary chapter
+  reading on the static published HTML. Configure its supported schema and
+  output so submitted content round-trips through Authorbot's safe canonical
+  Markdown path without introducing raw HTML or browser-only document state.
 - Use the same Milkdown-backed manuscript surface for collaboration when an
   authenticated reader activates Notes. An Authorbot-owned Milkdown plugin
   maps durable block and range anchors to ProseMirror decorations and selection

@@ -180,6 +180,95 @@ afterEach(() => {
 });
 
 describe("in-place manuscript editor launcher", () => {
+  it("announces chapter edit mode from handoff through WYSIWYG teardown", async () => {
+    stubFetch({ capabilities: ["chapters:read", "revisions:write"] });
+    mount();
+    const collab = document.createElement("authorbot-collab") as HTMLElement & {
+      setChapterEditMode: ReturnType<typeof vi.fn<(active: boolean) => void>>;
+    };
+    collab.dataset.chapterId = CHAPTER;
+    collab.setChapterEditMode = vi.fn();
+    document.body.append(collab);
+    await expect.poll(() => document.querySelector(".ab-manuscript-edit")).toBeTruthy();
+
+    (document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).click();
+    await expect.poll(() => createSurface.mock.calls.length).toBe(1);
+    expect(collab.setChapterEditMode).toHaveBeenLastCalledWith(true);
+    expect(document.querySelector<HTMLElement>("authorbot-manuscript-editor")?.dataset.chapterEditActive)
+      .toBe("true");
+
+    (document.querySelector(".ab-manuscript-editor-actions .ab-btn") as HTMLButtonElement)
+      .click();
+    await expect.poll(() => document.querySelector(".ab-manuscript-editor-shell")).toBeNull();
+    expect(collab.setChapterEditMode.mock.calls).toEqual([[true], [false]]);
+    expect(document.querySelector<HTMLElement>("authorbot-manuscript-editor")?.dataset.chapterEditActive)
+      .toBeUndefined();
+  });
+
+  it("keeps edit suppression active through fail-safe surface teardown", async () => {
+    stubFetch({ capabilities: ["chapters:read", "revisions:write"] });
+    mount();
+    const collab = document.createElement("authorbot-collab") as HTMLElement & {
+      setChapterEditMode: ReturnType<typeof vi.fn<(active: boolean) => void>>;
+    };
+    collab.dataset.chapterId = CHAPTER;
+    collab.setChapterEditMode = vi.fn();
+    document.body.append(collab);
+
+    let rejectDestroy!: (reason?: unknown) => void;
+    const destroying = new Promise<void>((_resolve, reject) => {
+      rejectDestroy = reject;
+    });
+    const destroy = vi.fn(() => destroying);
+    createSurface.mockImplementationOnce(async (options: ManuscriptSurfaceOptions) => {
+      lastSurfaceOptions = options;
+      surfaceMarkdown = options.markdown;
+      const editor = document.createElement("div");
+      editor.setAttribute("role", "textbox");
+      options.root.append(editor);
+      return { ...session(options), destroy };
+    });
+
+    await expect.poll(() => document.querySelector(".ab-manuscript-edit")).toBeTruthy();
+    (document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).click();
+    await expect.poll(() => createSurface.mock.calls.length).toBe(1);
+    const prose = document.querySelector<HTMLElement>(".prose")!;
+    expect(prose.hidden).toBe(true);
+    expect(collab.setChapterEditMode.mock.calls).toEqual([[true]]);
+
+    (document.querySelector(".ab-manuscript-editor-actions .ab-btn") as HTMLButtonElement)
+      .click();
+    await expect.poll(() => destroy).toHaveBeenCalledOnce();
+    expect(document.querySelector(".ab-manuscript-editor-shell")).toBeTruthy();
+    expect(prose.hidden).toBe(true);
+    expect(collab.setChapterEditMode.mock.calls).toEqual([[true]]);
+
+    rejectDestroy(new Error("surface teardown failed"));
+    await expect.poll(() => document.querySelector(".ab-manuscript-editor-shell")).toBeNull();
+    expect(prose.hidden).toBe(false);
+    expect(collab.setChapterEditMode.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("releases the exact collaboration island after their shared subtree detaches", async () => {
+    stubFetch({ capabilities: ["chapters:read", "revisions:write"] });
+    const editor = mount();
+    const collab = document.createElement("authorbot-collab") as HTMLElement & {
+      setChapterEditMode: ReturnType<typeof vi.fn<(active: boolean) => void>>;
+    };
+    collab.dataset.chapterId = CHAPTER;
+    collab.setChapterEditMode = vi.fn();
+    document.querySelector("article")?.append(collab);
+    await expect.poll(() => document.querySelector(".ab-manuscript-edit")).toBeTruthy();
+
+    (document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).click();
+    await expect.poll(() => createSurface.mock.calls.length).toBe(1);
+    expect(collab.setChapterEditMode.mock.calls).toEqual([[true]]);
+
+    document.querySelector("article")?.remove();
+    await expect.poll(() => collab.setChapterEditMode.mock.calls).toEqual([[true], [false]]);
+    expect(editor.dataset.chapterEditActive).toBeUndefined();
+  });
+
   it("keeps static reading intact and Milkdown unloaded until Edit is activated", async () => {
     stubFetch({ capabilities: ["chapters:read", "revisions:write"] });
     mount();

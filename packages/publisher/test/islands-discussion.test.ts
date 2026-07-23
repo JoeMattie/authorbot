@@ -83,6 +83,7 @@ function stub(options: {
   annotations: Array<ReturnType<typeof annotation>>;
   replies?: Record<string, unknown[]>;
   pendingCreate?: Promise<Response>;
+  pendingReply?: Promise<Response>;
   pendingPromote?: Promise<Response>;
   replyResponse?: (annotationId: string) => Response | Promise<Response>;
   calls?: Call[];
@@ -112,6 +113,14 @@ function stub(options: {
         operationId: "op-create",
         annotationId: "thread-created",
         correlationId: "corr-create",
+      });
+    }
+    if (/\/annotations\/[^/]+\/replies$/.test(url) && method === "POST") {
+      return options.pendingReply ?? json(202, {
+        status: "queued",
+        operationId: "op-reply",
+        replyId: "reply-created",
+        correlationId: "corr-reply",
       });
     }
     if (url.endsWith("/force-create-work-item") && method === "POST") {
@@ -160,6 +169,211 @@ afterEach(() => {
 });
 
 describe("chapter-wide Discussion", () => {
+  it("losslessly suspends and restores annotation entry during chapter edit mode", async () => {
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "comments:write",
+        "suggestions:write",
+      ]),
+      annotations: [],
+    });
+    const host = mount();
+    await expect.poll(() => document.querySelector(".ab-discussion-start")).toBeTruthy();
+
+    const discussion = document.querySelector<HTMLButtonElement>(".ab-discussion-start")!;
+    const pencil = document.querySelector<HTMLButtonElement>(".ab-annotate")!;
+    discussion.click();
+    const textarea = document.querySelector<HTMLTextAreaElement>(".ab-composer textarea")!;
+    textarea.value = "Keep this discussion draft while I edit.";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+
+    host.setChapterEditMode(true);
+    await host.prepareForExternalMode();
+    expect(document.querySelector(".ab-composer")).toBeNull();
+    expect(discussion.hidden).toBe(true);
+    expect(pencil.hidden).toBe(true);
+
+    // Programmatic/stale block and selection clicks are also ignored, not
+    // merely hidden.
+    pencil.click();
+    discussion.click();
+    (host as unknown as {
+      lastCapture: {
+        block: HTMLElement;
+        selector: {
+          blockId: string;
+          textPosition: { start: number; end: number };
+          textQuote: { exact: string };
+        };
+      };
+    }).lastCapture = {
+      block: document.getElementById(`b-${BLOCK}`)!,
+      selector: {
+        blockId: BLOCK,
+        textPosition: { start: 0, end: 9 },
+        textQuote: { exact: "The drift" },
+      },
+    };
+    document.querySelector<HTMLButtonElement>(".ab-select-suggestion")!.click();
+    expect(document.querySelector(".ab-composer")).toBeNull();
+
+    host.setChapterEditMode(false);
+    expect(discussion.hidden).toBe(false);
+    expect(pencil.hidden).toBe(false);
+    expect(document.querySelector<HTMLTextAreaElement>(".ab-composer textarea")?.value)
+      .toBe("Keep this discussion draft while I edit.");
+  });
+
+  it("reconciles edit suppression when the collaboration island is reattached", async () => {
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "comments:write",
+        "suggestions:write",
+      ]),
+      annotations: [],
+    });
+    const host = mount();
+    await expect.poll(() => document.querySelector(".ab-discussion-start")).toBeTruthy();
+
+    const editor = document.createElement("authorbot-manuscript-editor");
+    editor.dataset.chapterId = CHAPTER;
+    editor.dataset.chapterEditActive = "true";
+    document.querySelector(".chapter-reading-column")?.prepend(editor);
+    host.setChapterEditMode(true);
+    const parent = host.parentElement!;
+
+    host.remove();
+    parent.append(host);
+    await expect.poll(
+      () => (document.querySelector(".ab-discussion-start") as HTMLButtonElement).hidden,
+    ).toBe(true);
+
+    editor.removeAttribute("data-chapter-edit-active");
+    host.remove();
+    parent.append(host);
+    await expect.poll(
+      () => (document.querySelector(".ab-discussion-start") as HTMLButtonElement).hidden,
+    ).toBe(false);
+    expect((document.querySelector(".ab-annotate") as HTMLButtonElement).hidden).toBe(false);
+  });
+
+  it("defers a failed suggestion restore until chapter edit mode exits", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const pendingCreate = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "comments:write",
+        "suggestions:write",
+      ]),
+      annotations: [],
+      pendingCreate,
+    });
+    const host = mount();
+    await expect.poll(() => document.querySelector(".ab-select-suggestion")).toBeTruthy();
+
+    (host as unknown as {
+      lastCapture: {
+        block: HTMLElement;
+        selector: {
+          blockId: string;
+          textPosition: { start: number; end: number };
+          textQuote: { exact: string };
+        };
+      };
+    }).lastCapture = {
+      block: document.getElementById(`b-${BLOCK}`)!,
+      selector: {
+        blockId: BLOCK,
+        textPosition: { start: 0, end: 9 },
+        textQuote: { exact: "The drift" },
+      },
+    };
+    document.querySelector<HTMLButtonElement>(".ab-select-suggestion")!.click();
+    const form = document.querySelector(".ab-composer") as HTMLFormElement;
+    const textarea = form.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "The fog appeared";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    form.requestSubmit();
+    expect(document.querySelector(".ab-composer")).toBeNull();
+
+    host.setChapterEditMode(true);
+    resolveCreate(json(422, { detail: "suggestion rejected" }));
+    await expect.poll(
+      () => (host as unknown as { composer: { phase: string } }).composer.phase,
+    ).toBe("editing");
+    expect(document.querySelector(".ab-composer")).toBeNull();
+
+    host.setChapterEditMode(false);
+    expect(document.querySelector<HTMLTextAreaElement>(".ab-composer textarea")?.value)
+      .toBe("The fog appeared");
+    expect(document.querySelector(".ab-composer [role='alert']")).toBeTruthy();
+  });
+
+  it("defers a failed reply restore until chapter edit mode exits", async () => {
+    let resolveReply!: (response: Response) => void;
+    const pendingReply = new Promise<Response>((resolve) => {
+      resolveReply = resolve;
+    });
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "replies:write",
+      ]),
+      annotations: [annotation("thread-1")],
+      pendingReply,
+    });
+    const host = mount();
+    await expect.poll(() => document.querySelector(".ab-discussion-thread")).toBeTruthy();
+
+    const thread = document.querySelector(".ab-discussion-thread") as HTMLElement;
+    [...thread.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Reply")
+      ?.click();
+    const form = document.querySelector(".ab-reply-form") as HTMLFormElement;
+    const textarea = form.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "Keep this reply, too.";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    form.requestSubmit();
+    expect(document.querySelector(".ab-reply-form")).toBeNull();
+
+    host.setChapterEditMode(true);
+    resolveReply(json(422, { detail: "reply rejected" }));
+    await expect.poll(
+      () => (host as unknown as { openReplyFor: string | null }).openReplyFor,
+    ).toBe("thread-1");
+    expect(document.querySelector(".ab-reply-form")).toBeNull();
+
+    host.setChapterEditMode(false);
+    expect(document.querySelector<HTMLTextAreaElement>(".ab-reply-form textarea")?.value)
+      .toBe("Keep this reply, too.");
+    expect(document.querySelector(".ab-reply-form [role='alert']")).toBeTruthy();
+  });
+
+  it("does not offer a second approval vote on an already approved discussion comment", async () => {
+    stub({
+      session: me([
+        "chapters:read",
+        "comments:read",
+        "comments:vote",
+      ]),
+      annotations: [annotation("thread-1"), annotation("note-1", "block")],
+    });
+    mount();
+    await expect.poll(() => document.querySelectorAll(".ab-card").length).toBe(2);
+
+    expect(document.querySelector(".ab-discussion-thread .ab-votes")).toBeNull();
+    expect(document.querySelector("[data-surface='note'] .ab-votes")).toBeTruthy();
+  });
+
   it("keeps chapter threads below the manuscript and outside deterministic Notes order", async () => {
     const nested = [
       {
