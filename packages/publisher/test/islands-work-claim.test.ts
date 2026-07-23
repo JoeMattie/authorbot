@@ -158,12 +158,14 @@ function stubFetch(routes: Routes): void {
 
 const meEditor = {
   actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
-  scopes: ["chapters:read", "annotations:read", "annotations:write", "work:read", "work:claim", "submissions:write"],
+  scopes: [],
+  effectiveCapabilities: ["chapters:read", "work:read", "work:claim", "work:submit"],
 };
 
 const meReader = {
   actor: { id: "actor-2", displayName: "rae", externalIdentity: "github:rae" },
-  scopes: ["chapters:read", "annotations:read"],
+  scopes: [],
+  effectiveCapabilities: ["chapters:read"],
 };
 
 const queueRoutes = (

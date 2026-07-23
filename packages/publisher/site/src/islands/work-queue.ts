@@ -14,7 +14,12 @@
  * markup is the chapter link, whose href comes from the build-time chapter map
  * (trusted), never from API data. The lease token is never rendered.
  */
-import { type CompletedWorkItem, type Me, type WorkItem } from "./api.js";
+import {
+  hasEffectiveCapability,
+  type CompletedWorkItem,
+  type Me,
+  type WorkItem,
+} from "./api.js";
 import { el, srOnly } from "./dom.js";
 import { tallyOrEmpty, tallySummary } from "./vote-view.js";
 import { ClaimPanel, typeLabel, workTypeIcon, type ChapterRef } from "./work-claim.js";
@@ -194,7 +199,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
       this.clearQueue(
         state.session === null
           ? "Sign in with an editor (or higher) role to view work."
-          : state.session.scopes.includes("work:read")
+          : hasEffectiveCapability(state.session, "work:read", "work:read")
             ? `Work queue unavailable: ${state.workItemsError ?? "request failed"}`
             : "Your role cannot view the work queue.",
       );
@@ -231,7 +236,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
   }
 
   private canClaim(): boolean {
-    return this.me !== null && this.me.scopes.includes("work:claim");
+    return hasEffectiveCapability(this.me, "work:claim", "work:claim");
   }
 
   private async recoverStoredClaim(
@@ -385,7 +390,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
       this.completedStatus.textContent =
         state.session === null
           ? "Sign in with an editor (or higher) role to view completed work."
-          : state.session.scopes.includes("work:read")
+          : hasEffectiveCapability(state.session, "work:read", "work:read")
             ? `Completed work unavailable: ${state.completedWorkItemsError ?? "request failed"}`
             : "Your role cannot view completed work.";
       this.completedMoreWrap.hidden = true;

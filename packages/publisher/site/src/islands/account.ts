@@ -23,7 +23,7 @@
  * be reached it renders nothing, exactly like the other islands, chrome that
  * leads nowhere is worse than no chrome.
  */
-import type { Me, Role } from "./api.js";
+import { hasEffectiveCapability, type Me, type Role } from "./api.js";
 import { el } from "./dom.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
@@ -162,7 +162,7 @@ export class AuthorbotAccount extends HTMLElement {
       this.render(state.session);
       this.onResize();
     }
-    const canReadWork = state.session?.scopes.includes("work:read") === true;
+    const canReadWork = hasEffectiveCapability(state.session, "work:read", "work:read");
     if (!canReadWork) {
       const release = this.releaseConnection;
       this.releaseConnection = null;
@@ -233,7 +233,7 @@ export class AuthorbotAccount extends HTMLElement {
     // now lives in the primary navigation, so repeating it here would give
     // every signed-in desktop user two links to the same page.
     if (role === "maintainer") {
-      if (me.scopes.includes("revisions:read")) {
+      if (hasEffectiveCapability(me, "revisions:read", "revisions:read")) {
         strip.append(this.link(`${this.cfg.base}revisions/`, "Reviews"));
       }
       strip.append(this.link(`${this.cfg.base}settings/`, "Settings"));

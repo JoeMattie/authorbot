@@ -33,7 +33,13 @@ describe("account identity", () => {
         if (url.endsWith("/v1/me")) {
           return response({
             actor: { id: "actor-1", displayName: "JoeMattie", externalIdentity: "github:JoeMattie" },
-            scopes: ["chapters:read", "work:read", "work:claim", "revisions:read"],
+            scopes: ["chapters:read", "work:read", "work:claim"],
+            effectiveCapabilities: [
+              "chapters:read",
+              "work:read",
+              "work:claim",
+              "revisions:read",
+            ],
             memberships: [{ role: "maintainer" }],
           });
         }
