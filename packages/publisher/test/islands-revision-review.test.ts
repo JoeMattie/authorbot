@@ -92,8 +92,10 @@ function stubApi(options: {
   role?: string;
   scopes?: string[];
   proposals?: RevisionProposalSummary[];
+  linkedProposals?: RevisionProposalSummary[];
 } = {}): void {
   const proposals = options.proposals ?? [summary(PROPOSAL)];
+  const linkedProposals = options.linkedProposals ?? [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -112,7 +114,8 @@ function stubApi(options: {
       if (url.includes("/revision-proposals?")) {
         return json(200, { items: proposals, nextCursor: null });
       }
-      const selected = proposals.find((proposal) => url.includes(proposal.id));
+      const selected = [...proposals, ...linkedProposals]
+        .find((proposal) => url.includes(proposal.id));
       if (method === "GET" && selected !== undefined) {
         return json(200, detail(selected.id, selected));
       }
@@ -154,6 +157,7 @@ function mount(): AuthorbotRevisionReview {
 beforeEach(() => {
   calls = [];
   document.body.textContent = "";
+  window.history.replaceState(null, "", "/revisions/");
   resetProjectStoresForTests();
 });
 
@@ -216,6 +220,39 @@ describe("maintainer revision review element", () => {
     );
     const approveCall = calls.find((call) => call.url.endsWith(`/${DIRECT}/approve`));
     expect(approveCall).toMatchObject({ method: "POST", body: {} });
+  });
+
+  it("opens an exact linked proposal even when it is not in the pending queue", async () => {
+    const completed = summary(DIRECT, {
+      status: "approved",
+      target: {
+        kind: "chapter",
+        id: "chapter-archive",
+        path: "chapters/02-archive.md",
+        label: "Archive",
+      },
+      chapter: {
+        id: "chapter-archive",
+        title: "Archive",
+        path: "chapters/02-archive.md",
+        revision: 8,
+      },
+      currentRevision: 8,
+      resultingRevision: 8,
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+    });
+    window.history.replaceState(null, "", `/revisions/?proposal=${DIRECT}`);
+    stubApi({ proposals: [summary(PROPOSAL)], linkedProposals: [completed] });
+    mount();
+
+    await expect.poll(() => document.querySelector(".ab-revision-detail h2")?.textContent)
+      .toBe("Archive");
+    expect(calls.some(({ url }) => url.includes(`/revision-proposals/${DIRECT}`))).toBe(true);
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        `.ab-revision-list-button[data-proposal-id="${DIRECT}"]`,
+      )?.getAttribute("aria-current"),
+    ).toBe("true");
   });
 
   it("reviews hash-versioned planning documents without inventing a null revision", async () => {

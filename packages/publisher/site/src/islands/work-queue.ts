@@ -662,7 +662,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
       const revision = el("a", "ab-btn ab-completed-revision", "Review revision");
       revision.setAttribute(
         "href",
-        `../revisions/${encodeURIComponent(item.revisionProposalId)}/`,
+        `../revisions/?proposal=${encodeURIComponent(item.revisionProposalId)}`,
       );
       links.append(revision);
     }

@@ -63,6 +63,7 @@ function mount(attrs: Record<string, string> = {}): AuthorbotCollab {
 
 beforeEach(() => {
   vi.useRealTimers();
+  window.history.replaceState(null, "", "/chapters/baseline/");
   resetProjectStoresForTests();
 });
 
@@ -271,6 +272,65 @@ describe("authorbot-collab element", () => {
       inline: "nearest",
       behavior: "smooth",
     });
+  });
+
+  it("mounts and activates a source-note fragment after annotations hydrate", async () => {
+    const annotation = (id: string, body: string) => ({
+      id,
+      chapterId: CHAPTER_ID,
+      kind: "suggestion",
+      scope: "block",
+      chapterRevision: 3,
+      target: { blockId: BLOCK_ID },
+      authorActorId: "actor-1",
+      body,
+      status: "work_item_created",
+      gitOperationId: null,
+      createdAt: "2026-07-19T00:00:00Z",
+    });
+    stubFetch({
+      [`${API}/v1/me`]: {
+        status: 200,
+        body: {
+          actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+          scopes: ["chapters:read", "annotations:read"],
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/members`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: {
+          items: [
+            annotation("ann-first", "First note."),
+            annotation("ann-linked", "Linked completed-work source."),
+          ],
+          nextCursor: null,
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-first/replies`]: {
+        status: 404,
+        body: { detail: "replies unavailable" },
+      },
+    });
+    window.history.replaceState(
+      null,
+      "",
+      "/chapters/baseline/#authorbot-note-ann-linked",
+    );
+    mount();
+
+    await expect.poll(() => document.querySelectorAll(".ab-card").length).toBe(2);
+    const linked = document.getElementById("authorbot-note-ann-linked") as HTMLElement;
+    expect(linked).toBeTruthy();
+    expect(linked.classList.contains("ab-active")).toBe(true);
+    expect(linked.querySelector(".ab-card-summary")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(document.getElementById("authorbot-note-ann-first")?.classList.contains("ab-active"))
+      .toBe(false);
   });
 
   it("renders zero collaboration chrome when the API is unreachable (§1)", async () => {

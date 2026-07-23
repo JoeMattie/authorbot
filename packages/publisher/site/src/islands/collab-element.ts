@@ -76,6 +76,7 @@ interface FocusRestore {
 const DESKTOP_QUERY = "(min-width: 960px)";
 const CARD_GAP = 12;
 const DISCUSSION_PAGE_SIZE = 20;
+const NOTE_FRAGMENT_PREFIX = "authorbot-note-";
 const REFRESH_HINT = "Still syncing; refresh the page to see the final state.";
 const STALE_PAGE_HINT =
   "This chapter has changed since this page was published; " +
@@ -248,6 +249,8 @@ export class AuthorbotCollab extends HTMLElement {
   private explicitExpandedAnnotationId: string | null = null;
   private visibleBlockIds = new Set<string>();
   private suppressedAnnotationIds = new Set<string>();
+  /** The last deep link applied, so background refreshes never steal scroll. */
+  private activatedNoteFragment: string | null = null;
   private targetAdapter!: ChapterNotesTargetAdapter;
   private stopTargetVisibility: (() => void) | null = null;
 
@@ -561,6 +564,7 @@ export class AuthorbotCollab extends HTMLElement {
     document.addEventListener("selectionchange", this.onSelectionChange);
     window.addEventListener("resize", this.onResize);
     window.addEventListener("load", this.onWindowLoad);
+    window.addEventListener("hashchange", this.onHashChange);
   }
 
   private disconnectGlobalListeners(): void {
@@ -570,9 +574,15 @@ export class AuthorbotCollab extends HTMLElement {
     document.removeEventListener("selectionchange", this.onSelectionChange);
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("load", this.onWindowLoad);
+    window.removeEventListener("hashchange", this.onHashChange);
   }
 
   private readonly onWindowLoad = (): void => this.layout();
+
+  private readonly onHashChange = (): void => {
+    this.activatedNoteFragment = null;
+    this.activateNoteFragment();
+  };
 
   private readonly onMediaChange = (): void => {
     this.placeContainers();
@@ -1646,6 +1656,24 @@ export class AuthorbotCollab extends HTMLElement {
     this.updateNoteNavigation();
     this.layout();
     this.restoreFocus(restore);
+    this.activateNoteFragment();
+  }
+
+  /** Resolve a Work-history source-note link after its API-backed card mounts. */
+  private activateNoteFragment(): void {
+    const hash = window.location.hash;
+    if (hash === "" || hash === this.activatedNoteFragment) return;
+    const encoded = hash.slice(1);
+    if (!encoded.startsWith(NOTE_FRAGMENT_PREFIX)) return;
+    let annotationId: string;
+    try {
+      annotationId = decodeURIComponent(encoded.slice(NOTE_FRAGMENT_PREFIX.length));
+    } catch {
+      return;
+    }
+    if (annotationId.length === 0 || !this.cardEls.has(annotationId)) return;
+    this.activatedNoteFragment = hash;
+    this.activateAnnotation(annotationId);
   }
 
   private renderDiscussion(): void {
@@ -1811,6 +1839,7 @@ export class AuthorbotCollab extends HTMLElement {
     const author = this.authorName(annotation.authorActorId);
     const quote = annotation.target?.textQuote?.exact;
     const card = el("section", "ab-card ab-card-shell");
+    card.id = `${NOTE_FRAGMENT_PREFIX}${annotation.id}`;
     card.tabIndex = -1;
     card.dataset.annotationId = annotation.id;
     card.dataset.surface = surface;

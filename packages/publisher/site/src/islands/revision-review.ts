@@ -50,6 +50,11 @@ function dateLabel(value: string): string {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString();
 }
 
+function linkedProposalId(): string | null {
+  const value = new URL(window.location.href).searchParams.get("proposal")?.trim();
+  return value === undefined || value.length === 0 || value.length > 200 ? null : value;
+}
+
 export class AuthorbotRevisionReview extends HTMLElement {
   private store!: ProjectStore;
   private cfg!: RevisionReviewConfig;
@@ -58,6 +63,7 @@ export class AuthorbotRevisionReview extends HTMLElement {
   private unsubscribe: (() => void) | null = null;
   private releaseConnection: (() => void) | null = null;
   private selectedProposalId: string | null = null;
+  private linkedProposalId: string | null = null;
   private diffHandle: RevisionDiffHandle | null = null;
   private list!: HTMLUListElement;
   private listStatus!: HTMLParagraphElement;
@@ -102,6 +108,8 @@ export class AuthorbotRevisionReview extends HTMLElement {
     }
     if (!this.isCurrent(generation)) return;
     this.store = store;
+    this.linkedProposalId = linkedProposalId();
+    this.selectedProposalId = this.linkedProposalId;
     await store.getState().ensureSession();
     if (!this.isCurrent(generation)) return;
     if (store.getState().sessionStatus !== "ready") return;
@@ -111,6 +119,13 @@ export class AuthorbotRevisionReview extends HTMLElement {
     if (canReadRevisions(store.getState().session)) {
       await store.getState().ensureRevisionProposals();
       if (!this.isCurrent(generation)) return;
+      if (this.linkedProposalId !== null) {
+        // The pending-only list intentionally drops approved/rejected detail
+        // rows. Re-read the linked proposal after that authoritative refresh
+        // so an early detail/list race cannot erase the deep-linked record.
+        await store.getState().refreshRevisionProposal(this.linkedProposalId);
+        if (!this.isCurrent(generation)) return;
+      }
       this.releaseConnection = store.getState().retainConnection();
       this.sync();
     }
@@ -184,13 +199,19 @@ export class AuthorbotRevisionReview extends HTMLElement {
         `Revision queue unavailable: ${state.revisionProposalsError ?? "request failed"}`;
       return;
     }
-    if (state.revisionProposalIds.length === 0) {
+    const linked = this.linkedProposalId === null
+      ? undefined
+      : state.revisionProposalsById[this.linkedProposalId];
+    const proposalIds = linked === undefined || state.revisionProposalIds.includes(linked.id)
+      ? state.revisionProposalIds
+      : [linked.id, ...state.revisionProposalIds];
+    if (proposalIds.length === 0) {
       this.listStatus.hidden = false;
       this.listStatus.textContent = "No revisions are waiting for review.";
       return;
     }
     this.listStatus.hidden = true;
-    for (const proposalId of state.revisionProposalIds) {
+    for (const proposalId of proposalIds) {
       const proposal = state.revisionProposalsById[proposalId];
       if (proposal === undefined) continue;
       const targetDocument = revisionDocument(proposal);
@@ -231,7 +252,8 @@ export class AuthorbotRevisionReview extends HTMLElement {
     const state = this.store.getState();
     if (
       this.selectedProposalId === null ||
-      !state.revisionProposalIds.includes(this.selectedProposalId)
+      (!state.revisionProposalIds.includes(this.selectedProposalId) &&
+        this.selectedProposalId !== this.linkedProposalId)
     ) {
       this.selectedProposalId = state.revisionProposalIds[0] ?? null;
     }

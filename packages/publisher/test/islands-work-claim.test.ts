@@ -354,7 +354,7 @@ describe("work queue claim affordance (contract §7)", () => {
     ).toContain(`authorbot-note-${completedWorkItem().sourceAnnotationId}`);
     expect(
       completed.querySelector(".ab-completed-revision")?.getAttribute("href"),
-    ).toBe("../revisions/revision-1/");
+    ).toBe("../revisions/?proposal=revision-1");
 
     const badge = document.querySelector<HTMLElement>("[data-work-count]") as HTMLElement;
     expect(badge.textContent).toBe("1");
