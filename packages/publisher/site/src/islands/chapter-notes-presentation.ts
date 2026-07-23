@@ -81,6 +81,7 @@ export interface ChapterNotesTargetAdapter {
   setPreview(blockId: string, visible: boolean): void;
   reveal(blockId: string, behavior?: ScrollBehavior): void;
   clearInlineNotes(): void;
+  /** Forms stay nearest the target, ahead of existing note cards. */
   mountInlineNote(blockId: string | null, note: HTMLElement): void;
   /** Rich manuscript surfaces render highlights as document decorations. */
   setHighlights?(highlights: readonly ChapterNoteHighlight[]): void;
@@ -183,7 +184,8 @@ export class StaticChapterNotesTargetAdapter implements ChapterNotesTargetAdapte
 
   mountInlineNote(blockId: string | null, note: HTMLElement): void {
     const host = blockId === null ? this.wholeChapterHost : this.inlineHosts.get(blockId);
-    host?.append(note);
+    if (note.localName === "form") host?.prepend(note);
+    else host?.append(note);
   }
 
   private host(className: string, label: string): HTMLElement {

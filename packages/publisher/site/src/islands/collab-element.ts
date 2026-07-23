@@ -618,7 +618,7 @@ export class AuthorbotCollab extends HTMLElement {
     if (!this.canReadChapter()) return;
     const generation = this.mountGeneration;
     this.notesModeBtn.disabled = true;
-    this.notesModeStatus.textContent = "Loading the rich Notes view…";
+    this.notesModeStatus.textContent = "Loading Notes…";
     const mode = await this.ensureNotesMode(generation);
     if (mode === null || !this.isCurrentMount(generation)) return;
     await mode.toggle();
@@ -701,8 +701,7 @@ export class AuthorbotCollab extends HTMLElement {
         this.notesModeRequest = null;
         if (this.isCurrentMount(generation)) {
           this.notesModeBtn.disabled = false;
-          this.notesModeStatus.textContent =
-            "The rich Notes view could not load. Try again.";
+          this.notesModeStatus.textContent = "Notes could not load. Try again.";
         }
         return null;
       });
@@ -1791,6 +1790,10 @@ export class AuthorbotCollab extends HTMLElement {
     } else if (this.isDesktop) {
       this.cardsHost.prepend(form);
     } else {
+      // Keep the composer immediately beside its manuscript target, ahead of
+      // existing cards. If it follows an auto-expanding card, scrolling to the
+      // submit controls can alternately expand and collapse that card as the
+      // target crosses the viewport edge, making the form jump out of reach.
       this.targetAdapter.mountInlineNote(draft.blockId, form);
     }
     this.layout();

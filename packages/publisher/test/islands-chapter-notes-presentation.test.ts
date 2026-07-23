@@ -108,11 +108,15 @@ describe("static manuscript target adapter", () => {
     whole.textContent = "Whole";
     const anchored = document.createElement("article");
     anchored.textContent = "Anchored";
+    const composer = document.createElement("form");
+    composer.textContent = "Compose";
     adapter.mountInlineNote(null, whole);
     adapter.mountInlineNote(BLOCK_A, anchored);
+    adapter.mountInlineNote(BLOCK_A, composer);
 
     expect(prose.firstElementChild?.classList.contains("ab-inline-notes-whole")).toBe(true);
-    expect(document.getElementById("ui-a")?.nextElementSibling?.textContent).toBe("Anchored");
+    expect(document.getElementById("ui-a")?.nextElementSibling?.textContent)
+      .toBe("ComposeAnchored");
     adapter.setPreview(BLOCK_A, true);
     expect(first.classList.contains("ab-note-target-preview")).toBe(true);
     adapter.setPreview(BLOCK_A, false);

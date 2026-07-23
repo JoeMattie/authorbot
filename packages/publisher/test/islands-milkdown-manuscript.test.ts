@@ -41,10 +41,17 @@ describe("Milkdown manuscript surface", () => {
     const note = document.createElement("aside");
     note.textContent = "Review this beat.";
     first.notes.mountInlineNote(BLOCKS[0]!, note);
+    const composer = document.createElement("form");
+    composer.textContent = "Compose beside this beat.";
+    first.notes.mountInlineNote(BLOCKS[0]!, composer);
     expect(root.textContent).toContain("Review this beat.");
+    expect(root.textContent?.indexOf("Compose beside this beat.")).toBeLessThan(
+      root.textContent?.indexOf("Review this beat.") ?? 0,
+    );
 
     const once = first.getMarkdown();
     expect(once).not.toContain("Review this beat.");
+    expect(once).not.toContain("Compose beside this beat.");
     await first.destroy();
 
     const secondRoot = document.createElement("div");

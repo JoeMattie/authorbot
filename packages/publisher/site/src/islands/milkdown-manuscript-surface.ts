@@ -395,11 +395,13 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
   }
 
   mountInlineNote(blockId: string | null, note: HTMLElement): void {
-    this.bridge.model.widgets.push({
+    const widget = {
       key: `authorbot-note-${++this.widgetSequence}`,
       blockId,
       node: note,
-    });
+    };
+    if (note.localName === "form") this.bridge.model.widgets.unshift(widget);
+    else this.bridge.model.widgets.push(widget);
     this.bridge.refresh(this.view);
   }
 
