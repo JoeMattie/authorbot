@@ -9,6 +9,17 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.35
+
+- **Legacy agent-token capabilities now have their canonical projection.**
+  After the v0.1.34 dual-read Worker was deployed and verified healthy, this
+  release adds the idempotent
+  `0013_phase11_capabilities_backfill.sql` migration. It fills missing
+  canonical capability data while retaining legacy mode and the ordinary
+  legacy scopes that the deployed Worker still reads.
+- This is the isolated capability-backfill release. It adds no product feature
+  or book-format migration, and it does not begin Phase 3C legacy retirement.
+
 ## 0.1.34
 
 - **The full editorial workflow is now available from the site.** Editors can
