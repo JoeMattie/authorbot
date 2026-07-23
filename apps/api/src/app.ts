@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import {
   createRepositories,
+  isConstraintError,
   isUniqueConstraintError,
   type AgentTokenRecord,
   type AnnotationRecord,
@@ -856,73 +857,109 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         return problem(c, "validation-failed", { issues: issueList(parsed.error) });
       }
 
-      const token = await repos.agentTokens.getById(c.req.param("tokenId"));
-      if (token === null || token.projectId !== guard.project.id) {
-        return problem(c, "not-found", { detail: "unknown agent token" });
-      }
-      if (
-        token.revokedAt !== null ||
-        Date.parse(token.expiresAt) <= clock.now().getTime()
-      ) {
-        return problem(c, "state-conflict", {
-          detail: "only an active agent token's capabilities can be changed",
-        });
-      }
+      return serialize(guard.project.id, async () => {
+        const token = await repos.agentTokens.getById(c.req.param("tokenId"));
+        if (token === null || token.projectId !== guard.project.id) {
+          return problem(c, "not-found", { detail: "unknown agent token" });
+        }
+        if (
+          token.revokedAt !== null ||
+          Date.parse(token.expiresAt) <= clock.now().getTime()
+        ) {
+          return problem(c, "state-conflict", {
+            detail: "only an active agent token's capabilities can be changed",
+          });
+        }
 
-      const membership = await repos.projectMemberships.getByProjectAndActor(
-        guard.project.id,
-        token.actorId,
-      );
-      const role = membership?.revokedAt === null ? membership.role : null;
-      const before = tokenCapabilityProjection(token, role);
-      const capabilities = parsed.data.capabilities;
-      const scopes = legacyScopeShadow(capabilities);
-      const updated: AgentTokenRecord = {
-        ...token,
-        scopes: [...scopes],
-        capabilitiesV2: [...capabilities],
-        capabilityMode: "canonical",
-      };
-      const after = tokenCapabilityProjection(updated, role);
-      const responseBody = {
-        ...agentTokenJson(updated),
-        ...capabilityProjectionJson(after),
-        role,
-      };
-      const timestamp = now();
-      await deps.db.batch([
-        repos.agentTokens.setCapabilityStateStatement(token.id, {
-          scopes,
-          capabilitiesV2: capabilities,
+        const membership = await repos.projectMemberships.getByProjectAndActor(
+          guard.project.id,
+          token.actorId,
+        );
+        const role = membership?.revokedAt === null ? membership.role : null;
+        const before = tokenCapabilityProjection(token, role);
+        const capabilities = parsed.data.capabilities;
+        const scopes = legacyScopeShadow(capabilities);
+        const updated: AgentTokenRecord = {
+          ...token,
+          scopes: [...scopes],
+          capabilitiesV2: [...capabilities],
           capabilityMode: "canonical",
-        }),
-        repos.auditEvents.insertStatement({
-          id: uuidv7(clock.now()),
-          projectId: guard.project.id,
-          actorId: authOf(c).actor.id,
-          action: "agent_token.capabilities.update",
-          targetType: "agent_token",
-          targetId: token.id,
-          correlationId: c.get("correlationId"),
-          metadata: {
-            before: {
-              capabilityMode: before.capabilityMode,
-              capabilities: before.grantedCapabilities,
-              legacyEffectiveActions: before.legacyEffectiveActions,
-              legacyScopes: token.scopes,
-            },
-            after: {
-              capabilityMode: after.capabilityMode,
-              capabilities: after.grantedCapabilities,
-              legacyEffectiveActions: after.legacyEffectiveActions,
-              legacyScopes: updated.scopes,
-            },
-          },
-          createdAt: timestamp,
-        }),
-        ...claimStatements(c, 200, responseBody),
-      ]);
-      return c.json(responseBody, 200);
+        };
+        const after = tokenCapabilityProjection(updated, role);
+        const responseBody = {
+          ...agentTokenJson(updated),
+          ...capabilityProjectionJson(after),
+          role,
+        };
+        const timestamp = now();
+        try {
+          await deps.db.batch([
+            repos.agentTokens.setCapabilityStateCasStatement(
+              token.id,
+              {
+                scopes: token.scopes,
+                capabilitiesV2: token.capabilitiesV2 ?? null,
+                capabilityMode: token.capabilityMode ?? "legacy",
+              },
+              {
+                scopes,
+                capabilitiesV2: capabilities,
+                capabilityMode: "canonical",
+              },
+              timestamp,
+            ),
+            repos.auditEvents.insertStatement({
+              id: uuidv7(clock.now()),
+              projectId: guard.project.id,
+              actorId: authOf(c).actor.id,
+              action: "agent_token.capabilities.update",
+              targetType: "agent_token",
+              targetId: token.id,
+              correlationId: c.get("correlationId"),
+              metadata: {
+                before: {
+                  capabilityMode: before.capabilityMode,
+                  capabilities: before.grantedCapabilities,
+                  legacyEffectiveActions: before.legacyEffectiveActions,
+                  legacyScopes: token.scopes,
+                },
+                after: {
+                  capabilityMode: after.capabilityMode,
+                  capabilities: after.grantedCapabilities,
+                  legacyEffectiveActions: after.legacyEffectiveActions,
+                  legacyScopes: updated.scopes,
+                },
+              },
+              createdAt: timestamp,
+            }),
+            ...claimStatements(c, 200, responseBody),
+          ]);
+        } catch (error) {
+          if (!isConstraintError(error)) throw error;
+          const fresh = await repos.agentTokens.getById(token.id);
+          if (fresh === null || fresh.projectId !== guard.project.id) {
+            return problem(c, "not-found", { detail: "unknown agent token" });
+          }
+          if (
+            fresh.revokedAt !== null ||
+            Date.parse(fresh.expiresAt) <= clock.now().getTime()
+          ) {
+            return problem(c, "state-conflict", {
+              detail: "only an active agent token's capabilities can be changed",
+            });
+          }
+          const stateUnchanged =
+            fresh.capabilityMode === token.capabilityMode &&
+            JSON.stringify(fresh.scopes) === JSON.stringify(token.scopes) &&
+            JSON.stringify(fresh.capabilitiesV2 ?? null) ===
+              JSON.stringify(token.capabilitiesV2 ?? null);
+          if (stateUnchanged) throw error;
+          return problem(c, "state-conflict", {
+            detail: "agent token capabilities changed concurrently; refresh and retry",
+          });
+        }
+        return c.json(responseBody, 200);
+      });
     },
   );
 

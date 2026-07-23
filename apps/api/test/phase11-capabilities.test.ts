@@ -1,12 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Hono } from "hono";
+import { createApi } from "../src/app.js";
+import type { AppDeps, AppEnv } from "../src/deps.js";
+import { createDevIdentityProvider } from "../src/identity/provider.js";
 import {
   API_ORIGIN,
+  baseConfig,
   devLogin,
   jsonRequest,
   makeHarness,
   mintToken,
   type TestHarness,
 } from "./helpers.js";
+
+/** A distinct in-process stand-in for another Worker isolate over the same D1. */
+function siblingApp(h: TestHarness): Hono<AppEnv> {
+  const deps: AppDeps = {
+    db: h.db,
+    config: baseConfig(),
+    identityProvider: createDevIdentityProvider(),
+  };
+  return createApi(deps).app;
+}
 
 interface CanonicalMintBody {
   id: string;
@@ -262,6 +277,89 @@ describe("Phase 11 agent-token capabilities", () => {
       grantedCapabilities: [],
       effectiveCapabilities: [],
     });
+  });
+
+  it("serializes locally and compare-and-swaps cross-isolate capability replacements", async () => {
+    const { tokenId } = await mintToken(h, maintainer, ["chapters:read"]);
+    const path = `/v1/projects/${h.projectId}/agent-tokens/${tokenId}/capabilities`;
+    const other = siblingApp(h);
+    const [comments, suggestions] = await Promise.all([
+      h.app.request(
+        path,
+        jsonRequest(
+          "PUT",
+          { capabilities: ["chapters:read", "comments:read"] },
+          { Cookie: maintainer, "Idempotency-Key": "phase11-race-comments" },
+        ),
+      ),
+      other.request(
+        path,
+        jsonRequest(
+          "PUT",
+          { capabilities: ["chapters:read", "suggestions:read"] },
+          { Cookie: maintainer, "Idempotency-Key": "phase11-race-suggestions" },
+        ),
+      ),
+    ]);
+
+    expect([comments.status, suggestions.status]).toContain(200);
+    expect([200, 409]).toContain(comments.status);
+    expect([200, 409]).toContain(suggestions.status);
+    const rows = await h.db
+      .prepare(
+        `SELECT metadata FROM audit_events
+          WHERE action = 'agent_token.capabilities.update' AND target_id = ?
+          ORDER BY rowid`,
+      )
+      .bind(tokenId)
+      .all<{ metadata: string }>();
+    expect(rows).toHaveLength(
+      [comments.status, suggestions.status].filter((status) => status === 200).length,
+    );
+    if (rows.length === 2) {
+      const first = JSON.parse(rows[0]?.metadata ?? "{}") as {
+        after?: Record<string, unknown>;
+      };
+      const second = JSON.parse(rows[1]?.metadata ?? "{}") as {
+        before?: Record<string, unknown>;
+      };
+      expect(second.before).toEqual(first.after);
+    }
+  });
+
+  it("never applies a capability replacement after a racing revocation", async () => {
+    const { tokenId } = await mintToken(h, maintainer, ["chapters:read"]);
+    const other = siblingApp(h);
+    const [replacement, revocation] = await Promise.all([
+      h.app.request(
+        `/v1/projects/${h.projectId}/agent-tokens/${tokenId}/capabilities`,
+        jsonRequest(
+          "PUT",
+          { capabilities: ["chapters:read", "comments:read"] },
+          { Cookie: maintainer, "Idempotency-Key": "phase11-race-replace" },
+        ),
+      ),
+      other.request(`/v1/projects/${h.projectId}/agent-tokens/${tokenId}`, {
+        method: "DELETE",
+        headers: {
+          Cookie: maintainer,
+          Origin: API_ORIGIN,
+          "Idempotency-Key": "phase11-race-revoke",
+        },
+      }),
+    ]);
+
+    expect(revocation.status).toBe(204);
+    expect([200, 409]).toContain(replacement.status);
+    expect((await h.repos.agentTokens.getById(tokenId))?.revokedAt).not.toBeNull();
+    const updates = await h.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM audit_events
+          WHERE action = 'agent_token.capabilities.update' AND target_id = ?`,
+      )
+      .bind(tokenId)
+      .first<{ count: number }>();
+    expect(updates?.count).toBe(replacement.status === 200 ? 1 : 0);
   });
 
   it("projects capabilities in the session-only token list", async () => {

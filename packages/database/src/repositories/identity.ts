@@ -519,6 +519,57 @@ export class AgentTokensRepository {
       );
   }
 
+  /**
+   * Replace a live token's authority only when its complete stored state still
+   * matches the caller's read. A lost CAS assigns NULL to the NOT NULL
+   * `scopes` column so an enclosing batch aborts with its audit/idempotency
+   * writes instead of recording a change that did not happen.
+   */
+  setCapabilityStateCasStatement(
+    id: string,
+    expected: {
+      scopes: readonly string[];
+      capabilitiesV2: readonly string[] | null;
+      capabilityMode: AgentTokenCapabilityMode;
+    },
+    state: {
+      scopes: readonly string[];
+      capabilitiesV2: readonly string[] | null;
+      capabilityMode: AgentTokenCapabilityMode;
+    },
+    activeAfter: string,
+  ): SqlStatement {
+    const expectedCapabilities =
+      expected.capabilitiesV2 === null ? null : JSON.stringify(expected.capabilitiesV2);
+    return this.db
+      .prepare(
+        `UPDATE agent_tokens
+            SET scopes = CASE
+                  WHEN scopes = ?
+                   AND ((capabilities_v2 IS NULL AND ? IS NULL) OR capabilities_v2 = ?)
+                   AND capability_mode = ?
+                   AND revoked_at IS NULL
+                   AND expires_at > ?
+                  THEN ?
+                  ELSE NULL
+                END,
+                capabilities_v2 = ?,
+                capability_mode = ?
+          WHERE id = ?`,
+      )
+      .bind(
+        JSON.stringify(expected.scopes),
+        expectedCapabilities,
+        expectedCapabilities,
+        expected.capabilityMode,
+        activeAfter,
+        JSON.stringify(state.scopes),
+        state.capabilitiesV2 === null ? null : JSON.stringify(state.capabilitiesV2),
+        state.capabilityMode,
+        id,
+      );
+  }
+
   /** Returns true when the token existed. */
   async setCapabilityState(
     id: string,

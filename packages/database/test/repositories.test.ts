@@ -82,6 +82,88 @@ describe("repositories", () => {
     db.close();
   });
 
+  it("compare-and-swaps capability state and aborts after a competing update or revoke", async () => {
+    const { db, repos, project, actor } = await seedBasics();
+    const token: AgentTokenRecord = {
+      id: uuidv7(),
+      projectId: project.id,
+      actorId: actor.id,
+      name: "review-agent",
+      tokenHash: uuidv7(),
+      scopes: ["chapters:read"],
+      capabilitiesV2: ["chapters:read"],
+      capabilityMode: "canonical",
+      createdBy: actor.id,
+      createdAt: NOW,
+      expiresAt: "2026-08-22T18:00:00Z",
+      revokedAt: null,
+      lastUsedAt: null,
+    };
+    await repos.agentTokens.insert(token);
+
+    const expected = {
+      scopes: token.scopes,
+      capabilitiesV2: token.capabilitiesV2 ?? null,
+      capabilityMode: token.capabilityMode ?? "legacy",
+    } as const;
+    await db.batch([
+      repos.agentTokens.setCapabilityStateCasStatement(
+        token.id,
+        expected,
+        {
+          scopes: ["chapters:read"],
+          capabilitiesV2: ["chapters:read", "comments:read"],
+          capabilityMode: "canonical",
+        },
+        NOW,
+      ),
+    ]);
+    await expect(
+      db.batch([
+        repos.agentTokens.setCapabilityStateCasStatement(
+          token.id,
+          expected,
+          {
+            scopes: ["chapters:read"],
+            capabilitiesV2: ["chapters:read", "suggestions:read"],
+            capabilityMode: "canonical",
+          },
+          NOW,
+        ),
+      ]),
+    ).rejects.toThrow();
+    expect(await repos.agentTokens.getById(token.id)).toMatchObject({
+      capabilitiesV2: ["chapters:read", "comments:read"],
+      revokedAt: null,
+    });
+
+    const afterUpdate = await repos.agentTokens.getById(token.id);
+    if (afterUpdate === null) throw new Error("token disappeared");
+    await repos.agentTokens.revoke(token.id, "2026-07-19T18:01:00Z");
+    await expect(
+      db.batch([
+        repos.agentTokens.setCapabilityStateCasStatement(
+          token.id,
+          {
+            scopes: afterUpdate.scopes,
+            capabilitiesV2: afterUpdate.capabilitiesV2 ?? null,
+            capabilityMode: afterUpdate.capabilityMode ?? "legacy",
+          },
+          {
+            scopes: [],
+            capabilitiesV2: [],
+            capabilityMode: "canonical",
+          },
+          "2026-07-19T18:02:00Z",
+        ),
+      ]),
+    ).rejects.toThrow();
+    expect((await repos.agentTokens.getById(token.id))?.revokedAt).toBe(
+      "2026-07-19T18:01:00Z",
+    );
+    db.close();
+  });
+
   it("round-trips JSON columns: membership scopes and annotation target", async () => {
     const { db, repos, project, actor, chapter } = await seedBasics();
     await repos.projectMemberships.insert({
