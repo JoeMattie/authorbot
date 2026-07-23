@@ -25,7 +25,7 @@
 import {
   CollabApi,
   canAuthorChapters,
-  isMaintainer,
+  canPublishChapters,
   type ApiResult,
   type Me,
 } from "./api.js";
@@ -452,7 +452,7 @@ export class AuthorbotChapterComposer extends HTMLElement {
 
     // Publishing is a SEPARATE explicit action, outside the save form, so it
     // can never be triggered by submitting the composer.
-    if (isMaintainer(this.me)) {
+    if (canPublishChapters(this.me)) {
       this.body.append(this.buildPublishAction());
     }
     this.renderState();

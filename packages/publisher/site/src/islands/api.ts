@@ -60,7 +60,14 @@ export function roleOf(me: Me | null): Role | null {
 /** Contract §3.5: authoring is editor-or-maintainer, never scope alone. */
 export function canAuthorChapters(me: Me | null): boolean {
   const role = roleOf(me);
-  return (role === "editor" || role === "maintainer") && me !== null && me.scopes.includes("submissions:write");
+  return (role === "editor" || role === "maintainer") &&
+    hasEffectiveCapability(me, "chapters:write", "submissions:write");
+}
+
+/** Publishing is a separate maintainer capability, never implied by writing. */
+export function canPublishChapters(me: Me | null): boolean {
+  return roleOf(me) === "maintainer" &&
+    hasEffectiveCapability(me, "chapters:publish", "submissions:write");
 }
 
 /** Contract §3.6: settings and the overrides are maintainer-only. */
