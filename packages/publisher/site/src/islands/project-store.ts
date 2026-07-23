@@ -19,8 +19,10 @@ import {
   type ChapterHistoryPage,
   type ChapterHistoryRestoreAccepted,
   type ChapterProjection,
+  type ChapterRevisionProposalCommand,
   type ChapterSource,
   type CompletedWorkItem,
+  type CreateRevisionProposalCommand,
   type CreateAnnotationAccepted,
   type FeedEvent,
   type LeaseRelease,
@@ -76,7 +78,7 @@ export interface ProjectStoreApi {
     path: string,
   ): Promise<ApiResult<RepositoryDocumentSource>>;
   createRevisionProposal?(
-    command: RepositoryDocumentProposalCommand,
+    command: CreateRevisionProposalCommand,
     options?: MutationOptions,
   ): Promise<ApiResult<RevisionProposalAccepted>>;
   reviewRevisionProposal?: CollabApi["reviewRevisionProposal"];
@@ -291,6 +293,9 @@ export interface ProjectStoreState {
   proposeRepositoryDocument(
     command: RepositoryDocumentProposalCommand,
   ): Promise<StoreActionResult<RevisionProposalAccepted>>;
+  proposeChapterRevision(
+    command: ChapterRevisionProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>>;
   createChapter(command: ChapterCreateCommand): Promise<StoreActionResult<ChapterAccepted>>;
   reviseChapter(command: ChapterReviseCommand): Promise<StoreActionResult<ChapterAccepted>>;
   setChapterPublication(
@@ -325,7 +330,7 @@ class ProjectStoreApiClient extends CollabApi implements ProjectStoreApi {
   }
 
   async createRevisionProposal(
-    command: RepositoryDocumentProposalCommand,
+    command: CreateRevisionProposalCommand,
     options?: MutationOptions,
   ): Promise<ApiResult<RevisionProposalAccepted>> {
     return this.jsonResult<RevisionProposalAccepted>(
@@ -3238,13 +3243,15 @@ export function createProjectStore(
     return result.ok ? { ok: true, value: result.value } : actionFailure(result);
   };
 
-  const proposeRepositoryDocument = async (
-    command: RepositoryDocumentProposalCommand,
+  const proposeRevision = async (
+    command: CreateRevisionProposalCommand,
+    fingerprintKind: "chapter" | "document",
+    chapterId: string | null,
   ): Promise<StoreActionResult<RevisionProposalAccepted>> => {
     const write = api.createRevisionProposal;
-    if (write === undefined) return unsupported("repository document proposal");
+    if (write === undefined) return unsupported("revision proposal");
     const generation = authorizationGeneration;
-    const fingerprint = commandFingerprint("revision.propose-document", command);
+    const fingerprint = commandFingerprint(`revision.propose-${fingerprintKind}`, command);
     const key = retainedKeyFor(fingerprint);
     const result = await replayOnce(() =>
       write.call(api, command, { idempotencyKey: key }),
@@ -3261,13 +3268,23 @@ export function createProjectStore(
     if (result.value.operationId !== null) {
       await registerOperationContext(result.value.operationId, {
         kind: "revision.apply",
-        chapterId: null,
+        chapterId,
         workItemId: null,
         revisionProposalId: result.value.proposalId,
       });
     }
     return { ok: true, value: result.value };
   };
+
+  const proposeRepositoryDocument = (
+    command: RepositoryDocumentProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
+    proposeRevision(command, "document", null);
+
+  const proposeChapterRevision = (
+    command: ChapterRevisionProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
+    proposeRevision(command, "chapter", command.chapterId);
 
   const writeChapter = async (
     command: ChapterCreateCommand | ChapterReviseCommand,
@@ -3567,6 +3584,7 @@ export function createProjectStore(
     readChapterSource,
     readRepositoryDocument,
     proposeRepositoryDocument,
+    proposeChapterRevision,
     createChapter: (command) => writeChapter(command),
     reviseChapter: (command) => writeChapter(command),
     setChapterPublication,

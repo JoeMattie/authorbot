@@ -41,6 +41,7 @@ interface SchemaNode {
   enum?: string[];
   maxItems?: number;
   required?: string[];
+  allOf?: SchemaNode[];
   oneOf?: SchemaNode[];
   items?: SchemaNode;
   properties?: Record<string, SchemaNode>;
@@ -205,6 +206,25 @@ describe("openapi.yaml is synced with the router", () => {
       "block_replacement",
       "chapter_replacement",
     ]);
+  });
+
+  it("documents the exact chapter-source hash needed by revision proposals", () => {
+    const source = responseSchema(
+      "/v1/projects/{projectId}/chapters/{chapterId}/source",
+      "get",
+    );
+    expect(source?.required).toEqual(expect.arrayContaining([
+      "chapterId",
+      "revision",
+      "contentHash",
+      "body",
+    ]));
+    expect(source?.properties?.["contentHash"]?.allOf?.[0]?.$ref).toBe(
+      "#/components/schemas/ContentHash",
+    );
+    expect(
+      spec.components.schemas["CreateChapterReplacementProposal"]?.required,
+    ).toEqual(expect.arrayContaining(["baseRevision", "baseContentHash"]));
   });
 
   it("documents the exact canonical editorial capability vocabulary", () => {

@@ -374,6 +374,38 @@ authorbot-manuscript-editor:empty {
   margin: 0 0 2rem;
 }
 
+.ab-manuscript-recovery {
+  margin: 0 0 2rem;
+  padding: 1rem;
+  border: 1px solid var(--warning-border, #b7791f);
+  border-radius: 12px;
+  background: var(--warning-surface, color-mix(in srgb, #f6ad55 12%, var(--surface)));
+}
+
+.ab-manuscript-recovery-title,
+.ab-manuscript-recovery-copy,
+.ab-manuscript-stale-warning {
+  margin: 0 0 0.75rem;
+}
+
+.ab-manuscript-recovery-title {
+  font-size: 1.05rem;
+}
+
+.ab-manuscript-recovery-preview {
+  margin-bottom: 0.85rem;
+}
+
+.ab-manuscript-recovery-prose {
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.ab-manuscript-recovery-actions {
+  justify-content: flex-start;
+}
+
 .ab-manuscript-editor-root {
   width: 100%;
   min-height: 22rem;
@@ -400,6 +432,30 @@ authorbot-manuscript-editor:empty {
 .ab-manuscript-editor-root .ProseMirror:focus-visible {
   outline: 2px solid var(--blue-500, var(--link));
   outline-offset: 3px;
+}
+
+.ab-manuscript-review-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.ab-manuscript-summary-field,
+.ab-manuscript-notes-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.ab-manuscript-summary,
+.ab-manuscript-notes {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.ab-manuscript-notes {
+  resize: vertical;
 }
 
 .ab-manuscript-editor-actions {
@@ -448,6 +504,15 @@ authorbot-manuscript-editor:empty {
 
   .ab-manuscript-editor-root .ProseMirror {
     padding: 1.25rem 1rem;
+  }
+
+  .ab-manuscript-review-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .ab-manuscript-editor-actions .ab-btn {
+    width: 100%;
+    min-height: 44px;
   }
 }
 

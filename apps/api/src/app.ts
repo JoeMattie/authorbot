@@ -1117,6 +1117,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       summary: fm.data.summary ?? null,
       /** Send this straight back as `baseRevision` on the revise. */
       revision: fm.data.revision,
+      /** Bind a revision proposal to these exact repository bytes. */
+      contentHash: `sha256:${await sha256Hex(source)}`,
       status: fm.data.status,
       /**
        * Markdown as an author wrote it: no frontmatter, no marker syntax.

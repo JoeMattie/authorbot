@@ -465,6 +465,8 @@ export interface ChapterSource {
   title: string;
   summary: string | null;
   revision: number;
+  /** Exact digest of the repository source read for this response. */
+  contentHash?: string;
   status: string;
   body: string;
 }
@@ -682,6 +684,22 @@ export interface RepositoryDocumentProposalCommand {
   notes?: string;
   applyImmediately?: boolean;
 }
+
+/** Complete, immutable chapter replacement proposed from one exact source read. */
+export interface ChapterRevisionProposalCommand {
+  proposalType: "chapter_replacement";
+  chapterId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  proposedContent: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
+}
+
+export type CreateRevisionProposalCommand =
+  | ChapterRevisionProposalCommand
+  | RepositoryDocumentProposalCommand;
 
 /** A normal proposal is pending review; an atomic maintainer apply is queued. */
 export interface RevisionProposalAccepted {

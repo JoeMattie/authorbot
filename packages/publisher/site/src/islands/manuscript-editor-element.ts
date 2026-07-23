@@ -2,16 +2,23 @@
  * Lightweight in-place chapter editor launcher.
  *
  * This element contains no Milkdown import. It offers Edit only after the
- * shared project store confirms both an editor/maintainer role and the exact
- * `revisions:write` capability, then requests the heavy surface on activation.
- * Submission is an event callback boundary for Slice 4; this module never
- * falls back to the legacy direct chapter-revision command.
+ * shared project store confirms the exact read/write capabilities, then
+ * requests the heavy surface on activation. Submissions are immutable,
+ * hash-bound revision proposals; this module never falls back to the legacy
+ * direct chapter-revision command.
  */
-import { roleOf, type ChapterSource, type Me } from "./api.js";
+import {
+  hasEffectiveCapability,
+  roleOf,
+  type ChapterRevisionProposalCommand,
+  type ChapterSource,
+  type Me,
+} from "./api.js";
 import {
   clearChapterDraft,
   loadChapterDraft,
   saveChapterDraft,
+  type StoredChapterDraft,
 } from "./chapter-composer-state.js";
 import { el } from "./dom.js";
 import { createLazyManuscriptSurface } from "./manuscript-surface-loader.js";
@@ -30,13 +37,15 @@ export interface ChapterRevisionDraft {
   title: string;
   markdown: string;
   baseRevision: number;
-  /** Added to the read model by Slice 4; null on older compatible Workers. */
-  baseContentHash: string | null;
+  baseContentHash: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
 }
 
 export interface ChapterRevisionSubmitEventDetail {
   draft: ChapterRevisionDraft;
-  /** A synchronous listener supplies the authoritative store/API action. */
+  /** Optional compatibility hook; normal submissions use the shared store. */
   handle: ((draft: ChapterRevisionDraft) => Promise<ManuscriptSubmitResult>) | null;
 }
 
@@ -66,10 +75,13 @@ function parseConfig(host: HTMLElement): Config | null {
 }
 
 function mayProposeRevision(me: Me | null): boolean {
-  const role = roleOf(me);
-  return me !== null &&
-    (role === "editor" || role === "maintainer") &&
-    me.scopes.includes("revisions:write");
+  return hasEffectiveCapability(me, "chapters:read", "chapters:read") &&
+    hasEffectiveCapability(me, "revisions:write", "revisions:write");
+}
+
+function mayApplyRevision(me: Me | null): boolean {
+  return roleOf(me) === "maintainer" && mayProposeRevision(me) &&
+    hasEffectiveCapability(me, "revisions:review", "revisions:review");
 }
 
 function storageOrNull(): Storage | null {
@@ -81,8 +93,14 @@ function storageOrNull(): Storage | null {
 }
 
 function sourceContentHash(source: ChapterSource): string | null {
-  const candidate = (source as ChapterSource & { contentHash?: unknown }).contentHash;
-  return typeof candidate === "string" ? candidate : null;
+  const candidate = source.contentHash;
+  return typeof candidate === "string" && /^sha256:[0-9a-f]{64}$/u.test(candidate)
+    ? candidate
+    : null;
+}
+
+function canonicalBody(markdown: string): string {
+  return markdown.replace(/\r\n?/gu, "\n").trim();
 }
 
 export class AuthorbotManuscriptEditor extends HTMLElement {
@@ -92,11 +110,24 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
   private editButton: HTMLButtonElement | null = null;
   private editorShell: HTMLElement | null = null;
   private editorRoot: HTMLElement | null = null;
+  private summaryInput: HTMLInputElement | null = null;
+  private notesInput: HTMLTextAreaElement | null = null;
+  private errorLine: HTMLElement | null = null;
   private statusLine: HTMLElement | null = null;
+  private recoveryPanel: HTMLElement | null = null;
   private session: ManuscriptSurfaceSession | null = null;
   private source: ChapterSource | null = null;
+  private baseRevision: number | null = null;
+  private baseContentHash: string | null = null;
   private started = false;
+  private busy = false;
+  private applyImmediately = false;
   private generation = 0;
+  private readonly beforeUnload = (event: BeforeUnloadEvent): void => {
+    if (!this.isDirty()) return;
+    event.preventDefault();
+    event.returnValue = true;
+  };
 
   connectedCallback(): void {
     if (this.started) return;
@@ -110,7 +141,9 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
 
   disconnectedCallback(): void {
     this.started = false;
+    this.busy = false;
     this.generation += 1;
+    window.removeEventListener("beforeunload", this.beforeUnload);
     void this.destroySession(false);
   }
 
@@ -153,22 +186,176 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
   }
 
   private async openEditor(): Promise<void> {
-    if (this.session !== null || this.editButton === null || this.prose === null) return;
+    if (
+      this.session !== null || this.recoveryPanel !== null || this.editButton === null ||
+      this.prose === null || this.busy
+    ) return;
     const generation = this.generation;
+    this.busy = true;
     this.editButton.disabled = true;
     this.setLauncherStatus("Loading chapter editor…");
     const read = await this.store.getState().readChapterSource(this.cfg.chapterId);
     if (!this.current(generation)) return;
     if (!read.ok) {
+      this.busy = false;
       this.editButton.disabled = false;
       this.setLauncherStatus(`The chapter editor could not open: ${read.message}`, true);
       return;
     }
+    const contentHash = sourceContentHash(read.value);
+    if (read.value.chapterId !== this.cfg.chapterId || contentHash === null) {
+      this.busy = false;
+      this.editButton.disabled = false;
+      this.setLauncherStatus(
+        "The chapter editor could not open: the source response did not include the exact chapter identity and content hash.",
+        true,
+      );
+      return;
+    }
     this.source = read.value;
     const stored = loadChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
-    const markdown = stored?.body ?? read.value.body;
+    if (
+      stored !== null &&
+      (stored.baseRevision !== read.value.revision || stored.baseContentHash !== contentHash)
+    ) {
+      this.renderStaleDraftChoice(read.value, stored, contentHash, generation);
+      return;
+    }
+    await this.mountEditor(
+      read.value,
+      stored,
+      read.value.revision,
+      contentHash,
+      false,
+      generation,
+    );
+  }
+
+  private renderStaleDraftChoice(
+    source: ChapterSource,
+    stored: StoredChapterDraft,
+    currentContentHash: string,
+    generation: number,
+  ): void {
+    if (this.editButton === null) return;
+    this.busy = false;
+    this.editButton.disabled = true;
+    this.editButton.setAttribute("aria-expanded", "true");
+    this.setLauncherStatus("");
+
+    const panel = el("section", "ab-manuscript-recovery");
+    panel.setAttribute("role", "alert");
+    panel.setAttribute("aria-label", "Saved chapter draft needs attention");
+    panel.append(
+      el("h2", "ab-manuscript-recovery-title", "Saved draft needs attention"),
+      el(
+        "p",
+        "ab-manuscript-recovery-copy",
+        `This saved draft is based on ${
+          stored.baseRevision === null ? "an unknown revision" : `revision ${stored.baseRevision}`
+        }, while the chapter is now revision ${source.revision}. It has not been discarded or overwritten.`,
+      ),
+    );
+    const preview = el("details", "ab-manuscript-recovery-preview");
+    preview.append(el("summary", "", "Preview saved draft"));
+    const prose = el("pre", "ab-manuscript-recovery-prose");
+    prose.textContent = stored.body;
+    preview.append(prose);
+    panel.append(preview);
+
+    const actions = el("div", "ab-form-actions ab-manuscript-recovery-actions");
+    const validStoredHash = typeof stored.baseContentHash === "string" &&
+      /^sha256:[0-9a-f]{64}$/u.test(stored.baseContentHash);
+    if (stored.baseRevision !== null && validStoredHash) {
+      const recover = el("button", "ab-btn ab-primary", "Recover saved draft");
+      recover.type = "button";
+      recover.addEventListener("click", () => {
+        if (this.busy || this.recoveryPanel !== panel) return;
+        this.busy = true;
+        panel.remove();
+        this.recoveryPanel = null;
+        void this.mountEditor(
+          source,
+          stored,
+          stored.baseRevision as number,
+          stored.baseContentHash as string,
+          true,
+          generation,
+        );
+      });
+      actions.append(recover);
+    } else {
+      panel.append(el(
+        "p",
+        "ab-manuscript-recovery-copy",
+        "This draft predates exact source hashes, so it can be previewed and copied but cannot be submitted as a revision.",
+      ));
+    }
+    const discard = el(
+      "button",
+      "ab-btn ab-danger",
+      "Discard saved draft and edit current",
+    );
+    discard.type = "button";
+    discard.addEventListener("click", () => {
+      if (this.busy || this.recoveryPanel !== panel) return;
+      this.busy = true;
+      clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+      panel.remove();
+      this.recoveryPanel = null;
+      void this.mountEditor(
+        source,
+        null,
+        source.revision,
+        currentContentHash,
+        false,
+        generation,
+      );
+    });
+    const keep = el("button", "ab-btn", "Keep saved draft");
+    keep.type = "button";
+    keep.addEventListener("click", () => {
+      if (this.recoveryPanel !== panel) return;
+      panel.remove();
+      this.recoveryPanel = null;
+      this.source = null;
+      window.removeEventListener("beforeunload", this.beforeUnload);
+      this.editButton!.disabled = false;
+      this.editButton!.setAttribute("aria-expanded", "false");
+      this.setLauncherStatus("Saved draft kept in this tab.");
+      this.editButton!.focus();
+    });
+    actions.append(discard, keep);
+    panel.append(actions);
+    this.recoveryPanel = panel;
+    this.append(panel);
+    window.addEventListener("beforeunload", this.beforeUnload);
+  }
+
+  private async mountEditor(
+    source: ChapterSource,
+    stored: StoredChapterDraft | null,
+    baseRevision: number,
+    baseContentHash: string,
+    staleBase: boolean,
+    generation: number,
+  ): Promise<void> {
+    if (this.editButton === null || this.prose === null) return;
+    this.busy = true;
+    this.editButton.disabled = true;
+    this.source = source;
+    this.baseRevision = baseRevision;
+    this.baseContentHash = baseContentHash;
+    const markdown = stored?.body ?? source.body;
     const shell = el("section", "ab-manuscript-editor-shell");
-    shell.setAttribute("aria-label", `Editing ${read.value.title || this.cfg.chapterTitle}`);
+    shell.setAttribute("aria-label", `Editing ${source.title || this.cfg.chapterTitle}`);
+    if (staleBase) {
+      shell.append(el(
+        "p",
+        "ab-warning ab-manuscript-stale-warning",
+        `Recovered draft from revision ${baseRevision}. It remains bound to that older source and may conflict with current revision ${source.revision}.`,
+      ));
+    }
     const editorRoot = el("div", "ab-manuscript-editor-root");
     const error = el("p", "ab-error ab-manuscript-error");
     error.setAttribute("role", "alert");
@@ -177,17 +364,50 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
     status.hidden = true;
+    const reviewFields = el("div", "ab-manuscript-review-fields");
+    const summaryLabel = el("label", "ab-manuscript-summary-field");
+    summaryLabel.append(el("span", "ab-field-label", "Change summary (optional)"));
+    const summary = el("input", "ab-input ab-manuscript-summary");
+    summary.type = "text";
+    summary.maxLength = 2000;
+    summary.value = stored?.changeSummary ?? "";
+    summary.addEventListener("input", () => this.persistDraft());
+    summaryLabel.append(summary);
+    const notesLabel = el("label", "ab-manuscript-notes-field");
+    notesLabel.append(el("span", "ab-field-label", "Notes for reviewer (optional)"));
+    const notes = el("textarea", "ab-textarea ab-manuscript-notes");
+    notes.rows = 3;
+    notes.maxLength = 10_000;
+    notes.value = stored?.notes ?? "";
+    notes.addEventListener("input", () => this.persistDraft());
+    notesLabel.append(notes);
+    reviewFields.append(summaryLabel, notesLabel);
     const actions = el("div", "ab-form-actions ab-manuscript-editor-actions");
     const cancel = el("button", "ab-btn", "Cancel");
     cancel.type = "button";
     cancel.addEventListener("click", () => void this.cancelEditor());
     const submit = el("button", "ab-btn ab-primary", "Submit for review");
     submit.type = "button";
-    submit.addEventListener("click", () => void this.submitEditor(submit, error, status));
+    submit.dataset.manuscriptSubmit = "review";
+    submit.addEventListener("click", () => void this.submitEditor(false));
     actions.append(cancel, submit);
-    shell.append(editorRoot, error, status, actions);
+    if (mayApplyRevision(this.store.getState().session)) {
+      const apply = el(
+        "button",
+        "ab-btn ab-primary ab-manuscript-apply",
+        "Apply changes",
+      );
+      apply.type = "button";
+      apply.dataset.manuscriptSubmit = "apply";
+      apply.addEventListener("click", () => void this.submitEditor(true));
+      actions.append(apply);
+    }
+    shell.append(editorRoot, reviewFields, error, status, actions);
     this.editorShell = shell;
     this.editorRoot = editorRoot;
+    this.summaryInput = summary;
+    this.notesInput = notes;
+    this.errorLine = error;
     this.statusLine = status;
     this.append(shell);
     this.prose.hidden = true;
@@ -204,23 +424,17 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
         markdown,
         blockIds,
         activation: "edit",
-        accessibleName: `Chapter text for ${read.value.title || this.cfg.chapterTitle}`,
+        accessibleName: `Chapter text for ${source.title || this.cfg.chapterTitle}`,
         allowBlockNotes: false,
         onMarkdownChange: (body) => {
-          saveChapterDraft(storageOrNull(), this.cfg.project, {
-            chapterId: this.cfg.chapterId,
-            title: read.value.title,
-            body,
-            baseRevision: read.value.revision,
-            caret: null,
-            focus: "body",
-          });
+          this.persistDraft(body);
         },
         onSubmit: (request) => this.requestSubmission(request),
       });
     } catch (caught) {
       if (!this.current(generation)) return;
       await this.destroySession(false);
+      this.busy = false;
       this.editButton.disabled = false;
       this.setLauncherStatus(
         `The chapter editor could not open: ${caught instanceof Error ? caught.message : String(caught)}`,
@@ -232,8 +446,10 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       await this.destroySession(false);
       return;
     }
+    this.busy = false;
     this.editButton.disabled = false;
     this.setLauncherStatus("");
+    window.addEventListener("beforeunload", this.beforeUnload);
     this.session.focus();
   }
 
@@ -241,40 +457,81 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     request: ManuscriptSubmitRequest,
   ): Promise<ManuscriptSubmitResult> {
     const source = this.source;
-    if (source === null) {
+    const baseRevision = this.baseRevision;
+    const baseContentHash = this.baseContentHash;
+    if (source === null || baseRevision === null || baseContentHash === null) {
       return { ok: false, message: "The chapter base is no longer available." };
     }
+    const markdown = canonicalBody(request.markdown);
+    if (markdown === "") {
+      return { ok: false, message: "Write some text before submitting this revision." };
+    }
+    if (markdown === canonicalBody(source.body)) {
+      return { ok: false, message: "Make a change before submitting this revision." };
+    }
+    const changeSummary = this.summaryInput?.value.trim() ?? "";
+    const notes = this.notesInput?.value.trim() ?? "";
     const draft: ChapterRevisionDraft = {
       chapterId: this.cfg.chapterId,
       title: source.title,
-      markdown: request.markdown,
-      baseRevision: source.revision,
-      baseContentHash: sourceContentHash(source),
+      markdown,
+      baseRevision,
+      baseContentHash,
+      ...(changeSummary === "" ? {} : { changeSummary }),
+      ...(notes === "" ? {} : { notes }),
+      ...(this.applyImmediately ? { applyImmediately: true } : {}),
     };
     const detail: ChapterRevisionSubmitEventDetail = { draft, handle: null };
     this.dispatchEvent(new CustomEvent<ChapterRevisionSubmitEventDetail>(
       CHAPTER_REVISION_SUBMIT_EVENT,
       { bubbles: true, composed: true, detail },
     ));
-    if (detail.handle === null) {
-      return {
-        ok: false,
-        message: "Revision submission is not connected on this deployment.",
-      };
+    if (detail.handle !== null) {
+      return detail.handle(draft);
     }
-    return detail.handle(draft);
+    const command: ChapterRevisionProposalCommand = {
+      proposalType: "chapter_replacement",
+      chapterId: draft.chapterId,
+      baseRevision: draft.baseRevision,
+      baseContentHash: draft.baseContentHash,
+      proposedContent: draft.markdown,
+      ...(draft.changeSummary === undefined ? {} : { changeSummary: draft.changeSummary }),
+      ...(draft.notes === undefined ? {} : { notes: draft.notes }),
+      ...(draft.applyImmediately === true ? { applyImmediately: true } : {}),
+    };
+    const result = await this.store.getState().proposeChapterRevision(command);
+    return result.ok
+      ? {
+          ok: true,
+          message: draft.applyImmediately === true
+            ? "Changes are applying. This page will update after deployment."
+            : "Revision submitted for review.",
+        }
+      : { ok: false, message: result.message, status: result.status };
   }
 
-  private async submitEditor(
-    button: HTMLButtonElement,
-    error: HTMLElement,
-    status: HTMLElement,
-  ): Promise<void> {
+  private async submitEditor(applyImmediately: boolean): Promise<void> {
     const session = this.session;
-    if (session === null) return;
-    button.disabled = true;
+    const error = this.errorLine;
+    const status = this.statusLine;
+    if (session === null || error === null || status === null || this.busy) return;
+    const me = this.store.getState().session;
+    if (!mayProposeRevision(me)) {
+      this.showEditorError("You no longer have permission to submit this revision.");
+      return;
+    }
+    if (applyImmediately && !mayApplyRevision(me)) {
+      this.showEditorError("You no longer have permission to apply this revision.");
+      return;
+    }
+    this.persistDraft();
+    this.busy = true;
+    this.applyImmediately = applyImmediately;
+    this.setEditorBusy(true);
     error.hidden = true;
-    status.textContent = "Submitting the chapter for review…";
+    status.textContent = applyImmediately
+      ? "Applying chapter changes…"
+      : "Submitting the chapter for review…";
     status.hidden = false;
     let result: ManuscriptSubmitResult;
     try {
@@ -282,20 +539,32 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     } catch (caught) {
       result = { ok: false, message: caught instanceof Error ? caught.message : String(caught) };
     }
-    button.disabled = false;
+    this.applyImmediately = false;
+    this.busy = false;
+    this.setEditorBusy(false);
     if (!result.ok) {
-      error.textContent = result.message ?? "The revision could not be submitted.";
+      const prefix = result.status === 409
+        ? "The chapter changed after this editor opened. Your draft is still here. "
+        : "";
+      error.textContent = `${prefix}${result.message ?? "The revision could not be submitted."}`;
       error.hidden = false;
       status.hidden = true;
+      this.persistDraft();
       return;
     }
     clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
-    status.textContent = result.message ?? "Revision submitted for review.";
-    status.hidden = false;
+    await this.destroySession(false);
+    this.setLauncherStatus(
+      result.message ?? (applyImmediately
+        ? "Changes are applying. This page will update after deployment."
+        : "Revision submitted for review."),
+    );
+    this.editButton?.focus();
   }
 
   private async cancelEditor(): Promise<void> {
-    if (this.session?.dirty === true && !window.confirm("Discard this in-progress chapter edit?")) {
+    if (this.busy) return;
+    if (this.isDirty() && !window.confirm("Discard this in-progress chapter edit?")) {
       return;
     }
     clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
@@ -303,18 +572,97 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
   }
 
   private async destroySession(restoreFocus: boolean): Promise<void> {
+    window.removeEventListener("beforeunload", this.beforeUnload);
+    this.busy = false;
+    this.applyImmediately = false;
     const session = this.session;
     this.session = null;
     if (session !== null) await session.destroy();
     this.editorShell?.remove();
     this.editorShell = null;
     this.editorRoot = null;
+    this.summaryInput = null;
+    this.notesInput = null;
+    this.errorLine = null;
     this.statusLine = null;
+    this.source = null;
+    this.baseRevision = null;
+    this.baseContentHash = null;
+    this.recoveryPanel?.remove();
+    this.recoveryPanel = null;
     if (this.prose !== null) this.prose.hidden = false;
     if (this.editButton !== null) {
       this.editButton.setAttribute("aria-expanded", "false");
       if (restoreFocus) this.editButton.focus();
     }
+  }
+
+  private isDirty(): boolean {
+    if (this.recoveryPanel !== null) return true;
+    let proseChanged = this.session?.dirty === true;
+    if (this.session !== null && this.source !== null) {
+      try {
+        proseChanged = this.baseRevision !== this.source.revision ||
+          this.baseContentHash !== sourceContentHash(this.source) ||
+          canonicalBody(this.session.getMarkdown()) !== canonicalBody(this.source.body);
+      } catch {
+        // The surface's own dirty flag remains the safe loss-warning fallback.
+      }
+    }
+    return proseChanged || (this.summaryInput?.value.trim() ?? "") !== "" ||
+      (this.notesInput?.value.trim() ?? "") !== "";
+  }
+
+  private persistDraft(markdown?: string): void {
+    const source = this.source;
+    const baseRevision = this.baseRevision;
+    const baseContentHash = this.baseContentHash;
+    if (source === null || baseRevision === null || baseContentHash === null) return;
+    let body = markdown;
+    if (body === undefined) {
+      try {
+        body = this.session?.getMarkdown() ?? source.body;
+      } catch {
+        return;
+      }
+    }
+    const baseMatchesCurrent = baseRevision === source.revision &&
+      baseContentHash === sourceContentHash(source);
+    if (
+      baseMatchesCurrent &&
+      canonicalBody(body) === canonicalBody(source.body) &&
+      (this.summaryInput?.value.trim() ?? "") === "" &&
+      (this.notesInput?.value.trim() ?? "") === ""
+    ) {
+      clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+      return;
+    }
+    saveChapterDraft(storageOrNull(), this.cfg.project, {
+      chapterId: this.cfg.chapterId,
+      title: source.title,
+      body,
+      baseRevision,
+      baseContentHash,
+      changeSummary: this.summaryInput?.value ?? "",
+      notes: this.notesInput?.value ?? "",
+      caret: null,
+      focus: "body",
+    });
+  }
+
+  private setEditorBusy(busy: boolean): void {
+    for (const button of this.editorShell?.querySelectorAll<HTMLButtonElement>("button") ?? []) {
+      button.disabled = busy;
+    }
+    if (this.summaryInput !== null) this.summaryInput.disabled = busy;
+    if (this.notesInput !== null) this.notesInput.disabled = busy;
+  }
+
+  private showEditorError(message: string): void {
+    if (this.errorLine === null || this.statusLine === null) return;
+    this.errorLine.textContent = message;
+    this.errorLine.hidden = false;
+    this.statusLine.hidden = true;
   }
 
   private setLauncherStatus(message: string, error = false): void {

@@ -245,6 +245,11 @@ export interface StoredChapterDraft {
   title: string;
   body: string;
   baseRevision: number | null;
+  /** Present for revision-proposal drafts that must stay bound to exact bytes. */
+  baseContentHash?: string;
+  /** Optional review context used by the in-place manuscript editor. */
+  changeSummary?: string;
+  notes?: string;
   /** Caret offset within the focused field, so a refresh returns the writer
    * exactly where they were. */
   caret: number | null;
@@ -325,6 +330,13 @@ export function loadChapterDraft(
       title: parsed.title,
       body: parsed.body,
       baseRevision: typeof parsed.baseRevision === "number" ? parsed.baseRevision : null,
+      ...(typeof parsed.baseContentHash === "string"
+        ? { baseContentHash: parsed.baseContentHash }
+        : {}),
+      ...(typeof parsed.changeSummary === "string"
+        ? { changeSummary: parsed.changeSummary }
+        : {}),
+      ...(typeof parsed.notes === "string" ? { notes: parsed.notes } : {}),
       caret: typeof parsed.caret === "number" ? parsed.caret : null,
       focus: focus === "title" || focus === "body" ? focus : null,
     };

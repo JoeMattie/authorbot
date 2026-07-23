@@ -1026,7 +1026,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [chapterId, title, revision, status, body]
+                required: [chapterId, title, revision, contentHash, status, body]
                 properties:
                   chapterId:
                     type: string
@@ -1039,6 +1039,13 @@ paths:
                   revision:
                     type: integer
                     description: Send back as `baseRevision` when revising.
+                  contentHash:
+                    allOf:
+                      - $ref: "#/components/schemas/ContentHash"
+                    description: >
+                      Digest of the exact repository source read for this
+                      response. Send back as `baseContentHash` when proposing
+                      a chapter revision.
                   status:
                     type: string
                     enum: [draft, proposed, published]

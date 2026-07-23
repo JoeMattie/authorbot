@@ -10,6 +10,8 @@ export interface ManuscriptSubmitRequest {
 export interface ManuscriptSubmitResult {
   ok: boolean;
   message?: string;
+  /** HTTP-style status when the store rejected the proposal. */
+  status?: number;
 }
 
 export interface ManuscriptSurfaceOptions {

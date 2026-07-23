@@ -36,6 +36,7 @@ import {
 } from "./phase4-helpers.js";
 import { uuidv7 } from "../src/ids.js";
 import { PROSE_OUTBOX_KINDS } from "../src/coordinator.js";
+import { sha256Hex } from "../src/crypto.js";
 import { createDrainRunner } from "../src/drain.js";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -777,7 +778,7 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
   };
 
   it("returns prose with no frontmatter and no block markers", async () => {
-    const { chapterId } = await createChapter({ title: "The Ridge", body: PROSE });
+    const { chapterId, source } = await createChapter({ title: "The Ridge", body: PROSE });
     const { status, body } = await getSource(chapterId);
 
     expect(status).toBe(200);
@@ -786,6 +787,7 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
     expect(String(body["body"])).not.toContain("---");
     expect(body["title"]).toBe("The Ridge");
     expect(body["status"]).toBe("draft");
+    expect(body["contentHash"]).toBe(`sha256:${await sha256Hex(source)}`);
   });
 
   it("uses the coordinator source reader when the Worker has no local Git reader", async () => {

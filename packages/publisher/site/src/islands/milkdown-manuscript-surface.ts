@@ -513,6 +513,7 @@ export async function createManuscriptSurface(
   const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (!dirty) return;
     event.preventDefault();
+    event.returnValue = true;
   };
   if (options.activation === "edit") {
     window.addEventListener("beforeunload", warnBeforeUnload);
