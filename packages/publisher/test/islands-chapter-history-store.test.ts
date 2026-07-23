@@ -20,6 +20,11 @@ const me: Me = {
   actor: { id: "editor-1", displayName: "Editor", externalIdentity: "github:editor" },
   memberships: [{ role: "editor" }],
   scopes: ["history:read", "revisions:write"],
+  capabilityMode: "canonical",
+  grantedCapabilities: ["history:read", "revisions:write"],
+  roleCapabilityCeiling: ["history:read", "revisions:write"],
+  effectiveCapabilities: ["history:read", "revisions:write"],
+  legacyEffectiveActions: [],
 };
 
 const revision = (value: number, current = false) => ({

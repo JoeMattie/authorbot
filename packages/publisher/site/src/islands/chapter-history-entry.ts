@@ -1,5 +1,5 @@
-/** Scope-gated, click-lazy entry point for the inline chapter time machine. */
-import type { Me } from "./api.js";
+/** Capability-gated, click-lazy entry point for the inline chapter time machine. */
+import { hasEffectiveCapability, type Me } from "./api.js";
 import { el } from "./dom.js";
 import { loadLazyModule } from "./lazy-module.js";
 import { loadProjectStore } from "./project-store-loader.js";
@@ -68,7 +68,7 @@ function parseConfig(host: HTMLElement): ChapterHistoryEntryConfig | null {
 }
 
 function canReadHistory(me: Me | null): boolean {
-  return me?.scopes.includes("history:read") === true;
+  return hasEffectiveCapability(me, "history:read", "history:read");
 }
 
 export class AuthorbotChapterHistory extends HTMLElement {

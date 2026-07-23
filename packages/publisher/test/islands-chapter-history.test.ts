@@ -6,7 +6,10 @@ import {
   setChapterHistoryPanelLoaderForTests,
 } from "../site/src/islands/chapter-history-entry.js";
 import { AuthorbotChapterHistoryPanel } from "../site/src/islands/chapter-history-panel.js";
-import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
+import {
+  getProjectStore,
+  resetProjectStoresForTests,
+} from "../site/src/islands/project-store.js";
 
 const API = "http://api.test";
 const PROJECT = "hollow-creek-anomaly";
@@ -37,7 +40,9 @@ function content(value: number): string {
   return value === 3 ? "Current <img src=x onerror=alert(1)>\n" : `Revision ${value}\n`;
 }
 
-function stubApi(scopes = ["history:read", "revisions:write", "revisions:read"]): void {
+function stubApi(
+  effectiveCapabilities = ["history:read", "revisions:write", "revisions:read"],
+): void {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -46,7 +51,14 @@ function stubApi(scopes = ["history:read", "revisions:write", "revisions:read"])
         return json({
           actor: { id: "editor-1", displayName: "Editor", externalIdentity: "github:editor" },
           memberships: [{ role: "editor" }],
-          scopes,
+          // Deliberately broad legacy shadows prove the canonical projection
+          // is authoritative for every History affordance.
+          scopes: ["history:read", "revisions:write", "revisions:read"],
+          capabilityMode: "canonical",
+          grantedCapabilities: effectiveCapabilities,
+          roleCapabilityCeiling: ["history:read", "revisions:write", "revisions:read"],
+          effectiveCapabilities,
+          legacyEffectiveActions: [],
         });
       }
       if (url.endsWith(`/chapters/${CHAPTER}/history?limit=50`)) {
@@ -86,7 +98,14 @@ function stubApi(scopes = ["history:read", "revisions:write", "revisions:read"])
               : {
                   fromRevision: compare === "previous" ? comparisonRevision : selected,
                   toRevision: compare === "previous" ? selected : comparisonRevision,
-                  unifiedDiff: null,
+                  unifiedDiff: [
+                    "--- a/chapter.md",
+                    "+++ b/chapter.md",
+                    "@@ -1 +1 @@",
+                    `-${content(compare === "previous" ? comparisonRevision : selected).trimEnd()}`,
+                    `+${content(compare === "previous" ? selected : comparisonRevision).trimEnd()}`,
+                    "",
+                  ].join("\n"),
                   computationLimited: false,
                 },
         });
@@ -242,6 +261,66 @@ describe("inline chapter history", () => {
       "cannot propose restoring",
     );
     expect(readOnly.querySelector(".ab-history-restore-button")).toBeNull();
+
+    readOnly.remove();
+    resetProjectStoresForTests();
+    stubApi(["history:read", "revisions:write"]);
+    const writeWithoutRead = mount();
+    await expect.poll(() =>
+      writeWithoutRead.querySelector<HTMLButtonElement>(".ab-history-trigger"),
+    ).toBeTruthy();
+    writeWithoutRead.querySelector<HTMLButtonElement>(".ab-history-trigger")?.click();
+    await expect.poll(() =>
+      writeWithoutRead.querySelector(".ab-history-detail-header h3")?.textContent,
+    ).toBe("Revision 3 of 3");
+    writeWithoutRead
+      .querySelector<HTMLButtonElement>('.ab-history-revision[data-revision="2"]')
+      ?.click();
+    await expect.poll(() =>
+      writeWithoutRead.querySelector<HTMLButtonElement>(".ab-history-restore-button"),
+    ).toBeTruthy();
+    writeWithoutRead.querySelector<HTMLButtonElement>(".ab-history-restore-button")?.click();
+    await expect.poll(() =>
+      writeWithoutRead.querySelector(".ab-history-restore-success")?.textContent,
+    ).toContain("submitted as a proposal for review");
+    expect(writeWithoutRead.querySelector(".ab-history-review-link")).toBeNull();
+  });
+
+  it("preserves the active visual diff and focus across unrelated project updates", async () => {
+    stubApi();
+    const host = mount();
+    await expect.poll(() =>
+      host.querySelector<HTMLButtonElement>(".ab-history-trigger"),
+    ).toBeTruthy();
+    host.querySelector<HTMLButtonElement>(".ab-history-trigger")?.click();
+    await expect.poll(() => host.querySelector(".ab-history-detail-header h3")?.textContent).toBe(
+      "Revision 3 of 3",
+    );
+    host
+      .querySelector<HTMLButtonElement>('.ab-history-revision[data-revision="2"]')
+      ?.click();
+    await expect.poll(() => host.querySelector(".ab-history-detail-header h3")?.textContent).toBe(
+      "Revision 2 of 3",
+    );
+    host.querySelector<HTMLButtonElement>('button[data-compare="current"]')?.click();
+    await expect.poll(() => host.querySelector(".ab-revision-diff-visual")).toBeTruthy();
+
+    const diff = host.querySelector<HTMLElement>(".ab-history-diff")!;
+    const visual = host.querySelector<HTMLElement>(".ab-revision-diff-visual")!;
+    const focused = host.querySelector<HTMLButtonElement>(
+      'button[data-compare="current"]',
+    )!;
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+
+    getProjectStore({ apiBase: API, project: PROJECT }).setState({
+      workItemsStatus: "loading",
+    });
+    await Promise.resolve();
+
+    expect(host.querySelector(".ab-history-diff")).toBe(diff);
+    expect(host.querySelector(".ab-revision-diff-visual")).toBe(visual);
+    expect(document.activeElement).toBe(focused);
   });
 
   it("leaves the chapter readable and reports a terminal lazy-chunk failure once", async () => {

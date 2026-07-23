@@ -1,15 +1,17 @@
 /** Inline, document-safe chapter history browser and restore-proposal surface. */
-import type {
-  ChapterHistoryComparison,
-  ChapterHistoryDetail,
-  ChapterHistoryPage,
-  ChapterHistoryRevision,
-  Me,
+import {
+  hasEffectiveCapability,
+  type ChapterHistoryComparison,
+  type ChapterHistoryDetail,
+  type ChapterHistoryPage,
+  type ChapterHistoryRevision,
+  type Me,
 } from "./api.js";
 import { el } from "./dom.js";
 import {
   chapterHistoryDetailKey,
   type ProjectStore,
+  type ProjectStoreState,
 } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 import { renderRevisionDiff, type RevisionDiffHandle } from "./revision-diff.js";
@@ -52,11 +54,15 @@ function parseConfig(host: HTMLElement): ChapterHistoryConfig | null {
 }
 
 function canReadHistory(me: Me | null): boolean {
-  return me?.scopes.includes("history:read") === true;
+  return hasEffectiveCapability(me, "history:read", "history:read");
 }
 
 function canRestoreHistory(me: Me | null): boolean {
-  return me?.scopes.includes("revisions:write") === true;
+  return hasEffectiveCapability(me, "revisions:write", "revisions:write");
+}
+
+function canReadRevisions(me: Me | null): boolean {
+  return hasEffectiveCapability(me, "revisions:read", "revisions:read");
 }
 
 function dateLabel(value: string): string {
@@ -195,7 +201,9 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       const store = await loadProjectStore(this.cfg);
       if (!this.isCurrent(generation)) return;
       this.store = store;
-      this.unsubscribe = store.subscribe(() => this.sync());
+      this.unsubscribe = store.subscribe((state, previous) => {
+        if (this.historyStateChanged(state, previous)) this.sync();
+      });
       await store.getState().ensureSession();
       if (!this.isCurrent(generation)) return;
       const me = store.getState().session;
@@ -212,6 +220,44 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
         this.showFatal("Chapter history could not load. Close the panel and try again.");
       }
     }
+  }
+
+  /**
+   * The project store also carries notes, work, drafts, and live-connection
+   * state. Rebuilding the history detail for those updates destroys the active
+   * Diff2Html enhancement and steals focus from its controls, so only observe
+   * the session and the currently displayed history resources.
+   */
+  private historyStateChanged(
+    state: ProjectStoreState,
+    previous: ProjectStoreState,
+  ): boolean {
+    if (state.sessionStatus !== previous.sessionStatus || state.session !== previous.session) {
+      return true;
+    }
+    const chapterId = this.cfg.chapterId;
+    if (
+      state.chapterHistoryStatusByChapter[chapterId] !==
+        previous.chapterHistoryStatusByChapter[chapterId] ||
+      state.chapterHistoryByChapter[chapterId] !== previous.chapterHistoryByChapter[chapterId] ||
+      state.chapterHistoryErrorByChapter[chapterId] !==
+        previous.chapterHistoryErrorByChapter[chapterId]
+    ) {
+      return true;
+    }
+    if (this.selectedRevision === null) return false;
+    const key = chapterHistoryDetailKey(
+      chapterId,
+      this.selectedRevision,
+      this.comparison,
+    );
+    return (
+      state.chapterHistoryDetailStatusByKey[key] !==
+        previous.chapterHistoryDetailStatusByKey[key] ||
+      state.chapterHistoryDetailByKey[key] !== previous.chapterHistoryDetailByKey[key] ||
+      state.chapterHistoryDetailErrorByKey[key] !==
+        previous.chapterHistoryDetailErrorByKey[key]
+    );
   }
 
   private sync(): void {
@@ -617,7 +663,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       );
       success.setAttribute("role", "status");
       section.append(success);
-      if (me?.scopes.includes("revisions:read") === true) {
+      if (canReadRevisions(me)) {
         const link = el("a", "ab-history-review-link", "Open revision review");
         link.href = `${this.cfg.base}revisions/`;
         section.append(link);
