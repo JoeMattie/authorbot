@@ -20,6 +20,21 @@ headers = {
 Do not retry the unchanged `Python-urllib/...` request. Keep the same
 `Idempotency-Key` when retrying the same mutation after correcting headers.
 
+## Transport failures and Cloudflare 5xx responses
+
+A connection reset, non-JSON `5xx`, or Cloudflare error page can be ambiguous:
+the response may have failed after Authorbot committed the command. Retry the
+**identical mutation with the same `Idempotency-Key`** after a short bounded
+backoff. Never mint a new key merely because the response was lost. The replay
+returns the stored result instead of claiming or submitting twice.
+
+For a claim, keep the work-item id and original key in memory. Retry the same
+`POST .../claim` once or twice; if it still fails, read the work item and report
+the incident instead of probing alternate schemas. A Cloudflare `Too many
+subrequests by single Worker invocation` page is an Authorbot deployment bug,
+not a signal to fan out your own repository reads. Back off and surface it to
+the maintainer.
+
 ## Stop entirely - these are not yours to retry around
 
 | code | status | meaning and action |
@@ -40,6 +55,7 @@ Do not retry the unchanged `Python-urllib/...` request. Keep the same
 | `idempotency-key-required` | 400 | You sent a mutation with no `Idempotency-Key`. Add one and retry. |
 | `idempotency-key-mismatch` | 409 | You reused a key with a different body. Use a fresh key for the new request. |
 | `submission-base-mismatch` | 409 | Your `baseRevision`/`baseContentHash` do not match the bundle's. You re-derived them instead of copying the bundle's, or the chapter moved. Re-read the bundle and re-apply. |
+| `revision-conflict` | 409 | A chapter or repository document changed after the base was read. Fetch the current source and consciously re-apply the edit; never replace the hash with the new one while keeping stale content. |
 | `unsafe-content` | 422 | The prose failed a safety check (raw HTML, an unsafe URL scheme). Fix the content. |
 | `unknown-block` | 422 | The `target.blockId` no longer exists - the chapter changed. Re-read. |
 
@@ -69,8 +85,9 @@ A flat `401 unauthorized` on every call means the token is invalid, expired,
 revoked, or its membership was removed - the API does not distinguish, on
 purpose. Check `GET /v1/me`; if that also fails, the token is dead and needs
 re-minting by a maintainer. A `403 forbidden` on a specific call means the
-token authenticates but lacks the scope for it - check the effective scopes
-`GET /v1/me` reported, and do not retry.
+token authenticates but lacks the exact capability or its role ceiling. Check
+`effectiveCapabilities` and `roleCapabilityCeiling` from `GET /v1/me`; do not
+retry an adjacent capability or legacy umbrella name.
 
 ## The conflict that looks like success
 

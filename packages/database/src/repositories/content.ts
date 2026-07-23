@@ -33,13 +33,14 @@ export class ChaptersRepository {
     return this.db
       .prepare(
         `INSERT INTO chapters
-           (id, project_id, path, slug, title, chapter_order, status, revision,
+           (id, project_id, path, slug, title, summary, chapter_order, status, revision,
             content_hash, head_commit, last_published_commit, block_ids, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            path = excluded.path,
            slug = excluded.slug,
            title = excluded.title,
+           summary = excluded.summary,
            chapter_order = excluded.chapter_order,
            status = excluded.status,
            revision = excluded.revision,
@@ -55,6 +56,7 @@ export class ChaptersRepository {
         record.path,
         record.slug,
         record.title,
+        record.summary,
         record.order,
         record.status,
         record.revision,
@@ -227,6 +229,7 @@ function mapChapter(row: SqlRow): ChapterProjectionRecord {
     path: String(row["path"]),
     slug: String(row["slug"]),
     title: String(row["title"]),
+    summary: row["summary"] === null ? null : String(row["summary"]),
     order: row["chapter_order"] === null ? null : Number(row["chapter_order"]),
     status: String(row["status"]) as ChapterProjectionRecord["status"],
     revision: Number(row["revision"]),
@@ -479,6 +482,37 @@ export class RepliesRepository {
   async updateStatus(id: string, status: ReplyRecordStatus, updatedAt: string): Promise<boolean> {
     const result = await this.updateStatusStatement(id, status, updatedAt).run();
     return result.changes > 0;
+  }
+
+  setGitOperationStatement(id: string, gitOperationId: string, updatedAt: string): SqlStatement {
+    return this.db
+      .prepare(`UPDATE replies SET git_operation_id = ?, updated_at = ? WHERE id = ?`)
+      .bind(gitOperationId, updatedAt, id);
+  }
+
+  /**
+   * Attach a withdrawal operation only while the same open projection row is
+   * still current. The NOT NULL status constraint aborts the surrounding
+   * batch if another Worker invocation won the race after the caller's read.
+   */
+  setWithdrawalOperationStatement(
+    id: string,
+    expectedGitOperationId: string | null,
+    gitOperationId: string,
+    updatedAt: string,
+  ): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE replies
+            SET status = CASE
+                  WHEN status = 'open' AND git_operation_id IS ? THEN 'open'
+                  ELSE NULL
+                END,
+                git_operation_id = ?,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(expectedGitOperationId, gitOperationId, updatedAt, id);
   }
 
   /** Insert-or-update by id (see AnnotationsRepository.upsertStatement). */

@@ -6,6 +6,16 @@ import {
   resetProjectStoresForTests,
   type ProjectStore,
 } from "../site/src/islands/project-store.js";
+import {
+  resetManuscriptSurfaceModuleLoaderForTests,
+  setManuscriptSurfaceModuleLoaderForTests,
+} from "../site/src/islands/manuscript-surface-loader.js";
+import type {
+  ManuscriptSurfaceModule,
+  ManuscriptSurfaceOptions,
+  ManuscriptSurfaceSession,
+} from "../site/src/islands/manuscript-surface.js";
+import type { ChapterNotesTargetAdapter } from "../site/src/islands/chapter-notes-presentation.js";
 
 /**
  * Smoke tests for the `<authorbot-collab>` element wiring (Phase 2b contract
@@ -63,10 +73,12 @@ function mount(attrs: Record<string, string> = {}): AuthorbotCollab {
 
 beforeEach(() => {
   vi.useRealTimers();
+  window.history.replaceState(null, "", "/chapters/baseline/");
   resetProjectStoresForTests();
 });
 
 afterEach(() => {
+  resetManuscriptSurfaceModuleLoaderForTests();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
@@ -180,7 +192,7 @@ describe("authorbot-collab element", () => {
     mount();
     await expect.poll(() => document.querySelectorAll(".ab-annotate").length).toBe(1);
     const button = document.querySelector(".ab-annotate") as HTMLButtonElement;
-    expect(button.textContent).toContain("Annotate this block");
+    expect(button.getAttribute("aria-label")).toBe("Note on this block");
     // Injected UI is marked so the normalizer skips it and sits outside the
     // block element (the block's own text is pristine).
     expect(button.closest("[data-ab-ui]")).toBeTruthy();
@@ -248,10 +260,9 @@ describe("authorbot-collab element", () => {
     const buttons = [...card.querySelectorAll("button")].map((b) => b.textContent);
     expect(buttons).toContain("Withdraw");
     expect(buttons).toContain("Reply");
-    // Signed-in state shown; block marker counts the annotation.
-    await expect.poll(() => document.querySelector(".ab-me")?.textContent).toBe(
-      "Signed in as mara",
-    );
+    // Identity belongs to the shared account control, not the Notes rail.
+    expect(document.querySelector(".ab-authbar .ab-me")).toBeNull();
+    expect((document.querySelector(".ab-authbar") as HTMLElement)?.hidden).toBe(true);
     expect(document.querySelector(".ab-marker-count")?.textContent).toBe("1");
     expect(document.querySelector(`#b-${BLOCK_ID}`)?.classList.contains("ab-annotated")).toBe(
       true,
@@ -272,6 +283,171 @@ describe("authorbot-collab element", () => {
       inline: "nearest",
       behavior: "smooth",
     });
+  });
+
+  it("activates the lazy Milkdown Notes surface only after an authenticated reader asks", async () => {
+    const highlights = vi.fn();
+    const destroy = vi.fn(async () => {});
+    const adapter: ChapterNotesTargetAdapter = {
+      elementFor: () => null,
+      observeVisibility: () => () => {},
+      setPreview: vi.fn(),
+      reveal: vi.fn(),
+      clearInlineNotes: vi.fn(),
+      mountInlineNote: vi.fn(),
+      setHighlights: highlights,
+    };
+    const create = vi.fn(async (options: ManuscriptSurfaceOptions) => {
+      options.root.append(document.createElement("div"));
+      return {
+        activation: "notes",
+        notes: adapter,
+        dirty: false,
+        getMarkdown: () => options.markdown,
+        focus: vi.fn(),
+        submit: vi.fn(),
+        destroy,
+      } as unknown as ManuscriptSurfaceSession;
+    });
+    setManuscriptSurfaceModuleLoaderForTests(async () => ({
+      createManuscriptSurface: create,
+    } satisfies ManuscriptSurfaceModule));
+    stubFetch({
+      [`${API}/v1/me`]: {
+        status: 200,
+        body: {
+          actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+          scopes: [],
+          capabilityMode: "canonical",
+          effectiveCapabilities: ["chapters:read", "comments:read"],
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/members`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: {
+          items: [{
+            id: "ann-rich",
+            chapterId: CHAPTER_ID,
+            kind: "comment",
+            scope: "range",
+            chapterRevision: 3,
+            target: {
+              blockId: BLOCK_ID,
+              textPosition: { start: 4, end: 9 },
+              textQuote: { exact: "drift" },
+            },
+            authorActorId: "actor-1",
+            body: "Keep this anchored in rich Notes mode.",
+            status: "open",
+            gitOperationId: null,
+            createdAt: "2026-07-19T00:00:00Z",
+          }],
+          nextCursor: null,
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-rich/replies`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/source`]: {
+        status: 200,
+        body: {
+          chapterId: CHAPTER_ID,
+          title: "Loose Ends",
+          summary: null,
+          revision: 3,
+          contentHash: `sha256:${"a".repeat(64)}`,
+          status: "published",
+          body: "The drift appeared on a Tuesday.",
+        },
+      },
+    });
+    mount();
+    await expect.poll(() => document.querySelector<HTMLButtonElement>(".ab-notes-mode-toggle"))
+      .toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+    const toggle = document.querySelector<HTMLButtonElement>(".ab-notes-mode-toggle")!;
+    toggle.click();
+    await expect.poll(() => create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      activation: "notes",
+      markdown: "The drift appeared on a Tuesday.",
+      blockIds: [BLOCK_ID],
+      allowBlockNotes: false,
+    });
+    expect((document.querySelector(".prose") as HTMLElement).hidden).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(highlights).toHaveBeenCalledWith([
+      expect.objectContaining({ annotationId: "ann-rich", blockId: BLOCK_ID }),
+    ]);
+
+    toggle.click();
+    await expect.poll(() => destroy).toHaveBeenCalledTimes(1);
+    expect((document.querySelector(".prose") as HTMLElement).hidden).toBe(false);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("mounts and activates a source-note fragment after annotations hydrate", async () => {
+    const annotation = (id: string, body: string) => ({
+      id,
+      chapterId: CHAPTER_ID,
+      kind: "suggestion",
+      scope: "block",
+      chapterRevision: 3,
+      target: { blockId: BLOCK_ID },
+      authorActorId: "actor-1",
+      body,
+      status: "work_item_created",
+      gitOperationId: null,
+      createdAt: "2026-07-19T00:00:00Z",
+    });
+    stubFetch({
+      [`${API}/v1/me`]: {
+        status: 200,
+        body: {
+          actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+          scopes: ["chapters:read", "annotations:read"],
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/members`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: {
+          items: [
+            annotation("ann-first", "First note."),
+            annotation("ann-linked", "Linked completed-work source."),
+          ],
+          nextCursor: null,
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-first/replies`]: {
+        status: 404,
+        body: { detail: "replies unavailable" },
+      },
+    });
+    window.history.replaceState(
+      null,
+      "",
+      "/chapters/baseline/#authorbot-note-ann-linked",
+    );
+    mount();
+
+    await expect.poll(() => document.querySelectorAll(".ab-card").length).toBe(2);
+    const linked = document.getElementById("authorbot-note-ann-linked") as HTMLElement;
+    expect(linked).toBeTruthy();
+    expect(linked.classList.contains("ab-active")).toBe(true);
+    expect(linked.querySelector(".ab-card-summary")?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(document.getElementById("authorbot-note-ann-first")?.classList.contains("ab-active"))
+      .toBe(false);
   });
 
   it("renders zero collaboration chrome when the API is unreachable (§1)", async () => {
@@ -307,7 +483,7 @@ describe("authorbot-collab element", () => {
       [`${API}/v1/projects/`]: { status: 200, body: { items: [], nextCursor: null } },
     });
     mount();
-    await expect.poll(() => document.querySelector(".ab-me")).toBeTruthy();
+    await expect.poll(() => document.querySelector(".ab-authbar .ab-hint")).toBeTruthy();
     const pencil = document.querySelector<HTMLButtonElement>(".ab-annotate");
     expect(pencil?.hidden).toBe(true);
   });
@@ -326,7 +502,17 @@ describe("authorbot-collab element", () => {
     expect(document.activeElement?.classList.contains("ab-signin")).toBe(true);
   });
 
-  it("announces block scope, links the drawer toggle to its panel, hides the glyph (§4 ARIA)", async () => {
+  it("announces block scope, mounts mobile notes inline, and previews the block accessibly", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      media: "(min-width: 960px)",
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    })));
     stubFetch({
       [`${API}/v1/me`]: {
         status: 200,
@@ -371,16 +557,24 @@ describe("authorbot-collab element", () => {
     const label = document.querySelector(".ab-card")?.getAttribute("aria-label") ?? "";
     expect(label).toContain("on this block");
     expect(label).not.toContain("on this chapter");
-    // Drawer toggle ↔ panel wiring.
-    const toggle = document.querySelector(".ab-drawer-toggle");
-    expect(toggle?.getAttribute("aria-controls")).toBe("ab-drawer-panel");
-    expect(document.getElementById("ab-drawer-panel")).not.toBeNull();
+    expect(document.querySelector(".ab-drawer")).toBeNull();
+    expect(document.querySelector(`.ab-inline-notes[data-block-id="${BLOCK_ID}"] .ab-card`))
+      .toBe(document.querySelector(".ab-card"));
     // Decorative pencil glyph is hidden from AT.
     expect(
       document.querySelector(".ab-annotate-glyph")?.getAttribute("aria-hidden"),
     ).toBe("true");
-    // §2.1 vice-versa: hovering the anchor block highlights its card.
     const block = document.getElementById(`b-${BLOCK_ID}`) as HTMLElement;
+    const annotate = document.querySelector(".ab-annotate") as HTMLButtonElement;
+    const tooltip = document.getElementById(annotate.getAttribute("aria-describedby") ?? "") as HTMLElement;
+    expect(tooltip.getAttribute("role")).toBe("tooltip");
+    annotate.dispatchEvent(new Event("pointerenter"));
+    expect(tooltip.hidden).toBe(false);
+    expect(block.classList.contains("ab-note-target-preview")).toBe(true);
+    annotate.dispatchEvent(new Event("pointerleave"));
+    expect(tooltip.hidden).toBe(true);
+    expect(block.classList.contains("ab-note-target-preview")).toBe(false);
+    // §2.1 vice-versa: hovering the anchor block highlights its card.
     block.dispatchEvent(new Event("mouseenter"));
     expect(document.querySelector(".ab-card")?.classList.contains("ab-hovered")).toBe(true);
     block.dispatchEvent(new Event("mouseleave"));
@@ -532,6 +726,130 @@ describe("authorbot-collab element", () => {
       "Authoritative reply",
     );
     expect(document.querySelector(".ab-reply .ab-status-syncing")).toBeNull();
+  });
+
+  it("closes reply-withdraw confirmation optimistically and restores a rejected reply", async () => {
+    let finishWithdraw: ((response: Response) => void) | undefined;
+    const pendingWithdraw = new Promise<Response>((resolve) => {
+      finishWithdraw = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+              scopes: [],
+              memberships: [{ projectId: "project-1", role: "contributor" }],
+              capabilityMode: "canonical",
+              effectiveCapabilities: [
+                "comments:read",
+                "replies:write",
+                "feedback:withdraw-own",
+              ],
+            }),
+          } as Response;
+        }
+        if (
+          init?.method === "POST" &&
+          url.endsWith("/annotations/ann-reply-withdraw/replies/reply-own/withdraw")
+        ) {
+          return pendingWithdraw;
+        }
+        if (url.includes(`/chapters/${CHAPTER_ID}/annotations`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: [{
+                id: "ann-reply-withdraw",
+                chapterId: CHAPTER_ID,
+                kind: "comment",
+                scope: "block",
+                chapterRevision: 3,
+                target: { blockId: BLOCK_ID },
+                authorActorId: "actor-2",
+                body: "Thread owner",
+                status: "open",
+                gitOperationId: null,
+                createdAt: "2026-07-19T00:00:00Z",
+              }],
+              nextCursor: null,
+            }),
+          } as Response;
+        }
+        if (url.includes("/annotations/ann-reply-withdraw/replies")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: [{
+                id: "reply-own",
+                projectId: "project-1",
+                annotationId: "ann-reply-withdraw",
+                parentReplyId: null,
+                authorActorId: "actor-1",
+                body: "Keep this visible if the command is rejected.",
+                status: "open",
+                gitOperationId: null,
+                createdAt: "2026-07-19T00:01:00Z",
+                updatedAt: "2026-07-19T00:01:00Z",
+              }],
+              nextCursor: null,
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [], nextCursor: null }),
+        } as Response;
+      }),
+    );
+
+    mount();
+    await expect.poll(() => document.querySelector(".ab-reply .ab-body")?.textContent).toBe(
+      "Keep this visible if the command is rejected.",
+    );
+    const withdraw = [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].find(
+      (button) => button.textContent === "Withdraw reply",
+    ) as HTMLButtonElement;
+    withdraw.click();
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].find(
+      (button) => button.textContent === "Confirm withdraw reply",
+    ) as HTMLButtonElement;
+    expect(confirm).toBeTruthy();
+    expect(document.querySelector(".ab-reply button")?.textContent).not.toBe("Withdraw reply");
+
+    confirm.click();
+    // The confirmation closes and the reply body disappears before the
+    // deliberately unresolved HTTP request returns.
+    expect(document.querySelector(".ab-reply-withdrawn")?.textContent).toBe("Reply withdrawn.");
+    expect(document.querySelector(".ab-reply .ab-body")).toBeNull();
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].some(
+        (button) => button.textContent === "Confirm withdraw reply",
+      ),
+    ).toBe(false);
+
+    finishWithdraw?.({
+      ok: false,
+      status: 403,
+      json: async () => ({ detail: "reply withdrawal is forbidden" }),
+    } as Response);
+    await expect.poll(() => document.querySelector(".ab-reply .ab-body")?.textContent).toBe(
+      "Keep this visible if the command is rejected.",
+    );
+    expect(document.querySelector(".ab-reply")?.textContent).toContain("Your role is read-only here.");
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].some(
+        (button) => button.textContent === "Withdraw reply",
+      ),
+    ).toBe(true);
   });
 
   it("clears and closes the note composer before its POST finishes", async () => {

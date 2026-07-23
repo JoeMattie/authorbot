@@ -392,33 +392,55 @@ As a maintainer, mint one:
 
 ```
 POST /v1/projects/{projectId}/agent-tokens
-{ "name": "drafting-agent", "scopes": ["chapters:read", "work:read",
-                                       "work:claim", "submissions:write"] }
+{ "name": "drafting-agent", "capabilities": ["chapters:read", "work:read",
+       "work:claim", "work:submit", "revisions:read", "revisions:write"] }
 ```
 
 The plaintext token is returned **once**. Only its hash is stored.
 
-Grant the narrowest set that does the job - an agent's real power is its
-token's scopes intersected with its membership role, so both are limits:
+Grant the narrowest set that does the job. An agent's real power is its exact
+selected capabilities intersected with its membership-role ceiling, so both
+are independent limits. The Settings page groups every current grant and shows
+what is effective versus selected but inactive:
 
 ```
-  annotations:write   propose changes
-  votes:write         vote (only if you want agents voting)
-  work:claim          claim work items
-  submissions:write   submit completed work
+  comments:read / comments:write          read or create comments
+  suggestions:read / suggestions:write    read or propose suggested edits
+  replies:write                            reply to readable feedback
+  comments:vote / suggestions:vote        vote on that exact feedback kind
+  feedback:withdraw-own                   withdraw the token actor's feedback or reply
+  work:read / work:claim / work:submit    complete assigned Work
+  summaries:write                          update chapter summaries
+  chapters:write / chapters:publish       draft or publish chapters
+  revisions:read / revisions:write        read or submit revision proposals
+  revisions:review                         approve revisions (maintainer role)
+  history:read                             inspect earlier chapter prose
 ```
+
+Moderation, promotion, Work cancellation, chapter publication, and revision
+approval are separate high-impact capabilities and start off. Agent tokens can
+never manage identities, tokens, memberships, settings, or repository
+integration.
 
 The loop an agent runs:
 
 ```
   1. GET  /v1/projects/{p}/work-items?status=ready     find work
   2. POST /v1/projects/{p}/work-items/{id}/claim       get lease + task bundle
-  3. (write the prose, using the bundle's context)
-  4. POST .../lease/renew                              if taking a while
-  5. POST .../submissions                              with lease token +
+  3. GET  bundle.context.storyApi.*                    read outline, timeline,
+                                                       and paged characters
+  4. (write the prose, using the bundle's context and canon)
+  5. POST .../lease/renew                              if taking a while
+  6. POST .../submissions                              with lease token +
                                                        base revision
-  6. GET  /v1/projects/{p}/operations/{opId}           watch it land
+  7. GET  /v1/projects/{p}/operations/{opId}           watch it land, or
+     review the returned proposalId for a whole-chapter replacement
 ```
+
+The claim bundle's `storyRefs` are ids, not guessed URL fragments.
+`context.storyApi` supplies the canonical authenticated routes. Character
+pages are bounded to 20 files and return `nextCursor`; keep paging until it is
+`null` before treating the character bible as complete.
 
 `examples/agent-workflow.mjs` in this repository is a complete, dependency-free
 reference implementation of exactly that loop.

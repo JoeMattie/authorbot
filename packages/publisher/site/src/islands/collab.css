@@ -220,6 +220,11 @@ main.ab-enabled {
   margin-top: 0.5rem;
 }
 
+.ab-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .ab-field {
   display: block;
   margin: 0.4rem 0;
@@ -477,7 +482,6 @@ main.ab-enabled {
 }
 
 .ab-drawer-panel .ab-card-shell {
-  position: static;
   margin: 0.6rem 0;
 }
 
@@ -615,236 +619,6 @@ main.ab-enabled {
 
 .ab-badge-detail {
   margin: 0.3rem 0 0;
-}
-
-/* ---- work-queue page (Phase 3 contract §6) -------------------------------- */
-
-.work-page {
-  max-width: 44rem;
-}
-
-.work-intro {
-  color: var(--muted);
-}
-
-.ab-work-list {
-  list-style: none;
-  margin: 1rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.ab-work-item {
-  padding: 0.75rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-}
-
-.ab-work-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.ab-work-chapter {
-  font-weight: 600;
-}
-
-.ab-work-meta {
-  margin: 0.4rem 0 0;
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.ab-work-more {
-  margin-top: 1rem;
-}
-
-.ab-work-status {
-  color: var(--muted);
-}
-
-.ab-work-actions {
-  margin-top: 0.6rem;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.ab-work-hint {
-  margin: 0;
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-/* ---- claim + edit view (Phase 4 contract §7) ------------------------------ */
-
-.ab-claim {
-  margin: 0 0 1.5rem;
-  padding: 1rem;
-  border: 1px solid var(--link);
-  border-radius: 6px;
-  background: var(--surface);
-}
-
-.ab-claim-title {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-.ab-claim-meta {
-  margin: 0.25rem 0 0.75rem;
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.ab-lease {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-}
-
-.ab-lease-remaining {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-/* Outline + weight, never colour alone (§16.6 / Phase 2b §4). */
-.ab-lease-soon {
-  outline: 2px solid #a03434;
-  outline-offset: 2px;
-  color: #a03434;
-}
-
-@media (prefers-color-scheme: dark) {
-  .ab-lease-soon {
-    outline-color: #e09a9a;
-    color: #e09a9a;
-  }
-}
-
-.ab-lease-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.ab-lease-prompt {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.ab-claim-section {
-  margin-top: 1rem;
-}
-
-.ab-claim-section h3 {
-  margin: 0 0 0.35rem;
-  font-size: 0.95rem;
-}
-
-.ab-untrusted-note {
-  margin: 0 0 0.5rem;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
-.ab-claim-request,
-.ab-original-text {
-  margin: 0;
-  padding: 0.5rem 0.7rem;
-  border-left: 3px solid var(--border);
-  background: var(--bg);
-  white-space: pre-wrap;
-}
-
-.ab-claim-summary,
-.ab-claim-refs {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.ab-claim-refs {
-  padding-left: 1.1rem;
-}
-
-.ab-submit-form {
-  margin-top: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.ab-textarea {
-  min-height: 9rem;
-  font: inherit;
-  white-space: pre-wrap;
-  resize: vertical;
-}
-
-.ab-form-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.ab-submit-status {
-  margin: 0.75rem 0 0;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.ab-submit-syncing {
-  border-style: dashed;
-}
-
-.ab-submit-completed {
-  border-color: var(--link);
-  color: var(--link);
-}
-
-.ab-submit-conflict,
-.ab-submit-expired {
-  border-color: #a03434;
-  color: #a03434;
-}
-
-@media (prefers-color-scheme: dark) {
-  .ab-submit-conflict,
-  .ab-submit-expired {
-    border-color: #e09a9a;
-    color: #e09a9a;
-  }
-}
-
-.ab-conflict-line {
-  margin: 0.4rem 0 0;
-  font-size: 0.85rem;
-}
-
-.ab-conflict-id {
-  word-break: break-all;
-}
-
-@media (pointer: coarse) {
-  .ab-textarea,
-  .ab-claim .ab-input {
-    min-height: 44px;
-  }
 }
 
 /* ---- motion --------------------------------------------------------------- */
@@ -1497,10 +1271,34 @@ main.ab-enabled {
 
 .ab-rail-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 12px;
+}
+
+.ab-notes-mode-toggle {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 7px;
+  background: var(--surface-card, var(--bg));
+  color: var(--text-body, var(--fg));
+  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.ab-notes-mode-toggle:hover:not(:disabled),
+.ab-notes-mode-toggle:focus-visible,
+.ab-notes-mode-toggle[aria-pressed="true"] {
+  border-color: var(--blue-500, var(--link));
+  background: var(--surface-selected, var(--surface));
+  outline: 0;
+}
+
+.ab-notes-mode-toggle[hidden] {
+  display: none;
 }
 
 .ab-note-nav {
@@ -1650,19 +1448,6 @@ main.ab-enabled {
   font: 400 15px/1.55 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
-/* Collapsed notes retain their attribution and target. Activating a card or
-   its inline mark opens the body, votes, replies, and actions in place. */
-.ab-card:not(.ab-active) > .ab-body,
-.ab-card:not(.ab-active) > .ab-hint,
-.ab-card:not(.ab-active) > .ab-suggestion-diff,
-.ab-card:not(.ab-active) > .ab-votes,
-.ab-card:not(.ab-active) > .ab-override,
-.ab-card:not(.ab-active) > .ab-replies,
-.ab-card:not(.ab-active) > .ab-actions,
-.ab-card:not(.ab-active) > .ab-reply-form {
-  display: none;
-}
-
 .ab-suggestion-diff {
   display: grid;
   gap: 7px;
@@ -1715,14 +1500,6 @@ main.ab-enabled {
 .ab-card.ab-promoted .ab-suggestion-diff {
   border-color: color-mix(in srgb, var(--green-400, #62c889) 48%, transparent);
   background: color-mix(in srgb, var(--green-400, #62c889) 8%, transparent);
-}
-
-.ab-card.ab-promoted:not(.ab-active) > .ab-body {
-  display: block;
-}
-
-.ab-card.ab-promoted:not(.ab-active) > .ab-suggestion-diff {
-  display: grid;
 }
 
 @media (pointer: coarse) {
@@ -1949,6 +1726,13 @@ main.ab-enabled {
   border-top: 1px solid var(--border-subtle, var(--border));
 }
 
+.ab-discussion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .ab-discussion-boundary h2 {
   margin: 0 0 8px;
   color: var(--text-strong, var(--fg));
@@ -1961,6 +1745,51 @@ main.ab-enabled {
   margin: 0 0 12px;
   color: var(--text-muted, var(--muted));
   font: 400 15px/1.65 var(--font-body, "Source Serif 4", Georgia, serif);
+}
+
+.ab-discussion-composer:not(:empty) {
+  margin: 18px 0;
+}
+
+.ab-discussion-composer .ab-composer,
+.ab-discussion-thread {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ab-discussion-threads {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.ab-discussion-thread {
+  padding: 16px 18px;
+  border-color: var(--border-default, var(--border));
+  border-radius: 10px;
+  background: var(--surface-card, var(--bg));
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.14));
+}
+
+.ab-discussion-thread:focus-visible {
+  outline: 2px solid var(--blue-500, var(--link));
+  outline-offset: 3px;
+}
+
+.ab-discussion-empty {
+  margin: 18px 0 0;
+  color: var(--text-muted, var(--muted));
+  font-size: 0.9rem;
+}
+
+.ab-discussion-empty[hidden],
+.ab-discussion-more[hidden],
+.ab-discussion-start[hidden] {
+  display: none;
+}
+
+.ab-discussion-more {
+  margin-top: 18px;
 }
 
 @keyframes ab-fade-in {
@@ -1977,6 +1806,16 @@ main.ab-enabled {
 
   .ab-discussion-boundary {
     margin-top: 48px;
+  }
+
+  .ab-discussion-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ab-discussion-start {
+    width: 100%;
+    min-height: 44px;
   }
 
   .ab-drawer {
@@ -2011,5 +1850,157 @@ main.ab-enabled {
   .ab-seltool,
   .ab-composer {
     animation: none;
+  }
+}
+
+/* ==== Chapter notes presentation follow-up ================================ */
+
+/* The block preview is an outline, not a border, so discovering an annotation
+   target never changes manuscript measure or line wrapping. */
+.ab-prose .ab-note-target-preview {
+  background: color-mix(in srgb, var(--blue-500, var(--link)) 8%, transparent);
+  outline: 2px solid var(--blue-500, var(--link));
+  outline-offset: 5px;
+}
+
+.ab-block-ui {
+  z-index: 12;
+}
+
+.ab-note-tooltip {
+  position: absolute;
+  top: 4px;
+  left: calc(100% + 7px);
+  z-index: 20;
+  width: max-content;
+  max-width: 12rem;
+  padding: 5px 8px;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 6px;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.18));
+  color: var(--text-body, var(--fg));
+  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
+  pointer-events: none;
+}
+
+.ab-note-tooltip[hidden],
+.ab-authbar[hidden] {
+  display: none;
+}
+
+/* Navigation remains outside the scrolling list, so Previous and Next are
+   reachable even when one expanded note is taller than the viewport. `auto`
+   creates a scrollbar only when the ordered card stack actually overflows. */
+.chapter-reading-layout.ab-reading-layout > .ab-gutter {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 92px);
+  max-height: calc(100vh - 92px);
+  overflow: visible;
+}
+
+.ab-gutter .ab-rail-head,
+.ab-gutter .ab-authbar {
+  flex: 0 0 auto;
+}
+
+.ab-gutter .ab-cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+}
+
+/* Offscreen anchored notes are one actionable line. Full card contents stay
+   mounted so focus restoration and optimistic controls retain their state. */
+.ab-card-summary {
+  display: none;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text-body, var(--fg));
+  font: 600 12px/1.45 var(--font-display, system-ui, sans-serif);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ab-card.ab-note-collapsed {
+  min-height: 38px;
+  padding: 9px 11px;
+}
+
+.ab-card.ab-note-collapsed > :not(.ab-card-summary) {
+  display: none;
+}
+
+.ab-card.ab-note-collapsed > .ab-card-summary {
+  display: block;
+}
+
+.ab-note-collapse {
+  margin-top: 11px;
+}
+
+/* Inline hosts are inert on desktop; the exact same ordered card nodes mount
+   into them at mobile widths. */
+.ab-inline-notes {
+  display: none;
+}
+
+@media (max-width: 959.9px) {
+  /* Mobile has no notes drawer or side panel. Notes participate in manuscript
+     flow with full line breaks and never cover the bottom of the chapter. */
+  main.ab-enabled {
+    padding-bottom: 0;
+  }
+
+  .ab-inline-notes:not(:empty) {
+    display: block;
+    width: 100%;
+    margin: 0 0 1.35rem;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+
+  .ab-inline-notes-whole:not(:empty) {
+    margin: 0 0 1.75rem;
+  }
+
+  .ab-inline-notes-block:not(:empty) {
+    margin-top: -0.55rem;
+  }
+
+  .ab-inline-notes .ab-card-shell,
+  .ab-inline-notes .ab-composer {
+    position: static;
+    width: 100%;
+    margin: 0 0 10px;
+    border: 1px solid var(--border-default, var(--border));
+    border-radius: 10px;
+    background: var(--surface-card, var(--bg));
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.14));
+  }
+
+  .ab-inline-notes .ab-card {
+    padding: 13px 14px;
+    color: var(--text-body, var(--fg));
+  }
+
+  .ab-inline-notes .ab-card.ab-note-collapsed {
+    padding: 10px 12px;
+  }
+
+  .ab-note-tooltip {
+    right: 0;
+    left: auto;
+    transform: translateY(calc(-100% - 6px));
   }
 }

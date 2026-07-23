@@ -35,7 +35,11 @@ import {
   type CoordinatorStore,
   type ProjectCoordinator,
 } from "./coordinator.js";
-import type { RepositorySourceReadResult } from "./deps.js";
+import type {
+  RepositoryHistoryListResult,
+  RepositorySourceReadResult,
+  RepositoryTextFilePageResult,
+} from "./deps.js";
 
 /** The `DurableObjectState` subset the coordinator uses. */
 export interface DurableObjectStateLike {
@@ -75,12 +79,24 @@ export interface CoordinatorDoOverrides {
 /** Storage key recording which project this instance was created for. */
 export const PROJECT_ID_KEY = "project-id";
 
-export type CoordinatorAction = "drain" | "refresh" | "source" | "sweep" | "stale" | "status";
+export type CoordinatorAction =
+  | "drain"
+  | "history"
+  | "history-source"
+  | "refresh"
+  | "source"
+  | "source-page"
+  | "sweep"
+  | "stale"
+  | "status";
 
 const ACTIONS: readonly CoordinatorAction[] = [
   "drain",
+  "history",
+  "history-source",
   "refresh",
   "source",
+  "source-page",
   "sweep",
   "stale",
   "status",
@@ -167,12 +183,66 @@ export class ProjectCoordinatorDurableObject {
         return json(await coordinator.drainOutbox());
       case "refresh":
         return json(await coordinator.refreshProjection());
+      case "history": {
+        const path = url.searchParams.get("path");
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const limit = Number(url.searchParams.get("limit") ?? "25");
+        if (
+          path === null ||
+          path.length === 0 ||
+          path.length > 2048 ||
+          !Number.isInteger(page) ||
+          page < 1 ||
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 50
+        ) {
+          return json({ error: "invalid repository history request" }, 400);
+        }
+        return json(await coordinator.listFileHistory(path, { page, limit }));
+      }
+      case "history-source": {
+        const path = url.searchParams.get("path");
+        const commitSha = url.searchParams.get("commit");
+        if (
+          path === null ||
+          path.length === 0 ||
+          path.length > 2048 ||
+          commitSha === null ||
+          !/^[0-9a-f]{40}$/u.test(commitSha)
+        ) {
+          return json({ error: "invalid repository history source request" }, 400);
+        }
+        return json(await coordinator.readTextFileAtCommit(path, commitSha));
+      }
       case "source": {
         const path = url.searchParams.get("path");
         if (path === null || path.length === 0 || path.length > 2048) {
           return json({ error: "invalid repository source path" }, 400);
         }
         return json(await coordinator.readTextFile(path));
+      }
+      case "source-page": {
+        const glob = url.searchParams.get("glob");
+        const after = url.searchParams.get("after");
+        const limit = Number(url.searchParams.get("limit") ?? "20");
+        if (
+          glob === null ||
+          glob.length === 0 ||
+          glob.length > 2048 ||
+          (after !== null && (after.length === 0 || after.length > 2048)) ||
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 20
+        ) {
+          return json({ error: "invalid repository source-page request" }, 400);
+        }
+        return json(
+          await coordinator.listTextFiles(glob, {
+            limit,
+            ...(after === null ? {} : { after }),
+          }),
+        );
       }
       case "sweep":
         return json(await coordinator.sweepLeases());
@@ -283,4 +353,134 @@ export async function callCoordinatorReadTextFile(
     throw new Error("coordinator source returned an invalid response");
   }
   return body as RepositorySourceReadResult;
+}
+
+/** Read one validated, bounded configured-glob source page. */
+export async function callCoordinatorListTextFiles(
+  namespace: DurableObjectNamespaceLike,
+  projectId: string,
+  glob: string,
+  options: { after?: string; limit?: number } = {},
+): Promise<RepositoryTextFilePageResult> {
+  const stub = coordinatorStub(namespace, projectId);
+  const url = new URL(
+    `${COORDINATOR_ORIGIN}/projects/${encodeURIComponent(projectId)}/source-page`,
+  );
+  url.searchParams.set("glob", glob);
+  url.searchParams.set("limit", String(options.limit ?? 20));
+  if (options.after !== undefined) url.searchParams.set("after", options.after);
+  const response = await stub.fetch(url.toString(), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`coordinator source-page failed with ${String(response.status)}`);
+  }
+  const body = (await response.json()) as unknown;
+  if (!validTextFilePageResult(body, options.limit ?? 20)) {
+    throw new Error("coordinator source-page returned an invalid response");
+  }
+  return body;
+}
+
+/** List one validated, bounded repository file-history page. */
+export async function callCoordinatorListFileHistory(
+  namespace: DurableObjectNamespaceLike,
+  projectId: string,
+  path: string,
+  options: { page?: number; limit?: number } = {},
+): Promise<RepositoryHistoryListResult> {
+  const stub = coordinatorStub(namespace, projectId);
+  const url = new URL(`${COORDINATOR_ORIGIN}/projects/${encodeURIComponent(projectId)}/history`);
+  url.searchParams.set("path", path);
+  url.searchParams.set("page", String(options.page ?? 1));
+  url.searchParams.set("limit", String(options.limit ?? 25));
+  const response = await stub.fetch(url.toString(), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`coordinator history failed with ${String(response.status)}`);
+  }
+  const body = (await response.json()) as unknown;
+  if (!validHistoryListResult(body)) {
+    throw new Error("coordinator history returned an invalid response");
+  }
+  return body;
+}
+
+/** Read one historical repository file snapshot through the coordinator. */
+export async function callCoordinatorReadTextFileAtCommit(
+  namespace: DurableObjectNamespaceLike,
+  projectId: string,
+  path: string,
+  commitSha: string,
+): Promise<RepositorySourceReadResult> {
+  const stub = coordinatorStub(namespace, projectId);
+  const url = new URL(
+    `${COORDINATOR_ORIGIN}/projects/${encodeURIComponent(projectId)}/history-source`,
+  );
+  url.searchParams.set("path", path);
+  url.searchParams.set("commit", commitSha);
+  const response = await stub.fetch(url.toString(), { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`coordinator history-source failed with ${String(response.status)}`);
+  }
+  const body = (await response.json()) as unknown;
+  if (!validSourceResult(body)) {
+    throw new Error("coordinator history-source returned an invalid response");
+  }
+  return body;
+}
+
+function validSourceResult(body: unknown): body is RepositorySourceReadResult {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    "outcome" in body &&
+    (body.outcome === "not-found" ||
+      body.outcome === "unavailable" ||
+      (body.outcome === "found" && "source" in body && typeof body.source === "string"))
+  );
+}
+
+function validTextFilePageResult(
+  body: unknown,
+  requestedLimit: number,
+): body is RepositoryTextFilePageResult {
+  if (typeof body !== "object" || body === null || !("outcome" in body)) return false;
+  if (body.outcome === "unavailable") return true;
+  if (body.outcome !== "found") return false;
+  if (!("files" in body) || !Array.isArray(body.files) || body.files.length > requestedLimit) {
+    return false;
+  }
+  return (
+    "headCommit" in body &&
+    (body.headCommit === null || typeof body.headCommit === "string") &&
+    "nextAfter" in body &&
+    (body.nextAfter === null || typeof body.nextAfter === "string") &&
+    body.files.every(
+      (file) =>
+        typeof file === "object" &&
+        file !== null &&
+        "path" in file &&
+        typeof file.path === "string" &&
+        "source" in file &&
+        typeof file.source === "string",
+    )
+  );
+}
+
+function validHistoryListResult(body: unknown): body is RepositoryHistoryListResult {
+  if (typeof body !== "object" || body === null || !("outcome" in body)) return false;
+  if (body.outcome === "unavailable") return true;
+  if (body.outcome !== "found" || !("entries" in body) || !Array.isArray(body.entries)) {
+    return false;
+  }
+  return (
+    "page" in body &&
+    typeof body.page === "number" &&
+    "hasMore" in body &&
+    typeof body.hasMore === "boolean" &&
+    body.entries.every((entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      "commitSha" in entry &&
+      typeof entry.commitSha === "string",
+    )
+  );
 }

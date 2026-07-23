@@ -34,6 +34,12 @@ describe("account identity", () => {
           return response({
             actor: { id: "actor-1", displayName: "JoeMattie", externalIdentity: "github:JoeMattie" },
             scopes: ["chapters:read", "work:read", "work:claim"],
+            effectiveCapabilities: [
+              "chapters:read",
+              "work:read",
+              "work:claim",
+              "revisions:read",
+            ],
             memberships: [{ role: "maintainer" }],
           });
         }
@@ -61,7 +67,7 @@ describe("account identity", () => {
       [...account.querySelectorAll<HTMLAnchorElement>(".ab-account-link")].map(
         (link) => link.textContent,
       ),
-    ).toEqual(["Settings"]);
+    ).toEqual(["Reviews", "Settings"]);
   });
 
   it("counts every page of ready work for the global badge", async () => {

@@ -45,6 +45,41 @@ export interface VoteTally {
   humanMaintainerApprovals: number;
 }
 
+/**
+ * One compact, bounded Work-history row. It deliberately excludes retained
+ * submission prose: the Work page needs attribution and links, not another
+ * copy of a chapter revision payload.
+ */
+export interface CompletedWorkItemSummary {
+  workItem: WorkItemRecord;
+  source: {
+    kind: string;
+    scope: string;
+    body: string;
+    status: string;
+  } | null;
+  chapter: {
+    title: string;
+    slug: string;
+  } | null;
+  completedBy: {
+    actorId: string;
+    type: string;
+    displayName: string;
+    externalIdentity: string | null;
+  } | null;
+  completedAt: string;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  revisionProposalId: string | null;
+  approvedBy: {
+    actorId: string;
+    type: string;
+    displayName: string;
+    externalIdentity: string | null;
+  } | null;
+}
+
 const TALLY_SQL = `
   SELECT
     COALESCE(SUM(CASE WHEN v.value = 'approve' THEN 1 ELSE 0 END), 0) AS approvals,
@@ -526,6 +561,76 @@ export class WorkItemsRepository {
     return rows.map(mapWorkItem);
   }
 
+  /**
+   * Newest completed Work first, enriched in one database query. Correlated
+   * subqueries select at most one applied submission and approved proposal
+   * from the already-bounded Work page; there is no per-row repository or
+   * database fan-out.
+   */
+  async listCompletedSummaries(
+    projectId: string,
+    page?: { beforeId?: string; limit?: number },
+  ): Promise<CompletedWorkItemSummary[]> {
+    const cursor = page?.beforeId ?? "";
+    const limit = page?.limit ?? 50;
+    const rows = await this.db
+      .prepare(
+        `WITH completed_page AS (
+           SELECT *
+           FROM work_items
+           WHERE project_id = ?
+             AND status = 'completed'
+             AND (? = '' OR id < ?)
+           ORDER BY id DESC
+           LIMIT ?
+         )
+         SELECT
+           w.*,
+           a.kind AS source_kind,
+           a.scope AS source_scope,
+           a.body AS source_body,
+           a.status AS source_status,
+           c.title AS chapter_title,
+           c.slug AS chapter_slug,
+           s.actor_id AS completed_by_actor_id,
+           submitter.type AS completed_by_type,
+           submitter.display_name AS completed_by_name,
+           submitter.external_identity AS completed_by_external_identity,
+           rp.resulting_revision AS resulting_revision,
+           COALESCE(rp.commit_sha, operation.commit_sha) AS completion_commit_sha,
+           rp.id AS revision_proposal_id,
+           rp.reviewed_by_actor_id AS approved_by_actor_id,
+           reviewer.type AS approved_by_type,
+           reviewer.display_name AS approved_by_name,
+           reviewer.external_identity AS approved_by_external_identity
+         FROM completed_page w
+         LEFT JOIN annotations a ON a.id = w.source_annotation_id
+         LEFT JOIN chapters c ON c.id = w.chapter_id AND c.project_id = w.project_id
+         LEFT JOIN submissions s ON s.id = (
+           SELECT candidate.id
+           FROM submissions candidate
+           WHERE candidate.work_item_id = w.id AND candidate.state = 'applied'
+           ORDER BY candidate.id DESC
+           LIMIT 1
+         )
+         LEFT JOIN actors submitter ON submitter.id = s.actor_id
+         LEFT JOIN revision_proposals rp ON rp.id = (
+           SELECT candidate.id
+           FROM revision_proposals candidate
+           WHERE candidate.work_item_id = w.id AND candidate.status = 'approved'
+           ORDER BY candidate.id DESC
+           LIMIT 1
+         )
+         LEFT JOIN actors reviewer ON reviewer.id = rp.reviewed_by_actor_id
+         LEFT JOIN git_operations operation
+           ON operation.id = COALESCE(rp.git_operation_id, s.git_operation_id)
+         ORDER BY w.id DESC`,
+      )
+      .bind(projectId, cursor, cursor, limit)
+      .all();
+    return rows.map(mapCompletedWorkItemSummary);
+  }
+
   updateStatusStatement(id: string, status: WorkItemStatus, updatedAt: string): SqlStatement {
     return this.db
       .prepare(`UPDATE work_items SET status = ?, updated_at = ? WHERE id = ?`)
@@ -596,6 +701,59 @@ function mapWorkItem(row: SqlRow): WorkItemRecord {
     priority: String(row["priority"]) as WorkItemRecord["priority"],
     createdAt: String(row["created_at"]),
     updatedAt: String(row["updated_at"]),
+  };
+}
+
+function nullableString(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
+
+function mapCompletedWorkItemSummary(row: SqlRow): CompletedWorkItemSummary {
+  const sourceKind = nullableString(row["source_kind"]);
+  const chapterTitle = nullableString(row["chapter_title"]);
+  const completedByActorId = nullableString(row["completed_by_actor_id"]);
+  const approvedByActorId = nullableString(row["approved_by_actor_id"]);
+  const resultingRevision = row["resulting_revision"];
+  return {
+    workItem: mapWorkItem(row),
+    source:
+      sourceKind === null
+        ? null
+        : {
+            kind: sourceKind,
+            scope: String(row["source_scope"]),
+            body: String(row["source_body"]),
+            status: String(row["source_status"]),
+          },
+    chapter:
+      chapterTitle === null
+        ? null
+        : { title: chapterTitle, slug: String(row["chapter_slug"]) },
+    completedBy:
+      completedByActorId === null
+        ? null
+        : {
+            actorId: completedByActorId,
+            type: String(row["completed_by_type"]),
+            displayName: String(row["completed_by_name"]),
+            externalIdentity: nullableString(row["completed_by_external_identity"]),
+          },
+    completedAt: String(row["updated_at"]),
+    resultingRevision:
+      resultingRevision === null || resultingRevision === undefined
+        ? null
+        : Number(resultingRevision),
+    commitSha: nullableString(row["completion_commit_sha"]),
+    revisionProposalId: nullableString(row["revision_proposal_id"]),
+    approvedBy:
+      approvedByActorId === null
+        ? null
+        : {
+            actorId: approvedByActorId,
+            type: String(row["approved_by_type"]),
+            displayName: String(row["approved_by_name"]),
+            externalIdentity: nullableString(row["approved_by_external_identity"]),
+          },
   };
 }
 

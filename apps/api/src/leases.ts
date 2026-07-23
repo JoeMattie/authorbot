@@ -97,11 +97,12 @@ export interface SweepResult {
 }
 
 /**
- * The three statements that end ONE expired lease atomically: the
- * `lease_expired` event, the lease revocation, and the work item's return to
- * `ready`. They MUST be executed as a single `db.batch` - splitting them is
- * what previously let a crash (or a failing second write) strand a work item
- * as `leased` with no active lease row and no event, permanently unclaimable.
+ * The four statements that end ONE expired lease atomically: the
+ * `lease_expired` event, the lease revocation, deletion of any retained
+ * whole-chapter source, and the work item's return to `ready`. They MUST be
+ * executed as a single `db.batch` - splitting them is what previously let a
+ * crash (or a failing later write) strand either operational state or private
+ * manuscript text after the claim ended.
  *
  * Single-winner semantics without reading an affected-row count: the event
  * insert runs FIRST and is guarded by the very predicate the revocation then
@@ -132,8 +133,6 @@ export function expireLeaseStatements(
       leaseId,
       workItemId,
       now,
-      guardColumn: "id",
-      guardValue: leaseId,
     }),
     db
       .prepare(
@@ -143,14 +142,16 @@ export function expireLeaseStatements(
              AND expires_at <= ?`,
       )
       .bind(now, leaseId, now),
+    deleteInactiveLeaseDocumentSnapshotStatement(db, leaseId),
     workItemReleaseStatement(db, workItemId, now),
   ];
 }
 
 /**
- * The claim command's variant, keyed by work item: the same guarded event
- * plus the revocation of whatever expired lease occupies the slot. The claim
- * batch supplies its own work-item compare-and-swap, so no reset is included.
+ * The claim command's variant: the same guarded event plus the revocation of
+ * the expired lease the claimant observed and deletion of its retained
+ * whole-chapter source. The claim batch supplies its own work-item
+ * compare-and-swap, so no reset is included.
  */
 export function expireLeaseForWorkItemStatements(
   db: SqlDatabase,
@@ -163,24 +164,52 @@ export function expireLeaseForWorkItemStatements(
       leaseId,
       workItemId,
       now,
-      guardColumn: "work_item_id",
-      guardValue: workItemId,
     }),
     db
       .prepare(
         `UPDATE leases SET revoked_at = ?
-           WHERE work_item_id = ?
+           WHERE id = ? AND work_item_id = ?
              AND released_at IS NULL AND revoked_at IS NULL
              AND expires_at <= ?`,
       )
-      .bind(now, workItemId, now),
+      .bind(now, leaseId, workItemId, now),
+    deleteInactiveLeaseDocumentSnapshotStatement(db, leaseId),
   ];
 }
 
 /**
- * `lease_expired` appended only if an expired-but-active lease is still there
- * to expire. `guardColumn` is a fixed identifier chosen by the two callers
- * above - never caller data - so no value is ever spliced into SQL.
+ * Delete the manuscript source retained for a whole-chapter claim, but only
+ * after the SAME lease row is observably inactive in this transaction.
+ *
+ * The guard is essential for expiry races. A sweep can select an expired
+ * lease, then lose to a renewal that began before the old deadline. Its
+ * guarded revocation changes zero rows; an unconditional delete here would
+ * nevertheless erase the renewed holder's only immutable base. Observing
+ * `released_at` or `revoked_at` after the state transition makes either the
+ * ending command or the renewal the sole possible winner.
+ */
+export function deleteInactiveLeaseDocumentSnapshotStatement(
+  db: SqlDatabase,
+  leaseId: string,
+): SqlStatement {
+  return db
+    .prepare(
+      `DELETE FROM lease_document_snapshots
+        WHERE lease_id = ?
+          AND EXISTS (
+            SELECT 1 FROM leases
+             WHERE id = ?
+               AND (released_at IS NOT NULL OR revoked_at IS NOT NULL)
+          )`,
+    )
+    .bind(leaseId, leaseId);
+}
+
+/**
+ * `lease_expired` appended only if this exact expired-but-active lease is
+ * still there to expire. Keying both the event and transition by lease id
+ * prevents a stale claimant from attributing a newer holder's expiry to the
+ * lease it observed before a cross-isolate interleaving.
  */
 function leaseExpiredEventStatement(
   db: SqlDatabase,
@@ -189,8 +218,6 @@ function leaseExpiredEventStatement(
     leaseId: string;
     workItemId: string;
     now: string;
-    guardColumn: "id" | "work_item_id";
-    guardValue: string;
   },
 ): SqlStatement {
   const params: SqlValue[] = [
@@ -198,7 +225,7 @@ function leaseExpiredEventStatement(
     "lease_expired",
     JSON.stringify({ leaseId: input.leaseId, workItemId: input.workItemId }),
     input.now,
-    input.guardValue,
+    input.leaseId,
     input.now,
   ];
   return db
@@ -207,7 +234,7 @@ function leaseExpiredEventStatement(
        SELECT ?, ?, ?, ?
         WHERE EXISTS (
           SELECT 1 FROM leases
-           WHERE ${input.guardColumn} = ?
+           WHERE id = ?
              AND released_at IS NULL AND revoked_at IS NULL
              AND expires_at <= ?
         )`,
@@ -240,9 +267,10 @@ function workItemReleaseStatement(db: SqlDatabase, workItemId: string, now: stri
  * `expires_at <= now`, return its work item `leased → ready`, and emit
  * `lease_expired`. Race-safe against lazy expiry AND crash-safe: each lease
  * is ended by ONE atomic {@link expireLeaseStatements} batch, so there is no
- * window in which the lease is revoked but its work item is still `leased`.
- * A lease already ended by a concurrent command contributes no event and no
- * count (its guarded revocation changes 0 rows).
+ * window in which the lease is revoked but its work item is still `leased` or
+ * its retained whole-chapter source survives. A lease already ended by a
+ * concurrent command contributes no event and no count (its guarded
+ * revocation changes 0 rows).
  */
 export async function sweepExpiredLeases(
   db: SqlDatabase,
@@ -318,6 +346,7 @@ export function revokeLeaseForActorStatements(
            WHERE id = ? AND released_at IS NULL AND revoked_at IS NULL`,
       )
       .bind(now, leaseId),
+    deleteInactiveLeaseDocumentSnapshotStatement(db, leaseId),
     db
       .prepare(
         `UPDATE work_items SET status = 'ready', updated_at = ?

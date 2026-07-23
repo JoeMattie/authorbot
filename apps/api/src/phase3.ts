@@ -15,6 +15,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import {
   isConstraintError,
   type AnnotationRecord,
+  type CompletedWorkItemSummary,
   type DecisionRecord,
   type EventRecord,
   type ProjectRecord,
@@ -30,7 +31,6 @@ import {
   authorizeForceCreateWorkItem,
   authorizeRejectSuggestion,
   authorizeReopenSuggestion,
-  authorizeVote,
   cancelWorkItemCommandSchema,
   castVoteCommandSchema,
   clearVoteCommandSchema,
@@ -39,11 +39,17 @@ import {
   reopenSuggestionCommandSchema,
   resolveSupportChange,
   type AnnotationStatus,
+  type EditorialCapability,
   type VoteValue,
 } from "@authorbot/domain";
 import { evaluate, workTypeForScope } from "@authorbot/rule-engine";
 import { z } from "zod";
-import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
+import {
+  authOf,
+  hasEditorialAuthority,
+  requireProjectScope,
+  type AuthServices,
+} from "./auth.js";
 import type { AppDeps, AppEnv, Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import { annotationJson } from "./json.js";
@@ -59,6 +65,7 @@ import {
   streamClientKey,
 } from "./sse.js";
 import { adjustTally, tallyJson, tallyToMetrics, type Voter, type VoterActorType } from "./tally.js";
+import { createTokenEventProjector } from "./token-event-visibility.js";
 
 /**
  * Outbox kinds Phase 3 emits, matching the @authorbot/repo-coordinator
@@ -155,6 +162,45 @@ export function workItemJson(w: WorkItemRecord): Record<string, unknown> {
   };
 }
 
+function completedWorkSourceCapability(kind: string): EditorialCapability | null {
+  if (kind === "comment") return "comments:read";
+  if (kind === "suggestion") return "suggestions:read";
+  return null;
+}
+
+/**
+ * Compact Work-history response. Retained submission prose is never exposed,
+ * and source feedback is projected only when the caller may read that exact
+ * feedback kind. The Work row itself remains useful to a `work:read` caller.
+ */
+export function completedWorkItemJson(
+  row: CompletedWorkItemSummary,
+  effectiveCapabilities: readonly EditorialCapability[],
+): Record<string, unknown> {
+  const sourceCapability =
+    row.source === null ? null : completedWorkSourceCapability(row.source.kind);
+  const source =
+    row.source !== null &&
+    sourceCapability !== null &&
+    effectiveCapabilities.includes(sourceCapability)
+      ? row.source
+      : null;
+  return {
+    ...workItemJson(row.workItem),
+    source,
+    chapter:
+      row.chapter === null
+        ? null
+        : { id: row.workItem.chapterId, title: row.chapter.title, slug: row.chapter.slug },
+    completedBy: row.completedBy,
+    completedAt: row.completedAt,
+    resultingRevision: row.resultingRevision,
+    commitSha: row.commitSha,
+    revisionProposalId: row.revisionProposalId,
+    approvedBy: row.approvedBy,
+  };
+}
+
 /**
  * Annotation JSON + collaboration data (Phase 3 contract §2/§6): aggregate
  * tally for everyone the annotation is readable by; `myVote` only for
@@ -220,6 +266,7 @@ const PUBLIC_READER_WORK_ITEM_TYPES: ReadonlySet<string> = new Set([
 const PUBLIC_READER_OPERATION_KINDS: ReadonlySet<string> = new Set([
   "annotation.create",
   "reply.create",
+  "reply.withdraw",
   "annotation.withdraw",
 ]);
 
@@ -492,6 +539,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       appendEventStatement(project.id, "decision_created", {
         decisionId,
         annotationId: annotation.id,
+        annotationKind: annotation.kind,
+        decisionActionType: input.actionType,
         result: "create_work_item",
         rule: input.ruleName,
         ruleVersion: input.ruleVersion,
@@ -500,6 +549,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       appendEventStatement(project.id, "work_item_created", {
         workItemId,
         annotationId: annotation.id,
+        annotationKind: annotation.kind,
         chapterId: annotation.chapterId,
         type: workItemType,
         baseRevision,
@@ -516,7 +566,10 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   // ---- votes (contract §2, §3, §4) ------------------------------------------
 
   const voteHandler = (mode: "cast" | "clear") => async (c: Context<AppEnv>) => {
-    const guard = await requireProjectScope(c, services, "votes:write");
+    // Kind-specific authority is checked after the annotation is loaded. This
+    // first guard still applies membership, freeze/pause/policy, and rate
+    // limits without allowing the old umbrella to decide comment authority.
+    const guard = await requireProjectScope(c, services, null, { capability: "vote" });
     if ("response" in guard) {
       return guard.response;
     }
@@ -569,10 +622,21 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         if (annotation instanceof Response) {
           return annotation;
         }
-        // Suggestion-only (contract §2: comments -> 422).
-        const voteDecision = authorizeVote({ annotationKind: annotation.kind });
-        if (!voteDecision.allowed) {
-          return problem(c, "domain-rule-failed", { detail: voteDecision.message });
+        const requiredCapability =
+          annotation.kind === "suggestion" ? "suggestions:vote" : "comments:vote";
+        // Legacy votes:write remains suggestion-only. Passing no legacy scope
+        // for a comment makes the compatibility credential fail closed while
+        // canonical tokens and sessions use the exact kind capability.
+        if (
+          !hasEditorialAuthority(
+            a,
+            annotation.kind === "suggestion" ? "votes:write" : null,
+            { capabilities: [requiredCapability] },
+          )
+        ) {
+          return problem(c, "forbidden", {
+            detail: `actor lacks required editorial capability "${requiredCapability}"`,
+          });
         }
         if (!VOTABLE_STATUSES.has(annotation.status)) {
           return problem(c, "state-conflict", {
@@ -664,6 +728,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
           appendEventStatement(guard.project.id, "vote_aggregate", {
             annotationId: annotation.id,
             chapterId: annotation.chapterId,
+            annotationKind: annotation.kind,
             votes: tallyJson(tally),
           }),
         );
@@ -673,7 +738,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         let createdWorkItem = false;
         let stickyMirror = false;
 
-        for (const entry of await ctx.rules(guard.project.id)) {
+        // Comment votes use the same tally/history machinery but can never
+        // cross the suggestion-to-Work rule. Promotion remains the explicit
+        // maintainer action for a comment.
+        const applicableRules =
+          annotation.kind === "suggestion" ? await ctx.rules(guard.project.id) : [];
+        for (const entry of applicableRules) {
           const evaluation = evaluate(entry.rule, metrics);
           if (evaluation.satisfied) {
             ruleSatisfied = true;
@@ -757,6 +827,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
                 appendEventStatement(guard.project.id, DECISION_SUPPORT_CHANGED_EVENT, {
                   decisionId: existing.id,
                   annotationId: annotation.id,
+                  annotationKind: annotation.kind,
                   supportChanged: outcome.supportChanged,
                   transition: outcome.transition,
                 }),
@@ -882,7 +953,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
        * suggestion changes an annotation, so it asks for `annotations:write`
        * and picks up the policy gate that goes with it.
        */
-      const guard = await requireProjectScope(c, services, "annotations:write");
+      const guard = await requireProjectScope(c, services, "annotations:write", {
+        editorial: {
+          capabilities: ["suggestions:read", "feedback:moderate"],
+          legacyAction: "feedback:moderate",
+        },
+      });
       if ("response" in guard) {
         return guard.response;
       }
@@ -969,6 +1045,9 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             appendEventStatement(guard.project.id, "decision_created", {
               decisionId: override.decisionId,
               annotationId: annotation.id,
+              annotationKind: annotation.kind,
+              decisionActionType:
+                action === "reject" ? "reject_suggestion" : "reopen_suggestion",
               result: action === "reject" ? "rejected" : "overridden",
               override: action,
             }),
@@ -1018,7 +1097,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
        * suggestion and then manufacture work on it - no vote, no rule, and no
        * scope that says anything about work.
        */
-      const guard = await requireProjectScope(c, services, "work:claim");
+      const guard = await requireProjectScope(c, services, "work:claim", {
+        editorial: {
+          capabilities: ["work:promote"],
+          legacyAction: "work:promote",
+        },
+      });
       if ("response" in guard) {
         return guard.response;
       }
@@ -1138,7 +1222,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
 
   app.post("/v1/projects/:projectId/work-items/:workItemId/cancel", auth, idem, async (c) => {
     /** `work:claim`, not `null` - see force-create-work-item above. */
-    const guard = await requireProjectScope(c, services, "work:claim");
+    const guard = await requireProjectScope(c, services, "work:claim", {
+      editorial: {
+        capabilities: ["work:cancel"],
+        legacyAction: "work:cancel",
+      },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1160,6 +1249,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       const workItem = await repos.workItems.getById(parsed.data.workItemId);
       if (workItem === null || workItem.projectId !== guard.project.id) {
         return problem(c, "not-found", { detail: "unknown work item" });
+      }
+      const sourceAnnotation = await repos.annotations.getById(workItem.sourceAnnotationId);
+      if (sourceAnnotation === null || sourceAnnotation.projectId !== guard.project.id) {
+        throw new Error(
+          `work item ${workItem.id} has no project-owned source annotation ${workItem.sourceAnnotationId}`,
+        );
       }
       const a = authOf(c);
       const decision = authorizeCancelWorkItem({
@@ -1212,6 +1307,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         appendEventStatement(guard.project.id, "decision_created", {
           decisionId: override.decisionId,
           annotationId: workItem.sourceAnnotationId,
+          annotationKind: sourceAnnotation.kind,
+          decisionActionType: "cancel_work_item",
           result: "overridden",
           override: "cancel",
           workItemId: workItem.id,
@@ -1237,7 +1334,9 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
   ]);
 
   app.get("/v1/projects/:projectId/work-items", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "work:read");
+    const guard = await requireProjectScope(c, services, "work:read", {
+      editorial: { capabilities: ["work:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1272,8 +1371,33 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     });
   });
 
+  app.get("/v1/projects/:projectId/work-items/completed", auth, async (c) => {
+    const guard = await requireProjectScope(c, services, "work:read", {
+      editorial: { capabilities: ["work:read"] },
+    });
+    if ("response" in guard) {
+      return guard.response;
+    }
+    const limit = ctx.parseLimit(c);
+    if (limit instanceof Response) {
+      return limit;
+    }
+    const cursor = c.req.query("cursor");
+    const items = await repos.workItems.listCompletedSummaries(guard.project.id, {
+      limit,
+      ...(cursor === undefined ? {} : { beforeId: cursor }),
+    });
+    const effectiveCapabilities = authOf(c).effectiveCapabilities;
+    return c.json({
+      items: items.map((item) => completedWorkItemJson(item, effectiveCapabilities)),
+      nextCursor: items.length === limit ? (items[items.length - 1]?.workItem.id ?? null) : null,
+    });
+  });
+
   app.get("/v1/projects/:projectId/work-items/:workItemId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "work:read");
+    const guard = await requireProjectScope(c, services, "work:read", {
+      editorial: { capabilities: ["work:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -1328,8 +1452,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     const requestAuth = c.get("auth");
     // Open and approval-gated books admit signed-in non-members to annotation
     // reads. A credential alone therefore does not authorize the operational
-    // feed: only a current project membership does.
+    // feed. Human members retain its lossless representation; agent-token
+    // members receive only capability-authorized, field-projected events.
     const publicOnly = requestAuth === undefined || requestAuth.membership === null;
+    const tokenProjector = requestAuth?.kind === "token"
+      ? createTokenEventProjector(requestAuth.effectiveCapabilities)
+      : null;
 
     if (c.req.query("poll") === "1") {
       // JSON fallback for simple agents (§26.1). Public-only readers
@@ -1348,7 +1476,12 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             const projected = projectPublicReaderEvent(event);
             return projected === null ? [] : [projected];
           })
-        : items;
+        : tokenProjector === null
+          ? items
+          : items.flatMap((event) => {
+              const projected = tokenProjector(event);
+              return projected === null ? [] : [projected];
+            });
       return c.json({ items: visible.map(eventJson), latestId: latest });
     }
 
@@ -1390,6 +1523,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     return sseResponse(
       {
         listAfter: (afterId, limit) => repos.events.listAfter(project.id, afterId, limit),
+        ...(tokenProjector === null ? {} : { projectEvent: tokenProjector }),
         initialCursor,
         pollMs: deps.config.ssePollMs ?? DEFAULT_SSE_POLL_MS,
         heartbeatMs: deps.config.sseHeartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS,

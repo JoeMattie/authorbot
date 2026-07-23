@@ -43,14 +43,18 @@ async function assertNoIdsOrMarkers(page: Page, step: string): Promise<void> {
   expect(composed, `${step}: the prose box holds no frontmatter`).not.toMatch(/^---/);
 }
 
-test("the chapter-bottom editor stays within the reading measure", async ({ page }) => {
+test("the in-place chapter editor stays within the reading measure", async ({ page }) => {
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "editor-width-e2e", "editor");
-  // The chapter composer is a separate island from the sign-in control. It
+  // The manuscript editor is a separate island from the sign-in control. It
   // reads the new session on navigation, as the production page does.
   await page.reload();
 
-  const editor = page.locator(".chapter-authoring .ab-chapter-composer");
+  const edit = page.getByRole("button", { name: "Edit chapter" });
+  await expect(edit).toBeVisible();
+  await edit.click();
+
+  const editor = page.locator(".chapter-reading-column .ab-manuscript-editor-shell");
   await expect(editor).toBeVisible();
   const [editorBox, readingBox] = await Promise.all([
     editor.boundingBox(),

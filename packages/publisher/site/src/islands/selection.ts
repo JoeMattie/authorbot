@@ -31,17 +31,29 @@ export interface CapturedSelection {
 /** Contract §2.2: prefix/suffix are at most 32 characters. */
 export const QUOTE_CONTEXT = 32;
 
-/** Innermost ancestor (or self) carrying a `b-<uuid>` block anchor. */
+/**
+ * Innermost ancestor (or self) carrying a durable block anchor.
+ *
+ * Static pages use `id="b-<uuid>"`; the read-only Milkdown Notes surface
+ * projects the same identity as a ProseMirror decoration so selections remain
+ * bound to canonical repository block ids without serializing UI into Markdown.
+ */
 export function closestBlock(node: Node | null): HTMLElement | null {
   for (let current = node; current !== null; current = current.parentNode) {
     if (current.nodeType === 1) {
       const el = current as HTMLElement;
-      if (el.id.startsWith("b-")) {
+      if (el.id.startsWith("b-") || el.dataset.authorbotBlockId !== undefined) {
         return el;
       }
     }
   }
   return null;
+}
+
+function blockIdOf(block: HTMLElement): string | null {
+  if (block.id.startsWith("b-") && block.id.length > 2) return block.id.slice(2);
+  const decorated = block.dataset.authorbotBlockId;
+  return decorated === undefined || decorated === "" ? null : decorated;
 }
 
 function firstText(node: Node): Text | null {
@@ -137,6 +149,10 @@ export function captureRange(range: {
   if (block === null) {
     return null;
   }
+  const blockId = blockIdOf(block);
+  if (blockId === null) {
+    return null;
+  }
   let endBoundary = resolveTextBoundary(range.endContainer, range.endOffset, "end");
   if (endBoundary === null || !block.contains(endBoundary.node)) {
     // The end boundary landed outside the block. If visible characters were
@@ -187,7 +203,7 @@ export function captureRange(range: {
   return {
     block,
     selector: {
-      blockId: block.id.slice(2),
+      blockId,
       textPosition: { start, end },
       textQuote,
     },

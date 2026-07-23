@@ -298,6 +298,7 @@ h1:first-child,
 .chapter-order,
 .chapter-revision,
 .chapter-byline,
+.chapter-contributors,
 .chapter-kicker,
 .chapter-back {
   font-family: var(--font-mono);
@@ -355,19 +356,28 @@ h1:first-child,
   border-bottom: 1px solid var(--border-default);
 }
 
-.chapter-index a {
+.chapter-index-card {
+  position: relative;
+  border-radius: 8px;
+  transition: background 120ms ease-out, transform 120ms ease-out;
+}
+
+.chapter-index-primary {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 24px;
   gap: 16px;
   align-items: start;
   padding: 26px 12px;
-  border-radius: 8px;
   color: inherit;
-  transition: background 120ms ease-out, transform 120ms ease-out;
 }
 
-.chapter-index a:hover {
+.chapter-index-card:hover,
+.chapter-index-card:focus-within {
   background: var(--surface-card);
+}
+
+.chapter-index-card-with-contributors .chapter-index-primary {
+  padding-bottom: 43px;
 }
 
 .chapter-order,
@@ -385,7 +395,8 @@ h1:first-child,
   transition: transform 120ms ease-out, color 120ms ease-out;
 }
 
-.chapter-index a:hover .chapter-row-arrow {
+.chapter-index-card:hover .chapter-row-arrow,
+.chapter-index-card:focus-within .chapter-row-arrow {
   transform: translateX(3px);
   color: var(--text-link);
 }
@@ -454,6 +465,31 @@ h1:first-child,
   font-size: 10px;
 }
 
+.chapter-index .chapter-contributors {
+  position: absolute;
+  right: 48px;
+  bottom: 23px;
+  left: 62px;
+  z-index: 1;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-contributor-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 0.2em;
+}
+
+.chapter-contributor-link:hover {
+  color: var(--text-link);
+  text-decoration-color: currentColor;
+}
+
 .empty-state {
   margin-top: 28px;
   padding: 28px;
@@ -470,11 +506,19 @@ h1:first-child,
   padding: 12px clamp(18px, 4vw, 40px) 20px;
 }
 
+.chapter-reading-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 18px;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
 .chapter-back {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-bottom: 22px;
+  justify-self: start;
   color: var(--text-faint);
   font-size: 11px;
 }
@@ -540,6 +584,11 @@ h1:first-child,
 
 .chapter-credit-row .chapter-byline {
   margin-right: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.chapter-credit-row .chapter-contributors {
   color: var(--text-faint);
   font-size: 10px;
 }
@@ -832,10 +881,20 @@ table.timeline tbody th {
     font-size: 18px;
   }
 
-  .chapter-index a {
+  .chapter-index-primary {
     grid-template-columns: 27px minmax(0, 1fr) 18px;
     gap: 10px;
     padding: 22px 4px;
+  }
+
+  .chapter-index-card-with-contributors .chapter-index-primary {
+    padding-bottom: 39px;
+  }
+
+  .chapter-index .chapter-contributors {
+    right: 32px;
+    bottom: 19px;
+    left: 41px;
   }
 
   .chapter-index-heading strong {
@@ -1058,6 +1117,55 @@ a.story-outline-title:hover {
 
 .story-outline-summary {
   margin: 8px 0 0;
+  color: var(--text-muted, var(--muted));
+  font-family: var(--font-body, Georgia, serif);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.story-chapter-summaries {
+  margin-top: 44px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border-subtle, var(--border));
+}
+
+.story-chapter-summaries h2 {
+  margin: 4px 0 18px;
+  color: var(--text-strong, var(--fg));
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-size: clamp(22px, 4vw, 30px);
+  letter-spacing: -0.025em;
+}
+
+.story-chapter-summaries ol {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.story-chapter-summaries li {
+  padding: 16px 18px;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 9px;
+  background: var(--surface-card, var(--surface));
+}
+
+.story-chapter-summaries a {
+  color: var(--text-strong, var(--fg));
+  font-family: var(--font-display, system-ui, sans-serif);
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.story-chapter-summaries a:hover {
+  color: var(--text-link, var(--link));
+}
+
+.story-chapter-summaries p {
+  margin: 6px 0 0;
   color: var(--text-muted, var(--muted));
   font-family: var(--font-body, Georgia, serif);
   font-size: 15px;

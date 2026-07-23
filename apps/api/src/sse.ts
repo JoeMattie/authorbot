@@ -124,9 +124,19 @@ export function sseFrame(event: EventRecord): string {
   return `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(eventJson(event))}\n\n`;
 }
 
+/** Advance EventSource's reconnect cursor without dispatching a client event. */
+function sseCursorCheckpoint(id: number): string {
+  return `id: ${id}\n\n`;
+}
+
 export interface SseStreamOptions {
   /** Rows strictly after the cursor, id-ordered (EventsRepository.listAfter). */
   listAfter(afterId: number, limit: number): Promise<EventRecord[]>;
+  /**
+   * Optional per-request visibility boundary. A null result suppresses the
+   * frame, but the raw row still advances the in-connection cursor.
+   */
+  projectEvent?: (event: EventRecord) => EventRecord | null;
   /** Resume cursor: stream starts strictly after this id. */
   initialCursor: number;
   pollMs?: number;
@@ -180,10 +190,24 @@ export function sseResponse(options: SseStreamOptions, headers: Headers = new He
         try {
           for (;;) {
             const rows = await options.listAfter(cursor, PAGE_LIMIT);
+            let suppressedThrough: number | null = null;
             for (const row of rows) {
-              send(sseFrame(row));
               cursor = row.id;
+              const visible = options.projectEvent === undefined
+                ? row
+                : options.projectEvent(row);
+              if (visible === null) {
+                suppressedThrough = row.id;
+              } else {
+                send(sseFrame(visible));
+                suppressedThrough = null;
+              }
             }
+            // An id-only SSE block updates the browser's Last-Event-ID but
+            // dispatches no MessageEvent. Without it, a token whose tail is
+            // entirely filtered reconnects from its old cursor and rescans
+            // the same hidden history after every stream lifetime.
+            if (suppressedThrough !== null) send(sseCursorCheckpoint(suppressedThrough));
             if (rows.length < PAGE_LIMIT || closed) break;
           }
         } catch {

@@ -1,0 +1,28 @@
+---
+/**
+ * Static mount for the repository-document editor. No source bytes are stamped
+ * into HTML; the authorized element fetches them only after Edit is activated.
+ */
+import { site } from "virtual:authorbot-site";
+
+const { kind, targetId, path, label, readingId } = Astro.props;
+const collab = site.collab;
+const src = `${site.basePath}_astro/authorbot-planning.js`;
+---
+
+{
+  collab && (
+    <>
+      <authorbot-planning-document-editor
+        data-api-base={collab.apiBase}
+        data-project={collab.projectSlug}
+        data-kind={kind}
+        data-target-id={targetId}
+        data-path={path}
+        data-label={label}
+        data-reading-id={readingId}
+      ></authorbot-planning-document-editor>
+      <script is:inline type="module" src={src}></script>
+    </>
+  )
+}

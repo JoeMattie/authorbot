@@ -20,6 +20,7 @@ const DESIGN_EDGES: ReadonlyArray<[WorkItemStatus, WorkItemStatus]> = [
   ["leased", "ready"],
   ["leased", "submitted"],
   ["leased", "cancelled"],
+  ["submitted", "ready"],
   ["submitted", "applying"],
   ["submitted", "failed"],
   ["applying", "completed"],
@@ -38,6 +39,7 @@ const DESIGN_LABELLED_EDGES: ReadonlyArray<
   ["expire", "leased", "ready"], // expiry back-edge
   ["release", "leased", "ready"], // release back-edge
   ["submit", "leased", "submitted"],
+  ["review_rejected", "submitted", "ready"],
   ["validation_passed", "submitted", "applying"],
   ["validation_failed", "submitted", "failed"],
   ["apply_succeeded", "applying", "completed"],

@@ -84,6 +84,35 @@ export interface BookRepoSnapshot {
 export interface BookRepoReader {
   readSnapshot(): Promise<BookRepoSnapshot>;
   readTextFile?(path: string): Promise<string | null>;
+  listTextFiles?(
+    glob: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<RepoTextFilePage>;
+}
+
+/** One bounded source page. The caller turns `nextAfter` into its public cursor. */
+export interface RepoTextFilePage {
+  headCommit: string | null;
+  files: Array<{ path: string; source: string }>;
+  nextAfter: string | null;
+}
+
+/** Bounded metadata for one commit that changed a repository file. */
+export interface RepoFileHistoryEntry {
+  commitSha: string;
+  message: string;
+  authoredAt: string | null;
+  committedAt: string | null;
+  authorName: string | null;
+  authorLogin: string | null;
+  parentShas: string[];
+}
+
+export interface RepoFileHistoryPage {
+  entries: RepoFileHistoryEntry[];
+  page: number;
+  /** A conservative lookahead; an exact-multiple final page may lead to one empty read. */
+  hasMore: boolean;
 }
 
 /**
@@ -215,6 +244,32 @@ export function normalizeRepoPath(path: string): string {
     .join("/");
 }
 
+/**
+ * Match the small repository-relative glob vocabulary accepted by book.yml.
+ * `*` and `?` stay within one segment; `**` may cross directory boundaries.
+ * Both inputs must be contained before a regular expression is constructed.
+ */
+export function repoPathMatchesGlob(path: string, glob: string): boolean {
+  if (!isContainedRepoPath(path) || !isContainedRepoPath(glob)) return false;
+  let pattern = "^";
+  for (let index = 0; index < glob.length; index += 1) {
+    const char = glob[index] as string;
+    if (char === "*") {
+      if (glob[index + 1] === "*") {
+        pattern += ".*";
+        index += 1;
+      } else {
+        pattern += "[^/]*";
+      }
+    } else if (char === "?") {
+      pattern += "[^/]";
+    } else {
+      pattern += char.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
+    }
+  }
+  return new RegExp(`${pattern}$`, "u").test(path);
+}
+
 const CHAPTER_PATH = /^chapters\/[^/]+\.md$/;
 const DECISION_PATH = /^\.authorbot\/decisions\/([^/]+)\.yml$/;
 const WORK_ITEM_PATH = /^\.authorbot\/work-items\/([^/]+)\.md$/;
@@ -294,6 +349,17 @@ interface BlobResponse {
   encoding?: unknown;
 }
 
+interface CommitListItem {
+  sha?: unknown;
+  commit?: {
+    message?: unknown;
+    author?: { name?: unknown; date?: unknown } | null;
+    committer?: { date?: unknown } | null;
+  } | null;
+  author?: { login?: unknown } | null;
+  parents?: unknown;
+}
+
 // -------------------------------------------------------------------- options
 
 export interface GitHubBookRepoReaderOptions {
@@ -321,6 +387,11 @@ export interface GitHubBookRepoReaderOptions {
 }
 
 export const MAX_BLOB_CONCURRENCY = 8;
+/** 3 metadata requests + this many blobs stays safely below Worker subrequest ceilings. */
+export const MAX_TEXT_FILE_PAGE_SIZE = 20;
+export const MAX_TEXT_FILE_BYTES = 512 * 1024;
+/** Keep the current head plus at most five historical full-tree indexes. */
+export const MAX_TREE_INDEX_CACHE_ENTRIES = 6;
 const DEFAULT_MAX_FILES = 2000;
 
 export class GitHubBookRepoReader implements BookRepoReader {
@@ -334,12 +405,13 @@ export class GitHubBookRepoReader implements BookRepoReader {
   readonly #fetch: AuthorizedFetch;
   readonly #includePath: (path: string) => boolean;
   /**
-   * Path → entry, keyed by commit sha. A commit is immutable, so this is a
-   * cache that can never go stale; it only ever avoids re-reading a tree we
-   * have already read. The head ref is re-resolved on every call, so a caller
-   * that writes and then reads through the same instance still sees its write.
+   * Bounded LRU of path → entry indexes keyed by immutable commit SHA. Full
+   * recursive trees are large, and this reader lives inside a memoized Durable
+   * Object, so retaining every history selection would eventually exhaust the
+   * Worker. The currently resolved head is pinned while older entries rotate.
    */
   readonly #treeIndex = new Map<string, { treeSha: string; entries: Map<string, TreeEntryRecord> }>();
+  #headCommit: string | null = null;
 
   constructor(options: GitHubBookRepoReaderOptions) {
     this.owner = options.owner;
@@ -400,7 +472,28 @@ export class GitHubBookRepoReader implements BookRepoReader {
     if (typeof sha !== "string" || sha === "") {
       throw new GitHubReadError("missing-ref", `ref heads/${this.branch} carried no commit sha`);
     }
+    this.#headCommit = sha;
+    const cached = this.#treeIndex.get(sha);
+    if (cached !== undefined) {
+      // Map insertion order is the LRU order. Touching the head also prevents
+      // a hot current snapshot from being treated as the oldest history item.
+      this.#treeIndex.delete(sha);
+      this.#treeIndex.set(sha, cached);
+    }
     return sha;
+  }
+
+  #rememberTreeIndex(
+    commitSha: string,
+    index: { treeSha: string; entries: Map<string, TreeEntryRecord> },
+  ): void {
+    this.#treeIndex.delete(commitSha);
+    this.#treeIndex.set(commitSha, index);
+    while (this.#treeIndex.size > MAX_TREE_INDEX_CACHE_ENTRIES) {
+      const evict = [...this.#treeIndex.keys()].find((sha) => sha !== this.#headCommit);
+      if (evict === undefined) return;
+      this.#treeIndex.delete(evict);
+    }
   }
 
   async #rootTreeSha(commitSha: string): Promise<string> {
@@ -423,7 +516,10 @@ export class GitHubBookRepoReader implements BookRepoReader {
     commitSha: string,
   ): Promise<{ treeSha: string; entries: Map<string, TreeEntryRecord> }> {
     const cached = this.#treeIndex.get(commitSha);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.#rememberTreeIndex(commitSha, cached);
+      return cached;
+    }
 
     const treeSha = await this.#rootTreeSha(commitSha);
     const body = await this.#getJson<TreeResponse>(
@@ -444,7 +540,7 @@ export class GitHubBookRepoReader implements BookRepoReader {
       entries.set(path, { sha, size });
     }
     const index = { treeSha, entries };
-    this.#treeIndex.set(commitSha, index);
+    this.#rememberTreeIndex(commitSha, index);
     return index;
   }
 
@@ -489,6 +585,124 @@ export class GitHubBookRepoReader implements BookRepoReader {
     const entry = entries.get(normalized);
     if (entry === undefined) return null;
     return this.#readBlobText(entry.sha);
+  }
+
+  /**
+   * Read one lexically paginated file page from a single branch-head tree.
+   * The tree index is commit-cached and only the returned page's blobs are
+   * fetched, so a page makes at most 3 metadata requests plus 20 blob reads.
+   */
+  async listTextFiles(
+    glob: string,
+    options: { after?: string; limit?: number } = {},
+  ): Promise<RepoTextFilePage> {
+    if (!isContainedRepoPath(glob) ||
+        (options.after !== undefined && !isContainedRepoPath(options.after))) {
+      return { headCommit: null, files: [], nextAfter: null };
+    }
+    const limit = Math.max(
+      1,
+      Math.min(MAX_TEXT_FILE_PAGE_SIZE, Math.trunc(options.limit ?? MAX_TEXT_FILE_PAGE_SIZE)),
+    );
+    const headCommit = await this.readHeadCommit();
+    const { entries } = await this.#indexFor(headCommit);
+    const matching = [...entries.keys()].filter((path) => repoPathMatchesGlob(path, glob)).sort();
+    if (matching.length > this.maxFiles) {
+      throw new GitHubReadError(
+        "file-budget-exceeded",
+        `glob ${glob} matched ${matching.length} files, above the ${this.maxFiles} limit`,
+      );
+    }
+    const remaining =
+      options.after === undefined
+        ? matching
+        : matching.filter((path) => path > (options.after as string));
+    const pagePaths = remaining.slice(0, limit);
+    for (const path of pagePaths) {
+      const size = entries.get(path)?.size ?? 0;
+      if (size > MAX_TEXT_FILE_BYTES) {
+        throw new GitHubReadError(
+          "file-budget-exceeded",
+          `file ${path} is ${size} bytes, above the ${MAX_TEXT_FILE_BYTES}-byte source limit`,
+        );
+      }
+    }
+    const bytes = await this.#fetchAll(pagePaths, entries);
+    const files = pagePaths.map((path) => ({
+      path,
+      source: decodeUtf8(bytes.get(path) as Uint8Array),
+    }));
+    return {
+      headCommit,
+      files,
+      nextAfter:
+        remaining.length > pagePaths.length && pagePaths.length > 0
+          ? (pagePaths[pagePaths.length - 1] as string)
+          : null,
+    };
+  }
+
+  /**
+   * Raw text of a contained file at one immutable commit. This is intentionally
+   * separate from the head reader: history consumers select one snapshot at a
+   * time and reuse the commit-keyed tree cache instead of rebuilding every
+   * historical tree in one Worker invocation.
+   */
+  async readTextFileAtCommit(path: string, commitSha: string): Promise<string | null> {
+    if (!isContainedRepoPath(path) || !/^[0-9a-f]{40}$/u.test(commitSha)) return null;
+    const normalized = normalizeRepoPath(path);
+    const { entries } = await this.#indexFor(commitSha);
+    const entry = entries.get(normalized);
+    return entry === undefined ? null : this.#readBlobText(entry.sha);
+  }
+
+  /**
+   * One bounded GitHub commits page filtered by an exact file path. Listing
+   * metadata is one request regardless of chapter count; callers fetch only
+   * the selected snapshot through {@link readTextFileAtCommit}.
+   */
+  async listFileHistory(
+    path: string,
+    options: { page?: number; limit?: number } = {},
+  ): Promise<RepoFileHistoryPage> {
+    if (!isContainedRepoPath(path)) {
+      return { entries: [], page: 1, hasMore: false };
+    }
+    const page = Math.max(1, Math.trunc(options.page ?? 1));
+    const limit = Math.max(1, Math.min(50, Math.trunc(options.limit ?? 25)));
+    const url = new URL(`${this.repoPath}/commits`);
+    url.searchParams.set("sha", this.branch);
+    url.searchParams.set("path", normalizeRepoPath(path));
+    url.searchParams.set("per_page", String(limit));
+    url.searchParams.set("page", String(page));
+    const body = await this.#getJson<CommitListItem[]>(
+      url.toString(),
+      `reading history for ${normalizeRepoPath(path)}`,
+    );
+    if (!Array.isArray(body)) {
+      throw new GitHubReadError("missing-object", "commit history response was not a list");
+    }
+    const entries: RepoFileHistoryEntry[] = [];
+    for (const item of body) {
+      const sha = item.sha;
+      if (typeof sha !== "string" || !/^[0-9a-f]{40}$/u.test(sha)) continue;
+      const commit = item.commit;
+      const parents = Array.isArray(item.parents) ? item.parents : [];
+      entries.push({
+        commitSha: sha,
+        message: typeof commit?.message === "string" ? commit.message : "",
+        authoredAt: typeof commit?.author?.date === "string" ? commit.author.date : null,
+        committedAt: typeof commit?.committer?.date === "string" ? commit.committer.date : null,
+        authorName: typeof commit?.author?.name === "string" ? commit.author.name : null,
+        authorLogin: typeof item.author?.login === "string" ? item.author.login : null,
+        parentShas: parents.flatMap((parent) => {
+          if (typeof parent !== "object" || parent === null) return [];
+          const parentSha = (parent as { sha?: unknown }).sha;
+          return typeof parentSha === "string" ? [parentSha] : [];
+        }),
+      });
+    }
+    return { entries, page, hasMore: body.length === limit };
   }
 
   /**

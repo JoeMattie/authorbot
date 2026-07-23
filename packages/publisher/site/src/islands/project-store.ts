@@ -10,12 +10,21 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   CollabApi,
+  hasEffectiveCapability,
   type Annotation,
   type ApiResult,
   type ChapterAccepted,
   type ChapterActivity,
+  type ChapterHistoryComparison,
+  type ChapterHistoryDetail,
+  type ChapterHistoryPage,
+  type ChapterHistoryRestoreAccepted,
   type ChapterProjection,
+  type ChapterRevisionProposalCommand,
+  type ChapterSummaryProposalCommand,
   type ChapterSource,
+  type CompletedWorkItem,
+  type CreateRevisionProposalCommand,
   type CreateAnnotationAccepted,
   type FeedEvent,
   type LeaseRelease,
@@ -25,8 +34,17 @@ import {
   type MutationOptions,
   type Operation,
   type OverrideResult,
+  type PublicationSummary,
   type Reply,
   type ReplyAccepted,
+  type ReplyWithdrawAccepted,
+  type RepositoryDocumentKind,
+  type RepositoryDocumentProposalCommand,
+  type RepositoryDocumentSource,
+  type RevisionProposalAccepted,
+  type RevisionProposalDetail,
+  type RevisionProposalSummary,
+  type RevisionReviewResult,
   type SubmissionAccepted,
   type SubmitBody,
   type TaskBundle,
@@ -36,6 +54,23 @@ import {
   type WithdrawAccepted,
 } from "./api.js";
 import { CollabEvents } from "./events.js";
+import {
+  acceptEditorRevision,
+  beginEditorRevision,
+  chapterEditorRevisionTarget,
+  failEditorRevisionSave,
+  publicationStateFromEvent,
+  reconcileEditorRevisionEvent,
+  reconcileEditorRevisionOperation,
+  reconcileEditorRevisionProposal,
+  reconcileEditorRevisionPublication,
+  repositoryEditorRevisionTarget,
+  resumeEditorRevision,
+  type EditorPublicationState,
+  type EditorRevisionState,
+  type EditorRevisionTarget,
+  type ResumeEditorRevision,
+} from "./editor-revision-state.js";
 
 export type ResourceStatus = "idle" | "loading" | "ready" | "error";
 
@@ -53,6 +88,25 @@ export interface ProjectStoreApi {
   workItems?(cursor?: string): Promise<
     ApiResult<{ items: WorkItem[]; nextCursor: string | null }>
   >;
+  completedWorkItems?(
+    cursor?: string,
+    limit?: number,
+  ): Promise<ApiResult<{ items: CompletedWorkItem[]; nextCursor: string | null }>>;
+  revisionProposals?: CollabApi["revisionProposals"];
+  revisionProposal?: CollabApi["revisionProposal"];
+  publications?(limit?: number): Promise<ApiResult<{ items: PublicationSummary[] }>>;
+  repositoryDocumentSource?(
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<ApiResult<RepositoryDocumentSource>>;
+  createRevisionProposal?(
+    command: CreateRevisionProposalCommand,
+    options?: MutationOptions,
+  ): Promise<ApiResult<RevisionProposalAccepted>>;
+  reviewRevisionProposal?: CollabApi["reviewRevisionProposal"];
+  chapterHistory?: CollabApi["chapterHistory"];
+  chapterHistoryRevision?: CollabApi["chapterHistoryRevision"];
+  restoreChapterRevision?: CollabApi["restoreChapterRevision"];
   operation?(operationId: string): Promise<Operation | null>;
   eventsUrl?(): string;
   pollEvents?(after: number): Promise<
@@ -61,6 +115,7 @@ export interface ProjectStoreApi {
   createAnnotation?: CollabApi["createAnnotation"];
   createReply?: CollabApi["createReply"];
   withdraw?: CollabApi["withdraw"];
+  withdrawReply?: CollabApi["withdrawReply"];
   castVote?: CollabApi["castVote"];
   clearVote?: CollabApi["clearVote"];
   promoteToWork?: CollabApi["promoteToWork"];
@@ -130,6 +185,8 @@ interface OperationContext {
   mutationId?: string;
   fingerprint?: string;
   refreshWork?: boolean;
+  revisionProposalId?: string;
+  editorTargetKey?: string;
   settlementAttempts?: number;
 }
 
@@ -156,6 +213,27 @@ export interface ProjectStoreState {
   workItemIds: readonly string[];
   workItemsStatus: ResourceStatus;
   workItemsError: string | null;
+  completedWorkItemsById: Readonly<Record<string, CompletedWorkItem>>;
+  completedWorkItemIds: readonly string[];
+  completedWorkItemsStatus: ResourceStatus;
+  completedWorkItemsError: string | null;
+  completedWorkItemsNextCursor: string | null;
+  revisionProposalsById: Readonly<Record<string, RevisionProposalSummary>>;
+  revisionProposalIds: readonly string[];
+  revisionProposalsStatus: ResourceStatus;
+  revisionProposalsError: string | null;
+  revisionProposalDetailStatusById: Readonly<Record<string, ResourceStatus>>;
+  revisionProposalDetailErrorById: Readonly<Record<string, string | null>>;
+  /** Lifecycle retained for direct chapter and planning-document editors. */
+  editorRevisionsByTargetKey: Readonly<Record<string, EditorRevisionState>>;
+  /** Publication callbacks retained so a late proposal event can still settle. */
+  editorPublicationsByCommit: Readonly<Record<string, EditorPublicationState>>;
+  chapterHistoryByChapter: Readonly<Record<string, ChapterHistoryPage>>;
+  chapterHistoryStatusByChapter: Readonly<Record<string, ResourceStatus>>;
+  chapterHistoryErrorByChapter: Readonly<Record<string, string | null>>;
+  chapterHistoryDetailByKey: Readonly<Record<string, ChapterHistoryDetail>>;
+  chapterHistoryDetailStatusByKey: Readonly<Record<string, ResourceStatus>>;
+  chapterHistoryDetailErrorByKey: Readonly<Record<string, string | null>>;
   operationsById: Readonly<Record<string, Operation>>;
   pendingMutations: Readonly<Record<string, PendingMutation>>;
   connection: ConnectionState;
@@ -177,6 +255,30 @@ export interface ProjectStoreState {
   refreshReplies(annotationId: string): Promise<void>;
   ensureWorkItems(): Promise<void>;
   refreshWorkItems(): Promise<void>;
+  ensureCompletedWorkItems(): Promise<void>;
+  refreshCompletedWorkItems(): Promise<void>;
+  loadMoreCompletedWorkItems(): Promise<void>;
+  ensureRevisionProposals(): Promise<void>;
+  refreshRevisionProposals(): Promise<void>;
+  ensureRevisionProposal(proposalId: string): Promise<void>;
+  refreshRevisionProposal(proposalId: string): Promise<void>;
+  trackEditorRevision(
+    target: EditorRevisionTarget,
+    revision: ResumeEditorRevision,
+  ): void;
+  forgetEditorRevision(targetKey: string): void;
+  ensureChapterHistory(chapterId: string): Promise<void>;
+  refreshChapterHistory(chapterId: string): Promise<void>;
+  ensureChapterHistoryRevision(
+    chapterId: string,
+    revision: number,
+    compare: ChapterHistoryComparison,
+  ): Promise<void>;
+  refreshChapterHistoryRevision(
+    chapterId: string,
+    revision: number,
+    compare: ChapterHistoryComparison,
+  ): Promise<void>;
   refreshOperation(operationId: string): Promise<Operation | null>;
   /**
    * Retain the one project feed. The returned release function is idempotent;
@@ -194,9 +296,22 @@ export interface ProjectStoreState {
     parentReplyId?: string,
   ): Promise<StoreActionResult<ReplyAccepted>>;
   withdrawAnnotation(annotationId: string): Promise<StoreActionResult<WithdrawAccepted>>;
+  withdrawReply(
+    annotationId: string,
+    replyId: string,
+  ): Promise<StoreActionResult<ReplyWithdrawAccepted>>;
   setVote(annotationId: string, value: VoteValue | null): Promise<StoreActionResult<VoteResult>>;
   promoteAnnotation(annotationId: string): Promise<StoreActionResult<OverrideResult>>;
   rejectAnnotation(annotationId: string, reason: string): Promise<StoreActionResult<OverrideResult>>;
+  reviewRevision(
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ): Promise<StoreActionResult<RevisionReviewResult>>;
+  restoreChapterHistory(
+    chapterId: string,
+    revision: number,
+  ): Promise<StoreActionResult<ChapterHistoryRestoreAccepted>>;
   claimWork(workItemId: string): Promise<StoreActionResult<SafeTaskBundle>>;
   recoverClaim(bundle: SafeTaskBundle): Promise<StoreActionResult<SafeTaskBundle>>;
   /** Drop a local capability without sending a server mutation. */
@@ -208,6 +323,19 @@ export interface ProjectStoreState {
     command: WorkSubmission,
   ): Promise<StoreActionResult<SubmissionAccepted>>;
   readChapterSource(chapterId: string): Promise<StoreActionResult<ChapterSource>>;
+  readRepositoryDocument(
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<StoreActionResult<RepositoryDocumentSource>>;
+  proposeRepositoryDocument(
+    command: RepositoryDocumentProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>>;
+  proposeChapterRevision(
+    command: ChapterRevisionProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>>;
+  proposeChapterSummary(
+    command: ChapterSummaryProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>>;
   createChapter(command: ChapterCreateCommand): Promise<StoreActionResult<ChapterAccepted>>;
   reviseChapter(command: ChapterReviseCommand): Promise<StoreActionResult<ChapterAccepted>>;
   setChapterPublication(
@@ -221,11 +349,50 @@ export type ProjectStore = StoreApi<ProjectStoreState>;
 const CONNECTION_RETRY_BASE_MS = 500;
 const CONNECTION_RETRY_MAX_MS = 30_000;
 const MAX_WORK_ITEM_PAGES = 10;
+const COMPLETED_WORK_ITEM_PAGE_SIZE = 20;
+const MAX_REVISION_PROPOSAL_PAGES = 10;
+const MAX_CHAPTER_HISTORY_ROWS = 50;
+const MAX_CHAPTER_HISTORY_DETAILS = 8;
 const MAX_OPERATION_SETTLEMENT_RETRIES = 4;
+
+/** Planning writes live in the lazy store chunk, not the 35 KB reader entry. */
+class ProjectStoreApiClient extends CollabApi implements ProjectStoreApi {
+  async repositoryDocumentSource(
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<ApiResult<RepositoryDocumentSource>> {
+    const query = new URLSearchParams({ kind, path });
+    return this.jsonResult<RepositoryDocumentSource>(
+      (async () =>
+        this.get(this.projectUrl(`/repository-documents/source?${query.toString()}`)))(),
+      [200],
+    );
+  }
+
+  async createRevisionProposal(
+    command: CreateRevisionProposalCommand,
+    options?: MutationOptions,
+  ): Promise<ApiResult<RevisionProposalAccepted>> {
+    return this.jsonResult<RevisionProposalAccepted>(
+      this.post(this.projectUrl("/revision-proposals"), command, options),
+      [201, 202],
+      { mutation: true, subject: "revision proposal" },
+    );
+  }
+}
+
+/** Stable cache key shared by the history panel and the project store. */
+export function chapterHistoryDetailKey(
+  chapterId: string,
+  revision: number,
+  compare: ChapterHistoryComparison,
+): string {
+  return JSON.stringify([chapterId, revision, compare]);
+}
 
 export function createProjectStore(
   config: ProjectStoreConfig,
-  api: ProjectStoreApi = new CollabApi(config.apiBase, config.project),
+  api: ProjectStoreApi = new ProjectStoreApiClient(config.apiBase, config.project),
 ): ProjectStore {
   let sessionRequest: Promise<void> | null = null;
   let chaptersRequest: Promise<void> | null = null;
@@ -236,6 +403,17 @@ export function createProjectStore(
   const replyQueuedRequests = new Map<string, Promise<void>>();
   let workItemsRequest: Promise<void> | null = null;
   let workItemsQueuedRequest: Promise<void> | null = null;
+  let completedWorkItemsRequest: Promise<void> | null = null;
+  let completedWorkItemsQueuedRequest: Promise<void> | null = null;
+  let revisionProposalsRequest: Promise<void> | null = null;
+  let revisionProposalsQueuedRequest: Promise<void> | null = null;
+  const revisionProposalRequests = new Map<string, Promise<void>>();
+  const revisionProposalQueuedRequests = new Map<string, Promise<void>>();
+  let editorPublicationsRequest: Promise<void> | null = null;
+  const chapterHistoryRequests = new Map<string, Promise<void>>();
+  const chapterHistoryQueuedRequests = new Map<string, Promise<void>>();
+  const chapterHistoryDetailRequests = new Map<string, Promise<void>>();
+  const chapterHistoryDetailQueuedRequests = new Map<string, Promise<void>>();
   let connectionUsers = 0;
   let events: CollabEvents | null = null;
   let startingEvents: Promise<void> | null = null;
@@ -259,6 +437,7 @@ export function createProjectStore(
     }
   >();
   const retainedMutationKeys = new Map<string, string>();
+  const retainedRevisionCorrelations = new Map<string, string>();
   const operationContexts = new Map<string, OperationContext>();
   let store!: ProjectStore;
 
@@ -312,6 +491,23 @@ export function createProjectStore(
 
   const settleCommand = (fingerprint: string): void => {
     retainedMutationKeys.delete(fingerprint);
+    retainedRevisionCorrelations.delete(fingerprint);
+  };
+
+  const retainedRevisionCorrelationFor = (fingerprint: string): string => {
+    const retained = retainedRevisionCorrelations.get(fingerprint);
+    if (retained !== undefined) return retained;
+    const created = mutationId();
+    retainedRevisionCorrelations.set(fingerprint, created);
+    return created;
+  };
+
+  const settleRevisionCommandForCorrelation = (correlationId: string): void => {
+    for (const [fingerprint, retained] of retainedRevisionCorrelations) {
+      if (retained !== correlationId) continue;
+      settleCommand(fingerprint);
+      return;
+    }
   };
 
   const credentialChanged = <T>(): StoreActionResult<T> => ({
@@ -335,6 +531,15 @@ export function createProjectStore(
     annotations: string[];
     replies: string[];
     work: boolean;
+    completedWork: boolean;
+    revisions: boolean;
+    revisionDetails: string[];
+    history: string[];
+    historyDetails: Array<{
+      chapterId: string;
+      revision: number;
+      compare: ChapterHistoryComparison;
+    }>;
     connection: boolean;
   } => {
     const state = store.getState();
@@ -343,6 +548,15 @@ export function createProjectStore(
       annotations: Object.keys(state.annotationStatusByChapter),
       replies: Object.keys(state.replyStatusByAnnotation),
       work: state.workItemsStatus !== "idle",
+      completedWork: state.completedWorkItemsStatus !== "idle",
+      revisions: state.revisionProposalsStatus !== "idle",
+      revisionDetails: Object.keys(state.revisionProposalDetailStatusById),
+      history: Object.keys(state.chapterHistoryStatusByChapter),
+      historyDetails: Object.values(state.chapterHistoryDetailByKey).map((detail) => ({
+        chapterId: detail.chapterId,
+        revision: detail.selected.revision,
+        compare: detail.compare,
+      })),
       connection: connectionUsers > 0,
     };
     const claimInvalidationsByWorkItem = {
@@ -357,6 +571,12 @@ export function createProjectStore(
     annotationQueuedRequests.clear();
     replyQueuedRequests.clear();
     workItemsQueuedRequest = null;
+    completedWorkItemsQueuedRequest = null;
+    revisionProposalsQueuedRequest = null;
+    revisionProposalQueuedRequests.clear();
+    editorPublicationsRequest = null;
+    chapterHistoryQueuedRequests.clear();
+    chapterHistoryDetailQueuedRequests.clear();
     clearConnectionRetry();
     authoritativeReady = false;
     transportConnected = false;
@@ -366,6 +586,7 @@ export function createProjectStore(
     leaseRecoveryCorrelations.clear();
     localSubmissionCommands.clear();
     retainedMutationKeys.clear();
+    retainedRevisionCorrelations.clear();
     operationContexts.clear();
     authoritativeChapters = {};
     store.setState({
@@ -386,6 +607,25 @@ export function createProjectStore(
       workItemIds: [],
       workItemsStatus: "idle",
       workItemsError: null,
+      completedWorkItemsById: {},
+      completedWorkItemIds: [],
+      completedWorkItemsStatus: "idle",
+      completedWorkItemsError: null,
+      completedWorkItemsNextCursor: null,
+      revisionProposalsById: {},
+      revisionProposalIds: [],
+      revisionProposalsStatus: "idle",
+      revisionProposalsError: null,
+      revisionProposalDetailStatusById: {},
+      revisionProposalDetailErrorById: {},
+      editorRevisionsByTargetKey: {},
+      editorPublicationsByCommit: {},
+      chapterHistoryByChapter: {},
+      chapterHistoryStatusByChapter: {},
+      chapterHistoryErrorByChapter: {},
+      chapterHistoryDetailByKey: {},
+      chapterHistoryDetailStatusByKey: {},
+      chapterHistoryDetailErrorByKey: {},
       operationsById: {},
       pendingMutations: {},
       activeClaimsByWorkItem: {},
@@ -569,10 +809,110 @@ export function createProjectStore(
     setPendingMutations(pending);
   };
 
+  const applyKnownEditorPublication = (
+    editor: EditorRevisionState,
+    publications = store.getState().editorPublicationsByCommit,
+  ): EditorRevisionState => {
+    if (editor.commitSha === null) return editor;
+    const publication = publications[editor.commitSha];
+    return publication === undefined
+      ? editor
+      : reconcileEditorRevisionPublication(editor, publication);
+  };
+
+  const setEditorRevision = (editor: EditorRevisionState): void => {
+    const settled = applyKnownEditorPublication(editor);
+    store.setState({
+      editorRevisionsByTargetKey: {
+        ...store.getState().editorRevisionsByTargetKey,
+        [settled.target.key]: settled,
+      },
+    });
+  };
+
+  const updateEditorRevision = (
+    targetKey: string,
+    update: (current: EditorRevisionState) => EditorRevisionState,
+  ): void => {
+    const current = store.getState().editorRevisionsByTargetKey[targetKey];
+    if (current === undefined) return;
+    const next = applyKnownEditorPublication(update(current));
+    if (next === current) return;
+    store.setState({
+      editorRevisionsByTargetKey: {
+        ...store.getState().editorRevisionsByTargetKey,
+        [targetKey]: next,
+      },
+    });
+  };
+
+  const editorTargetKeyForProposal = (proposalId: string): string | null => {
+    for (const editor of Object.values(store.getState().editorRevisionsByTargetKey)) {
+      if (editor.proposalId === proposalId) return editor.target.key;
+    }
+    return null;
+  };
+
+  const reconcileProposalIntoEditors = (proposal: RevisionProposalSummary): void => {
+    const targetKey = editorTargetKeyForProposal(proposal.id);
+    if (targetKey === null) return;
+    updateEditorRevision(targetKey, (current) =>
+      reconcileEditorRevisionProposal(current, proposal));
+  };
+
+  const rememberEditorPublication = (publication: EditorPublicationState): void => {
+    const publications = {
+      ...store.getState().editorPublicationsByCommit,
+      [publication.integratedCommit]: publication,
+      ...(publication.deployedCommit === null
+        ? {}
+        : { [publication.deployedCommit]: publication }),
+    };
+    const editors: Record<string, EditorRevisionState> = {};
+    for (const [targetKey, editor] of Object.entries(
+      store.getState().editorRevisionsByTargetKey,
+    )) {
+      editors[targetKey] = applyKnownEditorPublication(editor, publications);
+    }
+    store.setState({
+      editorPublicationsByCommit: publications,
+      editorRevisionsByTargetKey: editors,
+    });
+  };
+
+  const loadEditorPublications = (): Promise<void> => {
+    if (editorPublicationsRequest !== null) return editorPublicationsRequest;
+    const read = api.publications;
+    if (read === undefined) return Promise.resolve();
+    const generation = authorizationGeneration;
+    editorPublicationsRequest = (async () => {
+      const result = await read.call(api, 50);
+      if (generation !== authorizationGeneration || !result.ok) return;
+      // The endpoint is newest-first. Apply oldest-to-newest so the latest
+      // callback for a commit wins when CI reported several build states.
+      for (const item of [...result.value.items].reverse()) {
+        if (
+          typeof item.integratedCommit !== "string" ||
+          typeof item.buildStatus !== "string" ||
+          (item.deployedCommit !== null && typeof item.deployedCommit !== "string")
+        ) continue;
+        rememberEditorPublication({
+          integratedCommit: item.integratedCommit,
+          buildStatus: item.buildStatus,
+          deployedCommit: item.deployedCommit,
+        });
+      }
+    })().finally(() => {
+      editorPublicationsRequest = null;
+    });
+    return editorPublicationsRequest;
+  };
+
   const refreshMutationResources = async (
     chapterId: string | null,
     annotationId: string | null,
     refreshWork: boolean,
+    revisionProposalId?: string,
   ): Promise<{ attempted: boolean; ok: boolean }> => {
     const jobs: Promise<unknown>[] = [];
     const checks: Array<() => boolean> = [];
@@ -597,6 +937,23 @@ export function createProjectStore(
       jobs.push(loadWorkItems(true));
       checks.push(() => store.getState().workItemsStatus === "ready");
     }
+    if (refreshWork && store.getState().completedWorkItemsStatus !== "idle") {
+      jobs.push(loadCompletedWorkItems("refresh"));
+      checks.push(() => store.getState().completedWorkItemsStatus === "ready");
+    }
+    if (revisionProposalId !== undefined) {
+      if (store.getState().revisionProposalsStatus !== "idle") {
+        jobs.push(loadRevisionProposals(true));
+        checks.push(() => store.getState().revisionProposalsStatus === "ready");
+      }
+      if (store.getState().revisionProposalDetailStatusById[revisionProposalId] !== undefined) {
+        jobs.push(loadRevisionProposal(revisionProposalId, true));
+        checks.push(
+          () =>
+            store.getState().revisionProposalDetailStatusById[revisionProposalId] === "ready",
+        );
+      }
+    }
     const results = await Promise.allSettled(jobs);
     return {
       attempted: jobs.length > 0,
@@ -619,10 +976,15 @@ export function createProjectStore(
     // Delete before awaiting reads so a duplicate event or a response-race
     // cache lookup cannot settle the same logical command twice.
     operationContexts.delete(operationId);
+    if (context.editorTargetKey !== undefined) {
+      updateEditorRevision(context.editorTargetKey, (current) =>
+        reconcileEditorRevisionOperation(current, operation));
+    }
     const refreshed = await refreshMutationResources(
       context.chapterId,
       context.replyAnnotationId ?? context.annotationId ?? null,
       context.refreshWork === true || context.kind === "submission.apply",
+      context.revisionProposalId,
     );
     if (generation !== authorizationGeneration) return;
     if (refreshed.attempted && !refreshed.ok) {
@@ -737,6 +1099,24 @@ export function createProjectStore(
           for (const chapterId of reload.annotations) jobs.push(loadAnnotations(chapterId, true));
           for (const annotationId of reload.replies) jobs.push(loadReplies(annotationId, true));
           if (reload.work) jobs.push(loadWorkItems(true));
+          if (reload.completedWork) jobs.push(loadCompletedWorkItems("refresh"));
+          if (reload.revisions) jobs.push(loadRevisionProposals(true));
+          for (const proposalId of reload.revisionDetails) {
+            jobs.push(loadRevisionProposal(proposalId, true));
+          }
+          for (const chapterId of reload.history) {
+            jobs.push(loadChapterHistory(chapterId, true));
+          }
+          for (const detail of reload.historyDetails) {
+            jobs.push(
+              loadChapterHistoryRevision(
+                detail.chapterId,
+                detail.revision,
+                detail.compare,
+                true,
+              ),
+            );
+          }
           await Promise.allSettled(jobs);
           if (reload.connection && connectionUsers > 0) {
             const pendingStart = startingEvents;
@@ -1111,6 +1491,485 @@ export function createProjectStore(
     return workItemsRequest;
   };
 
+  /**
+   * Load exactly one completed-Work page. Unlike the live queue, history is
+   * intentionally user-paged so a long-running book never pulls its entire
+   * archive into one Worker invocation or browser render.
+   */
+  const loadCompletedWorkItems = (
+    mode: "ensure" | "refresh" | "more",
+  ): Promise<void> => {
+    const current = store.getState();
+    if (mode === "ensure" && current.completedWorkItemsStatus === "ready") {
+      return Promise.resolve();
+    }
+    if (mode === "more" && current.completedWorkItemsNextCursor === null) {
+      return Promise.resolve();
+    }
+    if (completedWorkItemsRequest !== null) {
+      const active = completedWorkItemsRequest;
+      if (mode === "ensure") return active;
+      if (completedWorkItemsQueuedRequest !== null) return completedWorkItemsQueuedRequest;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const next = (): Promise<void> => {
+        if (completedWorkItemsQueuedRequest === queued) {
+          completedWorkItemsQueuedRequest = null;
+        }
+        return generation === authorizationGeneration
+          ? loadCompletedWorkItems(mode)
+          : Promise.resolve();
+      };
+      queued = active.then(next, next);
+      completedWorkItemsQueuedRequest = queued;
+      return queued;
+    }
+
+    const read = api.completedWorkItems;
+    if (read === undefined) {
+      store.setState({
+        completedWorkItemsById: {},
+        completedWorkItemIds: [],
+        completedWorkItemsStatus: "ready",
+        completedWorkItemsError: null,
+        completedWorkItemsNextCursor: null,
+      });
+      return Promise.resolve();
+    }
+
+    const cursor = mode === "more"
+      ? (current.completedWorkItemsNextCursor ?? undefined)
+      : undefined;
+    store.setState({
+      completedWorkItemsStatus: "loading",
+      completedWorkItemsError: null,
+    });
+    const generation = authorizationGeneration;
+    completedWorkItemsRequest = (async () => {
+      const result = await read.call(api, cursor, COMPLETED_WORK_ITEM_PAGE_SIZE);
+      if (generation !== authorizationGeneration) return;
+      if (!result.ok) {
+        store.setState({
+          completedWorkItemsStatus: "error",
+          completedWorkItemsError: result.message,
+        });
+        return;
+      }
+      if (cursor !== undefined && result.value.nextCursor === cursor) {
+        store.setState({
+          completedWorkItemsStatus: "error",
+          completedWorkItemsError: "completed Work pagination returned a repeated cursor",
+        });
+        return;
+      }
+
+      const before = store.getState();
+      const completedWorkItemsById =
+        mode === "more" ? { ...before.completedWorkItemsById } : {};
+      const completedWorkItemIds = mode === "more"
+        ? [...before.completedWorkItemIds]
+        : [];
+      const seen = new Set(completedWorkItemIds);
+      for (const item of result.value.items) {
+        completedWorkItemsById[item.id] = item;
+        if (!seen.has(item.id)) {
+          completedWorkItemIds.push(item.id);
+          seen.add(item.id);
+        }
+      }
+      store.setState({
+        completedWorkItemsById,
+        completedWorkItemIds,
+        completedWorkItemsStatus: "ready",
+        completedWorkItemsError: null,
+        completedWorkItemsNextCursor: result.value.nextCursor,
+      });
+    })().finally(() => {
+      completedWorkItemsRequest = null;
+    });
+    return completedWorkItemsRequest;
+  };
+
+  const loadRevisionProposals = (force: boolean): Promise<void> => {
+    const current = store.getState();
+    if (!force && current.revisionProposalsStatus === "ready") {
+      return Promise.resolve();
+    }
+    if (revisionProposalsRequest !== null) {
+      const currentRequest = revisionProposalsRequest;
+      if (!force) return currentRequest;
+      if (revisionProposalsQueuedRequest !== null) return revisionProposalsQueuedRequest;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const refresh = (): Promise<void> => {
+        if (revisionProposalsQueuedRequest === queued) revisionProposalsQueuedRequest = null;
+        return generation === authorizationGeneration
+          ? loadRevisionProposals(true)
+          : Promise.resolve();
+      };
+      queued = currentRequest.then(refresh, refresh);
+      revisionProposalsQueuedRequest = queued;
+      return queued;
+    }
+    const read = api.revisionProposals;
+    if (read === undefined) {
+      store.setState({
+        revisionProposalsStatus: "error",
+        revisionProposalsError: "revision review is unavailable in this deployment",
+      });
+      return Promise.resolve();
+    }
+    store.setState({ revisionProposalsStatus: "loading", revisionProposalsError: null });
+    const generation = authorizationGeneration;
+    revisionProposalsRequest = (async () => {
+      const items: RevisionProposalSummary[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      let complete = false;
+      for (let page = 0; page < MAX_REVISION_PROPOSAL_PAGES; page += 1) {
+        const result = await read.call(api, cursor);
+        if (generation !== authorizationGeneration) return;
+        if (!result.ok) {
+          store.setState({
+            revisionProposalsStatus: "error",
+            revisionProposalsError: result.message,
+          });
+          return;
+        }
+        items.push(...result.value.items);
+        const next = result.value.nextCursor;
+        if (next === null) {
+          complete = true;
+          break;
+        }
+        if (seen.has(next)) {
+          store.setState({
+            revisionProposalsStatus: "error",
+            revisionProposalsError: "revision queue pagination returned a repeated cursor",
+          });
+          return;
+        }
+        seen.add(next);
+        cursor = next;
+      }
+      if (!complete) {
+        store.setState({
+          revisionProposalsStatus: "error",
+          revisionProposalsError:
+            `revision queue exceeded ${MAX_REVISION_PROPOSAL_PAGES} pages`,
+        });
+        return;
+      }
+      const previous = store.getState().revisionProposalsById;
+      const revisionProposalsById: Record<string, RevisionProposalSummary> = {};
+      for (const item of items) {
+        // Preserve an already-loaded detail snapshot while refreshing its
+        // authoritative summary/status from the bounded queue read.
+        revisionProposalsById[item.id] = { ...previous[item.id], ...item };
+      }
+      store.setState({
+        revisionProposalsById,
+        revisionProposalIds: items.map((item) => item.id),
+        revisionProposalsStatus: "ready",
+        revisionProposalsError: null,
+      });
+      for (const item of items) reconcileProposalIntoEditors(item);
+    })().finally(() => {
+      revisionProposalsRequest = null;
+    });
+    return revisionProposalsRequest;
+  };
+
+  const loadRevisionProposal = (proposalId: string, force: boolean): Promise<void> => {
+    const state = store.getState();
+    if (!force && state.revisionProposalDetailStatusById[proposalId] === "ready") {
+      return Promise.resolve();
+    }
+    const active = revisionProposalRequests.get(proposalId);
+    if (active !== undefined) {
+      if (!force) return active;
+      const queuedActive = revisionProposalQueuedRequests.get(proposalId);
+      if (queuedActive !== undefined) return queuedActive;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const refresh = (): Promise<void> => {
+        if (revisionProposalQueuedRequests.get(proposalId) === queued) {
+          revisionProposalQueuedRequests.delete(proposalId);
+        }
+        return generation === authorizationGeneration
+          ? loadRevisionProposal(proposalId, true)
+          : Promise.resolve();
+      };
+      queued = active.then(refresh, refresh);
+      revisionProposalQueuedRequests.set(proposalId, queued);
+      return queued;
+    }
+    const read = api.revisionProposal;
+    if (read === undefined) {
+      store.setState({
+        revisionProposalDetailStatusById: {
+          ...state.revisionProposalDetailStatusById,
+          [proposalId]: "error",
+        },
+        revisionProposalDetailErrorById: {
+          ...state.revisionProposalDetailErrorById,
+          [proposalId]: "revision review is unavailable in this deployment",
+        },
+      });
+      return Promise.resolve();
+    }
+    store.setState({
+      revisionProposalDetailStatusById: {
+        ...state.revisionProposalDetailStatusById,
+        [proposalId]: "loading",
+      },
+      revisionProposalDetailErrorById: {
+        ...state.revisionProposalDetailErrorById,
+        [proposalId]: null,
+      },
+    });
+    const generation = authorizationGeneration;
+    const request = (async () => {
+      const result = await read.call(api, proposalId);
+      if (generation !== authorizationGeneration) return;
+      const current = store.getState();
+      if (!result.ok) {
+        store.setState({
+          revisionProposalDetailStatusById: {
+            ...current.revisionProposalDetailStatusById,
+            [proposalId]: "error",
+          },
+          revisionProposalDetailErrorById: {
+            ...current.revisionProposalDetailErrorById,
+            [proposalId]: result.message,
+          },
+        });
+        return;
+      }
+      store.setState({
+        revisionProposalsById: {
+          ...current.revisionProposalsById,
+          [proposalId]: result.value,
+        },
+        revisionProposalDetailStatusById: {
+          ...current.revisionProposalDetailStatusById,
+          [proposalId]: "ready",
+        },
+        revisionProposalDetailErrorById: {
+          ...current.revisionProposalDetailErrorById,
+          [proposalId]: null,
+        },
+      });
+      reconcileProposalIntoEditors(result.value);
+    })().finally(() => {
+      revisionProposalRequests.delete(proposalId);
+    });
+    revisionProposalRequests.set(proposalId, request);
+    return request;
+  };
+
+  const loadChapterHistory = (chapterId: string, force: boolean): Promise<void> => {
+    const state = store.getState();
+    if (!force && state.chapterHistoryStatusByChapter[chapterId] === "ready") {
+      return Promise.resolve();
+    }
+    const active = chapterHistoryRequests.get(chapterId);
+    if (active !== undefined) {
+      if (!force) return active;
+      const queuedActive = chapterHistoryQueuedRequests.get(chapterId);
+      if (queuedActive !== undefined) return queuedActive;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const refresh = (): Promise<void> => {
+        if (chapterHistoryQueuedRequests.get(chapterId) === queued) {
+          chapterHistoryQueuedRequests.delete(chapterId);
+        }
+        return generation === authorizationGeneration
+          ? loadChapterHistory(chapterId, true)
+          : Promise.resolve();
+      };
+      queued = active.then(refresh, refresh);
+      chapterHistoryQueuedRequests.set(chapterId, queued);
+      return queued;
+    }
+    const read = api.chapterHistory;
+    if (read === undefined) {
+      store.setState({
+        chapterHistoryStatusByChapter: {
+          ...state.chapterHistoryStatusByChapter,
+          [chapterId]: "error",
+        },
+        chapterHistoryErrorByChapter: {
+          ...state.chapterHistoryErrorByChapter,
+          [chapterId]: "chapter history is unavailable in this deployment",
+        },
+      });
+      return Promise.resolve();
+    }
+    const generation = authorizationGeneration;
+    const request = Promise.resolve()
+      .then(async () => {
+        const result = await read.call(api, chapterId);
+        if (generation !== authorizationGeneration) return;
+        const current = store.getState();
+        if (!result.ok) {
+          store.setState({
+            chapterHistoryStatusByChapter: {
+              ...current.chapterHistoryStatusByChapter,
+              [chapterId]: "error",
+            },
+            chapterHistoryErrorByChapter: {
+              ...current.chapterHistoryErrorByChapter,
+              [chapterId]: result.message,
+            },
+          });
+          return;
+        }
+        store.setState({
+          chapterHistoryByChapter: {
+            ...current.chapterHistoryByChapter,
+            [chapterId]: {
+              ...result.value,
+              items: result.value.items.slice(0, MAX_CHAPTER_HISTORY_ROWS),
+            },
+          },
+          chapterHistoryStatusByChapter: {
+            ...current.chapterHistoryStatusByChapter,
+            [chapterId]: "ready",
+          },
+          chapterHistoryErrorByChapter: {
+            ...current.chapterHistoryErrorByChapter,
+            [chapterId]: null,
+          },
+        });
+      })
+      .finally(() => {
+        chapterHistoryRequests.delete(chapterId);
+      });
+    chapterHistoryRequests.set(chapterId, request);
+    store.setState({
+      chapterHistoryStatusByChapter: {
+        ...state.chapterHistoryStatusByChapter,
+        [chapterId]: "loading",
+      },
+      chapterHistoryErrorByChapter: {
+        ...state.chapterHistoryErrorByChapter,
+        [chapterId]: null,
+      },
+    });
+    return request;
+  };
+
+  const loadChapterHistoryRevision = (
+    chapterId: string,
+    revision: number,
+    compare: ChapterHistoryComparison,
+    force: boolean,
+  ): Promise<void> => {
+    const key = chapterHistoryDetailKey(chapterId, revision, compare);
+    const state = store.getState();
+    if (!force && state.chapterHistoryDetailStatusByKey[key] === "ready") {
+      return Promise.resolve();
+    }
+    const active = chapterHistoryDetailRequests.get(key);
+    if (active !== undefined) {
+      if (!force) return active;
+      const queuedActive = chapterHistoryDetailQueuedRequests.get(key);
+      if (queuedActive !== undefined) return queuedActive;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const refresh = (): Promise<void> => {
+        if (chapterHistoryDetailQueuedRequests.get(key) === queued) {
+          chapterHistoryDetailQueuedRequests.delete(key);
+        }
+        return generation === authorizationGeneration
+          ? loadChapterHistoryRevision(chapterId, revision, compare, true)
+          : Promise.resolve();
+      };
+      queued = active.then(refresh, refresh);
+      chapterHistoryDetailQueuedRequests.set(key, queued);
+      return queued;
+    }
+    const read = api.chapterHistoryRevision;
+    if (read === undefined) {
+      store.setState({
+        chapterHistoryDetailStatusByKey: {
+          ...state.chapterHistoryDetailStatusByKey,
+          [key]: "error",
+        },
+        chapterHistoryDetailErrorByKey: {
+          ...state.chapterHistoryDetailErrorByKey,
+          [key]: "chapter history is unavailable in this deployment",
+        },
+      });
+      return Promise.resolve();
+    }
+    const generation = authorizationGeneration;
+    const request = Promise.resolve()
+      .then(async () => {
+        const result = await read.call(api, chapterId, revision, compare);
+        if (generation !== authorizationGeneration) return;
+        const current = store.getState();
+        if (!result.ok) {
+          store.setState({
+            chapterHistoryDetailStatusByKey: {
+              ...current.chapterHistoryDetailStatusByKey,
+              [key]: "error",
+            },
+            chapterHistoryDetailErrorByKey: {
+              ...current.chapterHistoryDetailErrorByKey,
+              [key]: result.message,
+            },
+          });
+          return;
+        }
+        const chapterHistoryDetailByKey = {
+          ...current.chapterHistoryDetailByKey,
+          [key]: result.value,
+        };
+        const chapterHistoryDetailStatusByKey = {
+          ...current.chapterHistoryDetailStatusByKey,
+          [key]: "ready" as const,
+        };
+        const chapterHistoryDetailErrorByKey = {
+          ...current.chapterHistoryDetailErrorByKey,
+          [key]: null,
+        };
+        const chapterKeys = Object.keys(chapterHistoryDetailByKey).filter(
+          (candidate) => chapterHistoryDetailByKey[candidate]?.chapterId === chapterId,
+        );
+        const evictable = chapterKeys.filter((candidate) => candidate !== key);
+        while (chapterKeys.length > MAX_CHAPTER_HISTORY_DETAILS) {
+          const evicted = evictable.shift();
+          if (evicted === undefined) break;
+          chapterKeys.splice(chapterKeys.indexOf(evicted), 1);
+          delete chapterHistoryDetailByKey[evicted];
+          delete chapterHistoryDetailStatusByKey[evicted];
+          delete chapterHistoryDetailErrorByKey[evicted];
+        }
+        store.setState({
+          chapterHistoryDetailByKey,
+          chapterHistoryDetailStatusByKey,
+          chapterHistoryDetailErrorByKey,
+        });
+      })
+      .finally(() => {
+        chapterHistoryDetailRequests.delete(key);
+      });
+    chapterHistoryDetailRequests.set(key, request);
+    store.setState({
+      chapterHistoryDetailStatusByKey: {
+        ...state.chapterHistoryDetailStatusByKey,
+        [key]: "loading",
+      },
+      chapterHistoryDetailErrorByKey: {
+        ...state.chapterHistoryDetailErrorByKey,
+        [key]: null,
+      },
+    });
+    return request;
+  };
+
   const recoverAuthoritative = (): Promise<boolean> => {
     if (recoveryRequest !== null) {
       return recoveryRequest;
@@ -1126,6 +1985,12 @@ export function createProjectStore(
       const requireSession = state.sessionStatus !== "idle";
       const requireChapters = state.chaptersStatus !== "idle";
       const requireWorkItems = state.workItemsStatus !== "idle";
+      const requireCompletedWorkItems = state.completedWorkItemsStatus !== "idle";
+      const requireRevisionProposals = state.revisionProposalsStatus !== "idle";
+      const requiredHistoryChapters = Object.entries(state.chapterHistoryStatusByChapter)
+        .filter(([, status]) => status !== "idle")
+        .map(([chapterId]) => chapterId);
+      const requiredHistoryDetails = Object.values(state.chapterHistoryDetailByKey);
       const requiredChapters = Object.entries(state.annotationStatusByChapter)
         .filter(([, status]) => status !== "idle")
         .map(([chapterId]) => chapterId);
@@ -1135,11 +2000,34 @@ export function createProjectStore(
       if (requireSession) jobs.push(loadSession(true));
       if (requireChapters) jobs.push(loadChapters(true));
       if (requireWorkItems) jobs.push(loadWorkItems(true));
+      if (requireCompletedWorkItems) jobs.push(loadCompletedWorkItems("refresh"));
+      if (requireRevisionProposals) jobs.push(loadRevisionProposals(true));
+      if (Object.keys(state.editorRevisionsByTargetKey).length > 0) {
+        jobs.push(loadEditorPublications());
+      }
+      for (const chapterId of requiredHistoryChapters) {
+        jobs.push(loadChapterHistory(chapterId, true));
+      }
+      for (const detail of requiredHistoryDetails) {
+        jobs.push(
+          loadChapterHistoryRevision(
+            detail.chapterId,
+            detail.selected.revision,
+            detail.compare,
+            true,
+          ),
+        );
+      }
       for (const [chapterId, status] of Object.entries(state.annotationStatusByChapter)) {
         if (status !== "idle") jobs.push(loadAnnotations(chapterId, true));
       }
       for (const [annotationId, status] of Object.entries(state.replyStatusByAnnotation)) {
         if (status !== "idle") jobs.push(loadReplies(annotationId, true));
+      }
+      for (const [proposalId, status] of Object.entries(
+        state.revisionProposalDetailStatusById,
+      )) {
+        if (status !== "idle") jobs.push(loadRevisionProposal(proposalId, true));
       }
       const settled = await Promise.allSettled(jobs);
       if (generation !== authorizationGeneration) return false;
@@ -1148,6 +2036,37 @@ export function createProjectStore(
       if (requireSession && fresh.sessionStatus !== "ready") failed.push("session");
       if (requireChapters && fresh.chaptersStatus !== "ready") failed.push("chapters");
       if (requireWorkItems && fresh.workItemsStatus !== "ready") failed.push("Work");
+      if (
+        requireCompletedWorkItems &&
+        fresh.completedWorkItemsStatus !== "ready"
+      ) {
+        failed.push("completed Work");
+      }
+      if (requireRevisionProposals && fresh.revisionProposalsStatus !== "ready") {
+        failed.push("revision proposals");
+      }
+      if (
+        requiredHistoryChapters.some(
+          (chapterId) => fresh.chapterHistoryStatusByChapter[chapterId] !== "ready",
+        )
+      ) {
+        failed.push("chapter history");
+      }
+      for (const detail of requiredHistoryDetails) {
+        const key = chapterHistoryDetailKey(
+          detail.chapterId,
+          detail.selected.revision,
+          detail.compare,
+        );
+        if (fresh.chapterHistoryDetailStatusByKey[key] !== "ready") {
+          failed.push(`chapter history revision ${detail.selected.revision}`);
+        }
+      }
+      for (const proposalId of Object.keys(state.revisionProposalDetailStatusById)) {
+        if (fresh.revisionProposalDetailStatusById[proposalId] !== "ready") {
+          failed.push(`revision ${proposalId}`);
+        }
+      }
       if (
         requiredChapters.some(
           (chapterId) => fresh.annotationStatusByChapter[chapterId] !== "ready",
@@ -1250,6 +2169,31 @@ export function createProjectStore(
       typeof event.payload["submissionId"] === "string"
         ? event.payload["submissionId"]
         : null;
+    const revisionProposalId =
+      typeof event.payload["revisionProposalId"] === "string"
+        ? event.payload["revisionProposalId"]
+        : typeof event.payload["proposalId"] === "string"
+          ? event.payload["proposalId"]
+          : null;
+    const publication = publicationStateFromEvent(event);
+    if (publication !== null) rememberEditorPublication(publication);
+    if (event.type.startsWith("revision_proposal_")) {
+      const before = store.getState().editorRevisionsByTargetKey;
+      const editors: Record<string, EditorRevisionState> = {};
+      let changed = false;
+      let acceptedCorrelatedCommand = false;
+      for (const [targetKey, editor] of Object.entries(before)) {
+        const next = applyKnownEditorPublication(reconcileEditorRevisionEvent(editor, event));
+        editors[targetKey] = next;
+        changed ||= next !== editor;
+        acceptedCorrelatedCommand ||= editor.proposalId === null && next.proposalId !== null &&
+          correlationId !== null && editor.correlationId === correlationId;
+      }
+      if (changed) store.setState({ editorRevisionsByTargetKey: editors });
+      if (acceptedCorrelatedCommand && correlationId !== null) {
+        settleRevisionCommandForCorrelation(correlationId);
+      }
+    }
     if (workItemId !== null && event.type === "lease_renewed") {
       const claim = store.getState().activeClaimsByWorkItem[workItemId];
       const expiresAt = event.payload["expiresAt"];
@@ -1381,7 +2325,28 @@ export function createProjectStore(
       void loadReplies(annotationId, true);
     }
     if (store.getState().workItemsStatus !== "idle") void loadWorkItems(true);
+    if (store.getState().completedWorkItemsStatus !== "idle") {
+      void loadCompletedWorkItems("refresh");
+    }
     if (store.getState().chaptersStatus !== "idle") void loadChapters(true);
+    if (
+      chapterId !== null &&
+      store.getState().chapterHistoryStatusByChapter[chapterId] !== undefined
+    ) {
+      void loadChapterHistory(chapterId, true);
+    }
+    if (
+      (revisionProposalId !== null || event.type.startsWith("revision_proposal_")) &&
+      store.getState().revisionProposalsStatus !== "idle"
+    ) {
+      void loadRevisionProposals(true);
+    }
+    if (
+      revisionProposalId !== null &&
+      store.getState().revisionProposalDetailStatusById[revisionProposalId] !== undefined
+    ) {
+      void loadRevisionProposal(revisionProposalId, true);
+    }
   };
 
   const startEvents = (): Promise<void> => {
@@ -1893,6 +2858,83 @@ export function createProjectStore(
       fingerprint,
     });
     await settleAcceptedMutation(id, fingerprint, before.chapterId, annotationId, false, true);
+    return { ok: true, value: result.value };
+  };
+
+  const withdrawReply = async (
+    annotationId: string,
+    replyId: string,
+  ): Promise<StoreActionResult<ReplyWithdrawAccepted>> => {
+    const write = api.withdrawReply;
+    const before = store.getState().repliesById[replyId];
+    if (write === undefined) return unsupported("reply withdrawal");
+    if (before === undefined || before.annotationId !== annotationId) {
+      return unsupported("reply");
+    }
+    const generation = authorizationGeneration;
+    const annotation = store.getState().annotationsById[annotationId];
+    const chapterId = annotation?.chapterId ?? null;
+    const id = mutationId();
+    const fingerprint = commandFingerprint("reply.withdraw", annotationId, replyId);
+    const key = retainedKeyFor(fingerprint);
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: { ...before, status: "withdrawn" },
+      },
+    });
+    addPendingMutation({
+      id,
+      kind: "reply.withdraw",
+      phase: "optimistic",
+      idempotencyKey: key,
+      fingerprint,
+      chapterId,
+      annotationId,
+      workItemId: null,
+      activityDelta: { openReplies: -1 },
+    });
+    const result = await replayOnce(() =>
+      write.call(api, annotationId, replyId, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      return failOptimistic({
+        result,
+        mutationId: id,
+        fingerprint,
+        chapterId,
+        annotationId,
+        rollback: () => {
+          store.setState({
+            repliesById: {
+              ...store.getState().repliesById,
+              [replyId]: before,
+            },
+          });
+        },
+      });
+    }
+    const current = store.getState().repliesById[replyId] ?? before;
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: {
+          ...current,
+          status: "withdrawn",
+          gitOperationId: result.value.operationId,
+        },
+      },
+    });
+    updatePendingMutation(id, "accepted");
+    await registerOperationContext(result.value.operationId, {
+      kind: "reply.withdraw",
+      chapterId,
+      workItemId: null,
+      replyAnnotationId: annotationId,
+      mutationId: id,
+      fingerprint,
+    });
     return { ok: true, value: result.value };
   };
 
@@ -2456,6 +3498,139 @@ export function createProjectStore(
     return result.ok ? { ok: true, value: result.value } : actionFailure(result);
   };
 
+  const readRepositoryDocument = async (
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<StoreActionResult<RepositoryDocumentSource>> => {
+    const read = api.repositoryDocumentSource;
+    if (read === undefined) return unsupported("repository document source");
+    const generation = authorizationGeneration;
+    const result = await read.call(api, kind, path);
+    if (generation !== authorizationGeneration) return credentialChanged();
+    return result.ok ? { ok: true, value: result.value } : actionFailure(result);
+  };
+
+  const proposeRevision = async (
+    command: CreateRevisionProposalCommand,
+    fingerprintKind: "chapter" | "summary" | "document",
+    chapterId: string | null,
+    target?: EditorRevisionTarget,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> => {
+    const write = api.createRevisionProposal;
+    if (write === undefined) return unsupported("revision proposal");
+    const generation = authorizationGeneration;
+    const fingerprint = commandFingerprint(`revision.propose-${fingerprintKind}`, command);
+    const key = retainedKeyFor(fingerprint);
+    const correlationId = retainedRevisionCorrelationFor(fingerprint);
+    if (target !== undefined) {
+      setEditorRevision(beginEditorRevision(target, correlationId));
+    }
+    const result = await replayOnce(() =>
+      write.call(api, command, { idempotencyKey: key, correlationId }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      if (target !== undefined) {
+        updateEditorRevision(target.key, (current) =>
+          failEditorRevisionSave(current, result.message));
+      }
+      const confirmed = target === undefined
+        ? undefined
+        : store.getState().editorRevisionsByTargetKey[target.key];
+      if (
+        target !== undefined &&
+        confirmed?.proposalId !== null &&
+        confirmed?.proposalId !== undefined
+      ) {
+        // The feed is authoritative evidence that this exact correlated POST
+        // landed, even when both HTTP attempts lost their responses. Keep the
+        // editor closed on its accepted draft instead of asking for a risky
+        // duplicate submission.
+        const accepted: RevisionProposalAccepted = {
+          proposalId: confirmed.proposalId,
+          operationId: confirmed.operationId,
+          correlationId: confirmed.correlationId ?? correlationId,
+          status: confirmed.phase === "pending_review" || confirmed.phase === "rejected"
+            ? "pending_review"
+            : "applying",
+        };
+        settleCommand(fingerprint);
+        if (store.getState().revisionProposalsStatus !== "idle") {
+          void loadRevisionProposals(true);
+        }
+        if (
+          api.revisionProposal !== undefined &&
+          hasEffectiveCapability(store.getState().session, "revisions:read", "revisions:read")
+        ) {
+          void loadRevisionProposal(accepted.proposalId, false);
+        }
+        void loadEditorPublications();
+        if (accepted.operationId !== null) {
+          await registerOperationContext(accepted.operationId, {
+            kind: "revision.apply",
+            chapterId,
+            workItemId: null,
+            revisionProposalId: accepted.proposalId,
+            editorTargetKey: target.key,
+          });
+        }
+        return { ok: true, value: accepted };
+      }
+      if (!shouldReplay(result)) settleCommand(fingerprint);
+      return actionFailure(result);
+    }
+    if (target !== undefined) {
+      updateEditorRevision(target.key, (current) =>
+        acceptEditorRevision(current, result.value));
+    }
+    settleCommand(fingerprint);
+    if (store.getState().revisionProposalsStatus !== "idle") {
+      void loadRevisionProposals(true);
+    }
+    if (
+      api.revisionProposal !== undefined &&
+      hasEffectiveCapability(store.getState().session, "revisions:read", "revisions:read")
+    ) {
+      void loadRevisionProposal(result.value.proposalId, false);
+    }
+    if (target !== undefined) void loadEditorPublications();
+    if (result.value.operationId !== null) {
+      await registerOperationContext(result.value.operationId, {
+        kind: "revision.apply",
+        chapterId,
+        workItemId: null,
+        revisionProposalId: result.value.proposalId,
+        ...(target === undefined ? {} : { editorTargetKey: target.key }),
+      });
+    }
+    return { ok: true, value: result.value };
+  };
+
+  const proposeRepositoryDocument = (
+    command: RepositoryDocumentProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
+    proposeRevision(
+      command,
+      "document",
+      null,
+      repositoryEditorRevisionTarget(command.targetKind, command.targetPath),
+    );
+
+  const proposeChapterRevision = (
+    command: ChapterRevisionProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
+    proposeRevision(
+      command,
+      "chapter",
+      command.chapterId,
+      chapterEditorRevisionTarget(command.chapterId),
+    );
+
+  const proposeChapterSummary = (
+    command: ChapterSummaryProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
+    proposeRevision(command, "summary", command.chapterId);
+
   const writeChapter = async (
     command: ChapterCreateCommand | ChapterReviseCommand,
   ): Promise<StoreActionResult<ChapterAccepted>> => {
@@ -2520,6 +3695,119 @@ export function createProjectStore(
     return { ok: true, value: result.value };
   };
 
+  const reviewRevision = async (
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ): Promise<StoreActionResult<RevisionReviewResult>> => {
+    const write = api.reviewRevisionProposal;
+    if (write === undefined) return unsupported("revision review");
+    const before = store.getState().revisionProposalsById[proposalId];
+    if (before === undefined) {
+      return {
+        ok: false,
+        kind: "rejected",
+        status: 404,
+        message: "revision proposal is not loaded",
+      };
+    }
+    const generation = authorizationGeneration;
+    const optimisticStatus = decision === "approve" ? "applying" : "rejected";
+    store.setState({
+      revisionProposalsById: {
+        ...store.getState().revisionProposalsById,
+        [proposalId]: { ...before, status: optimisticStatus },
+      },
+    });
+    reconcileProposalIntoEditors({ ...before, status: optimisticStatus });
+    const fingerprint = commandFingerprint(
+      "revision.review",
+      proposalId,
+      decision,
+      reason?.trim() ?? "",
+    );
+    const key = retainedKeyFor(fingerprint);
+    const result = await replayOnce(() =>
+      write.call(api, proposalId, decision, reason, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      store.setState({
+        revisionProposalsById: {
+          ...store.getState().revisionProposalsById,
+          [proposalId]: before,
+        },
+      });
+      reconcileProposalIntoEditors(before);
+      if (!shouldReplay(result)) settleCommand(fingerprint);
+      if (result.status === 409) {
+        void loadRevisionProposals(true);
+        void loadRevisionProposal(proposalId, true);
+      }
+      return actionFailure(result);
+    }
+    settleCommand(fingerprint);
+    const current = store.getState().revisionProposalsById[proposalId] ?? before;
+    store.setState({
+      revisionProposalsById: {
+        ...store.getState().revisionProposalsById,
+        [proposalId]: {
+          ...current,
+          status: result.value.status || optimisticStatus,
+          ...(result.value.operationId === undefined
+            ? {}
+            : { gitOperationId: result.value.operationId }),
+        },
+      },
+    });
+    reconcileProposalIntoEditors({
+      ...current,
+      status: result.value.status || optimisticStatus,
+      ...(result.value.operationId === undefined
+        ? {}
+        : { gitOperationId: result.value.operationId }),
+    });
+    if (result.value.operationId !== undefined) {
+      const editorTargetKey = editorTargetKeyForProposal(proposalId) ?? undefined;
+      await registerOperationContext(result.value.operationId, {
+        kind: "revision.apply",
+        chapterId: before.chapterId,
+        workItemId: before.workItemId,
+        refreshWork: before.workItemId !== null,
+        revisionProposalId: proposalId,
+        ...(editorTargetKey === undefined ? {} : { editorTargetKey }),
+      });
+    }
+    return { ok: true, value: result.value };
+  };
+
+  const restoreChapterHistory = async (
+    chapterId: string,
+    revision: number,
+  ): Promise<StoreActionResult<ChapterHistoryRestoreAccepted>> => {
+    const write = api.restoreChapterRevision;
+    if (write === undefined) return unsupported("chapter history restore");
+    const generation = authorizationGeneration;
+    const fingerprint = commandFingerprint("chapter.history.restore", chapterId, revision);
+    const key = retainedKeyFor(fingerprint);
+    const result = await replayOnce(() =>
+      write.call(api, chapterId, revision, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      if (!shouldReplay(result)) settleCommand(fingerprint);
+      if (result.status === 409) {
+        void loadChapterHistory(chapterId, true);
+      }
+      return actionFailure(result);
+    }
+    settleCommand(fingerprint);
+    if (store.getState().revisionProposalsStatus !== "idle") {
+      void loadRevisionProposals(true);
+    }
+    return { ok: true, value: result.value };
+  };
+
   store = createStore<ProjectStoreState>()(() => ({
     project: { ...config },
     session: null,
@@ -2542,6 +3830,25 @@ export function createProjectStore(
     workItemIds: [],
     workItemsStatus: "idle",
     workItemsError: null,
+    completedWorkItemsById: {},
+    completedWorkItemIds: [],
+    completedWorkItemsStatus: "idle",
+    completedWorkItemsError: null,
+    completedWorkItemsNextCursor: null,
+    revisionProposalsById: {},
+    revisionProposalIds: [],
+    revisionProposalsStatus: "idle",
+    revisionProposalsError: null,
+    revisionProposalDetailStatusById: {},
+    revisionProposalDetailErrorById: {},
+    editorRevisionsByTargetKey: {},
+    editorPublicationsByCommit: {},
+    chapterHistoryByChapter: {},
+    chapterHistoryStatusByChapter: {},
+    chapterHistoryErrorByChapter: {},
+    chapterHistoryDetailByKey: {},
+    chapterHistoryDetailStatusByKey: {},
+    chapterHistoryDetailErrorByKey: {},
     operationsById: {},
     pendingMutations: {},
     activeClaimsByWorkItem: {},
@@ -2563,6 +3870,53 @@ export function createProjectStore(
     refreshReplies: (annotationId) => loadReplies(annotationId, true),
     ensureWorkItems: () => loadWorkItems(false),
     refreshWorkItems: () => loadWorkItems(true),
+    ensureCompletedWorkItems: () => loadCompletedWorkItems("ensure"),
+    refreshCompletedWorkItems: () => loadCompletedWorkItems("refresh"),
+    loadMoreCompletedWorkItems: () => loadCompletedWorkItems("more"),
+    ensureRevisionProposals: () => loadRevisionProposals(false),
+    refreshRevisionProposals: () => loadRevisionProposals(true),
+    ensureRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, false),
+    refreshRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, true),
+    trackEditorRevision: (target, revision) => {
+      const existing = store.getState().editorRevisionsByTargetKey[target.key];
+      if (existing?.proposalId !== revision.proposalId) {
+        setEditorRevision(resumeEditorRevision(target, revision));
+      }
+      const loaded = store.getState().revisionProposalsById[revision.proposalId];
+      if (loaded !== undefined) reconcileProposalIntoEditors(loaded);
+      if (
+        api.revisionProposal !== undefined &&
+        hasEffectiveCapability(store.getState().session, "revisions:read", "revisions:read")
+      ) {
+        void loadRevisionProposal(revision.proposalId, false);
+      }
+      void loadEditorPublications();
+      if (revision.operationId !== undefined && revision.operationId !== null) {
+        const operationId = revision.operationId;
+        void registerOperationContext(operationId, {
+          kind: "revision.apply",
+          chapterId: target.chapterId,
+          workItemId: null,
+          revisionProposalId: revision.proposalId,
+          editorTargetKey: target.key,
+        }).then(() => {
+          if (api.operation !== undefined) {
+            void store.getState().refreshOperation(operationId);
+          }
+        });
+      }
+    },
+    forgetEditorRevision: (targetKey) => {
+      const editors = { ...store.getState().editorRevisionsByTargetKey };
+      delete editors[targetKey];
+      store.setState({ editorRevisionsByTargetKey: editors });
+    },
+    ensureChapterHistory: (chapterId) => loadChapterHistory(chapterId, false),
+    refreshChapterHistory: (chapterId) => loadChapterHistory(chapterId, true),
+    ensureChapterHistoryRevision: (chapterId, revision, compare) =>
+      loadChapterHistoryRevision(chapterId, revision, compare, false),
+    refreshChapterHistoryRevision: (chapterId, revision, compare) =>
+      loadChapterHistoryRevision(chapterId, revision, compare, true),
     refreshOperation: async (operationId) => {
       const generation = authorizationGeneration;
       const operation = (await api.operation?.(operationId)) ?? null;
@@ -2607,10 +3961,13 @@ export function createProjectStore(
     createAnnotation,
     createReply,
     withdrawAnnotation,
+    withdrawReply,
     setVote,
     promoteAnnotation: (annotationId) => overrideAnnotation(annotationId, "promote"),
     rejectAnnotation: (annotationId, reason) =>
       overrideAnnotation(annotationId, "reject", reason),
+    reviewRevision,
+    restoreChapterHistory,
     claimWork,
     recoverClaim,
     forgetClaim: (workItemId) => clearLocalClaim(workItemId),
@@ -2618,6 +3975,10 @@ export function createProjectStore(
     releaseClaim,
     submitClaim,
     readChapterSource,
+    readRepositoryDocument,
+    proposeRepositoryDocument,
+    proposeChapterRevision,
+    proposeChapterSummary,
     createChapter: (command) => writeChapter(command),
     reviseChapter: (command) => writeChapter(command),
     setChapterPublication,

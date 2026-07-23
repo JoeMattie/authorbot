@@ -16,6 +16,7 @@ import type {
   AppConfig,
   AppDeps,
   AppEnv,
+  RepositoryHistoryReader,
   RepositorySourceReader,
 } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
@@ -68,6 +69,7 @@ export function fixtureSnapshot(): BookRepoSnapshot {
           status: "published",
           revision: 3,
           authors: [{ actor: "github:avery-cole" }],
+          summary: "A published chapter summary from the repository projection.",
         },
         path: "chapters/001-baseline.md",
         contentHash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -121,6 +123,7 @@ export async function makeHarness(options: {
    */
   projectionRefresher?: ProjectionRefresher;
   repositorySourceReader?: RepositorySourceReader;
+  repositoryHistoryReader?: RepositoryHistoryReader;
 } = {}): Promise<TestHarness> {
   const db = openSqliteDatabase(":memory:");
   await applyMigrations(db, MIGRATIONS_DIR);
@@ -155,6 +158,9 @@ export async function makeHarness(options: {
       : {}),
     ...(options.repositorySourceReader !== undefined
       ? { repositorySourceReader: options.repositorySourceReader }
+      : {}),
+    ...(options.repositoryHistoryReader !== undefined
+      ? { repositoryHistoryReader: options.repositoryHistoryReader }
       : {}),
     onMutationCommitted: async (projectId) => {
       await mutationHook(projectId);
@@ -230,6 +236,28 @@ export async function mintToken(
   }
   const body = (await response.json()) as { token: string; id: string };
   return { token: body.token, tokenId: body.id };
+}
+
+/** Mint a Phase 11 canonical agent token via the session-only control plane. */
+export async function mintCanonicalToken(
+  harness: TestHarness,
+  cookie: string,
+  capabilities: string[],
+  name = "canonical-test-agent",
+): Promise<{ token: string; tokenId: string; actorId: string }> {
+  const response = await harness.app.request(
+    `/v1/projects/${harness.projectId}/agent-tokens`,
+    jsonRequest(
+      "POST",
+      { name, capabilities },
+      { Cookie: cookie, "Idempotency-Key": uuidv7() },
+    ),
+  );
+  if (response.status !== 201) {
+    throw new Error(`canonical mint failed with status ${response.status}`);
+  }
+  const body = (await response.json()) as { token: string; id: string; actorId: string };
+  return { token: body.token, tokenId: body.id, actorId: body.actorId };
 }
 
 export function jsonRequest(

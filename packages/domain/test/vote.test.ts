@@ -74,16 +74,12 @@ describe("clearVoteCommandSchema", () => {
   });
 });
 
-describe("authorizeVote (suggestion-only guard, contract section 2)", () => {
+describe("authorizeVote (comment and suggestion vote resource)", () => {
   it("allows voting on a suggestion", () => {
     expect(authorizeVote({ annotationKind: "suggestion" }).allowed).toBe(true);
   });
 
-  it("denies voting on a comment with a typed reason (API maps to 422)", () => {
-    const decision = authorizeVote({ annotationKind: "comment" });
-    expect(decision).toMatchObject({ allowed: false, reason: "not-a-suggestion" });
-    if (!decision.allowed) {
-      expect(decision.message).toContain("suggestions only");
-    }
+  it("allows voting on a comment (the API keeps it out of Work governance)", () => {
+    expect(authorizeVote({ annotationKind: "comment" }).allowed).toBe(true);
   });
 });

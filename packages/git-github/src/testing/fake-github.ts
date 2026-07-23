@@ -324,6 +324,9 @@ export class FakeGitHub {
     if (method === "GET" && rest[0] === "compare" && rest.length === 2) {
       return this.#compare(decodeURIComponent(rest[1] as string));
     }
+    if (method === "GET" && rest[0] === "commits" && rest.length === 1) {
+      return this.#listCommits(url);
+    }
     if (rest[0] !== "git") {
       return errorResponse(404, "Not Found");
     }
@@ -620,6 +623,56 @@ export class FakeGitHub {
       commits: [],
       files: [],
     });
+  }
+
+  /** Minimal `GET /repos/{o}/{r}/commits?path=...` history surface. */
+  #listCommits(url: URL): Response {
+    const ref = url.searchParams.get("sha") ?? this.defaultBranch;
+    const head = this.state.getRef(ref) ?? (this.state.commits.has(ref) ? ref : null);
+    if (head === null) return errorResponse(404, "Not Found");
+    const path = url.searchParams.get("path");
+    const perPage = Math.max(1, Math.min(100, Number(url.searchParams.get("per_page") ?? 30)));
+    const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+    const allHistory: string[] = [];
+    let cursor: string | null = head;
+    while (cursor !== null) {
+      allHistory.push(cursor);
+      cursor = this.state.commits.get(cursor)?.parents[0] ?? null;
+    }
+    const history = allHistory.filter((sha) => {
+      if (path === null || path === "") return true;
+      const commit = this.state.getCommit(sha);
+      const current = this.state.readFile(sha, path);
+      const parent = commit.parents[0];
+      const prior = parent === undefined ? null : this.state.readFile(parent, path);
+      return current !== prior;
+    });
+    const start = (page - 1) * perPage;
+    return json(history.slice(start, start + perPage).map((sha) => this.#restCommitBody(sha)));
+  }
+
+  #restCommitBody(sha: string): unknown {
+    const commit = this.state.getCommit(sha);
+    return {
+      sha,
+      commit: {
+        message: commit.message,
+        author: {
+          name: commit.author.name,
+          email: commit.author.email,
+          date: commit.author.date,
+        },
+        committer: {
+          name: commit.committer.name,
+          email: commit.committer.email,
+          date: commit.committer.date,
+        },
+        tree: { sha: commit.tree },
+      },
+      author: null,
+      committer: null,
+      parents: commit.parents.map((parent) => ({ sha: parent })),
+    };
   }
 
   #getTree(sha: string, url: URL): Response {

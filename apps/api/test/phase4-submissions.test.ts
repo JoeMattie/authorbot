@@ -8,7 +8,14 @@
 import { describe, expect, it } from "vitest";
 import { parseWorkItemArtifact } from "@authorbot/repo-coordinator";
 import { uuidv7 } from "../src/ids.js";
-import { BLOCK_ID_1, BLOCK_ID_2, CHAPTER_ID, devLogin, jsonRequest } from "./helpers.js";
+import {
+  BLOCK_ID_1,
+  BLOCK_ID_2,
+  CHAPTER_ID,
+  devLogin,
+  jsonRequest,
+  mintCanonicalToken,
+} from "./helpers.js";
 import {
   BLOCK_2_TEXT,
   CHAPTER_PATH,
@@ -180,6 +187,78 @@ describe("submission verification order (contract §4)", () => {
       harness.close();
     }
   });
+
+  it("requires work:submit independently from work:claim for canonical tokens", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const maintainer = await devLogin(harness, "canonical-owner", "maintainer");
+      const claimOnly = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:claim"],
+        "claim-only",
+      );
+      const first = await createReadyWorkItem(harness);
+      const claimedFirst = await claimWorkItem(harness, { token: claimOnly.token }, first.workItemId);
+      expect(claimedFirst.status).toBe(201);
+      const firstLease = claimedFirst.body["lease"] as { id: string; token: string };
+      const firstDocument = claimedFirst.body["document"] as {
+        revision: number;
+        contentHash: string;
+      };
+      const denied = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${first.workItemId}/submissions`,
+        jsonRequest(
+          "POST",
+          {
+            leaseId: firstLease.id,
+            leaseToken: firstLease.token,
+            type: "range_replacement",
+            baseRevision: firstDocument.revision,
+            baseContentHash: firstDocument.contentHash,
+            content: "haze settled over",
+          },
+          { Authorization: `Bearer ${claimOnly.token}` },
+        ),
+      );
+      expect(denied.status).toBe(403);
+      expect((await harness.repos.workItems.getById(first.workItemId))?.status).toBe("leased");
+
+      const worker = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:claim", "work:submit"],
+        "claim-and-submit",
+      );
+      const second = await createReadyWorkItem(harness);
+      const claimedSecond = await claimWorkItem(harness, { token: worker.token }, second.workItemId);
+      expect(claimedSecond.status).toBe(201);
+      const secondLease = claimedSecond.body["lease"] as { id: string; token: string };
+      const secondDocument = claimedSecond.body["document"] as {
+        revision: number;
+        contentHash: string;
+      };
+      const accepted = await harness.app.request(
+        `/v1/projects/${harness.projectId}/work-items/${second.workItemId}/submissions`,
+        jsonRequest(
+          "POST",
+          {
+            leaseId: secondLease.id,
+            leaseToken: secondLease.token,
+            type: "range_replacement",
+            baseRevision: secondDocument.revision,
+            baseContentHash: secondDocument.contentHash,
+            content: "haze settled over",
+          },
+          { Authorization: `Bearer ${worker.token}` },
+        ),
+      );
+      expect(accepted.status).toBe(202);
+      expect((await harness.repos.workItems.getById(second.workItemId))?.status).toBe("completed");
+    } finally {
+      harness.close();
+    }
+  });
 });
 
 describe("apply pipeline: happy path (exit criterion 3)", () => {
@@ -272,7 +351,7 @@ describe("apply pipeline: happy path (exit criterion 3)", () => {
     }
   });
 
-  it("chapter_replacement applies at base == current, reusing ids for unchanged blocks", async () => {
+  it("chapter_replacement creates an immutable proposal without changing the chapter", async () => {
     const harness = await makePhase4Harness();
     try {
       const ctx = await claimed(harness, { type: "revise_chapter" });
@@ -285,15 +364,65 @@ describe("apply pipeline: happy path (exit criterion 3)", () => {
       ].join("\n");
       const accepted = await submit(ctx, { type: "chapter_replacement", content: newBody });
       expect(accepted.status).toBe(202);
+      expect(accepted.body["status"]).toBe("pending_review");
+      expect(accepted.body["operationId"]).toBeNull();
+      const proposalId = accepted.body["proposalId"] as string;
+      const submissionId = accepted.body["submissionId"] as string;
+
+      // Submission receipt is review-only: no Git write, no revision bump.
       const chapterFile = harness.repoFiles.get(CHAPTER_PATH)!;
-      expect(chapterFile).toContain("revision: 4");
-      expect(chapterFile).toContain("A third paragraph arrives.");
-      // Byte-identical blocks keep their marker ids (§5).
+      expect(chapterFile).toContain("revision: 3");
+      expect(chapterFile).not.toContain("A third paragraph arrives.");
       expect(chapterFile).toContain(`id="${BLOCK_ID_1}"`);
       expect(chapterFile).toContain(`id="${BLOCK_ID_2}"`);
       const chapter = await harness.repos.chapters.getById(CHAPTER_ID);
-      expect(chapter?.revision).toBe(4);
-      expect(chapter?.blockIds).toHaveLength(3);
+      expect(chapter?.revision).toBe(3);
+      expect(harness.writer.commits).toHaveLength(0);
+
+      const proposal = await harness.repos.revisionProposals.getById(proposalId);
+      expect(proposal).toMatchObject({
+        id: proposalId,
+        origin: "work_submission",
+        proposalType: "chapter_replacement",
+        workItemId: ctx.workItemId,
+        submissionId,
+        baseRevision: 3,
+        proposedContent: newBody,
+        status: "pending_review",
+      });
+      expect(proposal?.baseContent).toContain("The drift appeared on the ridge at dawn.");
+      expect(proposal?.baseContent).not.toContain("authorbot:block");
+      expect((await harness.repos.submissions.getById(submissionId))?.state).toBe("received");
+      expect((await harness.repos.workItems.getById(ctx.workItemId))?.status).toBe("submitted");
+      expect(await harness.repos.leaseDocumentSnapshots.getByLeaseId(ctx.leaseId)).toBeNull();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps the lease's original review base when the repository moves before submission", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const ctx = await claimed(harness, { type: "revise_chapter" });
+      const moved = ctx.source
+        .replace("revision: 3", "revision: 4")
+        .replace(BLOCK_2_TEXT, "The town now speaks of it openly.");
+      await externalEdit(harness, moved, 4);
+      const proposed = `${BLOCK_2_TEXT}\n\nA replacement ending.`;
+
+      const accepted = await submit(ctx, {
+        type: "chapter_replacement",
+        content: proposed,
+      });
+      expect(accepted.status).toBe(202);
+      const proposal = await harness.repos.revisionProposals.getById(
+        accepted.body["proposalId"] as string,
+      );
+      expect(proposal?.baseRevision).toBe(3);
+      expect(proposal?.baseContent).toContain("The drift appeared on the ridge at dawn.");
+      expect(proposal?.baseContent).not.toContain("The town now speaks of it openly.");
+      expect(harness.repoFiles.get(CHAPTER_PATH)).toBe(moved);
+      expect(harness.writer.commits).toHaveLength(0);
     } finally {
       harness.close();
     }
@@ -425,6 +554,17 @@ ${BLOCK_2_TEXT}
       const types = await eventTypes(harness);
       expect(types).toContain("work_item_conflict");
       expect(types).toContain("work_item_created");
+      const conflictCreated = (
+        await harness.repos.events.listAfter(harness.projectId, 0, 500)
+      ).find(
+        (event) =>
+          event.type === "work_item_created" &&
+          (event.payload as Record<string, unknown>)["workItemId"] === conflictItem?.id,
+      );
+      expect(conflictCreated?.payload).toMatchObject({
+        annotationId: ctx.annotationId,
+        annotationKind: "suggestion",
+      });
     } finally {
       harness.close();
     }

@@ -14,13 +14,17 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await page.goto(chapterUrl("baseline"));
   await devLogin(page, "mara-e2e", "contributor");
 
-  // The desktop notes rail shares the page's vertical scroll. A nested
-  // scrollbar makes trackpad and wheel navigation stick inside the sidebar.
+  // The rail uses the available viewport. Its ordered list scrolls only when
+  // content overflows, while the Previous/Next controls stay outside it.
   const rail = page.locator(".ab-gutter");
   await expect(rail).toBeVisible();
+  const cardsHost = rail.locator(".ab-cards");
+  await expect.poll(() => cardsHost.evaluate((node) => getComputedStyle(node).overflowY)).toBe("auto");
+  await expect(rail.locator(".ab-note-nav")).toBeVisible();
+  await expect(rail.locator(".ab-me")).toHaveCount(0);
   await expect
-    .poll(() => rail.evaluate((node) => getComputedStyle(node).overflowY))
-    .toBe("visible");
+    .poll(() => cardsHost.evaluate((node) => node.scrollHeight <= node.clientHeight))
+    .toBe(true);
 
   // Select text inside the first block → the selection toolbar offers
   // Comment / Suggest an edit (contract §2.2).
@@ -86,6 +90,6 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await persisted.getByRole("button", { name: "Confirm withdraw" }).click();
   await expect(page.locator(".ab-card", { hasText: SUGGESTION_BODY })).toHaveCount(0);
   await page.reload();
-  await expect(page.locator(".ab-me", { hasText: "Signed in as mara-e2e" })).toBeVisible();
+  await expect(page.locator(".ab-account-who", { hasText: "mara-e2e" })).toBeVisible();
   await expect(page.locator(".ab-card", { hasText: SUGGESTION_BODY })).toHaveCount(0);
 });

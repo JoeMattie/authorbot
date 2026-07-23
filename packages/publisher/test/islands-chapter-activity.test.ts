@@ -46,6 +46,8 @@ function chapter(
     path: `chapters/${id}.md`,
     slug: id,
     title: id,
+    summary: null,
+    order: 10,
     status: "published",
     revision: 1,
     updatedAt: "2026-07-22T12:00:00Z",

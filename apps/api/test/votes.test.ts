@@ -79,11 +79,17 @@ describe("vote endpoints and pipeline", () => {
     expect(events.at(-1)?.previousValue).toBe("approve");
   });
 
-  it("votes on a comment are 422 (suggestion-only)", async () => {
+  it("records comment votes without triggering the suggestion-to-Work rule", async () => {
     const id = await createOpenSuggestion(h, author, { kind: "comment" });
     const res = await castVote(h, author, id, "approve");
-    expect(res.status).toBe(422);
-    expect(((await res.json()) as { code: string }).code).toBe("domain-rule-failed");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      votes: { approvals: 1, rejections: 0, abstentions: 0, netScore: 1 },
+      ruleSatisfied: false,
+      decision: null,
+    });
+    expect(await h.repos.decisions.getWorkItemCreation(id)).toBeNull();
+    expect(await h.repos.workItems.listBySourceAnnotation(id)).toEqual([]);
   });
 
   it("requires votes:write (a reader is 403)", async () => {

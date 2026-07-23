@@ -7,7 +7,8 @@ import type { Annotation } from "../site/src/islands/api.js";
 
 /**
  * Phase 3 contract §6: the approve/reject/abstain segmented control (aria-
- * pressed, current-vote highlight, enabled only with votes:write), the live
+ * pressed, current-vote highlight, enabled only with the kind-specific vote
+ * capability), the live
  * tally, and the "Queued as work item" badge - as a unit (VoteControl) and
  * wired into the suggestion cards (the element).
  */
@@ -188,6 +189,14 @@ const meVoter = {
   scopes: ["chapters:read", "annotations:read", "annotations:write", "votes:write"],
 };
 
+const meCommentVoter = {
+  actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+  scopes: [],
+  memberships: [{ role: "contributor" }],
+  capabilityMode: "canonical",
+  effectiveCapabilities: ["comments:vote"],
+};
+
 function annotationsRoute(items: Annotation[]): RouteMap {
   return {
     [`${API}/v1/projects/hollow-creek-anomaly/members`]: { status: 200, body: { items: [], nextCursor: null } },
@@ -212,7 +221,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("suggestion vote control (element)", () => {
+describe("feedback vote control (element)", () => {
   it("attaches the vote control to a suggestion card and enables it for a voter", async () => {
     stubFetch({ [`${API}/v1/me`]: { status: 200, body: meVoter }, ...annotationsRoute([suggestion({ votes: tally({ approvals: 2, netScore: 2, distinctVoters: 2 }) })]) });
     mount();
@@ -223,14 +232,56 @@ describe("suggestion vote control (element)", () => {
     expect(document.querySelector(".ab-vote-btn .ab-vote-count")?.textContent).toBe("2");
   });
 
-  it("gives comments no vote control", async () => {
+  it("shows comment tallies but keeps controls disabled without comments:vote", async () => {
     stubFetch({
       [`${API}/v1/me`]: { status: 200, body: meVoter },
       ...annotationsRoute([suggestion({ id: "ann-1", kind: "comment" })]),
     });
     mount();
     await expect.poll(() => document.querySelector(".ab-card")).toBeTruthy();
-    expect(document.querySelector(".ab-votes")).toBeNull();
+    expect(document.querySelector(".ab-votes")).not.toBeNull();
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>(".ab-vote-btn")].every(
+        (button) => button.disabled,
+      ),
+    ).toBe(true);
+  });
+
+  it("enables comment voting only with comments:vote and preserves comment status", async () => {
+    const fetchFn = stubFetch({
+      [`${API}/v1/me`]: { status: 200, body: meCommentVoter },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-1/vote`]: {
+        status: 200,
+        body: {
+          annotationId: "ann-1",
+          value: "approve",
+          votes: tally({ approvals: 1, netScore: 1, distinctVoters: 1 }),
+          ruleSatisfied: false,
+          decision: null,
+          correlationId: "comment-vote",
+        },
+      },
+      ...annotationsRoute([suggestion({ id: "ann-1", kind: "comment" })]),
+    });
+    mount();
+    await expect.poll(() => document.querySelector(".ab-vote-btn")).toBeTruthy();
+    const group = document.querySelector<HTMLElement>(".ab-vote-seg");
+    expect(group?.getAttribute("aria-label")).toBe("Vote on this comment");
+    const approve = document.querySelector<HTMLButtonElement>(
+      '.ab-vote-btn[data-vote="approve"]',
+    ) as HTMLButtonElement;
+    expect(approve.disabled).toBe(false);
+    approve.click();
+    await expect.poll(() => approve.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".ab-card-status")?.textContent).toBe("open");
+    expect(document.querySelector(".ab-accepted-badge")).toBeNull();
+    expect(
+      fetchFn.mock.calls.some(
+        (call) =>
+          String(call[0]).endsWith("/annotations/ann-1/vote") &&
+          (call[1] as RequestInit)?.method === "PUT",
+      ),
+    ).toBe(true);
   });
 
   it("casts a vote: PUTs, then updates the tally and pressed state in place", async () => {

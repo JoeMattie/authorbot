@@ -29,6 +29,39 @@ export {
 export type { Role, Scope, ScopeDenialReason } from "./scopes.js";
 
 export {
+  EDITORIAL_CAPABILITIES,
+  LEGACY_AGENT_SCOPES,
+  LEGACY_COMPATIBILITY_ACTIONS,
+  LEGACY_CONTROL_SCOPES,
+  LEGACY_EDITORIAL_SCOPES,
+  ROLE_EDITORIAL_CAPABILITIES,
+  authorizeEditorialCapability,
+  editorialCapabilitiesSchema,
+  editorialCapabilitySchema,
+  effectiveEditorialCapabilities,
+  legacyAgentScopeSchema,
+  legacyEffectiveActions,
+  legacyScopeShadow,
+  parseEditorialCapabilities,
+  parseLegacyScopes,
+  parseStoredEditorialCapabilities,
+  roleEditorialCapabilities,
+  translateLegacyScopes,
+} from "./editorial-capabilities.js";
+export type {
+  EditorialCapability,
+  EditorialCapabilityDenialReason,
+  EditorialCapabilityParseFailureReason,
+  EditorialCapabilityParseResult,
+  LegacyAgentScope,
+  LegacyCompatibilityAction,
+  LegacyControlScope,
+  LegacyEditorialScope,
+  LegacyEffectiveAction,
+  LegacyScopeParseResult,
+} from "./editorial-capabilities.js";
+
+export {
   ANNOTATION_STATUSES,
   ANNOTATION_TRANSITIONS,
   authorizeAnnotationWithdraw,
@@ -69,6 +102,7 @@ export {
   orderedRangeTargetSchema,
   utf8ByteLength,
   withdrawAnnotationCommandSchema,
+  withdrawReplyCommandSchema,
 } from "./commands.js";
 export type {
   CreateAnnotationCommand,
@@ -76,6 +110,7 @@ export type {
   MintAgentTokenCommand,
   MintAgentTokenCommandInput,
   WithdrawAnnotationCommand,
+  WithdrawReplyCommand,
 } from "./commands.js";
 
 export {

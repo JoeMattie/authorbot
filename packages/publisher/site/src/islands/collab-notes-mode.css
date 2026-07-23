@@ -1,0 +1,19 @@
+.ab-manuscript-notes-root {
+  width: 100%;
+  max-width: 64ch;
+  color: var(--text-body, var(--fg));
+  font: 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
+  text-wrap: pretty;
+}
+
+.ab-manuscript-notes-root .milkdown,
+.ab-manuscript-notes-root .ProseMirror {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+}
+
+.ab-manuscript-notes-root .ProseMirror {
+  padding: 0;
+  outline: 0;
+}

@@ -445,6 +445,144 @@ describe("seeing", () => {
     }
   });
 
+  it("offers every deployed editorial capability in named groups and mints canonical tokens", async () => {
+    stubFetch(
+      readRoutes({
+        [`${base}/agent-tokens`]: (call) =>
+          call.method === "POST"
+            ? json(201, {
+                ...token({
+                  capabilityMode: "canonical",
+                  grantedCapabilities: [
+                    "chapters:read",
+                    "suggestions:write",
+                    "replies:write",
+                    "comments:vote",
+                    "revisions:write",
+                  ],
+                  effectiveCapabilities: [
+                    "chapters:read",
+                    "suggestions:write",
+                    "replies:write",
+                    "comments:vote",
+                    "revisions:write",
+                  ],
+                }),
+                token: "authorbot_agent_once",
+              })
+            : json(200, { items: [] }),
+      }),
+    );
+    const host = mount();
+    const form = await until(() => host.querySelector<HTMLFormElement>(".ab-access-mint-form"));
+    const legends = [...form.querySelectorAll(".ab-capability-group > legend")].map(
+      (legend) => legend.textContent,
+    );
+    expect(legends).toEqual(["Read", "Discuss", "Work", "Chapters", "Revisions", "History"]);
+    expect(form.querySelectorAll<HTMLInputElement>(".ab-capability-checkbox")).toHaveLength(22);
+
+    const checked = [...form.querySelectorAll<HTMLInputElement>(".ab-capability-checkbox:checked")];
+    expect(checked.map((box) => box.value)).toEqual(["chapters:read"]);
+    for (const capability of [
+      "suggestions:write",
+      "replies:write",
+      "comments:vote",
+      "revisions:write",
+    ]) {
+      const box = form.querySelector<HTMLInputElement>(`input[value="${capability}"]`)!;
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    }
+    expect(text(host, ".ab-capability-summary")).toContain("Suggest edits");
+    expect(text(host, ".ab-capability-summary")).toContain("Vote on comments");
+
+    const name = form.querySelector<HTMLInputElement>('input[type="text"]')!;
+    name.value = "review-drafter";
+    form.querySelector<HTMLButtonElement>(".ab-create-token")!.click();
+    const mint = await until(() => calls.find((call) => call.method === "POST" && call.url === `${base}/agent-tokens`));
+    expect(mint.body).toEqual({
+      name: "review-drafter",
+      capabilities: [
+        "chapters:read",
+        "suggestions:write",
+        "replies:write",
+        "comments:vote",
+        "revisions:write",
+      ],
+      expiresInDays: 30,
+    });
+    await until(() => host.querySelector(".ab-access-token-once"));
+  });
+
+  it("shows exact, effective, and role-capped grants and updates them without rotating", async () => {
+    const exact = token({
+      capabilityMode: "canonical",
+      grantedCapabilities: ["chapters:read", "revisions:review"],
+      roleCapabilityCeiling: ["chapters:read", "revisions:read", "revisions:write"],
+      effectiveCapabilities: ["chapters:read"],
+    });
+    stubFetch(
+      readRoutes({
+        [`${base}/agent-tokens/tok-1/capabilities`]: (call) =>
+          json(200, {
+            ...exact,
+            grantedCapabilities: (call.body as { capabilities: string[] }).capabilities,
+            effectiveCapabilities: ["chapters:read", "revisions:write"],
+          }),
+        [`${base}/agent-tokens`]: () => json(200, { items: [exact] }),
+      }),
+    );
+    const host = mount();
+    const row = await until(() => host.querySelector<HTMLElement>(".ab-token"));
+    expect(row.textContent).toContain("Exact capabilities");
+    expect(row.textContent).toContain("Inactive at this role");
+    expect(row.textContent).toContain("revisions:review");
+
+    row.querySelector<HTMLButtonElement>(".ab-edit-token-capabilities")!.click();
+    const editor = await until(() => row.querySelector<HTMLFormElement>(".ab-token-capability-editor"));
+    expect(editor.textContent).toMatch(/Inactive at the current project role/i);
+    const review = editor.querySelector<HTMLInputElement>('input[value="revisions:review"]')!;
+    review.checked = false;
+    review.dispatchEvent(new Event("change"));
+    const write = editor.querySelector<HTMLInputElement>('input[value="revisions:write"]')!;
+    write.checked = true;
+    write.dispatchEvent(new Event("change"));
+    editor.querySelector<HTMLButtonElement>(".ab-save-token-capabilities")!.click();
+
+    const update = await until(() =>
+      calls.find((call) => call.method === "PUT" && call.url.endsWith("/tok-1/capabilities")),
+    );
+    expect(update.body).toEqual({ capabilities: ["chapters:read", "revisions:write"] });
+    await expect.poll(() => text(host, ".ab-access-status")).toMatch(/without rotating/i);
+  });
+
+  it("labels legacy permissions and warns before converting their preserved actions", async () => {
+    stubFetch(
+      readRoutes({
+        [`${base}/agent-tokens`]: () =>
+          json(200, {
+            items: [
+              token({
+                role: "maintainer",
+                capabilityMode: "legacy",
+                grantedCapabilities: ["work:claim"],
+                effectiveCapabilities: ["work:claim"],
+                legacyEffectiveActions: [
+                  { action: "work:promote", source: "legacy-scope", sourceScope: "work:claim" },
+                ],
+              }),
+            ],
+          }),
+      }),
+    );
+    const host = mount();
+    const row = await until(() => host.querySelector<HTMLElement>(".ab-token"));
+    expect(row.textContent).toContain("Legacy compatibility");
+    expect(row.textContent).toContain("work:promote via work:claim");
+    row.querySelector<HTMLButtonElement>(".ab-edit-token-capabilities")!.click();
+    expect(text(row, ".ab-capability-legacy-note")).toMatch(/converts it to exact capabilities/i);
+  });
+
   it("says a token with no membership can do nothing, rather than implying its scopes suffice", async () => {
     stubFetch(
       readRoutes({ [`${base}/agent-tokens`]: () => json(200, { items: [token({ role: null })] }) }),

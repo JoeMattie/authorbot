@@ -4,11 +4,12 @@ import type {
   WorkItemRecord,
   WorkItemStatus,
 } from "@authorbot/database";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CHAPTER_ID,
   devLogin,
   makeHarness,
+  mintCanonicalToken,
   mintToken,
   type TestHarness,
 } from "./helpers.js";
@@ -39,7 +40,13 @@ type Activity = Partial<{
 }>;
 
 interface ChapterPage {
-  items: Array<{ id: string; activity: Activity }>;
+  items: Array<{
+    id: string;
+    summary: string | null;
+    order: number | null;
+    status: string;
+    activity: Activity;
+  }>;
   nextCursor: string | null;
 }
 
@@ -124,6 +131,35 @@ describe("chapter-list activity summaries", () => {
     });
   });
 
+  it("returns unpublished summaries only to chapters:read without repository reads", async () => {
+    const sourceRead = vi.spyOn(h.reader, "readTextFile");
+    const token = await mintCanonicalToken(
+      h,
+      maintainer,
+      ["chapters:read"],
+      "outline-reader",
+    );
+    const authenticated = await listChapters(h, {
+      Authorization: `Bearer ${token.token}`,
+    });
+    expect(authenticated.status).toBe(200);
+    const body = (await authenticated.json()) as ChapterPage;
+    expect(body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: CHAPTER_2,
+          status: "proposed",
+          order: 20,
+          summary: "A private proposed-chapter summary.",
+        }),
+      ]),
+    );
+    expect(sourceRead).not.toHaveBeenCalled();
+
+    const anonymous = await listChapters(h, {});
+    expect(anonymous.status).toBe(401);
+  });
+
   it("uses one bounded collaboration query for a paginated chapter list", async () => {
     const originalPrepare = h.db.prepare.bind(h.db);
     let collaborationQueries = 0;
@@ -190,7 +226,9 @@ async function seedActivity(h: TestHarness): Promise<void> {
     path: "chapters/002-zero-activity.md",
     slug: "zero-activity",
     title: "Zero activity",
+    summary: "A private proposed-chapter summary.",
     order: 20,
+    status: "proposed",
   });
 
   const annotationIds: string[] = [];

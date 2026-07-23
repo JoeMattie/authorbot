@@ -1,0 +1,94 @@
+@import "diff2html/bundles/css/diff2html.min.css";
+
+.ab-revision-diff {
+  display: block;
+  min-width: 0;
+  color: var(--text-body, #c2bdb2);
+}
+
+.ab-revision-diff-visual {
+  max-width: 100%;
+  margin: 0 0 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border-default, #332f2a);
+  border-radius: 8px;
+  background: var(--surface-sunken, #141210);
+  scrollbar-gutter: stable;
+}
+
+.ab-revision-diff-visual .d2h-wrapper,
+.ab-revision-diff-visual .d2h-file-wrapper {
+  margin: 0;
+  border: 0;
+  border-radius: inherit;
+}
+
+.ab-revision-diff-visual .d2h-file-header {
+  border-bottom-color: var(--border-default, #332f2a);
+  background: var(--surface-raised, #282420);
+  color: var(--text-muted, #989289);
+}
+
+.ab-revision-diff-visual .d2h-code-line-ctn,
+.ab-revision-diff-visual .d2h-code-side-line {
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ab-revision-diff-fallback {
+  margin: 0;
+  border: 1px solid var(--border-default, #332f2a);
+  border-radius: 8px;
+  background: var(--surface-sunken, #141210);
+}
+
+.ab-revision-diff-fallback summary {
+  padding: 10px 12px;
+  color: var(--text-muted, #989289);
+  font: 600 12px/1.4 var(--font-display, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.ab-revision-diff-snapshot {
+  padding: 0 12px 12px;
+}
+
+.ab-revision-diff-snapshot h3 {
+  margin: 0 0 6px;
+  color: var(--text-faint, #89837a);
+  font: 600 10px/1.4 var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ab-revision-diff-snapshot pre {
+  max-height: 40vh;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-body, #c2bdb2);
+  font: 400 12px/1.55 var(--font-mono, monospace);
+}
+
+.ab-revision-diff-status {
+  margin: 8px 0 0;
+  color: var(--text-muted, #989289);
+  font: 400 12px/1.5 var(--font-display, system-ui, sans-serif);
+}
+
+@media (max-width: 719px) {
+  .ab-revision-diff-visual {
+    border-radius: 6px;
+  }
+
+  .ab-revision-diff-visual .d2h-file-header {
+    position: static;
+  }
+
+  .ab-revision-diff-visual .d2h-code-linenumber {
+    width: 3.5em;
+    min-width: 3.5em;
+  }
+}

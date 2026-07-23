@@ -245,6 +245,18 @@ export interface StoredChapterDraft {
   title: string;
   body: string;
   baseRevision: number | null;
+  /** Present for revision-proposal drafts that must stay bound to exact bytes. */
+  baseContentHash?: string;
+  /** Optional review context used by the in-place manuscript editor. */
+  changeSummary?: string;
+  notes?: string;
+  /** Accepted direct-edit proposal retained until rejection recovery or deploy. */
+  proposalId?: string;
+  proposalOperationId?: string | null;
+  proposalCorrelationId?: string | null;
+  proposalCommitSha?: string | null;
+  proposalPhase?: string;
+  proposalError?: string | null;
   /** Caret offset within the focused field, so a refresh returns the writer
    * exactly where they were. */
   caret: number | null;
@@ -325,6 +337,30 @@ export function loadChapterDraft(
       title: parsed.title,
       body: parsed.body,
       baseRevision: typeof parsed.baseRevision === "number" ? parsed.baseRevision : null,
+      ...(typeof parsed.baseContentHash === "string"
+        ? { baseContentHash: parsed.baseContentHash }
+        : {}),
+      ...(typeof parsed.changeSummary === "string"
+        ? { changeSummary: parsed.changeSummary }
+        : {}),
+      ...(typeof parsed.notes === "string" ? { notes: parsed.notes } : {}),
+      ...(typeof parsed.proposalId === "string" ? { proposalId: parsed.proposalId } : {}),
+      ...(typeof parsed.proposalOperationId === "string" || parsed.proposalOperationId === null
+        ? { proposalOperationId: parsed.proposalOperationId }
+        : {}),
+      ...(typeof parsed.proposalCorrelationId === "string" ||
+          parsed.proposalCorrelationId === null
+        ? { proposalCorrelationId: parsed.proposalCorrelationId }
+        : {}),
+      ...(typeof parsed.proposalCommitSha === "string" || parsed.proposalCommitSha === null
+        ? { proposalCommitSha: parsed.proposalCommitSha }
+        : {}),
+      ...(typeof parsed.proposalPhase === "string"
+        ? { proposalPhase: parsed.proposalPhase }
+        : {}),
+      ...(typeof parsed.proposalError === "string" || parsed.proposalError === null
+        ? { proposalError: parsed.proposalError }
+        : {}),
       caret: typeof parsed.caret === "number" ? parsed.caret : null,
       focus: focus === "title" || focus === "body" ? focus : null,
     };

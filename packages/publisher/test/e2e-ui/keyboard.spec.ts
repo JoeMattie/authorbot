@@ -10,6 +10,7 @@ import { expect, test } from "@playwright/test";
 import { chapterUrl, devLogin } from "./helpers.js";
 
 const KB_BODY = "E2E keyboard-only comment: this block reads well aloud.";
+const TOUCH_BODY = "E2E mobile inline note: keep this beside its paragraph.";
 
 test("keyboard-only annotation creation", async ({ page }) => {
   await page.goto(chapterUrl("baseline"));
@@ -69,5 +70,29 @@ test("touch readers can discover the per-block annotation affordance", async ({ 
   const annotate = page.locator(".ab-annotate").first();
   await expect(annotate).toBeVisible();
   await expect(annotate).toHaveCSS("opacity", "1");
+
+  const block = page.locator('main .prose [id^="b-"]').first();
+  await annotate.focus();
+  await expect(block).toHaveClass(/ab-note-target-preview/);
+  await expect(page.getByRole("tooltip", { name: "Note on this block" })).toBeVisible();
+  await annotate.click();
+  const composer = page.locator(".ab-composer");
+  await composer.locator("textarea").fill(TOUCH_BODY);
+  await composer.getByRole("button", { name: "Post" }).click();
+
+  const card = page.locator(".ab-inline-notes-block .ab-card", { hasText: TOUCH_BODY });
+  await expect(card).toBeVisible();
+  await expect(page.locator(".ab-drawer")).toHaveCount(0);
+  await expect(page.locator(".ab-inline-notes .ab-discussion-boundary")).toHaveCount(0);
+  const targetId = await block.getAttribute("id");
+  await expect
+    .poll(() =>
+      card.evaluate((node) => {
+        const host = node.closest(".ab-inline-notes-block");
+        const blockUi = host?.previousElementSibling;
+        return blockUi?.previousElementSibling?.id ?? null;
+      }),
+    )
+    .toBe(targetId);
   await context.close();
 });

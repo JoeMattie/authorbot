@@ -66,7 +66,7 @@ function fail(message) {
   process.exit(1);
 }
 
-function headers(mutation) {
+function headers(mutation, idempotencyKey) {
   const base = { accept: "application/json", "user-agent": "authorbot-agent/1.0" };
   if (bearer !== null) {
     base.authorization = `Bearer ${bearer}`;
@@ -79,29 +79,43 @@ function headers(mutation) {
   }
   if (mutation) {
     base["content-type"] = "application/json";
-    // Every mutation is idempotent-keyed, so a retry after a dropped
-    // connection replays the stored result instead of acting twice.
-    base["idempotency-key"] = crypto.randomUUID();
+    base["idempotency-key"] = idempotencyKey;
   }
   return base;
 }
 
 async function call(method, path, body) {
-  const response = await fetch(`${api}${path}`, {
-    method,
-    headers: headers(method !== "GET"),
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const text = await response.text();
-  let payload = null;
-  if (text.length > 0) {
+  const mutation = method !== "GET";
+  // One key per logical command, outside the retry loop. A dropped response
+  // must replay the stored result rather than claim or submit twice.
+  const idempotencyKey = mutation ? crypto.randomUUID() : undefined;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { raw: text };
+      const response = await fetch(`${api}${path}`, {
+        method,
+        headers: headers(mutation, idempotencyKey),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      const text = await response.text();
+      let payload = null;
+      if (text.length > 0) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = { raw: text };
+        }
+      }
+      if (response.status >= 500 && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 500));
+        continue;
+      }
+      return { status: response.status, body: payload };
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 500));
     }
   }
-  return { status: response.status, body: payload };
+  throw new Error("request retry loop ended unexpectedly");
 }
 
 /** `application/problem+json` → a one-line human explanation. */
@@ -226,6 +240,27 @@ async function main() {
     await devLogin(login, process.env.AUTHORBOT_DEV_ROLE ?? "editor");
   }
 
+  const identity = await call("GET", "/v1/me");
+  if (identity.status !== 200) {
+    fail(`identity check failed: ${problemLine(identity)}`);
+  }
+  const role = identity.body?.memberships?.[0]?.role ?? "none";
+  const effective = Array.isArray(identity.body?.effectiveCapabilities)
+    ? identity.body.effectiveCapabilities
+    : [];
+  process.stdout.write(
+    `identity: ${identity.body?.actor?.displayName ?? identity.body?.actor?.id ?? "unknown"} ` +
+      `role=${role} mode=${identity.body?.capabilityMode ?? "unknown"} ` +
+      `effective=${effective.join(",") || "none"}\n`,
+  );
+  if (identity.body?.capabilityMode !== "legacy") {
+    for (const capability of ["work:claim", "work:submit"]) {
+      if (!effective.includes(capability)) {
+        fail(`token lacks effective ${capability} capability`);
+      }
+    }
+  }
+
   const replacement = inlineText ?? (await readStdin());
   const dryRun = process.env.AUTHORBOT_DRY_RUN === "1";
 
@@ -274,6 +309,15 @@ async function main() {
     // item returns to the queue immediately instead of waiting for expiry.
     await releaseLease(bundle.lease.id);
     fail(`submission rejected: ${problemLine(submitted)}`);
+  }
+  if (submitted.body.status === "pending_review" && submitted.body.proposalId !== undefined) {
+    process.stdout.write(
+      `submitted ${submitted.body.submissionId}; revision proposal ${submitted.body.proposalId} is pending maintainer review\n`,
+    );
+    return 0;
+  }
+  if (typeof submitted.body.operationId !== "string") {
+    fail("submission returned neither a pending proposal nor an operation id");
   }
   process.stdout.write(
     `submitted ${submitted.body.submissionId} (operation ${submitted.body.operationId}); waiting for the commit…\n`,

@@ -197,7 +197,23 @@ describe("reply and withdraw round-trip through git", () => {
     const replyArtifact = await readFile(replyPath, "utf8");
     expect(replyArtifact).toContain("schema: authorbot.reply/v1");
     expect(replyArtifact).toContain(`annotation_id: ${created.annotationId}`);
+    expect(replyArtifact).toContain("status: open");
     expect(replyArtifact).toContain("Agreed - the second clause drags.");
+
+    // The reply author can withdraw just that reply. The body remains in Git
+    // history, while the current artifact and rebuilt projection carry the
+    // withdrawn state.
+    const replyWithdrawResponse = await app.app.request(
+      `/v1/projects/${app.projectId}/annotations/${created.annotationId}/replies/${reply.replyId}/withdraw`,
+      jsonRequest("POST", undefined, { Cookie: cookie }),
+    );
+    expect(replyWithdrawResponse.status).toBe(202);
+    const replyWithdraw = (await replyWithdrawResponse.json()) as { operationId: string };
+    expect(await readFile(replyPath, "utf8")).toContain("status: withdrawn");
+    expect((await app.repos.replies.getById(reply.replyId))?.status).toBe("withdrawn");
+    const replyLog = await git(clone.workTreePath, "log", "-1", "--format=%B");
+    expect(replyLog).toContain("Authorbot-Actor: github:ivy-chen");
+    expect(replyLog).toContain(`Authorbot-Operation: ${replyWithdraw.operationId}`);
 
     // Withdraw by a maintainer (author-or-maintainer rule) - the artifact is
     // re-rendered with status: withdrawn and credited to the withdrawer.

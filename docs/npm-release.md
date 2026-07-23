@@ -106,10 +106,12 @@ git commit -am "release: v1.5.0"
 ### 2. Rehearse
 
 ```bash
+pnpm build
 pnpm typecheck
 pnpm test
 pnpm check:packaging     # npm pack --dry-run over every package; publishes nothing
 pnpm check:author-ci     # installs the packed CLI with npm ci and runs it
+pnpm check:api-tarball   # installs and imports the packed API Worker
 ```
 
 `check:packaging` asserts each tarball carries `dist/` and a licence and leaks
@@ -120,22 +122,20 @@ runs `npx authorbot validate` and `npx authorbot build`. It needs the network
 and takes a couple of minutes. Run it before every release; it is the closest
 thing to being an author that exists in this repository.
 
-It covers the static-site path (`@authorbot/cli` and its runtime closure),
-which is what every book installs. It does not install `@authorbot/api`,
-because a static-only book has no reason to. If you have changed anything the
-Worker bundle depends on, rehearse that too:
+`check:author-ci` covers the static-site path (`@authorbot/cli` and its runtime
+closure), which is what every book installs. It deliberately does not install
+`@authorbot/api`, because a static-only book has no reason to.
 
-```bash
-node scripts/pack-release.mjs --out /tmp/authorbot-release
-# in a scratch directory, install @authorbot/api from those tarballs and
-# confirm the Worker entry loads and its migrations are present:
-node -e 'import("@authorbot/api/dist/worker.js").then(m => console.log(Object.keys(m)))'
-ls node_modules/@authorbot/api/migrations
-```
-
-`ProjectCoordinator` and a default export must both be there - they are what
-`wrangler.jsonc` resolves `main` and `class_name` against - and the migrations
-directory is what an author's `migrations_dir` points at.
+`check:api-tarball` covers the collaborative path. It packs every publishable
+package into a temporary release set, installs the API and its declared
+dependency closure from those local tarballs into a scratch project with
+lifecycle scripts disabled, and imports
+`./node_modules/@authorbot/api/dist/worker.js` through its real filesystem path.
+It asserts the default Worker and `ProjectCoordinator` exports that Wrangler
+loads, then compares every packaged D1 migration byte-for-byte with the root
+migration sources and checks the release boundary. The scratch directory is
+removed on success or failure; use `pnpm check:api-tarball --keep` to retain
+it for inspection.
 
 ### 3. Tag and push
 
@@ -152,7 +152,9 @@ checkout:
 3. typechecks and runs the full suite **against those build outputs**;
 4. runs the packaging check;
 5. packs with `pnpm` (rewriting `workspace:*` to the exact version);
-6. publishes each tarball with `npm publish --provenance`, in dependency
+6. installs and imports that exact packed API Worker and verifies its
+   migrations;
+7. publishes each tarball with `npm publish --provenance`, in dependency
    order, so nothing on the registry ever points at a package that is not
    there yet.
 

@@ -17,8 +17,9 @@ info:
     - List endpoints use cursor pagination (`cursor`, `limit`, `nextCursor`).
     - Every response carries `X-Correlation-Id`; asynchronous commands return
       an operation id resolvable at `/v1/projects/{projectId}/operations/{operationId}`.
-    - Humans (GitHub-backed session cookie) and agents (bearer token) are
-      treated identically after authorization.
+    - Editorial routes authorize humans and agents through the same exact
+      capability vocabulary. Project-control routes require a GitHub-backed
+      human session and refuse bearer credentials.
 
     Implementation status: operations marked `x-implementation-status: planned`
     are design skeleton for later phases and are not served yet. Everything
@@ -46,6 +47,8 @@ tags:
     description: Annotations, replies, votes, and re-anchoring.
   - name: work
     description: Work items, leases, and submissions (design §12).
+  - name: revisions
+    description: Immutable chapter, summary, and repository-document proposals, diffs, and review.
   - name: operations
     description: Git operations, event stream, and webhooks.
   - name: access
@@ -58,7 +61,7 @@ paths:
     get:
       operationId: getMe
       tags: [identity]
-      summary: Return the authenticated actor, memberships, and effective scopes.
+      summary: Return the authenticated actor, memberships, and effective capabilities.
       responses:
         "200":
           description: The current actor.
@@ -69,7 +72,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [actor, memberships, scopes, authKind]
+                required:
+                  - actor
+                  - memberships
+                  - scopes
+                  - authKind
+                  - capabilityMode
+                  - grantedCapabilities
+                  - roleCapabilityCeiling
+                  - effectiveCapabilities
+                  - legacyEffectiveActions
                 properties:
                   actor:
                     $ref: "#/components/schemas/Actor"
@@ -85,6 +97,18 @@ paths:
                   authKind:
                     type: string
                     enum: [session, token]
+                  capabilityMode:
+                    $ref: "#/components/schemas/CapabilityMode"
+                  grantedCapabilities:
+                    $ref: "#/components/schemas/EditorialCapabilitySet"
+                  roleCapabilityCeiling:
+                    $ref: "#/components/schemas/EditorialCapabilitySet"
+                  effectiveCapabilities:
+                    $ref: "#/components/schemas/EditorialCapabilitySet"
+                  legacyEffectiveActions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LegacyEffectiveAction"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -286,14 +310,13 @@ paths:
     get:
       operationId: listAgentTokens
       tags: [access]
-      summary: Agent token metadata - never the token value.
+      summary: Agent token metadata and effective capabilities - never the token value.
       description: >-
-        Name, scopes, owning human, membership role, created / last-used /
-        expiry times. Tokens are never re-displayable: no code path in the
-        system can return a token value after the mint response that created
-        it. The membership `role` is shown alongside the scopes because
-        effective authority is `token.scopes` intersected with the role bundle,
-        so scopes alone would overstate what a token can do.
+        Name, canonical grant and role ceiling, effective capabilities, legacy
+        compatibility state, owning human, membership role, and created /
+        last-used / expiry times. Tokens are never re-displayable: no code path
+        in the system can return a token value after the mint response that
+        created it.
       parameters:
         - name: includeRevoked
           in: query
@@ -326,7 +349,7 @@ paths:
     post:
       operationId: createAgentToken
       tags: [identity]
-      summary: Mint a named, scoped, expiring agent token (returned once).
+      summary: Mint a named, capability-limited, expiring agent token (returned once).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -334,25 +357,43 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [name, scopes]
-              properties:
-                name:
-                  type: string
-                  minLength: 1
-                  maxLength: 100
-                scopes:
-                  type: array
-                  minItems: 1
-                  description: Requested scopes; effective scopes are capped by the agent's pinned `editor` membership bundle.
-                  items:
-                    $ref: "#/components/schemas/Scope"
-                expiresInDays:
-                  type: integer
-                  minimum: 1
-                  maximum: 90
-                  default: 30
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [name, capabilities]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 100
+                    capabilities:
+                      $ref: "#/components/schemas/EditorialCapabilitySet"
+                    expiresInDays:
+                      type: integer
+                      minimum: 1
+                      maximum: 90
+                      default: 30
+                - type: object
+                  deprecated: true
+                  description: Deprecated legacy scope request retained during the Phase 11 transition.
+                  additionalProperties: false
+                  required: [name, scopes]
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 100
+                    scopes:
+                      type: array
+                      minItems: 1
+                      uniqueItems: true
+                      items:
+                        $ref: "#/components/schemas/Scope"
+                    expiresInDays:
+                      type: integer
+                      minimum: 1
+                      maximum: 90
+                      default: 30
       responses:
         "201":
           description: Token created; the secret appears exactly once, here.
@@ -407,6 +448,340 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /v1/projects/{projectId}/agent-tokens/{tokenId}/capabilities:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: tokenId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Uuid"
+    put:
+      operationId: replaceAgentTokenCapabilities
+      tags: [identity]
+      summary: Replace an active agent token's complete canonical capability set.
+      description: >-
+        Human-session maintainer control. The replacement is atomic and does
+        not rotate or return the bearer secret. Sending the same complete set
+        with the same idempotency key is safe to retry.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [capabilities]
+              properties:
+                capabilities:
+                  $ref: "#/components/schemas/EditorialCapabilitySet"
+      responses:
+        "200":
+          description: Updated metadata and effective capability projection.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AgentToken"
+                  - type: object
+                    required: [role]
+                    properties:
+                      role:
+                        oneOf:
+                          - $ref: "#/components/schemas/Role"
+                          - type: "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/repository-documents/source:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: getRepositoryDocumentSource
+      tags: [revisions]
+      summary: Read one configured planning document as an editable source snapshot.
+      description: >-
+        Requires project membership and `revisions:write`. `kind` and `path`
+        must identify the project's configured outline, timeline, or one file
+        matched by its character-document glob. The returned content hash is
+        the optimistic-concurrency base for a `repository_document` proposal.
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/RepositoryDocumentKind"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          description: Safe repository-relative path configured for this document kind.
+      responses:
+        "200":
+          description: Validated editable source at the branch head.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepositoryDocumentSource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/revision-proposals:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listRevisionProposals
+      tags: [revisions]
+      summary: List revision proposal metadata without prose snapshots.
+      description: Requires the exact `revisions:read` capability and project membership.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RevisionProposalStatus"
+        - name: chapterId
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Uuid"
+      responses:
+        "200":
+          description: Cursor page of proposal metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RevisionProposal"
+                  nextCursor:
+                    $ref: "#/components/schemas/NextCursor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createRevisionProposal
+      tags: [revisions]
+      summary: Propose a chapter, summary, or configured planning-document replacement.
+      description: >-
+        Chapter replacements and repository documents require
+        `revisions:write`. Chapter-summary proposals instead require
+        `chapters:read` plus `summaries:write` and are available at the
+        contributor role floor. Repository-document proposals address only
+        the configured outline, timeline, or character paths and use a content
+        hash rather than a chapter revision as their concurrency base.
+        `applyImmediately` additionally requires maintainer role plus
+        `revisions:review` and still creates the immutable reviewed proposal,
+        self-review audit, and linked Git write atomically. Legacy scopes never
+        translate to these capabilities.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRevisionProposal"
+      responses:
+        "201":
+          description: Proposal is pending review; no Git write was enqueued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "202":
+          description: Audited apply-immediately proposal is applying.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    get:
+      operationId: getRevisionProposal
+      tags: [revisions]
+      summary: Read one proposal including its immutable before/after snapshots.
+      responses:
+        "200":
+          description: Authorized proposal detail and current-base conflict warning.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/RevisionProposal"
+                  - type: object
+                    required: [baseContent, proposedContent]
+                    properties:
+                      baseContent: { type: string }
+                      proposedContent: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}/diff:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    get:
+      operationId: getRevisionProposalDiff
+      tags: [revisions]
+      summary: Read a bounded standard unified diff plus accessible snapshots.
+      description: Requires `revisions:read`; hostile proposal text is returned only as JSON data.
+      responses:
+        "200":
+          description: Diff and plain before/after fallback.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [proposalId, proposal, target, author, baseContent, proposedContent, unifiedDiff, computationLimited]
+                properties:
+                  proposalId:
+                    $ref: "#/components/schemas/Uuid"
+                  proposal:
+                    $ref: "#/components/schemas/RevisionProposal"
+                  target:
+                    $ref: "#/components/schemas/RevisionProposalTarget"
+                  author:
+                    oneOf:
+                      - $ref: "#/components/schemas/RevisionProposalActor"
+                      - type: "null"
+                  baseContent: { type: string }
+                  proposedContent: { type: string }
+                  unifiedDiff:
+                    oneOf: [{ type: string }, { type: "null" }]
+                  computationLimited: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    post:
+      operationId: approveRevisionProposal
+      tags: [revisions]
+      summary: Review and enqueue one pending proposal atomically.
+      description: >-
+        Requires `revisions:review`. Work proposals move proposal, submission,
+        and work item to applying in the same CAS-protected batch; direct and
+        summary proposals enqueue a linked `chapter.write` operation.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisionReview"
+      responses:
+        "202":
+          description: Proposal is applying.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/revision-proposals/{proposalId}/reject:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ProposalId"
+    post:
+      operationId: rejectRevisionProposal
+      tags: [revisions]
+      summary: Reject one pending proposal atomically.
+      description: >-
+        Requires `revisions:review`. A linked work submission becomes rejected
+        and its work item returns to ready in the same CAS-protected batch.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisionReview"
+      responses:
+        "200":
+          description: Proposal rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionProposalCommandResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /v1/projects/{projectId}/chapters:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -414,6 +789,12 @@ paths:
       operationId: listChapters
       tags: [chapters]
       summary: List chapter projections.
+      description: >-
+        Requires the exact `chapters:read` capability. The authenticated,
+        cursor-bounded projection includes each chapter's current frontmatter
+        summary and every lifecycle status, including draft and proposed.
+        Public Outline HTML does not call this endpoint and remains limited to
+        published summaries captured at build time.
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -461,6 +842,132 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /v1/projects/{projectId}/chapters/{chapterId}/history:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChapterId"
+    get:
+      operationId: listChapterHistory
+      tags: [chapters]
+      summary: List bounded chapter revision metadata, newest first.
+      description: >-
+        Requires project membership and the exact `history:read` capability.
+        Listing reads repository commit metadata but not historical chapter
+        bodies. At most 50 revisions are returned per request, even when a
+        larger general API limit is supplied.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: One-based history page number returned as `nextCursor`.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Bounded revision metadata plus the current chapter identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterHistoryPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/chapters/{chapterId}/history/{revision}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChapterId"
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getChapterHistoryRevision
+      tags: [chapters]
+      summary: Read one historical chapter snapshot and a bounded comparison.
+      description: >-
+        Requires `history:read`. `previous` compares the selected snapshot with
+        its predecessor; `current` compares it with the current revision. The
+        original revision, and a current-to-current comparison, have no second
+        snapshot or synthetic diff.
+      parameters:
+        - name: compare
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [previous, current]
+            default: previous
+      responses:
+        "200":
+          description: Selected snapshot, optional comparison, and oriented unified diff.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterHistoryDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/projects/{projectId}/chapters/{chapterId}/history/{revision}/restore:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/ChapterId"
+      - name: revision
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    post:
+      operationId: restoreChapterHistoryRevision
+      tags: [chapters, revisions]
+      summary: Propose restoring an older chapter snapshot.
+      description: >-
+        Requires both `history:read` and `revisions:write`. This never rewinds Git or applies text
+        immediately: it creates an immutable `chapter_replacement` proposal
+        with origin `history_restore` against the current chapter revision.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: Restore proposal created and pending maintainer review.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterHistoryRestoreResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   /v1/projects/{projectId}/chapter-submissions:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -473,7 +980,8 @@ paths:
         title and Markdown prose; the server generates the chapter id, the
         block marker for every top-level block, the slug, the order (last
         existing + 10), `status: draft`, and the revision. Requires the
-        `submissions:write` scope AND the editor or maintainer role. Publishing
+        canonical `chapters:write` capability, or the legacy
+        `submissions:write` scope, AND the editor or maintainer role. Publishing
         is a separate action.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -519,8 +1027,11 @@ paths:
         The chapter's Markdown as an author wrote it: frontmatter removed and
         block markers stripped. Feeds the Phase 6 §3.5 composer, whose revise
         half requires a complete replacement body plus the current
-        `baseRevision` - send `revision` straight back as that value. Editor or
-        maintainer only, matching the write it feeds.
+        `baseRevision` and `baseContentHash` - send `revision` and `contentHash`
+        straight back as those values. Canonical credentials require
+        `chapters:read`; legacy credentials use the historical
+        `submissions:write` scope. This read is not limited to editors and
+        maintainers.
       responses:
         "200":
           description: The chapter's editable source.
@@ -528,7 +1039,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [chapterId, title, revision, status, body]
+                required: [chapterId, title, revision, contentHash, status, body]
                 properties:
                   chapterId:
                     type: string
@@ -541,6 +1052,13 @@ paths:
                   revision:
                     type: integer
                     description: Send back as `baseRevision` when revising.
+                  contentHash:
+                    allOf:
+                      - $ref: "#/components/schemas/ContentHash"
+                    description: >
+                      Digest of the exact repository source read for this
+                      response. Send back as `baseContentHash` when proposing
+                      a chapter revision.
                   status:
                     type: string
                     enum: [draft, proposed, published]
@@ -624,83 +1142,90 @@ paths:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: getStoryOutline
-      x-implementation-status: planned
       tags: [chapters]
-      summary: Return the story graph (authorbot.story-graph/v1 projection).
+      summary: Read the configured, validated story outline.
+      description: >-
+        Requires the exact `chapters:read` capability. The path comes only
+        from the projected book.yml planning configuration (or its canonical
+        default); callers cannot supply an arbitrary repository path.
       responses:
         "200":
-          description: The story graph.
+          description: Validated outline at the repository branch head.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StoryGraph"
+                $ref: "#/components/schemas/StoryOutlineResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/story/timeline:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: getStoryTimeline
-      x-implementation-status: planned
       tags: [chapters]
-      summary: Return the timeline (authorbot.timeline/v1 projection).
+      summary: Read the configured, validated story timeline.
+      description: Requires the exact `chapters:read` capability.
       responses:
         "200":
-          description: The timeline.
+          description: Validated timeline at the repository branch head.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Timeline"
+                $ref: "#/components/schemas/StoryTimelineResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/story/characters:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
     get:
       operationId: listStoryCharacters
-      x-implementation-status: planned
       tags: [chapters]
-      summary: List character records.
+      summary: Page through configured, validated character documents.
+      description: >-
+        Requires the exact `chapters:read` capability. Each page reads at most
+        20 configured character blobs through the per-project coordinator;
+        it never fans out over every file in one Worker invocation.
       parameters:
         - $ref: "#/components/parameters/Cursor"
-        - $ref: "#/components/parameters/Limit"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 20
       responses:
         "200":
-          description: A page of characters.
+          description: Bounded page of validated character records and Markdown bodies.
           content:
             application/json:
               schema:
-                type: object
-                required: [items, nextCursor]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Character"
-                  nextCursor:
-                    $ref: "#/components/schemas/NextCursor"
+                $ref: "#/components/schemas/StoryCharacterPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/TooManyRequests"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /v1/projects/{projectId}/chapters/{chapterId}/annotations:
     parameters:
@@ -903,6 +1428,52 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  /v1/projects/{projectId}/annotations/{annotationId}/replies/{replyId}/withdraw:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+      - $ref: "#/components/parameters/ReplyId"
+    post:
+      operationId: withdrawAnnotationReply
+      tags: [annotations]
+      summary: Withdraw a reply (author or maintainer; queued for Git mirroring).
+      description: |
+        An author needs `feedback:withdraw-own`; withdrawing another actor's
+        reply needs maintainer-only `feedback:moderate`. The command rewrites
+        the reply artifact with `status: withdrawn`, and the projection flips
+        only after the Git operation commits. A pending or already withdrawn
+        reply returns 409. Legacy `annotations:write` preserves own-withdrawal
+        only for a credential that remains explicitly in compatibility mode;
+        legacy moderation additionally requires its source-tagged
+        `feedback:moderate` action.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Accepted; the reply remains open until the Git operation commits.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AcceptedCommand"
+                  - type: object
+                    required: [annotationId, replyId]
+                    properties:
+                      annotationId:
+                        $ref: "#/components/schemas/Uuid"
+                      replyId:
+                        $ref: "#/components/schemas/Uuid"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /v1/projects/{projectId}/annotations/{annotationId}/vote:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -912,13 +1483,13 @@ paths:
       tags: [annotations]
       summary: Create or replace the caller's current vote (one per actor).
       description: |
-        Requires `votes:write` (the contributor role bundle and above; agents
-        vote only when their membership grants it). Votes are accepted on
-        suggestions only - a comment returns 422. Recording the vote runs the
-        declarative rule engine in the same serialized command: a threshold
-        crossing creates a sticky decision and a `ready` work item, both
-        surfaced in `decision`. Tallies are aggregate-only; per-voter identity
-        is never returned (design §26.1).
+        A comment requires `comments:vote`; a suggested edit requires
+        `suggestions:vote`. Recording a suggestion vote runs the declarative
+        rule engine in the same serialized command, so a threshold crossing
+        creates a sticky decision and a `ready` work item. Comment votes use
+        the same current-vote and aggregate machinery but never enter that
+        suggestion-to-Work rule. Tallies are aggregate-only; per-voter
+        identity is never returned (design §26.1).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -958,9 +1529,11 @@ paths:
       summary: Clear the caller's current vote.
       description: |
         Removes the caller's current vote (idempotent - clearing a non-existent
-        vote still returns 200) and re-evaluates the rule. Dropping below a
-        satisfied rule marks the existing decision `support_changed`; the
-        decision and its work item are never deleted (design §11.3).
+        vote still returns 200). It requires the same exact kind capability as
+        PUT. A suggestion re-evaluates its rule: dropping below a satisfied
+        rule marks the existing decision `support_changed`, while the decision
+        and its work item are never deleted. Clearing a comment vote only
+        updates that comment's tally (design §11.3).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
@@ -1215,6 +1788,46 @@ paths:
                       $ref: "#/components/schemas/WorkItem"
                   nextCursor:
                     $ref: "#/components/schemas/NextCursor"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /v1/projects/{projectId}/work-items/completed:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: listCompletedWorkItems
+      tags: [work]
+      summary: List compact completed-work history, newest first.
+      description: >-
+        Requires `work:read`. Each stub attributes the completion and links its
+        source feedback, chapter, resulting revision, proposal, and commit when
+        available. Retained submission prose is deliberately omitted.
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Cursor page of completed-work stubs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CompletedWorkItem"
+                  nextCursor:
+                    $ref: "#/components/schemas/NextCursor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1628,6 +2241,14 @@ paths:
       operationId: getOperation
       tags: [operations]
       summary: Return the state of an asynchronous Git operation.
+      description: >-
+        Human project members may read project operations. Agent tokens may
+        read an operation only when the token actor uniquely owns it or the
+        token has the exact read capability for the operation's authoritative
+        resource (`comments:read`, `suggestions:read`, `work:read`,
+        `chapters:read`, or `revisions:read`). Control-plane, unknown,
+        malformed, dangling, and ambiguously linked operations fail closed for
+        agent tokens.
       responses:
         "200":
           description: The operation.
@@ -1715,8 +2336,11 @@ paths:
         refetch authoritative resources after reconnecting. Resume without loss
         via `Last-Event-ID` (or the `after` query parameter).
 
-        Authenticated project members may use the full stream. Anonymous
-        readers and signed-in non-members admitted by an open or
+        Human-session project members may use the full stream. Agent-token
+        members receive only events authorized by their exact effective read
+        capabilities, with an explicit field projection; unknown, malformed,
+        and control-plane event types fail closed. Anonymous readers and signed-in
+        non-members admitted by an open or
         approval-gated annotation policy may use only the `poll=1`
         representation. It is filtered to explicitly reviewed public
         collaboration subtypes: conflict Work creation and Work cancellation
@@ -3028,8 +3652,20 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
     AnnotationId:
       name: annotationId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
+    ReplyId:
+      name: replyId
       in: path
       required: true
       schema:
@@ -3275,6 +3911,59 @@ components:
         - submissions:write
         - tokens:manage
         - members:manage
+
+    EditorialCapability:
+      type: string
+      description: Exact Phase 11 editorial authority; unknown names never inherit access.
+      enum:
+        - chapters:read
+        - comments:read
+        - suggestions:read
+        - comments:write
+        - suggestions:write
+        - replies:write
+        - comments:vote
+        - suggestions:vote
+        - feedback:withdraw-own
+        - feedback:moderate
+        - work:read
+        - work:promote
+        - work:claim
+        - work:submit
+        - work:cancel
+        - summaries:write
+        - chapters:write
+        - chapters:publish
+        - revisions:read
+        - revisions:write
+        - revisions:review
+        - history:read
+
+    EditorialCapabilitySet:
+      type: array
+      uniqueItems: true
+      items:
+        $ref: "#/components/schemas/EditorialCapability"
+
+    CapabilityMode:
+      type: string
+      description: Human role projection, translated legacy token, or canonical token grant.
+      enum: [human, legacy, canonical]
+
+    LegacyEffectiveAction:
+      type: object
+      additionalProperties: false
+      required: [action, source, sourceScope]
+      properties:
+        action:
+          type: string
+          enum: [feedback:moderate, work:promote, work:cancel]
+        source:
+          type: string
+          const: legacy-scope
+        sourceScope:
+          type: string
+          enum: [annotations:write, work:claim]
 
     NextCursor:
       description: Cursor for the next page, or null on the last page.
@@ -3808,7 +4497,20 @@ components:
     AgentToken:
       type: object
       description: Agent token metadata; the secret itself is never returned after minting.
-      required: [id, projectId, actorId, name, scopes, createdBy, createdAt, expiresAt]
+      required:
+        - id
+        - projectId
+        - actorId
+        - name
+        - scopes
+        - capabilityMode
+        - grantedCapabilities
+        - roleCapabilityCeiling
+        - effectiveCapabilities
+        - legacyEffectiveActions
+        - createdBy
+        - createdAt
+        - expiresAt
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -3821,8 +4523,22 @@ components:
           type: string
         scopes:
           type: array
+          deprecated: true
+          description: Compatibility shadow for legacy deployments; do not infer authority from it.
           items:
             $ref: "#/components/schemas/Scope"
+        capabilityMode:
+          $ref: "#/components/schemas/CapabilityMode"
+        grantedCapabilities:
+          $ref: "#/components/schemas/EditorialCapabilitySet"
+        roleCapabilityCeiling:
+          $ref: "#/components/schemas/EditorialCapabilitySet"
+        effectiveCapabilities:
+          $ref: "#/components/schemas/EditorialCapabilitySet"
+        legacyEffectiveActions:
+          type: array
+          items:
+            $ref: "#/components/schemas/LegacyEffectiveAction"
         createdBy:
           description: Actor id of the minting maintainer.
           $ref: "#/components/schemas/Uuid"
@@ -3840,6 +4556,542 @@ components:
             - $ref: "#/components/schemas/Timestamp"
             - type: "null"
 
+    RepositoryDocumentKind:
+      type: string
+      enum: [outline, timeline, character]
+
+    RevisionProposalTargetKind:
+      type: string
+      enum: [chapter, outline, timeline, character]
+
+    RepositoryDocumentTarget:
+      type: object
+      additionalProperties: false
+      required: [kind, id, path, label]
+      properties:
+        kind:
+          $ref: "#/components/schemas/RepositoryDocumentKind"
+        id:
+          type: string
+          minLength: 1
+          description: "`outline`, `timeline`, or the character's canonical id."
+        path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        label:
+          type: string
+
+    RepositoryDocumentSource:
+      type: object
+      additionalProperties: false
+      required: [target, content, contentHash]
+      properties:
+        target:
+          $ref: "#/components/schemas/RepositoryDocumentTarget"
+        content:
+          type: string
+          description: Canonical repository source, including document metadata.
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+
+    RevisionProposalType:
+      type: string
+      enum: [chapter_replacement, chapter_summary, repository_document]
+
+    RevisionProposalOrigin:
+      type: string
+      enum: [work_submission, direct_edit, summary_proposal, history_restore, document_edit]
+
+    RevisionProposalStatus:
+      type: string
+      enum: [pending_review, applying, approved, rejected, conflicted, withdrawn]
+
+    RevisionProposalTarget:
+      type: object
+      description: Stable generic target metadata for revision review clients.
+      required: [kind, id, path, label]
+      properties:
+        kind:
+          $ref: "#/components/schemas/RevisionProposalTargetKind"
+        id:
+          type: string
+          minLength: 1
+          description: Chapter UUID, singleton document kind, or canonical character id.
+        path:
+          type: string
+        label:
+          type: string
+
+    RevisionProposalActor:
+      type: object
+      description: Display-safe actor attribution without external identity data.
+      required: [id, displayName, type]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        displayName:
+          type: string
+        type:
+          oneOf:
+            - type: string
+              enum: [human, agent, system]
+            - type: "null"
+
+    RevisionProposalWork:
+      type: object
+      required: [id, type, status]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        type:
+          type: string
+        status:
+          type: string
+
+    RevisionProposalChapter:
+      type: object
+      required: [id, title, slug, path, revision]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        slug:
+          type: string
+        path:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+
+    RevisionProposal:
+      type: object
+      description: Immutable proposal identity and mutable review/apply envelope; snapshots are detail-only.
+      required:
+        - id
+        - projectId
+        - chapterId
+        - targetKind
+        - targetId
+        - targetPath
+        - proposalType
+        - origin
+        - workItemId
+        - submissionId
+        - authorActorId
+        - baseRevision
+        - baseContentHash
+        - changeSummary
+        - notes
+        - status
+        - reviewedByActorId
+        - reviewedAt
+        - reviewReason
+        - gitOperationId
+        - operationId
+        - resultingRevision
+        - commitSha
+        - createdAt
+        - updatedAt
+        - target
+        - currentRevision
+        - currentContentHash
+        - conflictWarning
+        - author
+        - reviewedBy
+        - workItem
+        - chapter
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        projectId:
+          $ref: "#/components/schemas/Uuid"
+        chapterId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        targetKind:
+          $ref: "#/components/schemas/RevisionProposalTargetKind"
+        targetId:
+          type: string
+          minLength: 1
+        targetPath:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        proposalType:
+          $ref: "#/components/schemas/RevisionProposalType"
+        origin:
+          $ref: "#/components/schemas/RevisionProposalOrigin"
+        workItemId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        submissionId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        authorActorId:
+          $ref: "#/components/schemas/Uuid"
+        baseRevision:
+          description: Current chapter revision, or null for a repository document.
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: "null"
+        baseContentHash:
+          $ref: "#/components/schemas/ContentHash"
+        changeSummary:
+          oneOf:
+            - type: string
+            - type: "null"
+        notes:
+          oneOf:
+            - type: string
+            - type: "null"
+        status:
+          $ref: "#/components/schemas/RevisionProposalStatus"
+        reviewedByActorId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        reviewedAt:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        reviewReason:
+          oneOf:
+            - type: string
+            - type: "null"
+        gitOperationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        operationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        resultingRevision:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: "null"
+        commitSha:
+          oneOf:
+            - type: string
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
+        target:
+          $ref: "#/components/schemas/RevisionProposalTarget"
+        currentRevision:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: "null"
+        currentContentHash:
+          oneOf:
+            - $ref: "#/components/schemas/ContentHash"
+            - type: "null"
+        conflictWarning:
+          type: boolean
+        author:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalActor"
+            - type: "null"
+        reviewedBy:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalActor"
+            - type: "null"
+        workItem:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalWork"
+            - type: "null"
+        chapter:
+          oneOf:
+            - $ref: "#/components/schemas/RevisionProposalChapter"
+            - type: "null"
+
+    CreateRevisionProposal:
+      oneOf:
+        - $ref: "#/components/schemas/CreateChapterReplacementProposal"
+        - $ref: "#/components/schemas/CreateChapterSummaryProposal"
+        - $ref: "#/components/schemas/CreateRepositoryDocumentProposal"
+      discriminator:
+        propertyName: proposalType
+        mapping:
+          chapter_replacement: "#/components/schemas/CreateChapterReplacementProposal"
+          chapter_summary: "#/components/schemas/CreateChapterSummaryProposal"
+          repository_document: "#/components/schemas/CreateRepositoryDocumentProposal"
+
+    CreateChapterReplacementProposal:
+      type: object
+      additionalProperties: false
+      required:
+        [chapterId, proposalType, baseRevision, baseContentHash, proposedContent]
+      properties:
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        proposalType:
+          type: string
+          const: chapter_replacement
+        baseRevision:
+          type: integer
+          minimum: 1
+        baseContentHash:
+          $ref: "#/components/schemas/ContentHash"
+        proposedContent:
+          type: string
+          maxLength: 524288
+        changeSummary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        notes:
+          type: string
+          maxLength: 10000
+        applyImmediately:
+          type: boolean
+          default: false
+
+    CreateChapterSummaryProposal:
+      type: object
+      additionalProperties: false
+      required:
+        [chapterId, proposalType, baseRevision, baseContentHash, proposedContent]
+      properties:
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        proposalType:
+          type: string
+          const: chapter_summary
+        baseRevision:
+          type: integer
+          minimum: 1
+        baseContentHash:
+          $ref: "#/components/schemas/ContentHash"
+        proposedContent:
+          type: string
+          maxLength: 2000
+          description: Replacement summary. An empty string removes the summary.
+        changeSummary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        notes:
+          type: string
+          maxLength: 10000
+        applyImmediately:
+          type: boolean
+          default: false
+
+    CreateRepositoryDocumentProposal:
+      type: object
+      additionalProperties: false
+      required:
+        [proposalType, targetKind, targetPath, baseContentHash, proposedContent]
+      properties:
+        proposalType:
+          type: string
+          const: repository_document
+        targetKind:
+          $ref: "#/components/schemas/RepositoryDocumentKind"
+        targetPath:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Configured safe repository-relative document path.
+        baseContentHash:
+          $ref: "#/components/schemas/ContentHash"
+        proposedContent:
+          type: string
+          minLength: 1
+          maxLength: 524288
+          description: Complete replacement document, limited to 512 KiB after UTF-8 encoding.
+        changeSummary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        notes:
+          type: string
+          maxLength: 10000
+        applyImmediately:
+          type: boolean
+          default: false
+
+    RevisionReview:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    RevisionProposalCommandResult:
+      type: object
+      required: [proposalId, operationId, correlationId, status]
+      properties:
+        proposalId:
+          $ref: "#/components/schemas/Uuid"
+        operationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        correlationId:
+          type: string
+        status:
+          $ref: "#/components/schemas/RevisionProposalStatus"
+
+    ChapterHistoryActor:
+      type: object
+      required: [id, displayName, type]
+      properties:
+        id:
+          type: string
+          description: Retained actor id, GitHub actor ref, or commit identity.
+        displayName:
+          type: string
+        type:
+          oneOf:
+            - type: string
+              enum: [human, agent, system]
+            - type: "null"
+
+    ChapterHistoryRevision:
+      type: object
+      description: Commit metadata for one projected chapter revision.
+      required:
+        [revision, contentHash, commitSha, createdAt, author, changeSummary, origin, status, isCurrent]
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+        contentHash:
+          description: Exact for the current projection; null in historical list rows.
+          oneOf:
+            - $ref: "#/components/schemas/ContentHash"
+            - type: "null"
+        commitSha:
+          oneOf:
+            - type: string
+            - type: "null"
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        author:
+          oneOf:
+            - $ref: "#/components/schemas/ChapterHistoryActor"
+            - type: "null"
+        changeSummary:
+          oneOf:
+            - type: string
+              maxLength: 2000
+            - type: "null"
+        origin:
+          description: Proposal origin when retained, otherwise `repository_commit`.
+          oneOf:
+            - type: string
+            - type: "null"
+        status:
+          description: Current publication state, or null until a historical snapshot is selected.
+          oneOf:
+            - $ref: "#/components/schemas/ChapterStatus"
+            - type: "null"
+        isCurrent:
+          type: boolean
+
+    ChapterHistoryCurrent:
+      allOf:
+        - $ref: "#/components/schemas/ChapterHistoryRevision"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              $ref: "#/components/schemas/ChapterStatus"
+
+    ChapterHistorySnapshot:
+      allOf:
+        - $ref: "#/components/schemas/ChapterHistoryRevision"
+        - type: object
+          required: [content]
+          properties:
+            contentHash:
+              $ref: "#/components/schemas/ContentHash"
+            content:
+              type: string
+              description: Chapter prose with frontmatter and block markers removed.
+
+    ChapterHistoryDiff:
+      type: object
+      required: [fromRevision, toRevision, unifiedDiff, computationLimited]
+      properties:
+        fromRevision:
+          type: integer
+          minimum: 1
+        toRevision:
+          type: integer
+          minimum: 1
+        unifiedDiff:
+          oneOf:
+            - type: string
+            - type: "null"
+        computationLimited:
+          type: boolean
+
+    ChapterHistoryPage:
+      type: object
+      additionalProperties: false
+      required: [items, current, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ChapterHistoryRevision"
+        current:
+          $ref: "#/components/schemas/ChapterHistoryCurrent"
+        nextCursor:
+          $ref: "#/components/schemas/NextCursor"
+
+    ChapterHistoryDetail:
+      type: object
+      additionalProperties: false
+      required: [chapterId, compare, selected, comparison, current, diff]
+      properties:
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        compare:
+          type: string
+          enum: [previous, current]
+        selected:
+          $ref: "#/components/schemas/ChapterHistorySnapshot"
+        comparison:
+          oneOf:
+            - $ref: "#/components/schemas/ChapterHistorySnapshot"
+            - type: "null"
+        current:
+          $ref: "#/components/schemas/ChapterHistoryCurrent"
+        diff:
+          oneOf:
+            - $ref: "#/components/schemas/ChapterHistoryDiff"
+            - type: "null"
+
+    ChapterHistoryRestoreResult:
+      type: object
+      additionalProperties: false
+      required: [proposalId, status, correlationId]
+      properties:
+        proposalId:
+          $ref: "#/components/schemas/Uuid"
+        status:
+          type: string
+          const: pending_review
+        correlationId:
+          type: string
+
     ChapterStatus:
       type: string
       enum: [draft, proposed, published, archived]
@@ -3848,7 +5100,7 @@ components:
       type: object
       description: Chapter projection (design §9.1), rebuilt from the book repository.
       required:
-        [id, projectId, path, slug, title, order, status, revision, contentHash, updatedAt]
+        [id, projectId, path, slug, title, summary, order, status, revision, contentHash, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -3861,6 +5113,11 @@ components:
           $ref: "#/components/schemas/Slug"
         title:
           type: string
+        summary:
+          description: Current validated chapter-frontmatter summary.
+          oneOf:
+            - type: string
+            - type: "null"
         order:
           description: Chapter reading order from frontmatter; null only while a migrated projection awaits refresh.
           oneOf:
@@ -4089,8 +5346,7 @@ components:
           type: string
         status:
           type: string
-          # Mirrors the replies.status DB CHECK constraint; `withdrawn` is not
-          # produced by any implemented endpoint yet but is a legal state.
+          # Mirrors the replies.status DB CHECK constraint.
           enum: [pending_git, open, withdrawn]
         gitOperationId:
           oneOf:
@@ -4211,7 +5467,7 @@ components:
           $ref: "#/components/schemas/VoteSummary"
         ruleSatisfied:
           type: boolean
-          description: Whether the rule is currently satisfied for this suggestion.
+          description: Whether the suggestion rule is currently satisfied; always false for a comment.
         decision:
           description: The sticky decision, if one exists for this suggestion.
           oneOf:
@@ -4294,6 +5550,134 @@ components:
           $ref: "#/components/schemas/ActorRef"
         createdAt:
           $ref: "#/components/schemas/Timestamp"
+
+    CompletedWorkSource:
+      type: object
+      additionalProperties: false
+      required: [kind, scope, body, status]
+      properties:
+        kind:
+          $ref: "#/components/schemas/AnnotationKind"
+        scope:
+          $ref: "#/components/schemas/AnnotationScope"
+        body:
+          type: string
+          description: Source feedback text; completed submission prose is not included.
+        status:
+          $ref: "#/components/schemas/AnnotationStatus"
+
+    CompletedWorkChapter:
+      type: object
+      additionalProperties: false
+      required: [id, title, slug]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        title:
+          type: string
+        slug:
+          $ref: "#/components/schemas/Slug"
+
+    CompletedWorkActor:
+      type: object
+      additionalProperties: false
+      required: [actorId, type, displayName, externalIdentity]
+      properties:
+        actorId:
+          $ref: "#/components/schemas/Uuid"
+        type:
+          type: string
+          enum: [human, agent, system]
+        displayName:
+          type: string
+        externalIdentity:
+          oneOf:
+            - type: string
+            - type: "null"
+
+    CompletedWorkItem:
+      type: object
+      additionalProperties: false
+      description: >-
+        Compact completed-work history. It contains attribution and integration
+        links, never the retained prose of the completing submission.
+      required:
+        - id
+        - projectId
+        - type
+        - status
+        - sourceAnnotationId
+        - chapterId
+        - baseRevision
+        - target
+        - priority
+        - createdAt
+        - updatedAt
+        - source
+        - chapter
+        - completedBy
+        - completedAt
+        - resultingRevision
+        - commitSha
+        - revisionProposalId
+        - approvedBy
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        projectId:
+          $ref: "#/components/schemas/Uuid"
+        type:
+          $ref: "#/components/schemas/WorkItemType"
+        status:
+          type: string
+          const: completed
+        sourceAnnotationId:
+          $ref: "#/components/schemas/Uuid"
+        chapterId:
+          $ref: "#/components/schemas/Uuid"
+        baseRevision:
+          type: integer
+          minimum: 1
+        target:
+          description: Source annotation target snapshot, or null for chapter scope.
+        priority:
+          type: string
+          enum: [low, normal, high]
+        createdAt:
+          $ref: "#/components/schemas/Timestamp"
+        updatedAt:
+          $ref: "#/components/schemas/Timestamp"
+        source:
+          oneOf:
+            - $ref: "#/components/schemas/CompletedWorkSource"
+            - type: "null"
+        chapter:
+          oneOf:
+            - $ref: "#/components/schemas/CompletedWorkChapter"
+            - type: "null"
+        completedBy:
+          oneOf:
+            - $ref: "#/components/schemas/CompletedWorkActor"
+            - type: "null"
+        completedAt:
+          $ref: "#/components/schemas/Timestamp"
+        resultingRevision:
+          oneOf:
+            - type: integer
+              minimum: 1
+            - type: "null"
+        commitSha:
+          oneOf:
+            - type: string
+            - type: "null"
+        revisionProposalId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        approvedBy:
+          oneOf:
+            - $ref: "#/components/schemas/CompletedWorkActor"
+            - type: "null"
 
     Lease:
       type: object
@@ -4499,6 +5883,7 @@ components:
         context:
           type: object
           description: Untrusted project data assembled for the claimant.
+          required: [annotationBody, chapterSummary, storyRefs, storyApi]
           properties:
             annotationBody:
               type: string
@@ -4508,6 +5893,8 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/StoryNodeId"
+            storyApi:
+              $ref: "#/components/schemas/StoryApiLinks"
         submissionSchema:
           oneOf:
             - type: string
@@ -4533,7 +5920,7 @@ components:
           type: array
           items:
             type: object
-            required: [id, type]
+            required: [id, type, order]
             properties:
               id:
                 $ref: "#/components/schemas/StoryNodeId"
@@ -4542,23 +5929,37 @@ components:
                 enum: [premise, arc, part, chapter, scene, beat, custom]
               title:
                 type: string
+              summary:
+                type: string
               parent:
                 $ref: "#/components/schemas/StoryNodeId"
               order:
                 type: number
-              chapterId:
+              tags:
+                type: array
+                items: { type: string }
+              chapter_id:
                 $ref: "#/components/schemas/Uuid"
+              status:
+                type: string
+                enum: [draft, published, archived]
+              goal:
+                type: string
+              conflict:
+                type: string
+              outcome:
+                type: string
         links:
           type: array
           items:
             type: object
-            required: [from, to, kind]
+            required: [from, to, type]
             properties:
               from:
                 $ref: "#/components/schemas/StoryNodeId"
               to:
                 $ref: "#/components/schemas/StoryNodeId"
-              kind:
+              type:
                 type: string
 
     Timeline:
@@ -4569,17 +5970,24 @@ components:
         schema:
           type: string
           const: authorbot.timeline/v1
+        calendar:
+          type: object
+          additionalProperties: false
+          required: [type]
+          properties:
+            type: { type: string }
+            epoch_label: { type: string }
         events:
           type: array
           items:
             type: object
-            required: [id, sortKey, displayTime, title]
+            required: [id, sort_key, display_time, title]
             properties:
               id:
                 $ref: "#/components/schemas/StoryNodeId"
-              sortKey:
+              sort_key:
                 type: number
-              displayTime:
+              display_time:
                 type: string
               title:
                 type: string
@@ -4591,7 +5999,7 @@ components:
                 type: array
                 items:
                   $ref: "#/components/schemas/StoryNodeId"
-              chapterRefs:
+              chapter_refs:
                 type: array
                 items:
                   $ref: "#/components/schemas/Uuid"
@@ -4603,8 +6011,12 @@ components:
     Character:
       type: object
       description: Character record projection (authorbot.character/v1).
-      required: [id, name]
+      additionalProperties: false
+      required: [schema, id, name]
       properties:
+        schema:
+          type: string
+          const: authorbot.character/v1
         id:
           $ref: "#/components/schemas/StoryNodeId"
         name:
@@ -4617,9 +6029,71 @@ components:
           type: string
         status:
           type: string
+
+    StoryApiLinks:
+      type: object
+      additionalProperties: false
+      required: [outline, timeline, characters]
+      description: Canonical same-origin API paths; claimants follow these instead of guessing routes.
+      properties:
+        outline: { type: string }
+        timeline: { type: string }
+        characters: { type: string }
+
+    StoryOutlineResponse:
+      type: object
+      additionalProperties: false
+      required: [path, contentHash, outline, links]
+      properties:
+        path: { type: string }
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+        outline:
+          $ref: "#/components/schemas/StoryGraph"
+        links:
+          $ref: "#/components/schemas/StoryApiLinks"
+
+    StoryTimelineResponse:
+      type: object
+      additionalProperties: false
+      required: [path, contentHash, timeline, links]
+      properties:
+        path: { type: string }
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+        timeline:
+          $ref: "#/components/schemas/Timeline"
+        links:
+          $ref: "#/components/schemas/StoryApiLinks"
+
+    StoryCharacterItem:
+      type: object
+      additionalProperties: false
+      required: [path, contentHash, character, body]
+      properties:
+        path: { type: string }
+        contentHash:
+          $ref: "#/components/schemas/ContentHash"
+        character:
+          $ref: "#/components/schemas/Character"
         body:
           type: string
-          description: Markdown body of the character file. Untrusted content.
+          description: Validated Markdown body with raw HTML and forbidden URL schemes rejected.
+
+    StoryCharacterPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, links]
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/StoryCharacterItem"
+        nextCursor:
+          $ref: "#/components/schemas/NextCursor"
+        links:
+          $ref: "#/components/schemas/StoryApiLinks"
 
     Event:
       type: object

@@ -25,6 +25,7 @@ import {
   devLogin,
   fixtureSnapshot,
   makeHarness,
+  mintCanonicalToken,
   mintToken,
 } from "./helpers.js";
 import {
@@ -35,6 +36,7 @@ import {
 } from "./phase4-helpers.js";
 import { uuidv7 } from "../src/ids.js";
 import { PROSE_OUTBOX_KINDS } from "../src/coordinator.js";
+import { sha256Hex } from "../src/crypto.js";
 import { createDrainRunner } from "../src/drain.js";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -496,6 +498,45 @@ describe("publish / unpublish (contract §3.5: deliberately distinct from writin
     expect(bodyOf(after)).toBe(bodyOf(original));
     expect(after).not.toMatch(/---\n\n\n/);
   });
+
+  it("removes a summary through the reviewed metadata proposal and Git pipeline", async () => {
+    const { chapterId } = await createChapter({
+      title: "The Ridge",
+      body: PROSE,
+      summary: "An initial navigation summary.",
+    });
+    expect((await act(chapterId, "publish")).status).toBe(202);
+    await harness.mirror.drain(harness.projectId);
+    const before = await harness.repos.chapters.getById(chapterId);
+    if (before === null) throw new Error("published chapter projection missing");
+
+    const response = await harness.app.request(
+      `/v1/projects/${harness.projectId}/revision-proposals`,
+      {
+        method: "POST",
+        headers: headers(maintainer),
+        body: JSON.stringify({
+          proposalType: "chapter_summary",
+          chapterId,
+          baseRevision: before.revision,
+          baseContentHash: before.contentHash,
+          proposedContent: "",
+          changeSummary: "Remove the chapter summary.",
+          applyImmediately: true,
+        }),
+      },
+    );
+    expect(response.status, await response.text()).toBe(202);
+    await harness.mirror.drain(harness.projectId);
+
+    const after = await harness.repos.chapters.getById(chapterId);
+    const source = harness.repoFiles.get(after?.path ?? "") ?? "";
+    const frontmatter = chapterFrontmatterSchema.parse(
+      parseChapterMarkdown(source).frontmatter,
+    );
+    expect(frontmatter.summary).toBeUndefined();
+    expect(frontmatter.revision).toBe(before.revision + 1);
+  });
 });
 
 describe("authorization matrix (contract §3.5)", () => {
@@ -558,6 +599,50 @@ describe("authorization matrix (contract §3.5)", () => {
     expect(fm.authors).toEqual([
       expect.objectContaining({ name: "author-agent" }),
     ]);
+  });
+
+  it("requires exact chapters:write and chapters:publish canonical grants", async () => {
+    const chapterWriter = await mintCanonicalToken(
+      harness,
+      maintainer,
+      ["chapters:write"],
+      "chapter-writer",
+    );
+    const created = await harness.app.request(
+      `/v1/projects/${harness.projectId}/chapter-submissions`,
+      {
+        method: "POST",
+        headers: headers(undefined, chapterWriter.token),
+        body: JSON.stringify({ title: "Canonical agent draft", body: PROSE }),
+      },
+    );
+    expect(created.status).toBe(202);
+
+    await harness.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(chapterWriter.actorId)
+      .run();
+    const cannotPublish = await harness.app.request(
+      `/v1/projects/${harness.projectId}/chapters/${CHAPTER_ID}/unpublish`,
+      { method: "POST", headers: headers(undefined, chapterWriter.token) },
+    );
+    expect(cannotPublish.status).toBe(403);
+
+    const publisher = await mintCanonicalToken(
+      harness,
+      maintainer,
+      ["chapters:publish"],
+      "chapter-publisher",
+    );
+    await harness.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(publisher.actorId)
+      .run();
+    const canPublish = await harness.app.request(
+      `/v1/projects/${harness.projectId}/chapters/${CHAPTER_ID}/unpublish`,
+      { method: "POST", headers: headers(undefined, publisher.token) },
+    );
+    expect(canPublish.status).toBe(202);
   });
 });
 
@@ -732,7 +817,7 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
   };
 
   it("returns prose with no frontmatter and no block markers", async () => {
-    const { chapterId } = await createChapter({ title: "The Ridge", body: PROSE });
+    const { chapterId, source } = await createChapter({ title: "The Ridge", body: PROSE });
     const { status, body } = await getSource(chapterId);
 
     expect(status).toBe(200);
@@ -741,6 +826,7 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
     expect(String(body["body"])).not.toContain("---");
     expect(body["title"]).toBe("The Ridge");
     expect(body["status"]).toBe("draft");
+    expect(body["contentHash"]).toBe(`sha256:${await sha256Hex(source)}`);
   });
 
   it("uses the coordinator source reader when the Worker has no local Git reader", async () => {
@@ -797,10 +883,12 @@ describe("GET chapter source (contract §3.5, the composer's read half)", () => 
     expect(String(after.body["body"])).toContain("A new closing paragraph.");
   });
 
-  it("is editor/maintainer only, matching the write it feeds", async () => {
+  it("is readable by project members while writing stays separately gated", async () => {
     const { chapterId } = await createChapter();
     expect((await getSource(chapterId, editor)).status).toBe(200);
-    expect((await getSource(chapterId, contributor)).status).toBe(403);
+    expect((await getSource(chapterId, contributor)).status).toBe(200);
+    const reader = await devLogin(harness, "chapter-source-reader", "reader");
+    expect((await getSource(chapterId, reader)).status).toBe(200);
   });
 
   it("404s an unknown chapter", async () => {

@@ -32,6 +32,10 @@ import {
   ProjectAccessControlsRepository,
   RateLimitCountersRepository,
 } from "./access-control.js";
+import {
+  LeaseDocumentSnapshotsRepository,
+  RevisionProposalsRepository,
+} from "./revisions.js";
 
 export * from "./identity.js";
 export * from "./content.js";
@@ -41,6 +45,7 @@ export * from "./leasing.js";
 export * from "./publications.js";
 export * from "./settings.js";
 export * from "./access-control.js";
+export * from "./revisions.js";
 
 /**
  * One repository per table (Phase 2 contract §2 plus the Phase 3 contract
@@ -79,6 +84,10 @@ export interface Repositories {
   pendingAnnotations: PendingAnnotationsRepository;
   /** Phase 7: fixed-window mutation counters behind the 429s. */
   rateLimitCounters: RateLimitCountersRepository;
+  /** Phase 11: immutable chapter/summary proposals awaiting review or apply. */
+  revisionProposals: RevisionProposalsRepository;
+  /** Phase 11: exact whole-chapter lease base, retained until submission. */
+  leaseDocumentSnapshots: LeaseDocumentSnapshotsRepository;
 }
 
 export function createRepositories(db: SqlDatabase): Repositories {
@@ -109,5 +118,7 @@ export function createRepositories(db: SqlDatabase): Repositories {
     projectAccessControls: new ProjectAccessControlsRepository(db),
     pendingAnnotations: new PendingAnnotationsRepository(db),
     rateLimitCounters: new RateLimitCountersRepository(db),
+    revisionProposals: new RevisionProposalsRepository(db),
+    leaseDocumentSnapshots: new LeaseDocumentSnapshotsRepository(db),
   };
 }

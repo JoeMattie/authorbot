@@ -28,6 +28,53 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("CollabApi completed Work reads", () => {
+  it("requests one bounded page and preserves the opaque cursor", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      json({ items: [{ id: "work-complete-1" }], nextCursor: "next-completed" }, 200),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api().completedWorkItems("older than this", 20);
+
+    expect(result).toEqual({
+      ok: true,
+      value: { items: [{ id: "work-complete-1" }], nextCursor: "next-completed" },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/work-items/completed?limit=20&cursor=older+than+this`,
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe("include");
+  });
+});
+
+describe("CollabApi publication reads", () => {
+  it("requests a bounded authenticated publication history", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      json({
+        items: [{
+          id: "publication-1",
+          integratedCommit: "a".repeat(40),
+          buildStatus: "succeeded",
+          deployedCommit: "a".repeat(40),
+        }],
+      }, 200),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api().publications(25);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { items: [{ id: "publication-1", buildStatus: "succeeded" }] },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/publications?limit=25`,
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe("include");
+  });
+});
+
 describe("CollabApi mutation transport", () => {
   it("reuses an exact caller-supplied idempotency key across retries", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -98,6 +145,39 @@ describe("CollabApi mutation transport", () => {
     expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/u);
     expect(keys[1]).toMatch(/^[0-9a-f-]{36}$/u);
     expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it("withdraws a reply through its nested route with the caller's command key", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      json(
+        {
+          operationId: "operation-reply-withdraw",
+          annotationId: ANNOTATION,
+          replyId: "reply-1",
+          correlationId: "correlation-reply-withdraw",
+          status: "queued",
+        },
+        202,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api().withdrawReply(ANNOTATION, "reply-1", {
+      idempotencyKey: "reply-withdraw-command-1",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        annotationId: ANNOTATION,
+        replyId: "reply-1",
+        operationId: "operation-reply-withdraw",
+      },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/annotations/${ANNOTATION}/replies/reply-1/withdraw`,
+    );
+    expect(keyFrom(fetchMock.mock.calls[0] ?? [])).toBe("reply-withdraw-command-1");
   });
 
   it("parses an approval-gated annotation as pending review without an operation", async () => {
@@ -291,5 +371,92 @@ describe("CollabApi mutation transport", () => {
       "release-command-1",
       "reply-command-1",
     ]);
+  });
+});
+
+describe("CollabApi revision review transport", () => {
+  it("uses the bounded list/detail routes and the exact approve/reject contracts", async () => {
+    const proposalId = "proposal-1";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/revision-proposals?")) {
+        return json({ items: [], nextCursor: null }, 200);
+      }
+      if (url.endsWith("/diff")) {
+        return json(
+          {
+            proposal: { id: proposalId, currentRevision: 4 },
+            author: null,
+            baseContent: "Before",
+            proposedContent: "After",
+            unifiedDiff: null,
+            computationLimited: true,
+          },
+          200,
+        );
+      }
+      if ((init?.method ?? "GET") === "GET") {
+        return json({ id: proposalId, baseContent: "Before", proposedContent: "After" }, 200);
+      }
+      if (url.endsWith("/approve")) {
+        return json(
+          {
+            proposalId,
+            status: "applying",
+            correlationId: "correlation-approve",
+            operationId: "operation-approve",
+          },
+          202,
+        );
+      }
+      return json(
+        { proposalId, status: "rejected", correlationId: "correlation-reject" },
+        200,
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = api();
+
+    await client.revisionProposals("next page");
+    await client.revisionProposal(proposalId);
+    const approved = await client.reviewRevisionProposal(
+      proposalId,
+      "approve",
+      undefined,
+      { idempotencyKey: "approve-key" },
+    );
+    const rejected = await client.reviewRevisionProposal(
+      proposalId,
+      "reject",
+      "  Keep the current ending.  ",
+      { idempotencyKey: "reject-key" },
+    );
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/revision-proposals?status=pending_review&limit=50&cursor=next+page`,
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}`,
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}/diff`,
+    );
+    expect(fetchMock.mock.calls.slice(3).map((call) => String(call[0]))).toEqual([
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}/approve`,
+      `${API}/v1/projects/${PROJECT}/revision-proposals/${proposalId}/reject`,
+    ]);
+    expect(JSON.parse(String((fetchMock.mock.calls[3]?.[1] as RequestInit).body))).toEqual({});
+    expect(JSON.parse(String((fetchMock.mock.calls[4]?.[1] as RequestInit).body))).toEqual({
+      reason: "Keep the current ending.",
+    });
+    expect(fetchMock.mock.calls.slice(3).map((call) => keyFrom(call))).toEqual([
+      "approve-key",
+      "reject-key",
+    ]);
+    expect(approved).toMatchObject({
+      ok: true,
+      value: { status: "applying", operationId: "operation-approve" },
+    });
+    expect(rejected).toMatchObject({ ok: true, value: { status: "rejected" } });
   });
 });

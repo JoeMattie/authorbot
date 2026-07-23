@@ -44,6 +44,13 @@ async function collectFiles(dir: string): Promise<string[]> {
 const rel = (dir: string, files: string[]): string[] =>
   files.map((file) => path.relative(dir, file)).sort();
 
+const normalizeContributorCreditWhitespace = (html: string): string =>
+  html.replace(
+    /<span class="chapter-contributors">([\s\S]*?)<\/span>/g,
+    (_match, content: string) =>
+      `<span class="chapter-contributors">${content.replace(/\s+/g, " ").trim()}</span>`,
+  );
+
 beforeAll(async () => {
   outPlain = await mkdtemp(path.join(os.tmpdir(), "authorbot-2b-plain-"));
   outCollab = await mkdtemp(path.join(os.tmpdir(), "authorbot-2b-collab-"));
@@ -118,8 +125,8 @@ describe("api-url-less build (script-free regression)", () => {
     const plainFiles = rel(outPlain, await collectFiles(outPlain));
     const collabFiles = rel(outCollab, await collectFiles(outCollab));
     // The collab build adds exactly the island assets plus the pages that
-    // exist only when an API base is configured: /work/ (Phase 3 contract §6)
-    // and, from Phase 6, /settings/ (§3.6) and /write/ (§3.5). Each is gated
+    // exist only when an API base is configured: /work/ (Phase 3 contract §6),
+    // /settings/ (§3.6), /write/ (§3.5), and /revisions/ (Phase 11 §5). Each is gated
     // by `getStaticPaths` returning nothing without collab, which is what
     // keeps the api-url-less build byte-identical rather than merely similar.
     //
@@ -129,15 +136,26 @@ describe("api-url-less build (script-free regression)", () => {
     const lazyAssets = additions.filter((file) => file.startsWith(path.join("_astro", "assets")));
     expect(lazyAssets.some((file) => file.includes("project-store-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("revision-review-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("manuscript-editor-element-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("chapter-summary-editor-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("milkdown-manuscript-surface-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("chapter-history-entry-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("chapter-history-panel-"))).toBe(true);
     expect(additions.filter((file) => !lazyAssets.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
       path.join("_astro", "authorbot-access.js"),
       path.join("_astro", "authorbot-account.js"),
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("_astro", "authorbot-history.css"),
+      path.join("_astro", "authorbot-planning.css"),
+      path.join("_astro", "authorbot-planning.js"),
+      path.join("_astro", "authorbot-revisions.css"),
       path.join("_astro", "authorbot-settings.css"),
       path.join("_astro", "authorbot-settings.js"),
       path.join("_astro", "authorbot-work.css"),
+      path.join("revisions", "index.html"),
       path.join("settings", "index.html"),
       path.join("work", "index.html"),
       path.join("write", "index.html"),
@@ -173,13 +191,28 @@ describe("api-url-less build (script-free regression)", () => {
         // The CSP meta is stripped from BOTH sides now: prose pages emit it in
         // either build (design §19.4), so it is no longer an island insertion,
         // while the island-only pages still add one the plain build lacks.
-        collab = collab
+        collab = normalizeContributorCreditWhitespace(collab
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
+          .replace(/<link rel="stylesheet" href="[^"]*authorbot-planning\.css">/, "")
+          .replace(/<link rel="stylesheet" href="[^"]*authorbot-history\.css">/, "")
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
+          .replace(
+            /<authorbot-planning-document-editor[^>]*>\s*<\/authorbot-planning-document-editor>/,
+            "",
+          )
+          .replace(
+            /<authorbot-outline-summaries[^>]*>\s*<\/authorbot-outline-summaries>/,
+            "",
+          )
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           .replace(/<authorbot-chapter-activity[^>]*>\s*<\/authorbot-chapter-activity>/, "")
+          .replace(/<authorbot-chapter-history[^>]*>\s*<\/authorbot-chapter-history>/, "")
+          .replace(
+            /<a class="chapter-contributor-link"[^>]*>([^<]*)<\/a>/g,
+            "$1",
+          )
           .replace(/ data-chapter-activity-id="[^"]*"/g, "")
           .replace(/<span data-chapter-activity-slot hidden><\/span>/g, "")
           .replace(/<div[^>]*data-collab-only="chapter-tools"[^>]*>\s*<\/div>/, "")
@@ -189,14 +222,20 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-account[^>]*>\s*<\/authorbot-account>/, "")
           .replace(/<li data-collab-nav="work">[\s\S]*?<\/li>/, "")
           .replace(/<span[^>]*data-collab-nav="divider"[^>]*><\/span>/, "")
+          .replace(/<authorbot-manuscript-editor[^>]*>\s*<\/authorbot-manuscript-editor>/, "")
+          .replace(
+            /<authorbot-chapter-summary-editor[^>]*>\s*<\/authorbot-chapter-summary-editor>/,
+            "",
+          )
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<div class="chapter-authoring">\s*<\/div>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-account\.js"><\/script>/, "")
-          .replace(/>\s+</g, "> <");
-        plain = plain
+          .replace(/<script type="module" src="[^"]*authorbot-planning\.js"><\/script>/, "")
+          .replace(/>\s+</g, "> <"));
+        plain = normalizeContributorCreditWhitespace(plain
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
-          .replace(/>\s+</g, "> <");
+          .replace(/>\s+</g, "> <"));
       }
       expect(collab, file).toBe(plain);
     }
@@ -228,10 +267,18 @@ describe("collab-enabled build", () => {
     expect(page).toContain("<authorbot-account");
   });
 
-  it("puts the account strip on story pages without loading collaboration UI", async () => {
+  it("puts the account strip and planning entry on the Outline page", async () => {
     const page = await readFile(path.join(outCollab, "story/index.html"), "utf8");
     expect(page).toContain("<authorbot-account");
     expect(page).toContain('<script type="module" src="/_astro/authorbot-account.js">');
+    expect(page).toContain('<script type="module" src="/_astro/authorbot-planning.js">');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-planning.css">');
+    const summaries = /<authorbot-outline-summaries[^>]*>/.exec(page)?.[0] ?? "";
+    expect(summaries).toContain(`data-api-base="${API_URL}"`);
+    expect(summaries).toContain('data-project="hollow-creek-anomaly"');
+    expect(summaries).toContain(
+      'data-static-id="story-published-chapter-summaries"',
+    );
     expect(page).not.toContain("authorbot-collab.js");
   });
 
@@ -248,7 +295,41 @@ describe("collab-enabled build", () => {
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
   });
 
-  it("hydrates story identity with only the lightweight account entry", async () => {
+  it("stamps each editable story document with its canonical repository identity", async () => {
+    for (const [relPath, expected] of [
+      [
+        "story/index.html",
+        ['data-kind="outline"', 'data-target-id="outline"', 'data-path="story/outline.yml"'],
+      ],
+      [
+        "story/timeline/index.html",
+        ['data-kind="timeline"', 'data-target-id="timeline"', 'data-path="story/timeline.yml"'],
+      ],
+      [
+        "story/characters/mara-voss/index.html",
+        [
+          'data-kind="character"',
+          'data-target-id="character:mara-voss"',
+          'data-path="story/characters/mara-voss.md"',
+        ],
+      ],
+    ] as const) {
+      const html = await readFile(path.join(outCollab, relPath), "utf8");
+      expect(html, relPath).toContain("<authorbot-planning-document-editor");
+      for (const value of expected) expect(html, relPath).toContain(value);
+      expect(html, relPath).toContain("authorbot-planning.js");
+      expect(html, relPath).toContain("authorbot-planning.css");
+    }
+
+    const index = await readFile(
+      path.join(outCollab, "story/characters/index.html"),
+      "utf8",
+    );
+    expect(index).not.toContain("authorbot-planning-document-editor");
+    expect(index).not.toContain("authorbot-planning.js");
+  });
+
+  it("hydrates story identity without loading chapter collaboration UI", async () => {
     for (const relPath of [
       "story/index.html",
       "story/timeline/index.html",
@@ -271,12 +352,34 @@ describe("collab-enabled build", () => {
     expect(js.length).toBeGreaterThan(0);
   });
 
-  it("resolves each retryable lazy chunk beside the stable entries", async () => {
+  it("resolves retryable chunks beside their entries and preloads under the public asset root", async () => {
     const assets = await readdir(path.join(outCollab, "_astro", "assets"));
     const projectStore = assets.find((file) => file.startsWith("project-store-"));
+    const revisionReview = assets.find((file) => file.startsWith("revision-review-"));
     const workQueue = assets.find((file) => file.startsWith("work-queue-"));
+    const manuscript = assets.find((file) =>
+      file.startsWith("milkdown-manuscript-surface-") && file.endsWith(".js")
+    );
+    const manuscriptLoader = assets.find((file) =>
+      file.startsWith("manuscript-surface-loader-") && file.endsWith(".js")
+    );
+    const manuscriptEntry = assets.find((file) =>
+      file.startsWith("manuscript-editor-element-") && file.endsWith(".js")
+    );
+    const notesMode = assets.find((file) =>
+      file.startsWith("collab-notes-mode-") && file.endsWith(".js")
+    );
+    const summaryEditor = assets.find((file) => file.startsWith("chapter-summary-editor-"));
+    const historyEntry = assets.find((file) => file.startsWith("chapter-history-entry-"));
     expect(projectStore).toBeDefined();
+    expect(revisionReview).toBeDefined();
     expect(workQueue).toBeDefined();
+    expect(manuscript).toBeDefined();
+    expect(manuscriptLoader).toBeDefined();
+    expect(manuscriptEntry).toBeDefined();
+    expect(notesMode).toBeDefined();
+    expect(summaryEditor).toBeDefined();
+    expect(historyEntry).toBeDefined();
 
     const account = await readFile(
       path.join(outCollab, "_astro", "authorbot-account.js"),
@@ -286,21 +389,66 @@ describe("collab-enabled build", () => {
       path.join(outCollab, "_astro", "authorbot-collab.js"),
       "utf8",
     );
+    const planning = await readFile(
+      path.join(outCollab, "_astro/authorbot-planning.js"),
+      "utf8",
+    );
     for (const [entry, js] of [
       ["authorbot-account.js", account],
       ["authorbot-collab.js", collab],
+      ["authorbot-planning.js", planning],
     ] as const) {
       expect(js, entry).toContain("./assets/");
+      expect(js, entry).toContain('"/_astro/"');
       expect(js, entry).not.toContain('"/assets/');
       expect(js, entry).not.toContain("'/assets/");
     }
-    // Vite may emit entry-specific copies with different content hashes; the
-    // important deployment contract is that each reference stays relative to
-    // its stable entry and points at the intended split chunk.
+    // Vite may emit entry-specific copies with different content hashes. JS
+    // imports stay relative to the stable entry while its preload helper owns
+    // the root-relative public base used for lazy stylesheets.
     expect(account).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(account).not.toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
+    expect(account).not.toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/revision-review-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/chapter-history-entry-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/manuscript-editor-element-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/chapter-summary-editor-[\w-]+\.js/);
+    expect(planning).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
+    expect(planning).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
+    expect(planning).not.toContain("ProseMirror");
+
+    const historyEntryJs = await readFile(
+      path.join(outCollab, "_astro", "assets", historyEntry!),
+      "utf8",
+    );
+    expect(historyEntryJs).toMatch(/\.\/chapter-history-panel-[\w-]+\.js/);
+
+    const manuscriptEntryJs = await readFile(
+      path.join(outCollab, "_astro", "assets", manuscriptEntry!),
+      "utf8",
+    );
+    expect(manuscriptEntryJs).toMatch(/\.\/manuscript-surface-loader-[\w-]+\.js/);
+
+    const notesModeJs = await readFile(
+      path.join(outCollab, "_astro", "assets", notesMode!),
+      "utf8",
+    );
+    expect(notesModeJs).toMatch(/\.\/manuscript-surface-loader-[\w-]+\.js/);
+
+    const manuscriptLoaderJs = await readFile(
+      path.join(outCollab, "_astro", "assets", manuscriptLoader!),
+      "utf8",
+    );
+    expect(manuscriptLoaderJs).toMatch(/\.\/milkdown-manuscript-surface-[\w-]+\.js/);
+
+    const manuscriptJs = await readFile(
+      path.join(outCollab, "_astro", "assets", manuscript!),
+      "utf8",
+    );
+    expect(manuscriptJs).toContain("ProseMirror");
+    expect(collab).not.toContain("The chapter cannot enter rich-text mode");
   });
 
   it("hydrates the home page with private authoring entry points (Phase 6 §3.5)", async () => {
@@ -355,6 +503,50 @@ describe("collab-enabled build", () => {
     expect(nullResults).toMatch(
       /class="chapter-nav-prev" data-chapter-activity-id="019cadfd-8900-7140-98fb-ceff64cada33"/,
     );
+  });
+
+  it("mounts click-lazy chapter history with a chapter-only stylesheet", async () => {
+    const chapter = await readFile(
+      path.join(outCollab, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(chapter).toContain("<authorbot-chapter-history");
+    expect(chapter).toContain('data-chapter-id="019cadfd-8900-7140-98fb-ceff64cada33"');
+    expect(chapter).toContain(
+      '<link rel="stylesheet" href="/_astro/authorbot-history.css">',
+    );
+
+    const plain = await readFile(
+      path.join(outPlain, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(plain).not.toContain("authorbot-chapter-history");
+    expect(plain).not.toContain("authorbot-history.css");
+
+    const css = await readFile(path.join(outCollab, "_astro/authorbot-history.css"), "utf8");
+    expect(css).toContain("prefers-reduced-motion: reduce");
+    expect(css).toContain("authorbot-chapter-history-panel[hidden]");
+  });
+
+  it("mounts the capability-gated summary editor beside the published chapter deck", async () => {
+    const chapter = await readFile(
+      path.join(outCollab, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    const mount = /<authorbot-chapter-summary-editor[^>]*>/.exec(chapter)?.[0] ?? "";
+    expect(mount).toContain(`data-api-base="${API_URL}"`);
+    expect(mount).toContain('data-project="hollow-creek-anomaly"');
+    expect(mount).toContain('data-chapter-id="019cadfd-8900-7140-98fb-ceff64cada33"');
+    expect(mount).toContain('data-chapter-title="Baseline"');
+    expect(chapter.indexOf("chapter-deck")).toBeLessThan(
+      chapter.indexOf("authorbot-chapter-summary-editor"),
+    );
+
+    const plain = await readFile(
+      path.join(outPlain, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(plain).not.toContain("authorbot-chapter-summary-editor");
   });
 
   it("emits the /write/ and /settings/ pages only for a collab build", async () => {
@@ -415,6 +607,27 @@ describe("collab-enabled build", () => {
 
   it("plain build emits no /work/ page (script-free regression)", async () => {
     await expect(stat(path.join(outPlain, "work/index.html"))).rejects.toThrow();
+  });
+
+  it("emits a page-only /revisions/ review surface for collaboration builds", async () => {
+    const page = await readFile(path.join(outCollab, "revisions/index.html"), "utf8");
+    expect(page).toContain("<authorbot-revision-review");
+    expect(page).toContain(`data-api-base="${API_URL}"`);
+    expect(page).toContain('data-project="hollow-creek-anomaly"');
+    expect(page).toContain('data-base="/"');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-revisions.css">');
+    expect(page).toContain('<script type="module" src="/_astro/authorbot-collab.js">');
+    expect(page).toContain("Compare the complete before and after text");
+    expect(page).not.toMatch(/<[^>]+style=/);
+    await expect(stat(path.join(outPlain, "revisions/index.html"))).rejects.toThrow();
+
+    for (const file of await collectFiles(outCollab)) {
+      if (!file.endsWith(".html") || file.endsWith(path.join("revisions", "index.html"))) {
+        continue;
+      }
+      expect(await readFile(file, "utf8"), file).not.toContain("authorbot-revisions.css");
+    }
   });
 
   it("ships the bundle within the 35 KB gzipped budget (contract §1)", async () => {
@@ -624,6 +837,7 @@ describe("base-path builds are deployable (ADR-0019 §6)", () => {
       repoPath: exampleRepo,
       outDir: outBase,
       baseUrl: "/my-book",
+      apiUrl: "/my-book",
       logLevel: "error",
     });
   });
@@ -652,6 +866,18 @@ describe("base-path builds are deployable (ADR-0019 §6)", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it("keeps lazy editor scripts and styles root-relative under the base path", async () => {
+    const collab = await readFile(
+      path.join(outBase, "my-book", "_astro", "authorbot-collab.js"),
+      "utf8",
+    );
+    expect(collab).toContain('"/my-book/_astro/"');
+    expect(collab).toMatch(/assets\/manuscript-editor-element-[\w-]+\.js/);
+    expect(collab).toMatch(/assets\/manuscript-editor-element-[\w-]+\.css/);
+    expect(collab).not.toContain("http://");
+    expect(collab).not.toContain("https://");
   });
 
   it("leaves the build manifest at the output root for CI to read", async () => {

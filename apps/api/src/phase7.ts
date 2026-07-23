@@ -38,8 +38,18 @@ import type {
 import { roleSchema, type Role } from "@authorbot/domain";
 import { z } from "zod";
 import { accessStateJson, loadAccessState } from "./access-control.js";
-import { apiRoleScopes, type ApiScope } from "./api-scopes.js";
-import { authOf, requireProjectScope, type AuthServices } from "./auth.js";
+import {
+  apiRoleScopes,
+  capabilityProjectionJson,
+  tokenCapabilityProjection,
+  type ApiScope,
+} from "./api-scopes.js";
+import {
+  authOf,
+  requireHumanSession,
+  requireProjectScope,
+  type AuthServices,
+} from "./auth.js";
 import type { AppDeps, AppEnv, Clock } from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import { actorJson, agentTokenJson } from "./json.js";
@@ -245,28 +255,8 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
   /**
    * Guard for the maintainer control plane: project match, membership, scope,
    * the agent pause, and rate limits - but NOT the freeze, because a freeze
-   * that blocked its own reversal would be a one-way door.
-   *
-   * ## Why the scope argument exists (and why it is not `chapters:read`)
-   *
-   * Every route here also calls `requireMaintainer`, and for a human session
-   * the role IS the whole answer - a session's effective scopes are its role
-   * bundle, so role and scope say the same thing. For an AGENT TOKEN they do
-   * not: effective scopes are `token ∩ role bundle` (Phase 2 §3), and asking
-   * for `chapters:read` - the weakest scope in the vocabulary, present in every
-   * bundle - made that intersection vacuous. Role alone then decided, and the
-   * contract's deliberate grant of the maintainer role to an author's agent (so
-   * a `locked` book stays annotatable) silently carried the entire control
-   * plane with it: such a token could freeze the book, reopen the policy,
-   * revoke every other credential, and delete the human author's membership.
-   *
-   * So the *changing* routes name a genuinely maintainer-only scope -
-   * `members:manage` for the book's own controls and its people,
-   * `tokens:manage` for credentials. A human maintainer holds both through
-   * their role and notices nothing. An agent holds one only if its token was
-   * minted asking for it AND its membership was raised to maintainer: two
-   * explicit acts by a human, which is what "a deliberate grant rather than an
-   * implicit inheritance" is supposed to mean.
+   * that blocked its own reversal would be a one-way door. Callers use the
+   * session-only wrapper below before entering this guard.
    */
   const controlGuard = (
     c: Context<AppEnv>,
@@ -275,6 +265,30 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
     requireProjectScope(c, services, scope, {
       surface: "control",
       capability: null,
+    });
+
+  /** Every project-control surface requires an ambient human session. */
+  const humanControlGuard = async (
+    c: Context<AppEnv>,
+    scope: ApiScope = "chapters:read",
+  ): Promise<{ project: ProjectRecord } | { response: Response }> => {
+    const denied = requireHumanSession(c);
+    if (denied !== null) return { response: denied };
+    return controlGuard(c, scope);
+  };
+
+  /** Exact maintainer moderation authority, including legacy source tagging. */
+  const moderationGuard = (
+    c: Context<AppEnv>,
+    surface: "control" | "collaboration" = "control",
+  ): Promise<{ project: ProjectRecord } | { response: Response }> =>
+    requireProjectScope(c, services, "annotations:write", {
+      surface,
+      capability: null,
+      editorial: {
+        capabilities: ["feedback:moderate"],
+        legacyAction: "feedback:moderate",
+      },
     });
 
   /** The same guard, but frozen with the book (moderation approval commits). */
@@ -300,7 +314,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * here on leaves a `member.*` event that fills it in.
    */
   app.get("/v1/projects/:projectId/collaborators", auth, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await humanControlGuard(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -354,7 +368,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * value after the mint response that created it.
    */
   app.get("/v1/projects/:projectId/agent-tokens", auth, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await humanControlGuard(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -370,8 +384,11 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
           repos.actors.getById(t.createdBy),
           repos.projectMemberships.getByProjectAndActor(guard.project.id, t.actorId),
         ]);
+        const role = membership?.revokedAt === null ? membership.role : null;
+        const projection = tokenCapabilityProjection(t, role);
         return {
           ...agentTokenJson(t),
+          ...capabilityProjectionJson(projection),
           /** The human who minted it - the "owning human" of the contract. */
           owner: owner === null ? null : actorJson(owner),
           /**
@@ -381,7 +398,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
            * can do - and because an agent working a `locked` book is exactly
            * the one holding `maintainer` here.
            */
-          role: membership?.revokedAt === null ? membership.role : null,
+          role,
           expired: Date.parse(t.expiresAt) <= nowMs,
         };
       }),
@@ -398,7 +415,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * the database stores and the handle is what a person knows.
    */
   app.get("/v1/projects/:projectId/audit", auth, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await humanControlGuard(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -459,7 +476,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * it affects.
    */
   app.get("/v1/projects/:projectId/access", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await humanControlGuard(c);
     if ("response" in guard) return guard.response;
     const state = await loadAccessState(repos, guard.project.id);
     return c.json({
@@ -472,7 +489,9 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
 
   /** The documented ceilings (exit criterion 1). Readable by any member. */
   app.get("/v1/projects/:projectId/rate-limits", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) return guard.response;
     return c.json(rateLimitsJson());
   });
@@ -492,7 +511,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
   const freezeRoute = (frozen: boolean) => async (c: Context<AppEnv>) => {
     // `members:manage`, not `chapters:read`: the freeze is the book's stop
     // button, and a credential that can press it can also stop everyone else.
-    const guard = await controlGuard(c, "members:manage");
+    const guard = await humanControlGuard(c, "members:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -604,6 +623,8 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
     auth,
     idem,
     async (c: Context<AppEnv>) => {
+      const sessionOnly = requireHumanSession(c);
+      if (sessionOnly !== null) return sessionOnly;
       const guard = await collaborationGuard(c);
       if ("response" in guard) return guard.response;
       const denied = requireMaintainer(c);
@@ -674,7 +695,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
   const pauseRoute = (paused: boolean) => async (c: Context<AppEnv>) => {
     // Pausing agents is a statement about credentials, so it is gated on the
     // credential scope: `tokens:manage`.
-    const guard = await controlGuard(c, "tokens:manage");
+    const guard = await humanControlGuard(c, "tokens:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -767,7 +788,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * deliberate grant rather than an implicit inheritance from their owner".
    */
   app.patch("/v1/projects/:projectId/collaborators/:actorId", auth, idem, async (c) => {
-    const guard = await controlGuard(c, "members:manage");
+    const guard = await humanControlGuard(c, "members:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -869,7 +890,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * they already contributed is left untouched.
    */
   app.delete("/v1/projects/:projectId/collaborators/:actorId", auth, idem, async (c) => {
-    const guard = await controlGuard(c, "members:manage");
+    const guard = await humanControlGuard(c, "members:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -969,7 +990,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * mid-submission must not get its edit committed after the alarm was raised.
    */
   app.post("/v1/projects/:projectId/agent-tokens/revoke-all", auth, idem, async (c) => {
-    const guard = await controlGuard(c, "tokens:manage");
+    const guard = await humanControlGuard(c, "tokens:manage");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -1041,7 +1062,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * book, and approve / reject actions".
    */
   app.get("/v1/projects/:projectId/moderation/queue", auth, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await moderationGuard(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -1251,7 +1272,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
   app.post("/v1/projects/:projectId/moderation/:pendingId/approve", auth, idem, async (c) => {
     // Collaboration surface: approving commits new content, which is exactly
     // what a freeze exists to stop.
-    const guard = await collaborationGuard(c);
+    const guard = await moderationGuard(c, "collaboration");
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -1323,7 +1344,7 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
    * went wrong, so a freeze does not block it.
    */
   app.post("/v1/projects/:projectId/moderation/:pendingId/reject", auth, idem, async (c) => {
-    const guard = await controlGuard(c);
+    const guard = await moderationGuard(c);
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;
@@ -1399,8 +1420,10 @@ export function registerPhase7Routes(ctx: Phase7Context): void {
     if (!parsed.success) {
       return problem(c, "validation-failed", { issues: issueList(parsed.error) });
     }
-    const guard =
-      parsed.data.action === "approve" ? await collaborationGuard(c) : await controlGuard(c);
+    const guard = await moderationGuard(
+      c,
+      parsed.data.action === "approve" ? "collaboration" : "control",
+    );
     if ("response" in guard) return guard.response;
     const denied = requireMaintainer(c);
     if (denied !== null) return denied;

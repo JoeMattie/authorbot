@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { EDITORIAL_CAPABILITIES } from "@authorbot/domain";
 import { beforeAll, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { createApi } from "../src/app.js";
@@ -27,14 +28,43 @@ const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
 interface Operation {
   operationId?: string;
+  description?: string;
   "x-implementation-status"?: string;
+  responses?: Record<
+    string,
+    { content?: Record<string, { schema?: SchemaNode }> }
+  >;
+}
+interface SchemaNode {
+  $ref?: string;
+  type?: string;
+  description?: string;
+  const?: unknown;
+  enum?: string[];
+  maxItems?: number;
+  required?: string[];
+  allOf?: SchemaNode[];
+  oneOf?: SchemaNode[];
+  items?: SchemaNode;
+  properties?: Record<string, SchemaNode>;
+  discriminator?: { propertyName?: string; mapping?: Record<string, string> };
 }
 interface Spec {
   paths: Record<string, Record<string, Operation | undefined>>;
-  components: { schemas: Record<string, { enum?: string[] }> };
+  components: { schemas: Record<string, SchemaNode> };
 }
 
 const spec = YAML.parse(readFileSync(SPEC_PATH, "utf8")) as Spec;
+
+function responseSchema(path: string, method: string, status = "200"): SchemaNode | undefined {
+  return spec.paths[path]?.[method]?.responses?.[status]?.content?.["application/json"]?.schema;
+}
+
+function schemaAdmitsNull(schema: SchemaNode | undefined): boolean {
+  if (schema === undefined) return false;
+  if (schema.type === "null") return true;
+  return (schema.oneOf ?? []).some((member) => member.type === "null");
+}
 
 /** OpenAPI `{param}` templating → Hono `:param`. */
 const toHonoPath = (path: string): string => path.replace(/\{(\w+)\}/g, ":$1");
@@ -159,9 +189,8 @@ describe("openapi.yaml is synced with the router", () => {
   });
 
   it("keeps `planned` markers only on genuinely deferred Phase 5 work", () => {
-    // Contract §1 "Out": write_chapter submission flows, fuzzy re-anchor, and
-    // the story read endpoints are Phase 5. If something else acquires a
-    // marker, it needs a deliberate decision, not a silent one.
+    // Fuzzy re-anchor remains deferred. If something else acquires a marker,
+    // it needs a deliberate decision, not a silent one.
     const planned = specOperations()
       .filter((op) => op.planned)
       .map((op) => op.operationId)
@@ -169,12 +198,7 @@ describe("openapi.yaml is synced with the router", () => {
     // `createChapterSubmission` left this list in Phase 6: contract §3.5's
     // direct authoring path is implemented, along with the separate
     // publish/unpublish actions.
-    expect(planned).toEqual([
-      "getStoryOutline",
-      "getStoryTimeline",
-      "listStoryCharacters",
-      "reanchorAnnotation",
-    ]);
+    expect(planned).toEqual(["reanchorAnnotation"]);
   });
 
   it("documents the submission types the domain actually accepts", () => {
@@ -184,6 +208,190 @@ describe("openapi.yaml is synced with the router", () => {
       "block_replacement",
       "chapter_replacement",
     ]);
+  });
+
+  it("documents the exact chapter-source hash needed by revision proposals", () => {
+    const source = responseSchema(
+      "/v1/projects/{projectId}/chapters/{chapterId}/source",
+      "get",
+    );
+    expect(source?.required).toEqual(expect.arrayContaining([
+      "chapterId",
+      "revision",
+      "contentHash",
+      "body",
+    ]));
+    expect(source?.properties?.["contentHash"]?.allOf?.[0]?.$ref).toBe(
+      "#/components/schemas/ContentHash",
+    );
+    expect(
+      spec.components.schemas["CreateChapterReplacementProposal"]?.required,
+    ).toEqual(expect.arrayContaining(["baseRevision", "baseContentHash"]));
+  });
+
+  it("documents canonical and legacy chapter authoring authorization accurately", () => {
+    const submission = spec.paths["/v1/projects/{projectId}/chapter-submissions"]?.post;
+    expect(submission?.description).toContain("canonical `chapters:write` capability");
+    expect(submission?.description).toContain("legacy `submissions:write` scope");
+    expect(submission?.description).toContain("editor or maintainer role");
+
+    const source = spec.paths["/v1/projects/{projectId}/chapters/{chapterId}/source"]?.get;
+    expect(source?.description).toContain("Canonical credentials require `chapters:read`");
+    expect(source?.description).toContain("legacy credentials use the historical");
+    expect(source?.description).toContain("not limited to editors and maintainers");
+  });
+
+  it("documents the exact canonical editorial capability vocabulary", () => {
+    expect(spec.components.schemas["EditorialCapability"]?.enum).toEqual([
+      ...EDITORIAL_CAPABILITIES,
+    ]);
+  });
+
+  it("documents the completed-work history without retained submission prose", () => {
+    const page = responseSchema(
+      "/v1/projects/{projectId}/work-items/completed",
+      "get",
+    );
+    expect(page?.properties?.["items"]?.items?.$ref).toBe(
+      "#/components/schemas/CompletedWorkItem",
+    );
+
+    const completed = spec.components.schemas["CompletedWorkItem"];
+    expect(completed?.required).toEqual(
+      expect.arrayContaining([
+        "source",
+        "chapter",
+        "completedBy",
+        "completedAt",
+        "resultingRevision",
+        "commitSha",
+        "revisionProposalId",
+        "approvedBy",
+      ]),
+    );
+    expect(completed?.properties?.["content"]).toBeUndefined();
+    expect(completed?.properties?.["proposedContent"]).toBeUndefined();
+  });
+
+  it("documents bounded chapter history, detail comparison, and restore proposal shapes", () => {
+    expect(
+      responseSchema("/v1/projects/{projectId}/chapters/{chapterId}/history", "get")
+        ?.$ref,
+    ).toBe("#/components/schemas/ChapterHistoryPage");
+    expect(
+      responseSchema(
+        "/v1/projects/{projectId}/chapters/{chapterId}/history/{revision}",
+        "get",
+      )?.$ref,
+    ).toBe("#/components/schemas/ChapterHistoryDetail");
+    expect(
+      responseSchema(
+        "/v1/projects/{projectId}/chapters/{chapterId}/history/{revision}/restore",
+        "post",
+        "201",
+      )?.$ref,
+    ).toBe("#/components/schemas/ChapterHistoryRestoreResult");
+
+    expect(spec.components.schemas["ChapterHistoryPage"]?.properties?.["items"]?.maxItems)
+      .toBe(50);
+    expect(spec.components.schemas["ChapterHistoryRevision"]?.required).toContain("status");
+    expect(spec.components.schemas["ChapterHistoryDetail"]?.required).toEqual([
+      "chapterId",
+      "compare",
+      "selected",
+      "comparison",
+      "current",
+      "diff",
+    ]);
+    expect(
+      spec.components.schemas["ChapterHistoryRestoreResult"]?.properties?.["status"]?.const,
+    ).toBe("pending_review");
+  });
+
+  it("documents repository-document source and proposal variants", () => {
+    expect(
+      responseSchema("/v1/projects/{projectId}/repository-documents/source", "get")?.$ref,
+    ).toBe("#/components/schemas/RepositoryDocumentSource");
+    expect(
+      spec.components.schemas["RepositoryDocumentSource"]?.properties?.["target"]?.$ref,
+    ).toBe("#/components/schemas/RepositoryDocumentTarget");
+    expect(spec.components.schemas["RevisionProposalType"]?.enum).toEqual([
+      "chapter_replacement",
+      "chapter_summary",
+      "repository_document",
+    ]);
+    expect(spec.components.schemas["RevisionProposalOrigin"]?.enum).toEqual([
+      "work_submission",
+      "direct_edit",
+      "summary_proposal",
+      "history_restore",
+      "document_edit",
+    ]);
+    expect(spec.components.schemas["RevisionProposalTargetKind"]?.enum).toEqual([
+      "chapter",
+      "outline",
+      "timeline",
+      "character",
+    ]);
+
+    const proposal = spec.components.schemas["RevisionProposal"];
+    expect(schemaAdmitsNull(proposal?.properties?.["chapterId"])).toBe(true);
+    expect(schemaAdmitsNull(proposal?.properties?.["baseRevision"])).toBe(true);
+    expect(proposal?.required).toEqual(
+      expect.arrayContaining(["targetKind", "targetId", "targetPath"]),
+    );
+
+    const create = spec.components.schemas["CreateRevisionProposal"];
+    expect(create?.oneOf?.map((member) => member.$ref)).toEqual([
+      "#/components/schemas/CreateChapterReplacementProposal",
+      "#/components/schemas/CreateChapterSummaryProposal",
+      "#/components/schemas/CreateRepositoryDocumentProposal",
+    ]);
+    expect(create?.discriminator).toEqual({
+      propertyName: "proposalType",
+      mapping: {
+        chapter_replacement: "#/components/schemas/CreateChapterReplacementProposal",
+        chapter_summary: "#/components/schemas/CreateChapterSummaryProposal",
+        repository_document: "#/components/schemas/CreateRepositoryDocumentProposal",
+      },
+    });
+    expect(spec.components.schemas["CreateRepositoryDocumentProposal"]?.required).toEqual([
+      "proposalType",
+      "targetKind",
+      "targetPath",
+      "baseContentHash",
+      "proposedContent",
+    ]);
+    const createOperation = spec.paths["/v1/projects/{projectId}/revision-proposals"]?.post;
+    expect(createOperation?.description).toContain(
+      "`chapters:read` plus `summaries:write`",
+    );
+    expect(createOperation?.description).toContain("contributor role floor");
+    expect(createOperation?.description).toContain(
+      "maintainer role plus `revisions:review`",
+    );
+    expect(
+      spec.components.schemas["CreateChapterSummaryProposal"]
+        ?.properties?.["proposedContent"]?.description,
+    ).toContain("empty string removes");
+  });
+
+  it("documents authenticated, bounded story-bible reads and claim-bundle links", () => {
+    expect(responseSchema("/v1/projects/{projectId}/story/outline", "get")?.$ref).toBe(
+      "#/components/schemas/StoryOutlineResponse",
+    );
+    expect(responseSchema("/v1/projects/{projectId}/story/timeline", "get")?.$ref).toBe(
+      "#/components/schemas/StoryTimelineResponse",
+    );
+    expect(responseSchema("/v1/projects/{projectId}/story/characters", "get")?.$ref).toBe(
+      "#/components/schemas/StoryCharacterPage",
+    );
+    expect(spec.components.schemas["StoryCharacterPage"]?.properties?.["items"]?.maxItems)
+      .toBe(20);
+    expect(
+      spec.components.schemas["TaskBundle"]?.properties?.["context"]?.properties?.["storyApi"]
+        ?.$ref,
+    ).toBe("#/components/schemas/StoryApiLinks");
   });
 
   it("documents capability-filtered chapter activity with the exact optional counts", () => {
@@ -231,15 +439,55 @@ describe("openapi.yaml is synced with the router", () => {
     ).toBe("#/components/schemas/ChapterSummary");
   });
 
+  it("documents authenticated current chapter summaries on the bounded chapter list", () => {
+    const chapter = spec.components.schemas["Chapter"] as
+      | {
+          required?: string[];
+          properties?: Record<string, unknown>;
+        }
+      | undefined;
+    expect(chapter?.required).toContain("summary");
+    expect(chapter?.properties?.["summary"]).toEqual(
+      expect.objectContaining({
+        oneOf: expect.arrayContaining([
+          expect.objectContaining({ type: "string" }),
+          expect.objectContaining({ type: "null" }),
+        ]),
+      }),
+    );
+
+    const chapterList = spec.paths["/v1/projects/{projectId}/chapters"]?.["get"] as
+      | { description?: string }
+      | undefined;
+    expect(chapterList?.description).toContain("chapters:read");
+    expect(chapterList?.description).toContain("draft and proposed");
+    expect(chapterList?.description).toContain("published summaries");
+  });
+
   it("documents optional authentication for the public event-poll representation", () => {
     const events = spec.paths["/v1/projects/{projectId}/events"]?.["get"] as
-      | { security?: Record<string, never[]>[] }
+      | { description?: string; security?: Record<string, never[]>[] }
       | undefined;
     expect(events?.security).toEqual([
       { githubSession: [] },
       { agentToken: [] },
       {},
     ]);
+    expect(events?.description).toContain("exact effective read");
+    expect(events?.description).toContain("capabilities, with an explicit");
+    expect(events?.description).toContain("field projection");
+    expect(events?.description).toContain("malformed,");
+    expect(events?.description).toContain("control-plane event types fail closed");
+  });
+
+  it("documents capability-scoped operation reads for agent tokens", () => {
+    const operation = spec.paths[
+      "/v1/projects/{projectId}/operations/{operationId}"
+    ]?.["get"];
+    expect(operation?.description).toContain("uniquely owns it");
+    expect(operation?.description).toContain("exact read capability");
+    expect(operation?.description).toContain("Control-plane");
+    expect(operation?.description).toContain("fail closed");
   });
 });
 

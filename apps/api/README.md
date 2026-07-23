@@ -65,6 +65,31 @@ curl -H "Authorization: Bearer authorbot_..." \
   http://127.0.0.1:8787/v1/projects/hollow-creek-anomaly/chapters
 ```
 
+### Story bible reads for agents
+
+A credential with exactly `chapters:read` can read the validated planning
+documents configured by `book.yml` without repository credentials or guessed
+paths:
+
+```sh
+curl -H "Authorization: Bearer authorbot_..." \
+  http://127.0.0.1:8787/v1/projects/hollow-creek-anomaly/story/outline
+curl -H "Authorization: Bearer authorbot_..." \
+  http://127.0.0.1:8787/v1/projects/hollow-creek-anomaly/story/timeline
+curl -H "Authorization: Bearer authorbot_..." \
+  'http://127.0.0.1:8787/v1/projects/hollow-creek-anomaly/story/characters?limit=20'
+```
+
+Outline and timeline are single validated documents. Characters are cursor
+paginated, with at most 20 repository blobs read per request. Follow
+`nextCursor` until it is `null`. Each work-item claim also includes
+`context.storyApi` with these canonical same-origin paths; `storyRefs` remain
+stable story ids to look up in the returned documents. The API never accepts a
+caller-supplied repository path here: it uses `planning.outline`,
+`planning.timeline`, and `planning.characters_glob` from projected `book.yml`
+(or their canonical defaults), rejects traversal, and refuses invalid or
+unsafe committed documents rather than returning partial canon.
+
 **Worker limitation:** under `wrangler dev` the app runs reader-less - the
 Worker has no book-repository access until the Phase 5 GitHub reader/writer,
 so the chapters projection is empty, webhook pushes are recorded `ignored`,

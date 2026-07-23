@@ -1,6 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // The package typecheck includes Astro/Vite browser islands. Milkdown's
+    // public declarations intentionally use bundler-style extensionless
+    // re-exports, so resolve this mixed source graph the same way Vite does.
+    // The distributable Node package remains NodeNext in tsconfig.build.json.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "outDir": "dist",
     // The islands (site/src/islands, reached through the tests) target the
     // browser; DOM types are additive for the Node-side sources.

@@ -103,6 +103,7 @@ export async function setupDatabase(): Promise<SeededDatabase> {
     path: "chapters/01-signal.md",
     slug: "signal",
     title: "Signal",
+    summary: "A signal changes the investigation.",
     order: 10,
     status: "draft",
     revision: 2,
@@ -611,4 +612,45 @@ export async function enqueueAnnotationWithdraw(
     repos.outbox.insertStatement(outbox),
   ]);
   return { annotationId, operationId, outboxId };
+}
+
+/** API-shaped reply-withdraw command batch (new operation + outbox row). */
+export async function enqueueReplyWithdraw(
+  seed: SeededDatabase,
+  replyId: string,
+  actorId = seed.actorId,
+): Promise<Required<Pick<EnqueuedCommand, "replyId" | "operationId" | "outboxId">>> {
+  const { db, repos, projectId } = seed;
+  const ts = nowIso();
+  const operationId = uuidv7();
+  const outboxId = uuidv7();
+  const operation: GitOperationRecord = {
+    id: operationId,
+    projectId,
+    correlationId: uuidv7(),
+    expectedHead: null,
+    state: "queued",
+    attempts: 0,
+    commitSha: null,
+    error: null,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  const outbox: OutboxRecord = {
+    id: outboxId,
+    projectId,
+    gitOperationId: operationId,
+    kind: "reply.withdraw",
+    payload: { replyId, actorId },
+    status: "pending",
+    attempts: 0,
+    createdAt: ts,
+    processedAt: null,
+  };
+  await db.batch([
+    repos.gitOperations.insertStatement(operation),
+    repos.replies.setGitOperationStatement(replyId, operationId, ts),
+    repos.outbox.insertStatement(outbox),
+  ]);
+  return { replyId, operationId, outboxId };
 }

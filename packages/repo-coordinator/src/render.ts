@@ -110,6 +110,8 @@ export interface ReplyArtifactInput {
   parentReplyId?: string | null;
   /** Actor reference (`github:octocat`). */
   author: string;
+  /** Omitted by callers only for compatibility; new artifacts always write it. */
+  status?: "open" | "withdrawn";
   /** RFC 3339 UTC timestamp. */
   createdAt: string;
   /** Markdown body. */
@@ -126,6 +128,7 @@ export function renderReplyArtifact(input: ReplyArtifactInput): RenderedFile {
       ? {}
       : { parent_reply_id: input.parentReplyId }),
     author: input.author,
+    status: input.status ?? "open",
     created_at: input.createdAt,
   };
   replySchema.parse(frontmatter);

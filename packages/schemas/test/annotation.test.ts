@@ -140,6 +140,12 @@ describe("replySchema", () => {
     expectValid(replySchema, validReply);
   });
 
+  it("accepts explicit open/withdrawn status while preserving legacy omission", () => {
+    expectValid(replySchema, { ...validReply, status: "open" });
+    expectValid(replySchema, { ...validReply, status: "withdrawn" });
+    expectInvalid(replySchema, { ...validReply, status: "pending_git" });
+  });
+
   it("accepts a threaded reply with timestamps", () => {
     const threaded = clone(validReply);
     threaded.parent_reply_id = validReply.id;

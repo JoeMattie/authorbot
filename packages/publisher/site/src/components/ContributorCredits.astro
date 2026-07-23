@@ -1,0 +1,65 @@
+---
+import { chapterHistoryHash } from "../lib/chapter-history-link.js";
+
+interface Credit {
+  actor: string;
+  label: string;
+  acceptedRevisions: number[];
+}
+
+interface Props {
+  contributors: Credit[];
+  /** Empty on the chapter itself; absolute-to-base on the book index. */
+  chapterHref?: string;
+  historyAvailable: boolean;
+  /** The index stays compact; chapter surfaces omit this for the full list. */
+  limit?: number;
+  prefix?: string;
+}
+
+const {
+  contributors,
+  chapterHref = "",
+  historyAvailable,
+  limit = contributors.length,
+  prefix = "contributors",
+} = Astro.props;
+const shown = contributors.slice(0, limit);
+const remaining = contributors.length - shown.length;
+---
+
+<span class="chapter-contributors">
+  {prefix}{" "}
+  {
+    shown.map((credit, index) => {
+      const latest = credit.acceptedRevisions.at(-1);
+      const href =
+        historyAvailable && latest !== undefined
+          ? `${chapterHref}${chapterHistoryHash(latest)}`
+          : null;
+      const revisionLabel = credit.acceptedRevisions.join(", ");
+      const historyLabel =
+        credit.acceptedRevisions.length === 1
+          ? `View accepted revision ${String(latest)} credited to ${credit.label} in chapter history`
+          : `View the latest of ${String(credit.acceptedRevisions.length)} accepted revisions credited to ${credit.label} in chapter history`;
+      return (
+        <>
+          {index > 0 && ", "}
+          {href === null ? (
+            credit.label
+          ) : (
+            <a
+              class="chapter-contributor-link"
+              href={href}
+              aria-label={historyLabel}
+              title={`Accepted revisions: ${revisionLabel}`}
+            >
+              {credit.label}
+            </a>
+          )}
+        </>
+      );
+    })
+  }
+  {remaining > 0 && ` +${String(remaining)}`}
+</span>

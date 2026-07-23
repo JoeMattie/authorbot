@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Collab from "../components/Collab.astro";
+import ContributorCredits from "../components/ContributorCredits.astro";
 import Icon from "../components/Icon.astro";
 import { SITE_CSP } from "../lib/csp.js";
 import { site } from "virtual:authorbot-site";
@@ -31,6 +32,7 @@ const collab = site.collab;
 // carries the policy whether or not it also loads the islands (lib/csp.ts).
 const csp = SITE_CSP;
 const collabStylesHref = collab ? `${site.basePath}_astro/authorbot-collab.css` : undefined;
+const historyStylesHref = collab ? `${site.basePath}_astro/authorbot-history.css` : undefined;
 const chapterCharacters = site.characters.filter((character) =>
   character.chapters.some((entry) => entry.href === chapter.href),
 );
@@ -42,12 +44,28 @@ const chapterCharacters = site.characters.filter((character) =>
   noindex={chapter.isDraft}
   csp={csp}
   collabStylesHref={collabStylesHref}
+  extraStylesHrefs={historyStylesHref ? [historyStylesHref] : []}
   activeNav="chapters"
 >
   <div class="chapter-page">
-    <a class="chapter-back" href={site.basePath}>
-      <Icon name="chevron-left" size={15} /> All chapters
-    </a>
+    <div class="chapter-reading-controls">
+      <a class="chapter-back" href={site.basePath}>
+        <Icon name="chevron-left" size={15} /> All chapters
+      </a>
+      {
+        collab && (
+          <authorbot-chapter-history
+            data-api-base={collab.apiBase}
+            data-project={collab.projectSlug}
+            data-base={site.basePath}
+            data-chapter-id={chapter.id}
+            data-chapter-title={chapter.title}
+            data-chapter-revision={chapter.revision}
+            data-chapter-status={chapter.status}
+          />
+        )
+      }
+    </div>
     <div class="chapter-reading-layout ab-reading-layout">
       <div class="chapter-reading-column">
         <article class="chapter">
@@ -71,10 +89,26 @@ const chapterCharacters = site.characters.filter((character) =>
             </p>
             <h1>{chapter.title}</h1>
             {chapter.summary && <p class="chapter-deck">{chapter.summary}</p>}
+            {
+              collab && (
+                <authorbot-chapter-summary-editor
+                  data-api-base={collab.apiBase}
+                  data-project={collab.projectSlug}
+                  data-chapter-id={chapter.id}
+                  data-chapter-title={chapter.title}
+                />
+              )
+            }
             {(site.book.showAttribution || chapterCharacters.length > 0) && (
               <div class="chapter-credit-row">
-                {site.book.showAttribution && chapter.authors.length > 0 && (
-                  <span class="chapter-byline">by {chapter.authorLabels.join(" and ")}</span>
+                {site.book.showAttribution && chapter.primaryAuthor && (
+                  <span class="chapter-byline">by {chapter.primaryAuthor.label}</span>
+                )}
+                {site.book.showAttribution && chapter.contributors.length > 0 && (
+                  <ContributorCredits
+                    contributors={chapter.contributors}
+                    historyAvailable={collab !== null}
+                  />
                 )}
                 {chapterCharacters.map((character) => (
                   <a class="character-chip" href={character.href}>{character.name}</a>
@@ -82,13 +116,30 @@ const chapterCharacters = site.characters.filter((character) =>
               </div>
             )}
           </header>
+          {
+            collab && (
+              <authorbot-manuscript-editor
+                data-api-base={collab.apiBase}
+                data-project={collab.projectSlug}
+                data-chapter-id={chapter.id}
+                data-chapter-title={chapter.title}
+              />
+            )
+          }
           <div class="prose" set:html={chapter.html} />
           {
             showFooter && (
               <footer class="chapter-footer">
                 {site.book.showRevision && <span>Revision {chapter.revision}</span>}
-                {site.book.showAttribution && chapter.authors.length > 0 && (
-                  <span>By {chapter.authorLabels.join(", ")}</span>
+                {site.book.showAttribution && chapter.primaryAuthor && (
+                  <span>By {chapter.primaryAuthor.label}</span>
+                )}
+                {site.book.showAttribution && chapter.contributors.length > 0 && (
+                  <ContributorCredits
+                    contributors={chapter.contributors}
+                    historyAvailable={collab !== null}
+                    prefix="Contributors:"
+                  />
                 )}
               </footer>
             )
@@ -141,14 +192,6 @@ const chapterCharacters = site.characters.filter((character) =>
           data-api-base={collab.apiBase}
           data-project={collab.projectSlug}
           data-href={`${site.basePath}write/`}
-        />
-        <authorbot-chapter-composer
-          data-api-base={collab.apiBase}
-          data-project={collab.projectSlug}
-          data-dev-login={collab.devLogin ? "true" : undefined}
-          data-chapter-id={chapter.id}
-          data-chapter-title={chapter.title}
-          data-chapter-status={chapter.status}
         />
         </div>
       </>

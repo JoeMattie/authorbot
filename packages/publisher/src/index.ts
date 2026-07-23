@@ -28,6 +28,7 @@ export {
   type RenderOptions,
 } from "./render.js";
 export type {
+  ChapterCredit,
   IncludedChapterStatus,
   OutlineNode,
   SiteBook,

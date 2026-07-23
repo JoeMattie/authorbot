@@ -26,7 +26,9 @@ marker or the id - the server owns those. Submit only the block's new prose.
 ## `revise_chapter`
 Rewrite the whole chapter body as Markdown. No frontmatter, no
 `authorbot:block` markers - the server generates ids and structure. Keep every
-part the acceptance criteria did not ask you to change.
+part the acceptance criteria did not ask you to change. Submission consumes
+the lease and creates a `pending_review` revision proposal with a durable diff;
+it does not change the chapter until a maintainer approves it.
 
 ## `resolve_conflict`
 Created automatically when a submission's base had moved on. The bundle carries
@@ -45,4 +47,9 @@ discharge. Prefer to filter them out when scanning the queue.
 This does not mean an agent can never start a chapter. When the user explicitly
 asks for a new draft, use the separate direct authoring endpoint
 `POST /v1/projects/{project}/chapter-submissions` with `{ title, body, slug?,
-summary? }`. That flow has no claim or lease and is documented in `api.md`.
+summary? }`. That flow has no claim or lease and requires `chapters:write`.
+Configured Outline, Timeline, and Character edits use a
+`repository_document` revision proposal instead. Neither route turns these
+legacy Work types into submit-capable items; release a claimed unsupported
+item and use the documented direct flow only when the user actually asked for
+that change.

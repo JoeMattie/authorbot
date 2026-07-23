@@ -5,6 +5,12 @@
  */
 import type { ComposerKind, ComposerScope } from "./composer-state.js";
 import type { RangeSelector } from "./selection.js";
+import {
+  hasEffectiveCapability,
+  hasLegacyEffectiveAction,
+} from "./effective-capabilities.js";
+
+export { hasEffectiveCapability, hasLegacyEffectiveAction } from "./effective-capabilities.js";
 
 export interface MeActor {
   id: string;
@@ -27,6 +33,13 @@ export interface Me {
   scopes: string[];
   /** Present since Phase 3; absent for an actor with no membership. */
   memberships?: MeMembership[];
+  /** Phase 11's authoritative capability representation for this credential. */
+  capabilityMode?: "human" | "legacy" | "canonical";
+  grantedCapabilities?: string[];
+  roleCapabilityCeiling?: string[];
+  effectiveCapabilities?: string[];
+  /** Preserved high-impact behavior for an unconverted legacy token only. */
+  legacyEffectiveActions?: Array<{ action: string; sourceScopes?: string[] }>;
 }
 
 /** Exact response of the dev-only login route (singular project membership). */
@@ -53,7 +66,14 @@ export function roleOf(me: Me | null): Role | null {
 /** Contract §3.5: authoring is editor-or-maintainer, never scope alone. */
 export function canAuthorChapters(me: Me | null): boolean {
   const role = roleOf(me);
-  return (role === "editor" || role === "maintainer") && me !== null && me.scopes.includes("submissions:write");
+  return (role === "editor" || role === "maintainer") &&
+    hasEffectiveCapability(me, "chapters:write", "submissions:write");
+}
+
+/** Publishing is a separate maintainer capability, never implied by writing. */
+export function canPublishChapters(me: Me | null): boolean {
+  return roleOf(me) === "maintainer" &&
+    hasEffectiveCapability(me, "chapters:publish", "submissions:write");
 }
 
 /** Contract §3.6: settings and the overrides are maintainer-only. */
@@ -61,6 +81,11 @@ export function isMaintainer(me: Me | null): boolean {
   return roleOf(me) === "maintainer";
 }
 
+/**
+ * Browser affordances consume the same exact capability projection as the
+ * API. `legacyScope` is only a rolling-deploy fallback for a Worker that
+ * predates Phase 11 and therefore omitted the canonical fields entirely.
+ */
 export interface AnnotationTarget {
   blockId: string;
   textPosition?: { start: number; end: number };
@@ -132,13 +157,45 @@ export interface WorkItem {
   status: string;
   sourceAnnotationId: string;
   chapterId: string;
-  baseRevision: number;
+  baseRevision: number | null;
   target: AnnotationTarget | null;
   priority: string;
   createdAt: string;
   updatedAt: string;
   /** Support summary (aggregate tally) for the source suggestion. */
   support?: VoteTally;
+}
+
+/** Attribution retained on a compact completed-Work history row. */
+export interface CompletedWorkActor {
+  actorId: string;
+  type: string;
+  displayName: string;
+  externalIdentity: string | null;
+}
+
+/**
+ * A completed Work stub. The API deliberately omits submitted manuscript
+ * prose; the source note is enough context for this bounded history view.
+ */
+export interface CompletedWorkItem extends WorkItem {
+  source: {
+    kind: string;
+    scope: string;
+    body: string;
+    status: string;
+  } | null;
+  chapter: {
+    id: string;
+    title: string;
+    slug: string;
+  } | null;
+  completedBy: CompletedWorkActor | null;
+  completedAt: string;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  revisionProposalId: string | null;
+  approvedBy: CompletedWorkActor | null;
 }
 
 /** One event-feed row (Phase 3 contract §5). */
@@ -252,6 +309,12 @@ export interface ReplyAccepted extends Accepted {
 /** An annotation withdrawal accepted into the Git-backed stream. */
 export interface WithdrawAccepted extends Accepted {
   annotationId: string;
+}
+
+/** A reply withdrawal accepted into the Git-backed stream. */
+export interface ReplyWithdrawAccepted extends Accepted {
+  annotationId: string;
+  replyId: string;
 }
 
 /** The 200 body of a vote cast/clear (Phase 3 contract §2). */
@@ -391,6 +454,8 @@ export interface ChapterSource {
   title: string;
   summary: string | null;
   revision: number;
+  /** Exact digest of the repository source read for this response. */
+  contentHash?: string;
   status: string;
   body: string;
 }
@@ -422,6 +487,10 @@ export interface ChapterProjection {
   path: string;
   slug: string;
   title: string;
+  /** Current authenticated frontmatter summary, including unpublished chapters. */
+  summary: string | null;
+  /** Canonical frontmatter reading order. */
+  order: number | null;
   status: "draft" | "proposed" | "published" | "archived";
   revision: number;
   updatedAt: string;
@@ -435,6 +504,230 @@ export interface ChapterAccepted {
   operationId: string;
   correlationId: string;
   status: string;
+}
+
+// ---- Phase 11 §6: chapter history ----------------------------------------
+
+export type ChapterHistoryComparison = "previous" | "current";
+
+/** One immutable revision row. History lists never carry manuscript text. */
+export interface ChapterHistoryRevision {
+  revision: number;
+  /** Historical list rows may omit this to avoid one Git blob read per row. */
+  contentHash: string | null;
+  commitSha: string | null;
+  createdAt: string;
+  author: RevisionProposalActor | null;
+  changeSummary: string | null;
+  origin: string | null;
+  /** Historical list rows resolve this when the selected snapshot is read. */
+  status: string | null;
+  isCurrent: boolean;
+}
+
+export interface ChapterHistoryCurrent extends ChapterHistoryRevision {
+  status: string;
+}
+
+/** One bounded, newest-first metadata page. */
+export interface ChapterHistoryPage {
+  items: ChapterHistoryRevision[];
+  current: ChapterHistoryCurrent;
+  nextCursor: string | null;
+}
+
+export interface ChapterHistorySnapshot extends ChapterHistoryRevision {
+  /** Detail reads fetch this exact blob, so its digest is authoritative. */
+  contentHash: string;
+  content: string;
+}
+
+export interface ChapterHistoryDiff {
+  fromRevision: number;
+  toRevision: number;
+  unifiedDiff: string | null;
+  computationLimited: boolean;
+}
+
+/** One selected snapshot and exactly one requested comparison. */
+export interface ChapterHistoryDetail {
+  chapterId: string;
+  compare: ChapterHistoryComparison;
+  selected: ChapterHistorySnapshot;
+  comparison: ChapterHistorySnapshot | null;
+  current: ChapterHistoryCurrent;
+  diff: ChapterHistoryDiff | null;
+}
+
+/** Restoring history always creates a reviewable proposal; it never applies. */
+export interface ChapterHistoryRestoreAccepted {
+  proposalId: string;
+  status: "pending_review";
+  correlationId: string;
+}
+
+// ---- Phase 11 §5: revision proposal review --------------------------------
+
+/**
+ * Repository document named by a proposal. Chapter proposals use `chapter`;
+ * the deliberately open kind also supports Outline, Timeline, and Character
+ * documents without teaching the review surface a second workflow later.
+ */
+export interface RevisionProposalTarget {
+  kind: string;
+  id: string;
+  path: string;
+  label: string;
+}
+
+export interface RevisionProposalActor {
+  id: string;
+  displayName: string;
+  type: string | null;
+}
+
+export interface RevisionProposalWork {
+  id: string;
+  type: string;
+  status: string;
+}
+
+/** Compatibility metadata returned while chapter proposals are the only kind. */
+export interface RevisionProposalChapter {
+  id: string;
+  title: string;
+  slug?: string;
+  path?: string;
+  revision: number;
+}
+
+/** Bounded list row: immutable prose snapshots are detail-only. */
+export interface RevisionProposalSummary {
+  id: string;
+  projectId: string;
+  chapterId: string | null;
+  proposalType: string;
+  origin: string;
+  workItemId: string | null;
+  submissionId: string | null;
+  authorActorId: string;
+  baseRevision: number | null;
+  changeSummary: string | null;
+  notes: string | null;
+  status: string;
+  reviewedByActorId: string | null;
+  reviewedAt: string | null;
+  reviewReason: string | null;
+  /** New generic name; older proposal routes expose the same value as operationId. */
+  gitOperationId?: string | null;
+  operationId?: string | null;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Null for non-versioned/future document types or an unavailable projection. */
+  currentRevision?: number | null;
+  currentContentHash?: string | null;
+  /** API-computed base revision/hash mismatch, including same-revision external edits. */
+  conflictWarning?: boolean;
+  target?: RevisionProposalTarget | null;
+  author?: RevisionProposalActor | null;
+  workItem?: RevisionProposalWork | null;
+  chapter?: RevisionProposalChapter | null;
+}
+
+/** Authorized review payload; snapshots remain complete when diffing is capped. */
+export interface RevisionProposalDetail extends RevisionProposalSummary {
+  baseContentHash: string;
+  baseContent: string;
+  proposedContent: string;
+  diff: {
+    unifiedDiff: string | null;
+    computationLimited: boolean;
+  };
+}
+
+/** Approve queues Git; reject settles synchronously without an operation. */
+export interface RevisionReviewResult {
+  proposalId: string;
+  status: string;
+  correlationId: string;
+  operationId?: string;
+}
+
+export type RepositoryDocumentKind = "outline" | "timeline" | "character";
+
+/** Canonical source and immutable base identity for one planning document. */
+export interface RepositoryDocumentSource {
+  target: {
+    kind: RepositoryDocumentKind;
+    id: string;
+    path: string;
+    label: string;
+  };
+  content: string;
+  contentHash: string;
+}
+
+export interface RepositoryDocumentProposalCommand {
+  proposalType: "repository_document";
+  targetKind: RepositoryDocumentKind;
+  targetPath: string;
+  baseContentHash: string;
+  proposedContent: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
+}
+
+/** Complete, immutable chapter replacement proposed from one exact source read. */
+export interface ChapterRevisionProposalCommand {
+  proposalType: "chapter_replacement";
+  chapterId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  proposedContent: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
+}
+
+/** Hash-bound chapter metadata proposal. An empty value removes the summary. */
+export interface ChapterSummaryProposalCommand {
+  proposalType: "chapter_summary";
+  chapterId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  proposedContent: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
+}
+
+export type CreateRevisionProposalCommand =
+  | ChapterRevisionProposalCommand
+  | ChapterSummaryProposalCommand
+  | RepositoryDocumentProposalCommand;
+
+/** A normal proposal is pending review; an atomic maintainer apply is queued. */
+export interface RevisionProposalAccepted {
+  proposalId: string;
+  operationId: string | null;
+  correlationId: string;
+  status: "pending_review" | "applying" | string;
+}
+
+/** One bounded CI publication report used to settle direct-editor deploy state. */
+export interface PublicationSummary {
+  id: string;
+  integratedCommit: string;
+  buildStatus: string;
+  deployedCommit: string | null;
+  publicUrl?: string | null;
+  deployedAt?: string | null;
+  publisherVersion?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ---- Phase 6 §3.6: settings ------------------------------------------------
@@ -873,6 +1166,20 @@ export class CollabApi {
     );
   }
 
+  async withdrawReply(
+    annotationId: string,
+    replyId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ReplyWithdrawAccepted>> {
+    return this.accept<ReplyWithdrawAccepted>(
+      this.projectUrl(
+        `/annotations/${encodeURIComponent(annotationId)}/replies/${encodeURIComponent(replyId)}/withdraw`,
+      ),
+      {},
+      options,
+    );
+  }
+
   async operation(operationId: string): Promise<Operation | null> {
     const result = await this.operationResult(operationId);
     return result.ok ? result.value : null;
@@ -900,7 +1207,7 @@ export class CollabApi {
   // ---- votes (Phase 3 contract §2) -----------------------------------------
 
   /**
-   * Cast (or change) the viewer's vote on a suggestion. The 200 response
+   * Cast (or change) the viewer's vote on a comment or suggestion. The 200 response
    * carries the fresh aggregate tally and the current `create_work_item`
    * decision (if any), so the caller updates the control in place without a
    * refetch.
@@ -965,6 +1272,29 @@ export class CollabApi {
       return { ok: false, status: response.status, message: await problemMessage(response) };
     }
     const body = (await response.json()) as { items: WorkItem[]; nextCursor: string | null };
+    return { ok: true, value: { items: body.items, nextCursor: body.nextCursor ?? null } };
+  }
+
+  /** One explicit page of newest-first completed Work stubs. */
+  async completedWorkItems(
+    cursor?: string,
+    limit = 20,
+  ): Promise<ApiResult<{ items: CompletedWorkItem[]; nextCursor: string | null }>> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    let response: Response;
+    try {
+      response = await this.get(this.projectUrl(`/work-items/completed?${query.toString()}`));
+    } catch {
+      return { ok: false, status: 0, message: "network error" };
+    }
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: await problemMessage(response) };
+    }
+    const body = (await response.json()) as {
+      items: CompletedWorkItem[];
+      nextCursor: string | null;
+    };
     return { ok: true, value: { items: body.items, nextCursor: body.nextCursor ?? null } };
   }
 
@@ -1217,6 +1547,162 @@ export class CollabApi {
       ),
       [202],
       { mutation: true, subject: `chapter ${action}` },
+    );
+  }
+
+  // ---- Phase 11 §6: chapter history --------------------------------------
+
+  /** Latest 50 immutable revision records, newest first and without prose. */
+  async chapterHistory(chapterId: string): Promise<ApiResult<ChapterHistoryPage>> {
+    const query = new URLSearchParams({ limit: "50" });
+    return this.jsonResult<ChapterHistoryPage>(
+      (async () =>
+        this.get(
+          this.projectUrl(
+            `/chapters/${encodeURIComponent(chapterId)}/history?${query.toString()}`,
+          ),
+        ))(),
+      [200],
+    );
+  }
+
+  /** Selected manuscript snapshot plus either its predecessor or current text. */
+  async chapterHistoryRevision(
+    chapterId: string,
+    revision: number,
+    compare: ChapterHistoryComparison,
+  ): Promise<ApiResult<ChapterHistoryDetail>> {
+    const query = new URLSearchParams({ compare });
+    return this.jsonResult<ChapterHistoryDetail>(
+      (async () =>
+        this.get(
+          this.projectUrl(
+            `/chapters/${encodeURIComponent(chapterId)}/history/${revision}?${query.toString()}`,
+          ),
+        ))(),
+      [200],
+    );
+  }
+
+  /** Create a pending proposal from an immutable historic snapshot. */
+  async restoreChapterRevision(
+    chapterId: string,
+    revision: number,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ChapterHistoryRestoreAccepted>> {
+    return this.jsonResult<ChapterHistoryRestoreAccepted>(
+      this.post(
+        this.projectUrl(
+          `/chapters/${encodeURIComponent(chapterId)}/history/${revision}/restore`,
+        ),
+        {},
+        options,
+      ),
+      [201],
+      { mutation: true, subject: "chapter history restore" },
+    );
+  }
+
+  // ---- Phase 11 §5: revision proposal review ------------------------------
+
+  /** One bounded page of proposal summaries; immutable snapshots stay detail-only. */
+  async revisionProposals(
+    cursor?: string,
+  ): Promise<ApiResult<{ items: RevisionProposalSummary[]; nextCursor: string | null }>> {
+    const query = new URLSearchParams({ status: "pending_review", limit: "50" });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    return this.jsonResult<{ items: RevisionProposalSummary[]; nextCursor: string | null }>(
+      (async () => this.get(this.projectUrl(`/revision-proposals?${query.toString()}`)))(),
+      [200],
+    );
+  }
+
+  /** Full before/after snapshots plus the API's CPU-bounded unified diff. */
+  async revisionProposal(proposalId: string): Promise<ApiResult<RevisionProposalDetail>> {
+    const detail = await this.jsonResult<
+      Omit<RevisionProposalDetail, "diff"> & { diff?: RevisionProposalDetail["diff"] }
+    >(
+      (async () =>
+        this.get(this.projectUrl(`/revision-proposals/${encodeURIComponent(proposalId)}`)))(),
+      [200],
+    );
+    if (!detail.ok) return detail;
+    if (detail.value.diff !== undefined) {
+      return { ok: true, value: detail.value as RevisionProposalDetail };
+    }
+    // The first deploy kept CPU-bounded diff generation on a sibling route.
+    // Normalize it here so the shared store and view retain one stable detail
+    // interface while newer APIs may embed `diff` directly.
+    const rendered = await this.jsonResult<{
+      proposal: RevisionProposalSummary;
+      author?: RevisionProposalActor | null;
+      baseContent: string;
+      proposedContent: string;
+      unifiedDiff: string | null;
+      computationLimited: boolean;
+    }>(
+      (async () =>
+        this.get(
+          this.projectUrl(`/revision-proposals/${encodeURIComponent(proposalId)}/diff`),
+        ))(),
+      [200],
+    );
+    if (!rendered.ok) return rendered;
+    return {
+      ok: true,
+      value: {
+        ...detail.value,
+        ...rendered.value.proposal,
+        author: rendered.value.author ?? detail.value.author ?? null,
+        target: rendered.value.proposal.target ?? detail.value.target ?? null,
+        workItem: rendered.value.proposal.workItem ?? detail.value.workItem ?? null,
+        chapter: rendered.value.proposal.chapter ?? detail.value.chapter ?? null,
+        currentRevision:
+          rendered.value.proposal.currentRevision ?? detail.value.currentRevision ?? null,
+        gitOperationId:
+          rendered.value.proposal.gitOperationId ??
+          rendered.value.proposal.operationId ??
+          detail.value.gitOperationId ??
+          detail.value.operationId ??
+          null,
+        baseContent: rendered.value.baseContent,
+        proposedContent: rendered.value.proposedContent,
+        diff: {
+          unifiedDiff: rendered.value.unifiedDiff,
+          computationLimited: rendered.value.computationLimited,
+        },
+      },
+    };
+  }
+
+  /** Recent bounded publication reports let editor state survive missed feed events. */
+  async publications(limit = 50): Promise<ApiResult<{ items: PublicationSummary[] }>> {
+    return this.jsonResult<{ items: PublicationSummary[] }>(
+      (async () => this.get(this.projectUrl(`/publications?limit=${String(limit)}`)))(),
+      [200],
+    );
+  }
+
+  /**
+   * Approve is the one-click validated apply command. Rejection may carry a
+   * note, but an empty note is deliberately `{}` and never blocks the action.
+   */
+  async reviewRevisionProposal(
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<RevisionReviewResult>> {
+    return this.jsonResult<RevisionReviewResult>(
+      this.post(
+        this.projectUrl(
+          `/revision-proposals/${encodeURIComponent(proposalId)}/${decision}`,
+        ),
+        reason === undefined || reason.trim() === "" ? {} : { reason: reason.trim() },
+        options,
+      ),
+      decision === "approve" ? [202] : [200],
+      { mutation: true, subject: `revision ${decision}` },
     );
   }
 

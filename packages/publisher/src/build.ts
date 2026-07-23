@@ -79,8 +79,13 @@ function siteDataPlugin(model: SiteModel): {
  * plain copied asset (never JS-injected), so the contract §3 CSP works
  * without 'unsafe-inline' styles.
  */
-async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
+async function buildIslands(
+  siteRoot: string,
+  outDir: string,
+  siteBasePath: string,
+): Promise<void> {
   const assetDir = path.join(outDir, "_astro");
+  const publicAssetBase = `${siteBasePath}_astro/`;
   await mkdir(assetDir, { recursive: true });
   const { build: viteBuild } = await import("vite");
 
@@ -102,6 +107,7 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
   const entries = [
     { input: "src/islands/index.ts", js: "authorbot-collab.js" },
     { input: "src/islands/account-entry.ts", js: "authorbot-account.js" },
+    { input: "src/islands/planning-entry.ts", js: "authorbot-planning.js" },
     { input: "src/islands/settings.ts", js: "authorbot-settings.js" },
     { input: "src/islands/access.ts", js: "authorbot-access.js" },
   ] as const;
@@ -112,10 +118,13 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
         configFile: false,
         logLevel: "warn",
         root: siteRoot,
-        // Lazy chunks must resolve beside the stable entry under `_astro/`.
-        // Vite's default `/` base emits `/assets/...`, which 404s at both the
-        // origin root and every ADR-0019 base-path deployment.
-        base: "./",
+        // Give Vite the complete public path of this nested build. A relative
+        // base makes its CSS preload helper resolve dependencies through
+        // `new URL(..., import.meta.url).href`, which expands link hrefs to a
+        // full origin URL at runtime. Static Authorbot assets are root-relative
+        // and must retain the book prefix, including under ADR-0019 base-path
+        // deployments such as `/my-book/_astro/assets/...`.
+        base: publicAssetBase,
         build: {
           outDir: assetDir,
           emptyOutDir: false,
@@ -138,9 +147,12 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
   // §3 CSP works without 'unsafe-inline' styles.
   for (const [source, target] of [
     ["collab.css", "authorbot-collab.css"],
+    ["planning-editor.css", "authorbot-planning.css"],
     ["access.css", "authorbot-access.css"],
     ["settings.css", "authorbot-settings.css"],
     ["work.css", "authorbot-work.css"],
+    ["revision-review.css", "authorbot-revisions.css"],
+    ["chapter-history.css", "authorbot-history.css"],
   ] as const) {
     // Source styles keep their section comments for maintainers, while the
     // browser asset drops CSS comments just like the JS bundle drops source
@@ -229,7 +241,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   if (model.collab !== null) {
     // Islands land beside the rest of the site's assets, under the same base
     // path prefix their `<script src>` tags point at.
-    await buildIslands(siteRoot, siteOutDir);
+    await buildIslands(siteRoot, siteOutDir, model.basePath);
   }
 
   const commit =

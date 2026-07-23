@@ -5,11 +5,16 @@
  * better-sqlite3 + fakes).
  */
 import type { SqlDatabase, Repositories, ActorRecord, ProjectMembershipRecord } from "@authorbot/database";
-import type { LeaseConfig, Role } from "@authorbot/domain";
-import type { ApiScope } from "./api-scopes.js";
+import type {
+  EditorialCapability,
+  LeaseConfig,
+  LegacyEffectiveAction,
+  Role,
+} from "@authorbot/domain";
+import type { ApiScope, CapabilityProjection } from "./api-scopes.js";
 import type { IdentityProvider } from "./identity/provider.js";
 import type { IdempotencyClaim } from "./idempotency.js";
-import type { BookRepoReader } from "./projection/reader.js";
+import type { BookRepoReader, RepoTextFilePage } from "./projection/reader.js";
 import type { ProjectionRefresher } from "./reconcile.js";
 
 export type RepositorySourceReadResult =
@@ -17,9 +22,46 @@ export type RepositorySourceReadResult =
   | { outcome: "not-found" }
   | { outcome: "unavailable" };
 
+export type RepositoryTextFilePageResult =
+  | ({ outcome: "found" } & RepoTextFilePage)
+  | { outcome: "unavailable" };
+
 /** Repository reads routed through the project coordinator in production. */
 export interface RepositorySourceReader {
   readTextFile(projectId: string, path: string): Promise<RepositorySourceReadResult>;
+  listTextFiles?(
+    projectId: string,
+    glob: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<RepositoryTextFilePageResult>;
+}
+
+export interface RepositoryHistoryEntry {
+  commitSha: string;
+  message: string;
+  authoredAt: string | null;
+  committedAt: string | null;
+  authorName: string | null;
+  authorLogin: string | null;
+  parentShas: string[];
+}
+
+export type RepositoryHistoryListResult =
+  | { outcome: "found"; entries: RepositoryHistoryEntry[]; page: number; hasMore: boolean }
+  | { outcome: "unavailable" };
+
+/** Bounded historical repository reads routed through the project coordinator. */
+export interface RepositoryHistoryReader {
+  listFileHistory(
+    projectId: string,
+    path: string,
+    options?: { page?: number; limit?: number },
+  ): Promise<RepositoryHistoryListResult>;
+  readTextFileAtCommit(
+    projectId: string,
+    path: string,
+    commitSha: string,
+  ): Promise<RepositorySourceReadResult>;
 }
 
 export interface Clock {
@@ -131,6 +173,8 @@ export interface AppDeps {
   reader?: BookRepoReader;
   /** Production source-read seam owned by the per-project coordinator. */
   repositorySourceReader?: RepositorySourceReader;
+  /** Historical metadata/snapshots; absent on deployments without Git access. */
+  repositoryHistoryReader?: RepositoryHistoryReader;
   /**
    * Called after any mutation that enqueued an outbox row - the
    * repo-coordinator processor is wired here later. Optional; a rejection is
@@ -159,6 +203,16 @@ export interface AuthContext {
   role: Role | null;
   /** Effective scopes: role bundle for sessions, token ∩ bundle for tokens. */
   scopes: ApiScope[];
+  /** Which representation is authoritative for this credential. */
+  capabilityMode: CapabilityProjection["capabilityMode"];
+  /** Exact canonical grant written on a token, or the session role bundle. */
+  grantedCapabilities: EditorialCapability[];
+  /** Current project role ceiling, independently visible to callers. */
+  roleCapabilityCeiling: EditorialCapability[];
+  /** Exact grant ∩ current role ceiling. */
+  effectiveCapabilities: EditorialCapability[];
+  /** Explicitly source-tagged compatibility authority on legacy tokens only. */
+  legacyEffectiveActions: LegacyEffectiveAction[];
   /** Present for token auth. */
   tokenId?: string;
   /** Present for session auth. */
@@ -188,6 +242,22 @@ export async function readRepositoryText(
   }
   if (deps.repositorySourceReader !== undefined) {
     return deps.repositorySourceReader.readTextFile(projectId, path);
+  }
+  return { outcome: "unavailable" };
+}
+
+/** Read one bounded configured-glob page through the local reader or coordinator. */
+export async function readRepositoryTextPage(
+  deps: Pick<AppDeps, "reader" | "repositorySourceReader">,
+  projectId: string,
+  glob: string,
+  options: { after?: string; limit?: number } = {},
+): Promise<RepositoryTextFilePageResult> {
+  if (deps.reader?.listTextFiles !== undefined) {
+    return { outcome: "found", ...(await deps.reader.listTextFiles(glob, options)) };
+  }
+  if (deps.repositorySourceReader?.listTextFiles !== undefined) {
+    return deps.repositorySourceReader.listTextFiles(projectId, glob, options);
   }
   return { outcome: "unavailable" };
 }

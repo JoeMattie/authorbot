@@ -55,6 +55,12 @@ describe("closestBlock", () => {
     expect(closestBlock(text)?.id).toBe("b-22222");
   });
 
+  it("finds the block identity projected by the Milkdown Notes decoration", () => {
+    const root = mount('<p data-authorbot-block-id="rich-111">decorated prose</p>');
+    const text = root.querySelector("p")?.firstChild as Text;
+    expect(closestBlock(text)?.dataset.authorbotBlockId).toBe("rich-111");
+  });
+
   it("returns null outside any anchored block", () => {
     const root = mount("<p>unanchored</p>");
     expect(closestBlock(root.querySelector("p")?.firstChild ?? null)).toBeNull();
@@ -76,6 +82,19 @@ describe("captureRange", () => {
       " appeared on a Tuesday, in the f",
     );
     expect(capture?.selector.textQuote.suffix?.length).toBeLessThanOrEqual(QUOTE_CONTEXT);
+  });
+
+  it("keeps range selectors canonical inside the Milkdown Notes surface", () => {
+    const root = mount(
+      '<p data-authorbot-block-id="rich-222">The drift appeared on a Tuesday.</p>',
+    );
+    const text = root.querySelector("p")?.firstChild as Text;
+    const capture = captureRange(rangeOf(text, 4, text, 9, text));
+    expect(capture?.selector).toMatchObject({
+      blockId: "rich-222",
+      textPosition: { start: 4, end: 9 },
+      textQuote: { exact: "drift" },
+    });
   });
 
   it("spans inline formatting inside one block", () => {

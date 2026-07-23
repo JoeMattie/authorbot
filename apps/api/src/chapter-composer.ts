@@ -83,7 +83,8 @@ export interface ChapterWriteIntent {
   title?: string;
   body?: string;
   slug?: string;
-  summary?: string;
+  /** `null` removes an existing summary; absent leaves it unchanged. */
+  summary?: string | null;
   baseRevision?: number;
 }
 
@@ -128,11 +129,15 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
         );
       }
       const body = intent.body;
+      const summaryBase: ChapterFrontmatter = { ...fm.data };
+      if (intent.summary === null) delete summaryBase.summary;
       const nextFrontmatter: ChapterFrontmatter = {
-        ...fm.data,
+        ...summaryBase,
         revision: fm.data.revision + 1,
         ...(intent.title === undefined ? {} : { title: intent.title }),
-        ...(intent.summary === undefined ? {} : { summary: intent.summary }),
+        ...(intent.summary === undefined || intent.summary === null
+          ? {}
+          : { summary: intent.summary }),
         authors: withAuthor(fm.data.authors, actorRef, actorName),
       };
       // Body unchanged (a title/summary-only revise) keeps the committed body
@@ -229,7 +234,9 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
       status: "draft",
       revision: 1,
       authors: [chapterAuthor(actorRef, actorName)],
-      ...(intent.summary === undefined ? {} : { summary: intent.summary }),
+      ...(intent.summary === undefined || intent.summary === null
+        ? {}
+        : { summary: intent.summary }),
     });
     const head = renderFrontmatter(frontmatter);
     const content = applyChapterReplacement(head, intent.body).source;
@@ -260,6 +267,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
       content,
       slug: fm.slug,
       title: fm.title,
+      summary: fm.summary ?? null,
       order: fm.order,
       status: fm.status,
       revision: fm.revision,

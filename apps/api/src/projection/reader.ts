@@ -74,6 +74,15 @@ export interface BookRepoSnapshot {
   files?: ReadonlyMap<string, string>;
 }
 
+/** One bounded page of repository text files selected by a configured glob. */
+export interface RepoTextFilePage {
+  /** Branch head used for this page, when the reader can name it. */
+  headCommit: string | null;
+  files: Array<{ path: string; source: string }>;
+  /** Last returned path when another page exists, otherwise null. */
+  nextAfter: string | null;
+}
+
 export interface BookRepoReader {
   readSnapshot(): Promise<BookRepoSnapshot>;
   /**
@@ -92,6 +101,15 @@ export interface BookRepoReader {
    * that need source respond with a problem when it is absent.
    */
   readTextFile?(path: string): Promise<string | null>;
+  /**
+   * Read at most one small page of files matching a repository-relative glob.
+   * Implementations must bound source reads independently of the repository's
+   * total file count; story-bible character pagination is the first caller.
+   */
+  listTextFiles?(
+    glob: string,
+    options?: { after?: string; limit?: number },
+  ): Promise<RepoTextFilePage>;
 }
 
 // NOTE: valid block ids are persisted on the `chapters` projection row

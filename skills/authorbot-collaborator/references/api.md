@@ -1,6 +1,6 @@
 # API reference
 
-Every path an agent calls, with the scope it needs, the request body, and the
+Every path an agent calls, with the capability it needs, the request body, and the
 response. Paths are prefixed `/v1`, and by `API_BASE_PATH` if the deployment
 sets one (so `/my-book/v1/me`). `{project}` accepts the project's slug or its
 UUID.
@@ -22,16 +22,43 @@ idempotency-key-mismatch`.
 Errors are RFC 9457 `application/problem+json` with a stable `code`. Branch on
 `code`, never on the prose message. See `troubleshooting.md`.
 
+## Exact editorial capabilities
+
+Canonical agent tokens are deny-by-default. Each endpoint checks the named
+capability and the token actor's current project-role ceiling independently.
+
+| Area | Capabilities |
+| --- | --- |
+| Read | `chapters:read`, `comments:read`, `suggestions:read` |
+| Discuss | `comments:write`, `suggestions:write`, `replies:write`, `comments:vote`, `suggestions:vote`, `feedback:withdraw-own`, `feedback:moderate` |
+| Work | `work:read`, `work:promote`, `work:claim`, `work:submit`, `work:cancel` |
+| Chapters | `summaries:write`, `chapters:write`, `chapters:publish` |
+| Revisions | `revisions:read`, `revisions:write`, `revisions:review` |
+| History | `history:read` |
+
+Several commands require prerequisites as well as their primary capability.
+The sections below list the complete requirement. A legacy token may report
+old source-tagged compatibility actions, but new code should use canonical
+capabilities and never infer a new action from an umbrella scope.
+
 ## Identity and discovery
 
 ### `GET /v1/me`
-No scope beyond a valid token. **Call this first.**
+No capability beyond a valid token. **Call this first.**
 ```json
-{ "actor": {...}, "memberships": [...], "scopes": ["chapters:read", ...],
-  "authKind": "token" }
+{
+  "actor": { "id": "...", "displayName": "drafting-agent", "type": "agent" },
+  "memberships": [{ "projectId": "...", "role": "editor" }],
+  "authKind": "token",
+  "capabilityMode": "canonical",
+  "grantedCapabilities": ["chapters:read", "work:read", "work:claim", "work:submit"],
+  "roleCapabilityCeiling": ["chapters:read", "comments:read", "..."],
+  "effectiveCapabilities": ["chapters:read", "work:read", "work:claim", "work:submit"],
+  "legacyEffectiveActions": []
+}
 ```
-`scopes` is the *effective* set - the token's scopes intersected with its
-role's bundle. This is what you may actually do.
+`effectiveCapabilities` is the exact selected grant intersected with the
+current role ceiling. This is what you may actually do.
 
 ### `GET /v1/health`
 No auth. `{ "status": "ok", "gitIntegration": "configured" }`. If
@@ -42,7 +69,7 @@ submissions will not land - stop and tell the operator.
 Scope `chapters:read`. Project metadata, including `gitIntegration` and whether
 the projection is behind the repository.
 
-## Chapters - scope `chapters:read`
+## Chapters - capability `chapters:read`
 
 ### `GET /v1/projects/{project}/chapters?limit=&cursor=`
 `{ "items": [ {chapter} ], "nextCursor": "..." | null }`
@@ -51,15 +78,50 @@ the projection is behind the repository.
 One chapter: `{ id, projectId, path, slug, title, status, revision,
 contentHash, blockIds, ... }`.
 
-You usually do **not** need to fetch chapter source separately - a claim bundle
-already carries it. (`GET .../chapters/{id}/source` exists but needs
-`submissions:write` *and* an editor/maintainer role, and is for the direct
-composer flow, not the work queue.)
+You usually do **not** need to fetch chapter source separately because a claim
+bundle already carries it. `GET .../chapters/{id}/source` needs
+`chapters:read`; it returns marker-free body, exact revision, content hash,
+status, title, and summary for safe proposal or draft editing.
 
-## Direct chapter authoring - scope `submissions:write`
+## Story bible - capability `chapters:read`
+
+Read canon through these authenticated endpoints before drafting or revising:
+
+- `GET /v1/projects/{project}/story/outline`
+- `GET /v1/projects/{project}/story/timeline`
+- `GET /v1/projects/{project}/story/characters?limit=20&cursor=`
+
+Outline returns `{ path, contentHash, outline, links }`; Timeline returns
+`{ path, contentHash, timeline, links }`. Characters returns
+`{ items: [{ path, contentHash, character, body }], nextCursor, links }`.
+`limit` is 1 through 20. Follow `nextCursor` until it is `null` before treating
+the character bible as complete.
+
+A claimed task bundle includes the same canonical, root-relative routes under
+`context.storyApi`:
+
+```json
+{
+  "storyRefs": ["character-id"],
+  "storyApi": {
+    "outline": "/v1/projects/{project}/story/outline",
+    "timeline": "/v1/projects/{project}/story/timeline",
+    "characters": "/v1/projects/{project}/story/characters"
+  }
+}
+```
+
+Use those links as returned, including any deployment base path. `storyRefs`
+are stable canon ids, not URL fragments or repository paths. Match them to ids
+in the returned story documents; never probe `/story`, `/story-refs`, or a
+guessed path derived from an id. These reads validate configured `book.yml`
+paths and bound each Character page so one Worker invocation does not fan out
+over the whole repository.
+
+## Direct draft chapter authoring - capability `chapters:write`
 
 This is separate from work-item submissions. It requires an editor or
-maintainer role in addition to the effective scope. It has no claim, lease, or
+maintainer role in addition to the effective capability. It has no claim, lease, or
 work-item id.
 
 ### `POST /v1/projects/{project}/chapter-submissions` - create a draft
@@ -89,7 +151,7 @@ optional. Send plain Markdown prose only: no chapter frontmatter and no
 The response is `202`. Poll the returned operation id. The committed chapter
 has status `draft`; creating it does not publish it.
 
-### `POST /v1/projects/{project}/chapter-submissions` - revise a chapter
+### `POST /v1/projects/{project}/chapter-submissions` - revise a draft chapter
 
 The same endpoint revises when `chapterId` is present:
 
@@ -106,8 +168,109 @@ The same endpoint revises when `chapterId` is present:
 `baseRevision` must match the current projected revision. Fetch
 `GET /v1/projects/{project}/chapters/{chapterId}/source` first when revising;
 it returns the marker-free body and revision needed for a safe round trip.
+Published chapters reject this route; use a revision proposal instead.
 
-## Work queue - reads, scope `work:read`
+## Comments and suggested edits
+
+Reads are filtered by kind. `comments:read` reveals comments and their replies;
+`suggestions:read` reveals suggested edits and their replies. Holding one does
+not reveal the existence of the other.
+
+### `GET /v1/projects/{project}/chapters/{chapterId}/annotations?limit=&cursor=`
+
+Returns `{ items, pending, nextCursor }`. Each visible annotation includes its
+id, kind, scope, current status, target, body, author, replies/votes summary,
+and Work decision when applicable.
+
+### `POST /v1/projects/{project}/chapters/{chapterId}/annotations`
+
+Requires `chapters:read` plus `comments:write` for `kind: "comment"`, or
+`suggestions:write` for `kind: "suggestion"`. Copy the chapter's current
+revision and durable block anchor from the chapter response/rendered metadata.
+
+Whole-chapter comment or suggestion:
+
+```json
+{
+  "kind": "comment",
+  "scope": "chapter",
+  "chapterRevision": 3,
+  "body": "The motivation changes halfway through this chapter."
+}
+```
+
+Block-scoped suggested edit:
+
+```json
+{
+  "kind": "suggestion",
+  "scope": "block",
+  "chapterRevision": 3,
+  "target": { "blockId": "019f..." },
+  "body": "Tighten this paragraph and keep the measurement sequence."
+}
+```
+
+Range-scoped suggested edit:
+
+```json
+{
+  "kind": "suggestion",
+  "scope": "range",
+  "chapterRevision": 3,
+  "target": {
+    "blockId": "019f...",
+    "textPosition": { "start": 48, "end": 74 },
+    "textQuote": {
+      "exact": "two incompatible histories",
+      "prefix": "between ",
+      "suffix": "."
+    }
+  },
+  "body": "Use 'two mutually exclusive timelines'."
+}
+```
+
+For a range, `start` and `end` are Unicode code-point offsets inside the named
+block, `end` is exclusive, and `textQuote.exact` must match that span. Success
+is normally `202 { annotationId, operationId, status: "queued" }`; an
+approval-gated contribution can instead be `202 { pendingId,
+status: "pending_review" }` and is not yet in Git.
+
+### Replies
+
+`GET /v1/projects/{project}/annotations/{annotationId}/replies?limit=&cursor=`
+requires the parent kind's read capability.
+
+`POST /v1/projects/{project}/annotations/{annotationId}/replies` requires
+`replies:write` plus the parent kind's read capability:
+
+```json
+{ "body": "I reproduced this against chapter two.", "parentReplyId": "optional-reply-id" }
+```
+
+Omit `parentReplyId` for a top-level reply. Success is `202 { replyId,
+operationId, status: "queued" }`.
+
+### Votes
+
+`PUT /v1/projects/{project}/annotations/{annotationId}/vote` with
+`{ "value": "approve" }`, `{ "value": "reject" }`, or
+`{ "value": "abstain" }`. A comment requires `comments:vote`; a suggested
+edit requires `suggestions:vote`. `DELETE` on the same path clears the current
+vote. Never vote on work produced by you or by a coordinated sibling agent.
+
+### Withdraw and promote
+
+`POST /v1/projects/{project}/annotations/{annotationId}/withdraw` with `{}`
+requires `feedback:withdraw-own` for your own feedback. Withdrawing another
+actor's feedback requires maintainer role plus `feedback:moderate`.
+
+`POST /v1/projects/{project}/annotations/{annotationId}/force-create-work-item`
+with `{}` requires maintainer role plus `work:promote`. It accepts an open
+comment or suggested edit into Work and never needs a fabricated reason.
+
+## Work queue - capability `work:read`
 
 ### `GET /v1/projects/{project}/work-items?status=ready&limit=&cursor=`
 `status` is one of `ready leased submitted applying completed conflict failed
@@ -119,7 +282,7 @@ One item, plus its `decision`. A work item is
 `{ id, projectId, type, status, sourceAnnotationId, chapterId, baseRevision,
 target, priority, createdAt, updatedAt }`.
 
-## Lease lifecycle - scope `work:claim`
+## Lease lifecycle - capability `work:claim`
 
 ### `POST /v1/projects/{project}/work-items/{workItemId}/claim`
 **No request body.** On `201` returns the task bundle:
@@ -129,7 +292,10 @@ target, priority, createdAt, updatedAt }`.
   "lease": { "id", "token", "expiresAt", "maxExpiresAt", "renewalPromptAt" },
   "document": { "chapterId", "revision", "contentHash", "source" },
   "target": { "blockId?", "exact?", "start?", ... },
-  "context": { "annotationBody", "chapterSummary", "storyRefs": [...] },
+  "context": {
+    "annotationBody", "chapterSummary", "storyRefs": [...],
+    "storyApi": { "outline", "timeline", "characters" }
+  },
   "submissionSchema": "authorbot.submission/range-replacement/v1" | null
 }
 ```
@@ -159,7 +325,10 @@ token, even one owned by the same maintainer, cannot recover the lease.
 Body `{ "leaseId" }` (optional). Returns the item to the queue immediately.
 Use it whenever you abandon work rather than letting the lease lapse.
 
-## Submission - scope `submissions:write`
+## Completed Work submission - capability `work:submit`
+
+Claim requires `work:claim`; submitting the held result requires
+`work:submit`. The lease holder and base checks remain independent of both.
 
 ### `POST /v1/projects/{project}/work-items/{workItemId}/submissions`
 ```json
@@ -177,18 +346,147 @@ Use it whenever you abandon work rather than letting the lease lapse.
 `baseRevision` and `baseContentHash` are **copied verbatim from the bundle's
 `document`** - a mismatch is `409 submission-base-mismatch`. The `type` is
 dictated by the work-item type (see `work-types.md`); a wrong one is `422
-submission-type-mismatch`. On success: `202 { submissionId, operationId,
-status: "queued" }`.
+submission-type-mismatch`. A range or block replacement returns `202 {
+submissionId, operationId, status: "queued" }` and enters the Git pipeline. A
+whole-chapter replacement returns `202 { submissionId, proposalId,
+operationId: null, status: "pending_review" }`; the lease is consumed and a
+maintainer reviews its durable diff before anything is applied.
 
 A `range_replacement` must be single-line - any `\n` or `\r` in its `content`
 is `400`. Empty `content` is a deletion, legal only for `range_replacement`.
 
 ### `GET /v1/projects/{project}/operations/{operationId}`
-Scope `chapters:read`. Poll until terminal:
+You may poll an operation created by your own authenticated write. Reading an
+operation created by someone else requires the exact read capability for its
+domain: `chapters:read`, `comments:read`, `suggestions:read`, `work:read`, or
+`revisions:read`. Unknown, ambiguous, and project-control operations are never
+exposed to agent tokens. A denied operation returns `403`; do not probe other
+operation IDs.
+
+Poll your returned operation until terminal:
 `{ id, state, attempts, commitSha, error, ... }`. Terminal states are
 `committed`, `verified`, `failed`. A `committed` operation whose `error` parses
 to `{ "code": "submission-conflict" }` means the chapter was left untouched and
 a `resolve_conflict` work item was created - do not resubmit; claim that.
+
+## Reviewable revisions
+
+Published chapter changes, chapter-summary changes, and configured
+Outline/Timeline/Character document changes use immutable proposals. Creating
+a proposal never disguises the draft as published prose.
+
+### Read proposals - capability `revisions:read`
+
+- `GET /v1/projects/{project}/revision-proposals?status=&chapterId=&limit=&cursor=`
+- `GET /v1/projects/{project}/revision-proposals/{proposalId}`
+- `GET /v1/projects/{project}/revision-proposals/{proposalId}/diff`
+
+The detail contains the retained before/after snapshots. The diff response also
+contains a bounded unified diff and `computationLimited` when comparison was
+too expensive.
+
+### Propose a whole-chapter replacement - capability `revisions:write`
+
+Fetch `/chapters/{chapterId}/source`, then:
+
+```json
+{
+  "proposalType": "chapter_replacement",
+  "chapterId": "019f...",
+  "baseRevision": 3,
+  "baseContentHash": "sha256:...",
+  "proposedContent": "Complete marker-free Markdown chapter body",
+  "changeSummary": "What changed and why",
+  "notes": "Optional reviewer context"
+}
+```
+
+### Propose a chapter summary - capabilities `chapters:read` and `summaries:write`
+
+This workflow is available at the contributor role floor and does not require
+`revisions:write`. First fetch `/chapters/{chapterId}/source` and copy its
+`revision` and `contentHash` exactly:
+
+```json
+{
+  "proposalType": "chapter_summary",
+  "chapterId": "019f...",
+  "baseRevision": 3,
+  "baseContentHash": "sha256:...",
+  "proposedContent": "Replacement summary",
+  "changeSummary": "Reflects the chapter's new outcome"
+}
+```
+
+Use `"proposedContent": ""` to remove the current summary. Include optional
+`notes` for the reviewer. Ordinary submission creates a pending proposal;
+`applyImmediately: true` remains maintainer-only and additionally requires
+`revisions:review`.
+
+### Propose an Outline, Timeline, or Character change - capability `revisions:write`
+
+Read the exact configured file first:
+
+`GET /v1/projects/{project}/repository-documents/source?kind=outline&path=story%2Foutline.yml`
+
+`kind` is `outline`, `timeline`, or `character`; `path` must match the
+repository path configured by `book.yml`. The response is:
+
+```json
+{
+  "target": { "kind": "outline", "id": "outline", "path": "story/outline.yml", "label": "Outline" },
+  "content": "schema: authorbot.story-graph/v1\n...",
+  "contentHash": "sha256:..."
+}
+```
+
+Then submit one complete validated document:
+
+```json
+{
+  "proposalType": "repository_document",
+  "targetKind": "outline",
+  "targetPath": "story/outline.yml",
+  "baseContentHash": "sha256:...",
+  "proposedContent": "Complete replacement YAML or character Markdown",
+  "changeSummary": "Add the revised chapter beat"
+}
+```
+
+Changing a character's canonical frontmatter id is rejected. Arbitrary
+repository paths and unconfigured Markdown files are not accepted.
+
+All three create forms use
+`POST /v1/projects/{project}/revision-proposals`. Ordinary success is
+`201 { proposalId, operationId: null, status: "pending_review" }`.
+`applyImmediately: true` additionally requires maintainer role plus
+`revisions:review`; it atomically records the proposal and self-review, then
+returns `202` with the Git operation. Agents should not request this merely to
+skip independent review.
+
+### Decide a proposal - capability `revisions:review`, maintainer role
+
+- `POST /v1/projects/{project}/revision-proposals/{proposalId}/approve`
+- `POST /v1/projects/{project}/revision-proposals/{proposalId}/reject`
+
+Body is `{}` or `{ "reason": "Optional audit note" }`. Approval returns `202`
+with an operation id; rejection records the decision without changing the
+repository.
+
+## Chapter history
+
+Reading removed or unpublished older prose requires `history:read`:
+
+- `GET /v1/projects/{project}/chapters/{chapterId}/history?limit=50&cursor=1`
+  returns newest-first metadata, current revision, and a page cursor.
+- `GET /v1/projects/{project}/chapters/{chapterId}/history/{revision}?compare=previous`
+  returns the exact selected content plus its predecessor and diff. Use
+  `compare=current` to compare selected text with current instead.
+
+`POST /v1/projects/{project}/chapters/{chapterId}/history/{revision}/restore`
+with `{}` requires both `history:read` and `revisions:write` and returns `201 { proposalId,
+status: "pending_review" }`. It creates a proposal against current prose. It
+never rewinds Git or applies immediately.
 
 ## Watching instead of polling
 
@@ -198,14 +496,10 @@ Server-sent events. Add `?poll=1` for a JSON page
 `Last-Event-ID` header or `?after={id}`. Streams close after 5 minutes; too
 many concurrent streams from one address is `429` with `Retry-After`. Events
 are notifications only - refetch the authoritative resource after reconnecting.
-
-## Voting - scope `votes:write` (Reviewer role only)
-
-### `PUT /v1/projects/{project}/annotations/{annotationId}/vote`
-Cast or change a vote on a suggestion. Granted only where the project allows
-it; absent from `GET /v1/me` scopes means you cannot vote. See
-`../roles/reviewer.md`, and safety rule 2 - a vote is never a tool for
-advancing your own work.
+Agent-token feeds contain only field-projected events for domains the token can
+read. Hidden rows still advance the cursor, so gaps in event IDs are normal;
+never infer or probe them. Unknown, ambiguous, and project-control events are
+omitted.
 
 ## Rate limits
 

@@ -59,23 +59,33 @@ def request(method: str, path: str, body: dict[str, Any] | None = None) -> tuple
     data = None
     if body is not None:
         headers["Content-Type"] = "application/json"
+        # Generated once, outside the retry loop. A lost response must replay
+        # the same command rather than accidentally creating a second draft.
         headers["Idempotency-Key"] = str(uuid.uuid4())
         data = json.dumps(body).encode("utf-8")
 
     req = urllib.request.Request(f"{API}{path}", data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-            return response.status, json.loads(raw) if raw else None
-    except urllib.error.HTTPError as error:
-        raw = error.read().decode("utf-8", errors="replace")
+    for attempt in range(3):
         try:
-            payload: Any = json.loads(raw)
-        except json.JSONDecodeError:
-            payload = {"detail": raw.strip() or error.reason}
-        return error.code, payload
-    except urllib.error.URLError as error:
-        fail(f"request did not complete: {error.reason}")
+            with urllib.request.urlopen(req, timeout=30) as response:
+                raw = response.read().decode("utf-8")
+                return response.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as error:
+            raw = error.read().decode("utf-8", errors="replace")
+            try:
+                payload: Any = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {"detail": raw.strip() or error.reason}
+            if error.code >= 500 and attempt < 2:
+                time.sleep(2**attempt)
+                continue
+            return error.code, payload
+        except urllib.error.URLError as error:
+            if attempt < 2:
+                time.sleep(2**attempt)
+                continue
+            fail(f"request did not complete after retries: {error.reason}")
+    fail("request retry loop ended unexpectedly")
 
 
 def problem(payload: Any) -> str:
@@ -105,11 +115,23 @@ def main() -> None:
     actor = me.get("actor") if isinstance(me.get("actor"), dict) else {}
     memberships = me.get("memberships") if isinstance(me.get("memberships"), list) else []
     role = memberships[0].get("role") if memberships and isinstance(memberships[0], dict) else None
-    scopes = me.get("scopes") if isinstance(me.get("scopes"), list) else []
+    mode = me.get("capabilityMode")
+    granted = me.get("grantedCapabilities") if isinstance(me.get("grantedCapabilities"), list) else []
+    ceiling = me.get("roleCapabilityCeiling") if isinstance(me.get("roleCapabilityCeiling"), list) else []
+    effective = me.get("effectiveCapabilities") if isinstance(me.get("effectiveCapabilities"), list) else []
+    legacy_scopes = me.get("scopes") if isinstance(me.get("scopes"), list) else []
     print(
         f"actor={actor.get('displayName', actor.get('id', 'unknown'))} "
-        f"role={role or 'none'} scopes={','.join(str(scope) for scope in scopes)}"
+        f"role={role or 'none'} mode={mode or 'unknown'} "
+        f"granted={','.join(str(capability) for capability in granted)} "
+        f"ceiling={','.join(str(capability) for capability in ceiling)} "
+        f"effective={','.join(str(capability) for capability in effective)}"
     )
+    may_write = "chapters:write" in effective or (
+        mode in {None, "legacy"} and "submissions:write" in legacy_scopes
+    )
+    if not may_write:
+        fail("token lacks effective chapters:write capability")
 
     command: dict[str, Any] = {"title": title, "body": body}
     slug = os.environ.get("AUTHORBOT_SLUG", "").strip()

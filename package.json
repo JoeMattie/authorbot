@@ -15,6 +15,7 @@
     "typecheck": "pnpm -r typecheck",
     "check:packaging": "node scripts/check-packaging.mjs",
     "check:author-ci": "node scripts/simulate-author-ci.mjs",
+    "check:api-tarball": "node scripts/smoke-api-tarball.mjs",
     "validate:example": "pnpm --filter @authorbot/cli start validate examples/book-repo",
     "build:example": "pnpm --filter @authorbot/cli start build examples/book-repo --out _site"
   }

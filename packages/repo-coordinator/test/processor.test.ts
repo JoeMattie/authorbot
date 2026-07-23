@@ -17,6 +17,7 @@ import {
   enqueueAnnotationCreate,
   enqueueAnnotationWithdraw,
   enqueueReplyCreate,
+  enqueueReplyWithdraw,
   git,
   initGitRepo,
   nowIso,
@@ -87,6 +88,17 @@ describe("processor happy path", () => {
     expect(message).toContain(`Authorbot-Operation: ${operationId}`);
     const author = await git(repo.dir, "log", "-1", "--format=%an <%ae>");
     expect(author).toBe("Authorbot <authorbot@localhost>");
+
+    const completion = (await seed.repos.events.listAfter(seed.projectId, 0)).find(
+      (event) =>
+        event.type === "operation_completed" &&
+        (event.payload as { operationId?: string }).operationId === operationId,
+    );
+    expect(completion?.payload).toEqual({
+      operationId,
+      kind: "annotation.create",
+      annotationKind: "suggestion",
+    });
   });
 
   it("drains two annotations in insertion order as two commits", async () => {
@@ -121,15 +133,19 @@ describe("processor happy path", () => {
     expect(opSecond?.commitSha).toBe(await git(repo.dir, "rev-parse", "HEAD"));
   });
 
-  it("commits replies and withdrawals as separate logical mutations", async () => {
+  it("commits reply and annotation withdrawals as separate logical mutations", async () => {
     const created = await enqueueAnnotationCreate(seed);
     await processor.drain(seed.projectId);
 
     const reply = await enqueueReplyCreate(seed, created.annotationId);
+    const replyCreate = await processor.drain(seed.projectId);
+    expect(replyCreate.outcomes.map((o) => o.result)).toEqual(["committed"]);
+
+    const replyWithdraw = await enqueueReplyWithdraw(seed, reply.replyId);
     const withdraw = await enqueueAnnotationWithdraw(seed, created.annotationId);
     const { outcomes } = await processor.drain(seed.projectId);
     expect(outcomes.map((o) => o.result)).toEqual(["committed", "committed"]);
-    expect(await commitCount()).toBe(4); // initial + create + reply + withdraw
+    expect(await commitCount()).toBe(5); // initial + annotation + reply + two withdrawals
 
     // reply artifact
     const replyContent = await readFile(
@@ -139,8 +155,12 @@ describe("processor happy path", () => {
     const parsedReply = replySchema.parse(parseChapterMarkdown(replyContent).frontmatter);
     expect(parsedReply.id).toBe(reply.replyId);
     expect(parsedReply.annotation_id).toBe(created.annotationId);
+    expect(parsedReply.status).toBe("withdrawn");
     const replyRecord = await seed.repos.replies.getById(reply.replyId);
-    expect(replyRecord?.status).toBe("open");
+    expect(replyRecord?.status).toBe("withdrawn");
+    expect((await seed.repos.gitOperations.getById(replyWithdraw.operationId))?.state).toBe(
+      "committed",
+    );
 
     // withdraw = frontmatter status update on the same annotation file
     const annotationContent = await readFile(
@@ -155,6 +175,19 @@ describe("processor happy path", () => {
     expect(annotationRecord?.status).toBe("withdrawn");
     const withdrawOp = await seed.repos.gitOperations.getById(withdraw.operationId);
     expect(withdrawOp?.state).toBe("committed");
+    const completions = (await seed.repos.events.listAfter(seed.projectId, 0))
+      .filter((event) => event.type === "operation_completed")
+      .map((event) => event.payload as Record<string, unknown>);
+    expect(completions).toContainEqual({
+      operationId: reply.operationId,
+      kind: "reply.create",
+      annotationKind: "suggestion",
+    });
+    expect(completions).toContainEqual({
+      operationId: replyWithdraw.operationId,
+      kind: "reply.withdraw",
+      annotationKind: "suggestion",
+    });
   });
 });
 

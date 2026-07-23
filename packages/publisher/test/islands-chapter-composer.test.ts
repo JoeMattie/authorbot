@@ -81,8 +81,14 @@ const meWith = (role: string, scopes: string[], displayName = "mara") => ({
   memberships: [{ role }],
 });
 
-const meEditor = meWith("editor", ["chapters:read", "submissions:write"]);
-const meMaintainer = meWith("maintainer", ["chapters:read", "submissions:write"]);
+const meEditor = {
+  ...meWith("editor", ["chapters:read"]),
+  effectiveCapabilities: ["chapters:read", "chapters:write"],
+};
+const meMaintainer = {
+  ...meWith("maintainer", ["chapters:read"]),
+  effectiveCapabilities: ["chapters:read", "chapters:write", "chapters:publish"],
+};
 const meContributor = meWith("contributor", ["annotations:write"]);
 
 const accepted = {
@@ -291,8 +297,17 @@ describe("chapter composer element (contract §3.5)", () => {
     expect(requests.some((r) => r.method === "POST")).toBe(false);
   });
 
-  it("keeps publishing a separate action, offered only to a maintainer", async () => {
+  it("keeps publishing separate and offers it only with maintainer publish authority", async () => {
     stubFetch(createRoutes(meEditor));
+    mount();
+    await expect.poll(() => document.querySelector(".ab-chapter-form")).toBeTruthy();
+    expect(publishBtn()).toBeNull();
+
+    resetProjectStoresForTests();
+    stubFetch(createRoutes({
+      ...meWith("maintainer", ["chapters:read"]),
+      effectiveCapabilities: ["chapters:read", "chapters:write"],
+    }));
     mount();
     await expect.poll(() => document.querySelector(".ab-chapter-form")).toBeTruthy();
     expect(publishBtn()).toBeNull();

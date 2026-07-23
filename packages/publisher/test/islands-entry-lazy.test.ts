@@ -34,4 +34,21 @@ describe("collaboration entry lazy modules", () => {
     );
     expect(customElements.get("authorbot-work-queue")).toBeUndefined();
   });
+
+  it("keeps the revision-review fallback after its page-only chunk fails", async () => {
+    lazy.loadLazyModule.mockRejectedValue(new TypeError("revision chunk unavailable"));
+    document.body.innerHTML = `
+      <authorbot-revision-review>
+        <p class="revision-fallback">Revision proposals load here once JavaScript is enabled.</p>
+      </authorbot-revision-review>`;
+
+    await import("../site/src/islands/index.js");
+    await Promise.resolve();
+
+    expect(lazy.loadLazyModule).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".revision-fallback")?.textContent).toContain(
+      "Revision proposals load here",
+    );
+    expect(customElements.get("authorbot-revision-review")).toBeUndefined();
+  });
 });

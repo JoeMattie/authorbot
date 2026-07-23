@@ -6,13 +6,13 @@
 import type { RangeSelector } from "./selection.js";
 
 export type ComposerKind = "comment" | "suggestion";
-export type ComposerScope = "range" | "block";
+export type ComposerScope = "range" | "block" | "chapter";
 
 export interface ComposerDraft {
   kind: ComposerKind;
   scope: ComposerScope;
-  /** Range selector for `range` scope; block id alone for `block` scope. */
-  blockId: string;
+  /** Range selector for `range`; block id for `block`; null for `chapter`. */
+  blockId: string | null;
   selector: RangeSelector | null;
   body: string;
 }

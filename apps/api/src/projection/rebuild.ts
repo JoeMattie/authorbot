@@ -256,6 +256,7 @@ export async function rebuildProjection(
         path: chapter.path,
         slug: chapter.frontmatter.slug,
         title: chapter.frontmatter.title,
+        summary: chapter.frontmatter.summary ?? null,
         order: chapter.frontmatter.order,
         status: chapter.frontmatter.status,
         revision: chapter.frontmatter.revision,
@@ -361,9 +362,8 @@ export async function rebuildProjection(
         parentReplyId: record.parent_reply_id ?? null,
         authorActorId: authorId,
         body,
-        // Reply frontmatter has no status field (Phase 0 contract §4); a
-        // committed reply is `open`.
-        status: "open",
+        // Pre-withdrawal artifacts omit status and therefore remain open.
+        status: record.status ?? "open",
         gitOperationId: null,
         createdAt: record.created_at,
         updatedAt: record.updated_at ?? now,

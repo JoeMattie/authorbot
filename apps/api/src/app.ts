@@ -7,7 +7,10 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import {
   createRepositories,
+  isConstraintError,
   isUniqueConstraintError,
+  type AgentTokenRecord,
+  type AnnotationRecord,
   type ProjectRecord,
   type Repositories,
   type SqlStatement,
@@ -17,20 +20,32 @@ import {
   createAnnotationCommandSchema,
   createReplyCommandSchema,
   isWorkItemTerminal,
+  legacyScopeShadow,
   resolveSessionExpiry,
   resolveTokenExpiry,
   roleSchema,
   roleScopes,
   toTimestamp,
+  withdrawReplyCommandSchema,
   AGENT_TOKEN_PREFIX,
+  type EditorialCapability,
   WORK_ITEM_STATUSES,
 } from "@authorbot/domain";
-import { apiRoleScopes, mintAgentTokenApiCommandSchema } from "./api-scopes.js";
+import {
+  apiRoleScopes,
+  capabilityProjectionJson,
+  mintAgentTokenApiCommandSchema,
+  replaceAgentTokenCapabilitiesApiCommandSchema,
+  tokenCapabilityProjection,
+} from "./api-scopes.js";
 import { parseRuleEntries, resolveRuleEntries, type RuleEntry } from "./rules.js";
 import { registerSettingsRoutes } from "./settings.js";
 import { annotationCollabJson, registerPhase3Routes } from "./phase3.js";
 import { redactClaimBundle, registerPhase4Routes } from "./phase4.js";
 import { registerChapterSubmissionRoutes } from "./chapter-submissions.js";
+import { registerRevisionProposalRoutes } from "./revision-proposals.js";
+import { registerChapterHistoryRoutes } from "./chapter-history.js";
+import { registerStoryBibleRoutes } from "./story-bible.js";
 import {
   pendingAnnotationJson,
   registerPhase7Routes,
@@ -43,8 +58,10 @@ import { chapterFrontmatterSchema } from "@authorbot/schemas";
 import { z } from "zod";
 import {
   authOf,
+  hasEditorialAuthority,
   optionalAuth,
   requireAuth,
+  requireHumanSession,
   requireProjectScope,
   type AuthServices,
 } from "./auth.js";
@@ -277,7 +294,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     c: Context<AppEnv>,
   ): Promise<{ project: ProjectRecord } | { response: Response }> => {
     if (c.get("auth") !== undefined) {
-      return requireProjectScope(c, services, "annotations:read");
+      // Kind authority is applied after rows are loaded. A mixed collection
+      // may legitimately expose comments but not suggestions (or vice versa),
+      // so the old umbrella cannot decide admission up front.
+      return requireProjectScope(c, services, null);
     }
     if (!publicAnnotations) {
       return {
@@ -290,6 +310,275 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       return { response: problem(c, "not-found", { detail: "unknown project" }) };
     }
     return { project };
+  };
+
+  const feedbackReadCapability = (
+    kind: "comment" | "suggestion",
+  ): "comments:read" | "suggestions:read" =>
+    kind === "comment" ? "comments:read" : "suggestions:read";
+
+  const objectString = (value: unknown, key: string): string | null => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const candidate = (value as Record<string, unknown>)[key];
+    return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+  };
+
+  /**
+   * Resolve the exact read capabilities for one agent-token operation.
+   *
+   * `git_operations` deliberately contains only execution state. Its single
+   * durable domain link is the outbox row inserted in the same batch. The
+   * schema does not make that link unique, so read at most two rows and accept
+   * exactly one. Every payload id is then resolved back to its project-owned
+   * record before it can authorize a read. Unknown, malformed, dangling, and
+   * control-plane kinds return null and therefore fail closed.
+   *
+   * The query materializes at most two outbox links; domain resolution then
+   * uses primary-key lookups instead of loading project-sized collections.
+   */
+  const operationReadCapability = async (
+    projectId: string,
+    operationId: string,
+  ): Promise<readonly EditorialCapability[] | null> => {
+    const links = await deps.db
+      .prepare(
+        `SELECT kind, payload FROM outbox
+          WHERE project_id = ? AND git_operation_id = ?
+          ORDER BY id LIMIT 2`,
+      )
+      .bind(projectId, operationId)
+      .all<{ kind: string; payload: string }>();
+    if (links.length !== 1) return null;
+
+    const link = links[0];
+    if (link === undefined) return null;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(String(link.payload)) as unknown;
+    } catch {
+      return null;
+    }
+
+    switch (String(link.kind)) {
+      case "annotation.create":
+      case "annotation.withdraw": {
+        const annotationId = objectString(payload, "annotationId");
+        if (annotationId === null) return null;
+        const annotation = await repos.annotations.getById(annotationId);
+        if (annotation === null || annotation.projectId !== projectId) return null;
+        return [feedbackReadCapability(annotation.kind)];
+      }
+      case "reply.create":
+      case "reply.withdraw": {
+        const replyId = objectString(payload, "replyId");
+        const annotationId = objectString(payload, "annotationId");
+        if (replyId === null || annotationId === null) return null;
+        const reply = await repos.replies.getById(replyId);
+        if (
+          reply === null ||
+          reply.projectId !== projectId ||
+          reply.annotationId !== annotationId
+        ) {
+          return null;
+        }
+        const annotation = await repos.annotations.getById(reply.annotationId);
+        if (annotation === null || annotation.projectId !== projectId) return null;
+        return [feedbackReadCapability(annotation.kind)];
+      }
+      case "decision.create":
+      case "decision.update": {
+        const decisionId = objectString(payload, "decisionId");
+        if (decisionId === null) return null;
+        const decision = await repos.decisions.getById(decisionId);
+        if (decision === null || decision.projectId !== projectId) return null;
+        const annotation = await repos.annotations.getById(decision.sourceAnnotationId);
+        if (annotation === null || annotation.projectId !== projectId) return null;
+        const feedbackRead = feedbackReadCapability(annotation.kind);
+        if (
+          decision.actionType === "reject_suggestion" ||
+          decision.actionType === "reopen_suggestion"
+        ) {
+          return decision.workItemId === null ? [feedbackRead] : null;
+        }
+        if (
+          decision.actionType !== "create_work_item" &&
+          decision.actionType !== "cancel_work_item"
+        ) {
+          return null;
+        }
+        if (decision.workItemId === null) return null;
+        const workItem = await repos.workItems.getById(decision.workItemId);
+        if (
+          workItem === null ||
+          workItem.projectId !== projectId ||
+          workItem.sourceAnnotationId !== annotation.id
+        ) {
+          return null;
+        }
+        return decision.actionType === "cancel_work_item"
+          ? ["work:read"]
+          : [feedbackRead, "work:read"];
+      }
+      case "submission.apply": {
+        const submissionId = objectString(payload, "submissionId");
+        const workItemId = objectString(payload, "workItemId");
+        if (submissionId === null || workItemId === null) return null;
+        const [submission, workItem] = await Promise.all([
+          repos.submissions.getById(submissionId),
+          repos.workItems.getById(workItemId),
+        ]);
+        if (
+          submission === null ||
+          workItem === null ||
+          submission.projectId !== projectId ||
+          workItem.projectId !== projectId ||
+          submission.workItemId !== workItem.id
+        ) {
+          return null;
+        }
+        return ["work:read"];
+      }
+      case "chapter.write": {
+        const chapterId = objectString(payload, "chapterId");
+        const action = objectString(payload, "action");
+        if (
+          chapterId === null ||
+          action === null ||
+          !["create", "revise", "publish", "unpublish"].includes(action)
+        ) {
+          return null;
+        }
+        const hasProposalId =
+          payload !== null &&
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          Object.prototype.hasOwnProperty.call(payload, "revisionProposalId");
+        if (!hasProposalId) {
+          const chapter = await repos.chapters.getById(chapterId);
+          // A create is intentionally linked before its chapter projection
+          // exists; every other direct action must resolve the durable chapter.
+          if (action === "create") {
+            return chapter === null || chapter.projectId === projectId
+              ? ["chapters:read"]
+              : null;
+          }
+          return chapter !== null && chapter.projectId === projectId
+            ? ["chapters:read"]
+            : null;
+        }
+
+        const proposalId = objectString(payload, "revisionProposalId");
+        if (proposalId === null || action !== "revise") return null;
+        const proposal = await repos.revisionProposals.getById(proposalId);
+        if (
+          proposal === null ||
+          proposal.projectId !== projectId ||
+          proposal.targetKind !== "chapter" ||
+          proposal.chapterId !== chapterId ||
+          proposal.proposalType === "repository_document"
+        ) {
+          return null;
+        }
+        return ["revisions:read"];
+      }
+      case "repository_document.write": {
+        const proposalId = objectString(payload, "revisionProposalId");
+        if (proposalId === null) return null;
+        const proposal = await repos.revisionProposals.getById(proposalId);
+        if (
+          proposal === null ||
+          proposal.projectId !== projectId ||
+          proposal.proposalType !== "repository_document"
+        ) {
+          return null;
+        }
+        return ["revisions:read"];
+      }
+      default:
+        return null;
+    }
+  };
+
+  /**
+   * Actor ownership is linked by the correlation id shared by the operation
+   * and its atomic audit row. Client-supplied correlation ids can be reused,
+   * so the bypass applies only when there is exactly one distinct non-null
+   * actor for that project/correlation pair. LIMIT 2 makes ambiguity bounded
+   * and fail-closed without loading the audit trail.
+   */
+  const operationOwnedByActor = async (input: {
+    projectId: string;
+    correlationId: string;
+    actorId: string;
+  }): Promise<boolean> => {
+    const actors = await deps.db
+      .prepare(
+        `SELECT DISTINCT actor_id FROM audit_events
+          WHERE project_id = ? AND correlation_id = ? AND actor_id IS NOT NULL
+          ORDER BY actor_id LIMIT 2`,
+      )
+      .bind(input.projectId, input.correlationId)
+      .all<{ actor_id: string }>();
+    return actors.length === 1 && String(actors[0]?.actor_id) === input.actorId;
+  };
+
+  /** Exact kind read, after `requireReadOrPublic` has admitted the request. */
+  const canReadFeedbackKind = (
+    c: Context<AppEnv>,
+    kind: "comment" | "suggestion",
+  ): boolean => {
+    const requestAuth = c.get("auth");
+    if (requestAuth === undefined) return true;
+    // An open/approval-gated policy may admit a signed-in human nonmember.
+    // Reaching this point means the project guard already proved that policy.
+    if (requestAuth.kind === "session" && requestAuth.membership === null) return true;
+    return hasEditorialAuthority(requestAuth, "annotations:read", {
+      capabilities: [feedbackReadCapability(kind)],
+    });
+  };
+
+  const requireFeedbackKindRead = (
+    c: Context<AppEnv>,
+    kind: "comment" | "suggestion",
+  ): Response | null => {
+    if (canReadFeedbackKind(c, kind)) return null;
+    return problem(c, "forbidden", {
+      detail: `actor lacks required editorial capability "${feedbackReadCapability(kind)}"`,
+    });
+  };
+
+  /**
+   * Filter before forming the caller's page. Reading a raw page and filtering
+   * afterward would let a denied kind consume slots and move the cursor,
+   * leaking its presence while producing short or empty pages.
+   */
+  const listReadableAnnotations = async (
+    c: Context<AppEnv>,
+    chapterId: string,
+    limit: number,
+    afterId: string,
+  ): Promise<AnnotationRecord[]> => {
+    const visible: AnnotationRecord[] = [];
+    let cursor = afterId;
+    const batchSize = Math.max(limit, 100);
+    while (visible.length < limit) {
+      const batch = await repos.annotations.listByChapter(chapterId, {
+        limit: batchSize,
+        afterId: cursor,
+      });
+      if (batch.length === 0) break;
+      for (const annotation of batch) {
+        if (canReadFeedbackKind(c, annotation.kind)) {
+          visible.push(annotation);
+          if (visible.length === limit) break;
+        }
+      }
+      if (visible.length === limit || batch.length < batchSize) break;
+      cursor = batch[batch.length - 1]?.id ?? cursor;
+    }
+    return visible;
   };
 
   const now = (): string => toTimestamp(clock.now());
@@ -461,11 +750,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       memberships: a.membership !== null ? [membershipJson(a.membership)] : [],
       scopes: a.scopes,
       authKind: a.kind,
+      ...capabilityProjectionJson(a),
     });
   });
 
   app.get("/v1/projects/:projectId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -520,6 +812,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * who intends to fix the repository instead and just wants writes open.
    */
   app.post("/v1/projects/:projectId/divergence/clear", auth, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) return sessionOnly;
     const guard = await requireProjectScope(c, services, "chapters:read");
     if ("response" in guard) {
       return guard.response;
@@ -574,6 +868,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.get("/v1/projects/:projectId/members", auth, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) return sessionOnly;
     const guard = await requireProjectScope(c, services, "chapters:read");
     if ("response" in guard) {
       return guard.response;
@@ -613,6 +909,10 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/agent-tokens", auth, mintIdem, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) {
+      return sessionOnly;
+    }
     /**
      * CONTROL surface (Phase 7): a freeze must not block this.
      *
@@ -649,14 +949,21 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const tokenId = uuidv7(clock.now());
     const plaintext = `${AGENT_TOKEN_PREFIX}${randomBase64Url(32)}`;
     const tokenHash = await sha256Hex(plaintext);
+    const canonical = command.authorizationMode === "canonical";
+    const capabilities = canonical ? command.capabilities : null;
+    const tokenScopes = canonical
+      ? legacyScopeShadow(command.capabilities)
+      : command.scopes;
 
-    const tokenRecord = {
+    const tokenRecord: AgentTokenRecord = {
       id: tokenId,
       projectId: guard.project.id,
       actorId: agentActorId,
       name: command.name,
       tokenHash,
-      scopes: [...command.scopes],
+      scopes: [...tokenScopes],
+      capabilitiesV2: capabilities === null ? null : [...capabilities],
+      capabilityMode: canonical ? "canonical" : "legacy",
       createdBy: a.actor.id,
       createdAt: timestamp,
       expiresAt: expiry.expiresAt,
@@ -664,7 +971,12 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       lastUsedAt: null,
     };
 
-    const responseBody = { ...agentTokenJson(tokenRecord), token: plaintext };
+    const projection = tokenCapabilityProjection(tokenRecord, "editor");
+    const responseBody = {
+      ...agentTokenJson(tokenRecord),
+      ...capabilityProjectionJson(projection),
+      token: plaintext,
+    };
     const statements: SqlStatement[] = [
       repos.actors.insertStatement({
         id: agentActorId,
@@ -712,7 +1024,13 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         targetType: "agent_token",
         targetId: tokenId,
         correlationId: c.get("correlationId"),
-        metadata: { name: command.name, scopes: command.scopes, expiresAt: expiry.expiresAt },
+        metadata: {
+          name: command.name,
+          capabilityMode: tokenRecord.capabilityMode,
+          capabilities: projection.grantedCapabilities,
+          legacyScopes: tokenRecord.scopes,
+          expiresAt: expiry.expiresAt,
+        },
         createdAt: timestamp,
       }),
     ];
@@ -724,7 +1042,141 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return c.json(responseBody, 201);
   });
 
+  app.put(
+    "/v1/projects/:projectId/agent-tokens/:tokenId/capabilities",
+    auth,
+    idem,
+    async (c) => {
+      const sessionOnly = requireHumanSession(c);
+      if (sessionOnly !== null) {
+        return sessionOnly;
+      }
+      const guard = await requireProjectScope(c, services, "tokens:manage", {
+        surface: "control",
+      });
+      if ("response" in guard) {
+        return guard.response;
+      }
+      const body = await readJson(c);
+      if (body instanceof Response) {
+        return body;
+      }
+      const parsed = replaceAgentTokenCapabilitiesApiCommandSchema.safeParse(body);
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+
+      return serialize(guard.project.id, async () => {
+        const token = await repos.agentTokens.getById(c.req.param("tokenId"));
+        if (token === null || token.projectId !== guard.project.id) {
+          return problem(c, "not-found", { detail: "unknown agent token" });
+        }
+        if (
+          token.revokedAt !== null ||
+          Date.parse(token.expiresAt) <= clock.now().getTime()
+        ) {
+          return problem(c, "state-conflict", {
+            detail: "only an active agent token's capabilities can be changed",
+          });
+        }
+
+        const membership = await repos.projectMemberships.getByProjectAndActor(
+          guard.project.id,
+          token.actorId,
+        );
+        const role = membership?.revokedAt === null ? membership.role : null;
+        const before = tokenCapabilityProjection(token, role);
+        const capabilities = parsed.data.capabilities;
+        const scopes = legacyScopeShadow(capabilities);
+        const updated: AgentTokenRecord = {
+          ...token,
+          scopes: [...scopes],
+          capabilitiesV2: [...capabilities],
+          capabilityMode: "canonical",
+        };
+        const after = tokenCapabilityProjection(updated, role);
+        const responseBody = {
+          ...agentTokenJson(updated),
+          ...capabilityProjectionJson(after),
+          role,
+        };
+        const timestamp = now();
+        try {
+          await deps.db.batch([
+            repos.agentTokens.setCapabilityStateCasStatement(
+              token.id,
+              {
+                scopes: token.scopes,
+                capabilitiesV2: token.capabilitiesV2 ?? null,
+                capabilityMode: token.capabilityMode ?? "legacy",
+              },
+              {
+                scopes,
+                capabilitiesV2: capabilities,
+                capabilityMode: "canonical",
+              },
+              timestamp,
+            ),
+            repos.auditEvents.insertStatement({
+              id: uuidv7(clock.now()),
+              projectId: guard.project.id,
+              actorId: authOf(c).actor.id,
+              action: "agent_token.capabilities.update",
+              targetType: "agent_token",
+              targetId: token.id,
+              correlationId: c.get("correlationId"),
+              metadata: {
+                before: {
+                  capabilityMode: before.capabilityMode,
+                  capabilities: before.grantedCapabilities,
+                  legacyEffectiveActions: before.legacyEffectiveActions,
+                  legacyScopes: token.scopes,
+                },
+                after: {
+                  capabilityMode: after.capabilityMode,
+                  capabilities: after.grantedCapabilities,
+                  legacyEffectiveActions: after.legacyEffectiveActions,
+                  legacyScopes: updated.scopes,
+                },
+              },
+              createdAt: timestamp,
+            }),
+            ...claimStatements(c, 200, responseBody),
+          ]);
+        } catch (error) {
+          if (!isConstraintError(error)) throw error;
+          const fresh = await repos.agentTokens.getById(token.id);
+          if (fresh === null || fresh.projectId !== guard.project.id) {
+            return problem(c, "not-found", { detail: "unknown agent token" });
+          }
+          if (
+            fresh.revokedAt !== null ||
+            Date.parse(fresh.expiresAt) <= clock.now().getTime()
+          ) {
+            return problem(c, "state-conflict", {
+              detail: "only an active agent token's capabilities can be changed",
+            });
+          }
+          const stateUnchanged =
+            fresh.capabilityMode === token.capabilityMode &&
+            JSON.stringify(fresh.scopes) === JSON.stringify(token.scopes) &&
+            JSON.stringify(fresh.capabilitiesV2 ?? null) ===
+              JSON.stringify(token.capabilitiesV2 ?? null);
+          if (stateUnchanged) throw error;
+          return problem(c, "state-conflict", {
+            detail: "agent token capabilities changed concurrently; refresh and retry",
+          });
+        }
+        return c.json(responseBody, 200);
+      });
+    },
+  );
+
   app.delete("/v1/projects/:projectId/agent-tokens/:tokenId", auth, idem, async (c) => {
+    const sessionOnly = requireHumanSession(c);
+    if (sessionOnly !== null) {
+      return sessionOnly;
+    }
     /**
      * CONTROL surface: access-control.ts names "revoke a token" as one of the
      * things a freeze must not refuse. Before this it was the only one that
@@ -787,7 +1239,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   // ---- chapters --------------------------------------------------------------
 
   app.get("/v1/projects/:projectId/chapters", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -802,18 +1256,35 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       { limit, afterId: cursor },
     );
     const requestAuth = authOf(c);
-    const canReadFeedback = requestAuth.scopes.includes("annotations:read");
-    const canReadWork = requestAuth.scopes.includes("work:read");
+    const canReadComments = hasEditorialAuthority(requestAuth, "annotations:read", {
+      capabilities: ["comments:read"],
+    });
+    const canReadSuggestions = hasEditorialAuthority(requestAuth, "annotations:read", {
+      capabilities: ["suggestions:read"],
+    });
+    const canReadWork = hasEditorialAuthority(requestAuth, "work:read", {
+      capabilities: ["work:read"],
+    });
     return c.json({
       items: summaryPage.items.map(({ chapter, activity }) => ({
         ...chapterJson(chapter),
         activity: {
-          ...(canReadFeedback
+          ...(canReadSuggestions
             ? {
                 openSuggestions: activity.openSuggestions,
+              }
+            : {}),
+          ...(canReadComments
+            ? {
                 openBlockComments: activity.openBlockComments,
                 openChapterComments: activity.openChapterComments,
-                openReplies: activity.openCommentReplies + activity.openSuggestionReplies,
+              }
+            : {}),
+          ...(canReadComments || canReadSuggestions
+            ? {
+                openReplies:
+                  (canReadComments ? activity.openCommentReplies : 0) +
+                  (canReadSuggestions ? activity.openSuggestionReplies : 0),
               }
             : {}),
           ...(canReadWork ? { openWorkItems: activity.openWorkItems } : {}),
@@ -826,7 +1297,9 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.get("/v1/projects/:projectId/chapters/:chapterId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    const guard = await requireProjectScope(c, services, "chapters:read", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
     }
@@ -849,21 +1322,18 @@ export function createApi(deps: AppDeps): AuthorbotApi {
    * substitute: it is gated behind claiming a work item with a lease, and it
    * returns the raw file including block markers.
    *
-   * Editor/maintainer scoped like the write it feeds, and marker-stripped so
+   * Canonical credentials need `chapters:read`; legacy credentials keep the
+   * historical `submissions:write` gate. The response is marker-stripped so
    * the body a client sends back is the body a human edited - marker reuse for
    * unchanged blocks is `applyChapterReplacement`'s job at drain time, not the
    * client's.
    */
   app.get("/v1/projects/:projectId/chapters/:chapterId/source", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "submissions:write");
+    const guard = await requireProjectScope(c, services, "submissions:write", {
+      editorial: { capabilities: ["chapters:read"] },
+    });
     if ("response" in guard) {
       return guard.response;
-    }
-    const role = authOf(c).role;
-    if (role !== "editor" && role !== "maintainer") {
-      return problem(c, "forbidden", {
-        detail: "only an editor or a maintainer may read chapter source for editing",
-      });
     }
     const chapter = await repos.chapters.getById(c.req.param("chapterId"));
     if (chapter === null || chapter.projectId !== guard.project.id) {
@@ -893,6 +1363,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       summary: fm.data.summary ?? null,
       /** Send this straight back as `baseRevision` on the revise. */
       revision: fm.data.revision,
+      /** Bind a revision proposal to these exact repository bytes. */
+      contentHash: `sha256:${await sha256Hex(source)}`,
       status: fm.data.status,
       /**
        * Markdown as an author wrote it: no frontmatter, no marker syntax.
@@ -929,11 +1401,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (limit instanceof Response) {
       return limit;
     }
-    const cursor = c.req.query("cursor");
-    const annotations = await repos.annotations.listByChapter(chapter.id, {
-      limit,
-      ...(cursor !== undefined ? { afterId: cursor } : {}),
-    });
+    const cursor = c.req.query("cursor") ?? "";
+    const annotations = await listReadableAnnotations(c, chapter.id, limit, cursor);
     // Phase 3 contract §2/§6: embed aggregate vote tallies (public: counts
     // only) plus the create_work_item decision badge; members also see their
     // own current vote (`myVote`). The member actor id is null for anonymous
@@ -966,12 +1435,21 @@ export function createApi(deps: AppDeps): AuthorbotApi {
      * approved one, and cursor paging over `items` stays a paging over real
      * annotations.
      */
-    const viewerRole = c.get("auth")?.role ?? null;
+    const canModerate =
+      requestAuth !== undefined &&
+      hasEditorialAuthority(requestAuth, "annotations:write", {
+        capabilities: ["feedback:moderate"],
+        legacyAction: "feedback:moderate",
+      });
     let pending: Record<string, unknown>[] = [];
     if (viewerActorId !== null) {
       const queued = await repos.pendingAnnotations.listPendingByChapter(chapter.id);
       pending = queued
-        .filter((row) => viewerRole === "maintainer" || row.authorActorId === viewerActorId)
+        .filter(
+          (row) =>
+            (canModerate || row.authorActorId === viewerActorId) &&
+            canReadFeedbackKind(c, row.kind),
+        )
         .map(pendingAnnotationJson);
     }
 
@@ -994,6 +1472,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (annotation === null || annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
+    const denied = requireFeedbackKindRead(c, annotation.kind);
+    if (denied !== null) return denied;
     const requestAuth = c.get("auth");
     const memberActorId =
       requestAuth !== undefined && requestAuth.membership !== null
@@ -1007,10 +1487,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     auth,
     idem,
     async (c) => {
-      const guard = await requireProjectScope(c, services, "annotations:write");
-      if ("response" in guard) {
-        return guard.response;
-      }
       const body = await readJson(c);
       if (body instanceof Response) {
         return body;
@@ -1024,6 +1500,14 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         return problem(c, "validation-failed", { issues: issueList(parsed.error) });
       }
       const command = parsed.data;
+      const writeCapability =
+        command.kind === "comment" ? "comments:write" : "suggestions:write";
+      const guard = await requireProjectScope(c, services, "annotations:write", {
+        editorial: { capabilities: ["chapters:read", writeCapability] },
+      });
+      if ("response" in guard) {
+        return guard.response;
+      }
 
       const findings = bodySafetyFindings(command.body);
       if (findings.length > 0) {
@@ -1215,6 +1699,8 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     if (annotation === null || annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
+    const denied = requireFeedbackKindRead(c, annotation.kind);
+    if (denied !== null) return denied;
     const limit = parseLimit(c);
     if (limit instanceof Response) {
       return limit;
@@ -1228,14 +1714,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   });
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/replies", auth, idem, async (c) => {
-    // `requireMembership` (Phase 7): a permissive annotation policy widens who
-    // may START a thread, not who may join one - see ProjectGuardOptions.
-    const guard = await requireProjectScope(c, services, "annotations:write", {
-      requireMembership: true,
-    });
-    if ("response" in guard) {
-      return guard.response;
-    }
     const body = await readJson(c);
     if (body instanceof Response) {
       return body;
@@ -1256,7 +1734,30 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     }
 
     const annotation = await repos.annotations.getById(command.annotationId);
-    if (annotation === null || annotation.projectId !== guard.project.id) {
+    if (annotation === null) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    const parentReadCapability = feedbackReadCapability(annotation.kind);
+    const requirements = {
+      capabilities: ["replies:write", parentReadCapability],
+    } as const;
+    if (!hasEditorialAuthority(authOf(c), "annotations:write", requirements)) {
+      return problem(c, "forbidden", {
+        detail:
+          "actor lacks required editorial capabilities: replies:write, " +
+          parentReadCapability,
+      });
+    }
+    // `requireMembership` (Phase 7): a permissive annotation policy widens who
+    // may START a thread, not who may join one - see ProjectGuardOptions.
+    const guard = await requireProjectScope(c, services, "annotations:write", {
+      requireMembership: true,
+      editorial: requirements,
+    });
+    if ("response" in guard) {
+      return guard.response;
+    }
+    if (annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
     if (annotation.status !== "open" && annotation.status !== "pending_git") {
@@ -1322,13 +1823,157 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     return c.json(responseBody, 202);
   });
 
+  app.post(
+    "/v1/projects/:projectId/annotations/:annotationId/replies/:replyId/withdraw",
+    auth,
+    idem,
+    async (c) => {
+      const parsed = withdrawReplyCommandSchema.safeParse({
+        annotationId: c.req.param("annotationId"),
+        replyId: c.req.param("replyId"),
+      });
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+      const command = parsed.data;
+      const reply = await repos.replies.getById(command.replyId);
+      if (reply === null || reply.annotationId !== command.annotationId) {
+        return problem(c, "not-found", { detail: "unknown reply" });
+      }
+      const annotation = await repos.annotations.getById(command.annotationId);
+      if (annotation === null) {
+        return problem(c, "not-found", { detail: "unknown reply" });
+      }
+
+      const a = authOf(c);
+      const withdrawingOwn = reply.authorActorId === a.actor.id;
+      const requirements = withdrawingOwn
+        ? { capabilities: ["feedback:withdraw-own"] as const }
+        : {
+            capabilities: ["feedback:moderate"] as const,
+            legacyAction: "feedback:moderate" as const,
+          };
+      if (!hasEditorialAuthority(a, "annotations:write", requirements)) {
+        return problem(c, "forbidden", {
+          detail: `actor lacks required editorial capability "${requirements.capabilities[0]}"`,
+        });
+      }
+      const guard = await requireProjectScope(c, services, "annotations:write", {
+        requireMembership: true,
+        editorial: requirements,
+      });
+      if ("response" in guard) {
+        return guard.response;
+      }
+      if (reply.projectId !== guard.project.id || annotation.projectId !== guard.project.id) {
+        return problem(c, "not-found", { detail: "unknown reply" });
+      }
+      if (reply.status === "pending_git") {
+        return problem(c, "state-conflict", {
+          detail: "reply is still being committed; retry once its operation completes",
+        });
+      }
+      if (reply.status !== "open") {
+        return problem(c, "state-conflict", {
+          detail: `reply with status "${reply.status}" cannot be withdrawn`,
+        });
+      }
+      if (reply.gitOperationId !== null) {
+        const inFlight = await repos.gitOperations.getById(reply.gitOperationId);
+        if (
+          inFlight !== null &&
+          (inFlight.state === "queued" ||
+            inFlight.state === "preparing" ||
+            inFlight.state === "committing" ||
+            inFlight.state === "conflict")
+        ) {
+          return problem(c, "state-conflict", {
+            detail: "a git operation for this reply is still in flight; retry once it completes",
+          });
+        }
+      }
+
+      const correlationId = c.get("correlationId");
+      const timestamp = now();
+      const command202 = commandStatements({
+        project: guard.project,
+        correlationId,
+        actorId: a.actor.id,
+        action: "reply.withdraw",
+        targetType: "reply",
+        targetId: reply.id,
+        outboxKind: "reply.withdraw",
+        outboxPayload: {
+          type: "reply.withdraw",
+          replyId: reply.id,
+          annotationId: annotation.id,
+          actorId: a.actor.id,
+          actorRef: a.actorRef,
+        },
+        metadata: { annotationId: annotation.id },
+      });
+      const responseBody = {
+        operationId: command202.operationId,
+        annotationId: annotation.id,
+        replyId: reply.id,
+        correlationId,
+        status: "queued",
+      };
+      try {
+        await deps.db.batch([
+          command202.statements[0] as SqlStatement,
+          repos.replies.setWithdrawalOperationStatement(
+            reply.id,
+            reply.gitOperationId,
+            command202.operationId,
+            timestamp,
+          ),
+          ...command202.statements.slice(1),
+          ...claimStatements(c, 202, responseBody),
+        ]);
+      } catch (error) {
+        if (isConstraintError(error)) {
+          return problem(c, "state-conflict", {
+            detail: "the reply changed while its withdrawal was being queued; refresh and retry",
+          });
+        }
+        throw error;
+      }
+      await notifyMutation(guard.project.id);
+      return c.json(responseBody, 202);
+    },
+  );
+
   app.post("/v1/projects/:projectId/annotations/:annotationId/withdraw", auth, idem, async (c) => {
-    const guard = await requireProjectScope(c, services, "annotations:write");
+    const annotation = await repos.annotations.getById(c.req.param("annotationId"));
+    if (annotation === null) {
+      return problem(c, "not-found", { detail: "unknown annotation" });
+    }
+    const a = authOf(c);
+    const withdrawingOwn = annotation.authorActorId === a.actor.id;
+    const requirements = withdrawingOwn
+      ? { capabilities: ["feedback:withdraw-own"] as const }
+      : {
+          capabilities: ["feedback:moderate"] as const,
+          legacyAction: "feedback:moderate" as const,
+        };
+    const policyMayAdmitNonmemberAuthor =
+      withdrawingOwn && a.kind === "session" && a.membership === null;
+    if (
+      !policyMayAdmitNonmemberAuthor &&
+      !hasEditorialAuthority(a, "annotations:write", requirements)
+    ) {
+      return problem(c, "forbidden", {
+        detail: `actor lacks required editorial capability "${requirements.capabilities[0]}"`,
+      });
+    }
+    const guard = await requireProjectScope(c, services, "annotations:write", {
+      editorial: requirements,
+    });
     if ("response" in guard) {
       return guard.response;
     }
-    const annotation = await repos.annotations.getById(c.req.param("annotationId"));
-    if (annotation === null || annotation.projectId !== guard.project.id) {
+    if (annotation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown annotation" });
     }
     if (annotation.status === "pending_git") {
@@ -1337,7 +1982,6 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       });
     }
 
-    const a = authOf(c);
     const author = await repos.actors.getById(annotation.authorActorId);
     const decision = authorizeAnnotationWithdraw({
       annotationAuthor: author?.externalIdentity ?? `system:actor-${annotation.authorActorId}`,
@@ -1418,13 +2062,55 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   // ---- operations ------------------------------------------------------------
 
   app.get("/v1/projects/:projectId/operations/:operationId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read");
+    // Human members keep the Phase 2 behavior (all project operations are
+    // readable). Token reads are narrowed below after the operation's durable
+    // domain and owner have been resolved.
+    const guard = await requireProjectScope(c, services, null);
     if ("response" in guard) {
       return guard.response;
     }
     const operation = await repos.gitOperations.getById(c.req.param("operationId"));
     if (operation === null || operation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown operation" });
+    }
+
+    const requestAuth = authOf(c);
+    if (requestAuth.kind === "token") {
+      const requiredCapabilities = await operationReadCapability(
+        guard.project.id,
+        operation.id,
+      );
+      // A missing/ambiguous domain link and control-plane operations have no
+      // delegable editorial read capability. Do not let actor attribution
+      // turn either case into token authority.
+      if (requiredCapabilities === null) {
+        return problem(c, "forbidden", {
+          detail: "actor is not authorized to read this operation",
+        });
+      }
+      const ownsOperation = await operationOwnedByActor({
+        projectId: guard.project.id,
+        correlationId: operation.correlationId,
+        actorId: requestAuth.actor.id,
+      });
+      // Legacy rows use their conservative, role-intersected capability
+      // translation. Calling hasEditorialAuthority here would reapply the old
+      // umbrella scope and reopen the cross-domain read this route is closing.
+      const hasDomainRead =
+        requestAuth.capabilityMode === "legacy"
+          ? requiredCapabilities.some((capability) =>
+              requestAuth.effectiveCapabilities.includes(capability),
+            )
+          : requiredCapabilities.some((capability) =>
+              hasEditorialAuthority(requestAuth, null, {
+                capabilities: [capability],
+              }),
+            );
+      if (!ownsOperation && !hasDomainRead) {
+        return problem(c, "forbidden", {
+          detail: "actor is not authorized to read this operation",
+        });
+      }
     }
     return c.json(operationJson(operation));
   });
@@ -1887,6 +2573,41 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     notifyMutation,
   });
 
+  // ---- Phase 11 routes (review-gated chapter and summary revisions) -------
+  registerRevisionProposalRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    claimStatements,
+    commandStatements,
+    readJson,
+    parseLimit,
+    notifyMutation,
+    now,
+  });
+
+  registerChapterHistoryRoutes({
+    app,
+    deps,
+    repos,
+    clock,
+    services,
+    auth,
+    idem,
+    serialize,
+    claimStatements,
+    parseLimit,
+    now,
+  });
+
+  // ---- authenticated story bible (bounded repository reads) --------------
+  registerStoryBibleRoutes({ app, deps, repos, services, auth });
+
   // ---- Phase 6 routes (book settings + governance, contract §3.6) ---------
   registerSettingsRoutes({
     app,
@@ -1933,7 +2654,11 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     clock,
     getProject,
     auth,
-    requireRead: (c) => requireProjectScope(c, services, "chapters:read"),
+    requireRead: async (c) => {
+      const sessionOnly = requireHumanSession(c);
+      if (sessionOnly !== null) return { response: sessionOnly };
+      return requireProjectScope(c, services, "chapters:read");
+    },
   });
 
   return { app, repos, bootstrap, rebuild, reconcile };

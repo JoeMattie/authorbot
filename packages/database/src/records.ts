@@ -158,6 +158,14 @@ export interface HumanSessionRecord {
   revokedAt: string | null;
 }
 
+/**
+ * Which agent-token authorization representation is authoritative.
+ *
+ * `legacy` rows continue to use `scopes`; `canonical` rows use the additive
+ * `capabilities_v2` column while retaining `scopes` as a rollback-safe shadow.
+ */
+export type AgentTokenCapabilityMode = "legacy" | "canonical";
+
 export interface AgentTokenRecord {
   id: string;
   projectId: string;
@@ -166,6 +174,19 @@ export interface AgentTokenRecord {
   /** SHA-256 hash of the token. Plaintext is never stored. */
   tokenHash: string;
   scopes: string[];
+  /**
+   * Phase 11 canonical capability grants. NULL on an unconverted legacy row.
+   *
+   * Optional during the expand release so existing token constructors keep
+   * producing legacy rows without a flag-day API change. Repository reads
+   * always populate this field.
+   */
+  capabilitiesV2?: string[] | null;
+  /**
+   * The authoritative authorization representation. Optional inputs default
+   * to `legacy`; repository reads always populate it.
+   */
+  capabilityMode?: AgentTokenCapabilityMode;
   createdBy: string;
   createdAt: string;
   expiresAt: string;
@@ -179,6 +200,8 @@ export interface ChapterProjectionRecord {
   path: string;
   slug: string;
   title: string;
+  /** Current validated chapter-frontmatter summary, never public by itself. */
+  summary: string | null;
   /** Frontmatter order; null only during migration before the next rebuild. */
   order: number | null;
   status: ChapterStatus;
@@ -573,4 +596,90 @@ export interface RateLimitCounterRecord {
   windowStart: string;
   count: number;
   expiresAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 11: review-gated chapter and summary revisions (migration 0011)
+// ---------------------------------------------------------------------------
+
+/** Exact chapter source delivered in a whole-chapter lease task bundle. */
+export interface LeaseDocumentSnapshotRecord {
+  leaseId: string;
+  projectId: string;
+  chapterId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  source: string;
+  createdAt: string;
+}
+
+/** The content surface replaced by a revision proposal. */
+export type RevisionProposalType =
+  | "chapter_replacement"
+  | "chapter_summary"
+  | "repository_document";
+
+/** Canonical repository surface addressed by a proposal. */
+export type RevisionProposalTargetKind = "chapter" | "outline" | "timeline" | "character";
+
+/** How a proposal entered the shared maintainer-review pipeline. */
+export type RevisionProposalOrigin =
+  | "work_submission"
+  | "direct_edit"
+  | "summary_proposal"
+  | "history_restore"
+  | "document_edit";
+
+/**
+ * A proposal begins pending review, may be applied through the Git outbox,
+ * and finishes in one of the four terminal states. The repository guards
+ * every transition with the expected current status so concurrent reviewers
+ * cannot act on the same proposal twice.
+ */
+export type RevisionProposalStatus =
+  | "pending_review"
+  | "applying"
+  | "approved"
+  | "rejected"
+  | "conflicted"
+  | "withdrawn";
+
+/**
+ * Immutable proposal payload plus its mutable review/apply envelope.
+ *
+ * `baseContent` is deliberately retained beside `proposedContent`: review
+ * pages can render an exact diff without fetching an old Git tree once per
+ * proposal. Migration 0011 prevents either snapshot, its authorship, or its
+ * work/submission identity from changing after insertion.
+ */
+export interface RevisionProposalRecord {
+  id: string;
+  projectId: string;
+  chapterId: string | null;
+  targetKind: RevisionProposalTargetKind;
+  /** Chapter UUID, `outline`, `timeline`, or the character's canonical id. */
+  targetId: string;
+  /** Exact repository-relative file compared and eventually written. */
+  targetPath: string;
+  proposalType: RevisionProposalType;
+  origin: RevisionProposalOrigin;
+  workItemId: string | null;
+  submissionId: string | null;
+  authorActorId: string;
+  /** Null for repository planning documents, which use `baseContentHash`. */
+  baseRevision: number | null;
+  baseContentHash: string;
+  baseContent: string;
+  proposedContent: string;
+  changeSummary: string | null;
+  notes: string | null;
+  status: RevisionProposalStatus;
+  reviewedByActorId: string | null;
+  reviewedAt: string | null;
+  reviewReason: string | null;
+  gitOperationId: string | null;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

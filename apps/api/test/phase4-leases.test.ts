@@ -17,7 +17,14 @@ import {
   verifyLeaseToken,
 } from "../src/index.js";
 import { uuidv7 } from "../src/ids.js";
-import { devLogin, jsonRequest, mintToken, BLOCK_ID_1, CHAPTER_ID } from "./helpers.js";
+import {
+  devLogin,
+  jsonRequest,
+  mintCanonicalToken,
+  mintToken,
+  BLOCK_ID_1,
+  CHAPTER_ID,
+} from "./helpers.js";
 import {
   claimWorkItem,
   createReadyWorkItem,
@@ -165,6 +172,11 @@ describe("claim (contract §2/§3)", () => {
       expect(context["annotationBody"]).toBe("Consider tightening this opening line.");
       expect(context["chapterSummary"]).toBe("The anomaly is first sighted.");
       expect(Array.isArray(context["storyRefs"])).toBe(true);
+      expect(context["storyApi"]).toEqual({
+        outline: `/v1/projects/${harness.projectId}/story/outline`,
+        timeline: `/v1/projects/${harness.projectId}/story/timeline`,
+        characters: `/v1/projects/${harness.projectId}/story/characters`,
+      });
       expect(body["submissionSchema"]).toBe("authorbot.submission/range-replacement/v1");
 
       // The token is stored hash-only.
@@ -228,6 +240,34 @@ describe("claim (contract §2/§3)", () => {
     }
   });
 
+  it("requires the exact work:claim capability from canonical agent tokens", async () => {
+    const harness = await makePhase4Harness();
+    try {
+      const maintainer = await devLogin(harness, "capability-owner", "maintainer");
+      const readOnly = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:read"],
+        "work-reader",
+      );
+      const claimer = await mintCanonicalToken(
+        harness,
+        maintainer,
+        ["work:claim"],
+        "work-claimer",
+      );
+      const first = await createReadyWorkItem(harness);
+      const denied = await claimWorkItem(harness, { token: readOnly.token }, first.workItemId);
+      expect(denied.status).toBe(403);
+      expect((await harness.repos.workItems.getById(first.workItemId))?.status).toBe("ready");
+
+      const allowed = await claimWorkItem(harness, { token: claimer.token }, first.workItemId);
+      expect(allowed.status).toBe(201);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("agent tokens with work:claim can claim (same interface as humans)", async () => {
     const harness = await makePhase4Harness();
     try {
@@ -246,6 +286,13 @@ describe("claim (contract §2/§3)", () => {
     try {
       const first = await devLogin(harness, "first", "editor");
       const second = await devLogin(harness, "second", "editor");
+      const minter = await devLogin(harness, "lease-event-minter", "maintainer");
+      const workReader = await mintCanonicalToken(
+        harness,
+        minter,
+        ["work:read"],
+        "lease-event-observer",
+      );
       const { workItemId } = await createReadyWorkItem(harness);
       const claimed = await claimWorkItem(harness, { cookie: first }, workItemId);
       expect(claimed.status).toBe(201);
@@ -255,6 +302,7 @@ describe("claim (contract §2/§3)", () => {
       const held = await claimWorkItem(harness, { cookie: second }, workItemId);
       expect(held.status).toBe(409);
 
+      const beforeExpiry = await harness.repos.events.latestId(harness.projectId);
       harness.clock.advanceMs(31 * MINUTE);
       const takeover = await claimWorkItem(harness, { cookie: second }, workItemId);
       expect(takeover.status).toBe(201);
@@ -265,6 +313,15 @@ describe("claim (contract §2/§3)", () => {
       const types = await eventTypes(harness);
       expect(types.filter((t) => t === "work_item_leased")).toHaveLength(2);
       expect(types).toContain("lease_expired");
+      const feed = await harness.app.request(
+        `/v1/projects/${harness.projectId}/events?poll=1&after=${beforeExpiry}`,
+        { headers: { Authorization: `Bearer ${workReader.token}` } },
+      );
+      expect(feed.status).toBe(200);
+      const expired = ((await feed.json()) as {
+        items: { type: string; payload: Record<string, unknown> }[];
+      }).items.find((event) => event.type === "lease_expired");
+      expect(expired?.payload).toEqual({ leaseId: staleLeaseId, workItemId });
     } finally {
       harness.close();
     }

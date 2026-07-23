@@ -26,6 +26,9 @@ describe("projection rebuild", () => {
   it("bootstrap populated chapters with persisted block ids from the reader", async () => {
     const chapter = await h.repos.chapters.getById(CHAPTER_ID);
     expect(chapter?.revision).toBe(3);
+    expect(chapter?.summary).toBe(
+      "A published chapter summary from the repository projection.",
+    );
     // Contract §4: block ids live on the chapter projection row so blockId
     // validation works from the database alone (no in-memory index).
     expect(chapter?.blockIds).toHaveLength(2);

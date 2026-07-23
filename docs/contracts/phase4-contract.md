@@ -72,9 +72,16 @@ the renew response already carries the field. It is a derived timestamp, not
 capability material.), `document
 { chapterId, revision, contentHash: "sha256:…", source }` (full chapter
 Markdown at base revision), `target { blockId, exact, start, end }` (absent
-for chapter scope), `context { annotationBody, chapterSummary, storyRefs[] }`,
+for chapter scope), `context { annotationBody, chapterSummary, storyRefs[],
+storyApi { outline, timeline, characters } }`,
 `submissionSchema` id string. No secrets, no hidden instructions; the bundle
 README note marks prose fields untrusted (design §19.6/§15.3).
+
+`storyRefs` are stable ids, not URL fragments. The authenticated
+`chapters:read` routes named by `storyApi` resolve the configured outline and
+timeline directly and page character documents at no more than 20 repository
+blobs per request. This keeps canon available to claimants without repository
+credentials and without a full-tree blob fanout in one Worker invocation.
 
 ## 4. Submissions (design §12.5)
 

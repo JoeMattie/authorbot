@@ -364,7 +364,7 @@ Actor identities are `github:<login>` for humans, `agent:<name>` for agents,
 | Group | Actions |
 |---|---|
 | Identity | `session.login`, `agent_token.mint`, `agent_token.revoke` |
-| Annotation | `annotation.create`, `annotation.withdraw`, `annotation.reanchor`, `reply.create` |
+| Feedback | `annotation.create`, `annotation.withdraw`, `annotation.reanchor`, `reply.create`, `reply.withdraw` |
 | Governance | `decision.create`, `decision.support_changed`, `work_item.force_create`, `work_item.cancel` |
 | Work | `work_item.claim`, `lease.recover`, `lease.renew`, `lease.release`, `submission.create` |
 | Chapter | `chapter.create`, `chapter.revise`, `chapter.publish`, `chapter.unpublish` |

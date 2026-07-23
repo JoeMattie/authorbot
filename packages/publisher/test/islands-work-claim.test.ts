@@ -63,6 +63,34 @@ const workItem = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const completedWorkItem = (over: Record<string, unknown> = {}) => ({
+  ...workItem({ status: "completed" }),
+  source: {
+    kind: "suggestion",
+    scope: "range",
+    body: "Tighten this passage without changing the point of view.",
+    status: "work_item_created",
+  },
+  chapter: { id: CHAPTER_ID, title: "Baseline", slug: "baseline" },
+  completedBy: {
+    actorId: "actor-3",
+    type: "agent",
+    displayName: "Marin",
+    externalIdentity: null,
+  },
+  completedAt: "2026-07-21T19:00:00.000Z",
+  resultingRevision: 5,
+  commitSha: "0123456789abcdef0123456789abcdef01234567",
+  revisionProposalId: "revision-1",
+  approvedBy: {
+    actorId: "actor-1",
+    type: "human",
+    displayName: "mara",
+    externalIdentity: "github:mara",
+  },
+  ...over,
+});
+
 const bundle = (over: Partial<TaskBundle> = {}): TaskBundle => ({
   workItem: {
     id: WORK_ITEM_ID,
@@ -130,16 +158,26 @@ function stubFetch(routes: Routes): void {
 
 const meEditor = {
   actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
-  scopes: ["chapters:read", "annotations:read", "annotations:write", "work:read", "work:claim", "submissions:write"],
+  scopes: [],
+  effectiveCapabilities: ["chapters:read", "work:read", "work:claim", "work:submit"],
 };
 
 const meReader = {
   actor: { id: "actor-2", displayName: "rae", externalIdentity: "github:rae" },
-  scopes: ["chapters:read", "annotations:read"],
+  scopes: [],
+  effectiveCapabilities: ["chapters:read"],
 };
 
-const queueRoutes = (items: unknown[], me: unknown = meEditor): Routes => ({
+const queueRoutes = (
+  items: unknown[],
+  me: unknown = meEditor,
+  completed: Route | (() => Route) = {
+    status: 200,
+    body: { items: [], nextCursor: null },
+  },
+): Routes => ({
   [`${API}/v1/me`]: { status: 200, body: me },
+  [`${API}/v1/projects/${PROJECT}/work-items/completed`]: completed,
   [`${API}/v1/projects/${PROJECT}/work-items`]: { status: 200, body: { items, nextCursor: null } },
 });
 
@@ -191,6 +229,12 @@ describe("work queue claim affordance (contract §7)", () => {
       const url = String(input);
       if (url.endsWith("/v1/me")) return pendingSession;
       if (url.includes("/work-items?status=ready")) {
+        return new Response(JSON.stringify({ items: [], nextCursor: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/work-items/completed?")) {
         return new Response(JSON.stringify({ items: [], nextCursor: null }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -259,10 +303,85 @@ describe("work queue claim affordance (contract §7)", () => {
     expect(badge.hidden).toBe(true);
   });
 
+  it("keeps open work first and pages compact completed stubs without changing the badge", async () => {
+    let completedPage = 0;
+    stubFetch(
+      queueRoutes(
+        [workItem()],
+        meEditor,
+        () =>
+          completedPage++ === 0
+            ? {
+                status: 200,
+                body: { items: [completedWorkItem()], nextCursor: "completed-cursor" },
+              }
+            : {
+                status: 200,
+                body: {
+                  items: [
+                    completedWorkItem({
+                      id: "work-completed-2",
+                      sourceAnnotationId: "annotation-2",
+                      revisionProposalId: null,
+                      commitSha: null,
+                      resultingRevision: 6,
+                    }),
+                  ],
+                  nextCursor: null,
+                },
+              },
+      ),
+    );
+    const element = mount();
+
+    await expect.poll(() => document.querySelectorAll(".ab-completed-item").length).toBe(1);
+    expect(
+      element.querySelector(".ab-work-active")?.nextElementSibling?.classList.contains(
+        "ab-work-completed",
+      ),
+    ).toBe(true);
+    const completed = document.querySelector<HTMLElement>(".ab-completed-item") as HTMLElement;
+    expect(completed.querySelector(".ab-work-type")?.textContent).toBe("Revise passage");
+    expect(completed.querySelector(".ab-completed-body")?.textContent).toContain(
+      "Tighten this passage",
+    );
+    expect(completed.querySelector(".ab-completed-attribution")?.textContent).toContain(
+      "Completed by Marin · 2026-07-21",
+    );
+    expect(completed.querySelector(".ab-completed-result")?.textContent).toContain(
+      "Chapter revision 5 · Commit 0123456789ab · Approved by mara",
+    );
+    expect(
+      completed.querySelector<HTMLAnchorElement>(".ab-completed-source")?.href,
+    ).toContain(`authorbot-note-${completedWorkItem().sourceAnnotationId}`);
+    expect(
+      completed.querySelector(".ab-completed-revision")?.getAttribute("href"),
+    ).toBe("../revisions/?proposal=revision-1");
+
+    const badge = document.querySelector<HTMLElement>("[data-work-count]") as HTMLElement;
+    expect(badge.textContent).toBe("1");
+    const loadMore = document.querySelector<HTMLButtonElement>(
+      ".ab-completed-more-button",
+    ) as HTMLButtonElement;
+    expect(loadMore.hidden).toBe(false);
+    loadMore.click();
+
+    await expect.poll(() => document.querySelectorAll(".ab-completed-item").length).toBe(2);
+    expect(document.querySelector(".ab-completed-more")?.hasAttribute("hidden")).toBe(true);
+    expect(badge.textContent).toBe("1");
+    expect(requests.some(({ url }) => url.endsWith(
+      "/work-items/completed?limit=20&cursor=completed-cursor",
+    ))).toBe(true);
+  });
+
   it("clears private rows and claim controls when the browser credential changes", async () => {
     let currentMe: unknown = meEditor;
     stubFetch({
       [`${API}/v1/me`]: () => ({ status: 200, body: currentMe }),
+      [`${API}/v1/projects/${PROJECT}/work-items/completed`]: () =>
+        currentMe === meEditor
+          ? { status: 200, body: { items: [], nextCursor: null } }
+          : { status: 403, body: { detail: "work:read required" } },
       [`${API}/v1/projects/${PROJECT}/work-items`]: () =>
         currentMe === meEditor
           ? { status: 200, body: { items: [workItem()], nextCursor: null } }

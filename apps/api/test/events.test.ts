@@ -10,6 +10,7 @@ import {
   devLogin,
   jsonRequest,
   makeHarness,
+  mintCanonicalToken,
   type TestHarness,
 } from "./helpers.js";
 
@@ -389,6 +390,345 @@ describe("event feed", () => {
       internalLeaseToken: "must-not-cross-public-boundary",
     });
     pub.close();
+  });
+
+  it("gives zero-capability tokens an empty projected poll page and advances the cursor", async () => {
+    const owner = await devLogin(h, "event-zero-owner", "maintainer");
+    const agent = await mintCanonicalToken(h, owner, [], "event-zero-agent");
+    const after = await h.repos.events.latestId(h.projectId);
+    await h.repos.events.append({
+      projectId: h.projectId,
+      type: "annotation_created",
+      payload: {
+        annotationId: "comment-hidden",
+        chapterId: "chapter-hidden",
+        kind: "comment",
+        internalSecret: "must-not-cross-token-boundary",
+      },
+      createdAt: "2026-07-22T12:00:01Z",
+    });
+    await h.repos.events.append({
+      projectId: h.projectId,
+      type: "revision_proposal_created",
+      payload: { proposalId: "proposal-hidden", chapterId: "chapter-hidden" },
+      createdAt: "2026-07-22T12:00:02Z",
+    });
+    const last = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "agents_paused",
+      payload: { affectedTokens: 7, internalSecret: "control-plane-secret" },
+      createdAt: "2026-07-22T12:00:03Z",
+    });
+
+    const response = await h.app.request(`${eventsPath(h)}?poll=1&after=${after}`, {
+      headers: { Authorization: `Bearer ${agent.token}` },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      items: unknown[];
+      latestId: number;
+    };
+    expect(body.items).toEqual([]);
+    expect(body.latestId).toBe(last.id);
+    expect(JSON.stringify(body)).not.toContain("must-not-cross-token-boundary");
+    expect(JSON.stringify(body)).not.toContain("control-plane-secret");
+  });
+
+  it("projects token polling by adjacent read capability and strips additive fields", async () => {
+    const owner = await devLogin(h, "event-adjacent-owner", "maintainer");
+    const commentAgent = await mintCanonicalToken(
+      h,
+      owner,
+      ["comments:read"],
+      "event-comment-reader",
+    );
+    const workAgent = await mintCanonicalToken(
+      h,
+      owner,
+      ["work:read"],
+      "event-work-reader",
+    );
+    const revisionAgent = await mintCanonicalToken(
+      h,
+      owner,
+      ["revisions:read"],
+      "event-revision-reader",
+    );
+    const after = await h.repos.events.latestId(h.projectId);
+    const comment = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "annotation_created",
+      payload: {
+        annotationId: "comment-visible",
+        chapterId: "chapter-one",
+        kind: "comment",
+        scope: "block",
+        internalSecret: "comment-private-field",
+      },
+      createdAt: "2026-07-22T12:00:01Z",
+    });
+    const suggestion = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "annotation_created",
+      payload: {
+        annotationId: "suggestion-visible",
+        chapterId: "chapter-one",
+        kind: "suggestion",
+        scope: "range",
+        internalSecret: "suggestion-private-field",
+      },
+      createdAt: "2026-07-22T12:00:02Z",
+    });
+    const work = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "work_item_completed",
+      payload: {
+        workItemId: "work-visible",
+        submissionId: "submission-visible",
+        chapterId: "chapter-one",
+        revision: 4,
+        revisionProposalId: "proposal-cross-domain",
+        internalSecret: "work-private-field",
+      },
+      createdAt: "2026-07-22T12:00:03Z",
+    });
+    const revision = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "revision_proposal_created",
+      payload: {
+        proposalId: "proposal-visible",
+        chapterId: "chapter-one",
+        targetKind: "chapter",
+        proposalType: "chapter_replacement",
+        internalSecret: "revision-private-field",
+      },
+      createdAt: "2026-07-22T12:00:04Z",
+    });
+    await h.repos.events.append({
+      projectId: h.projectId,
+      type: "project_frozen",
+      payload: { internalSecret: "control-private-field" },
+      createdAt: "2026-07-22T12:00:05Z",
+    });
+
+    const poll = async (token: string) => {
+      const response = await h.app.request(`${eventsPath(h)}?poll=1&after=${after}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        items: { id: number; type: string; payload: Record<string, unknown> }[];
+      };
+    };
+
+    const comments = await poll(commentAgent.token);
+    expect(comments.items.map((event) => event.id)).toEqual([comment.id]);
+    expect(comments.items[0]?.payload).toEqual({
+      annotationId: "comment-visible",
+      kind: "comment",
+      scope: "block",
+    });
+
+    const workOnly = await poll(workAgent.token);
+    expect(workOnly.items.map((event) => event.id)).toEqual([work.id]);
+    expect(workOnly.items[0]?.payload).toEqual({
+      workItemId: "work-visible",
+      submissionId: "submission-visible",
+    });
+
+    const revisions = await poll(revisionAgent.token);
+    expect(revisions.items.map((event) => event.id)).toEqual([revision.id]);
+    expect(revisions.items[0]?.payload).toEqual({
+      proposalId: "proposal-visible",
+      targetKind: "chapter",
+      proposalType: "chapter_replacement",
+    });
+    const serialized = JSON.stringify({ comments, workOnly, revisions });
+    expect([
+      ...comments.items.map((event) => event.id),
+      ...workOnly.items.map((event) => event.id),
+      ...revisions.items.map((event) => event.id),
+    ]).not.toContain(suggestion.id);
+    expect(serialized).not.toContain("private-field");
+    expect(serialized).not.toContain("proposal-cross-domain");
+  });
+
+  it("projects production Work promotion and cancellation by exact token domain", async () => {
+    const maintainer = await devLogin(h, "event-work-maintainer", "maintainer");
+    const workToken = await mintCanonicalToken(
+      h,
+      maintainer,
+      ["work:read"],
+      "event-work-reader",
+    );
+    const feedbackToken = await mintCanonicalToken(h, maintainer, [
+      "comments:read",
+      "suggestions:read",
+    ], "event-feedback-reader");
+    const combinedToken = await mintCanonicalToken(h, maintainer, [
+      "suggestions:read",
+      "work:read",
+    ], "event-combined-reader");
+
+    const annotationId = await createOpenSuggestion(h, cookie);
+    const beforePromotion = await h.repos.events.latestId(h.projectId);
+    const promoted = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${annotationId}/force-create-work-item`,
+      jsonRequest("POST", {}, { Cookie: maintainer }),
+    );
+    expect(promoted.status).toBe(201);
+    const promotion = (await promoted.json()) as {
+      workItemId: string;
+      operationIds: string[];
+    };
+
+    const poll = async (token: string, after: number) => {
+      const response = await h.app.request(`${eventsPath(h)}?poll=1&after=${after}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        items: { type: string; payload: Record<string, unknown> }[];
+        latestId: number;
+      };
+    };
+
+    const workPromotion = await poll(workToken.token, beforePromotion);
+    expect(workPromotion.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "decision_created",
+          payload: { workItemId: promotion.workItemId },
+        }),
+        expect.objectContaining({
+          type: "work_item_created",
+          payload: expect.objectContaining({ workItemId: promotion.workItemId }),
+        }),
+      ]),
+    );
+    const workCreated = workPromotion.items.find((event) => event.type === "work_item_created");
+    expect(workCreated?.payload).not.toHaveProperty("annotationId");
+    expect(workCreated?.payload).not.toHaveProperty("chapterId");
+    expect(workCreated?.payload).not.toHaveProperty("baseRevision");
+
+    const combinedPromotion = await poll(combinedToken.token, beforePromotion);
+    expect(
+      combinedPromotion.items.find((event) => event.type === "work_item_created")?.payload,
+    ).toMatchObject({
+      workItemId: promotion.workItemId,
+      annotationId,
+    });
+    const feedbackPromotion = await poll(feedbackToken.token, beforePromotion);
+    expect(feedbackPromotion.items.some((event) => event.type === "work_item_created")).toBe(false);
+    expect(
+      feedbackPromotion.items.find((event) => event.type === "decision_created")?.payload,
+    ).not.toHaveProperty("workItemId");
+
+    expect(
+      (await h.app.request(
+        `/v1/projects/${h.projectId}/operations/${promotion.operationIds[0]}`,
+        { headers: { Authorization: `Bearer ${workToken.token}` } },
+      )).status,
+    ).toBe(200);
+
+    const beforeCancellation = workPromotion.latestId;
+    const cancelled = await h.app.request(
+      `/v1/projects/${h.projectId}/work-items/${promotion.workItemId}/cancel`,
+      jsonRequest("POST", { reason: "superseded" }, { Cookie: maintainer }),
+    );
+    expect(cancelled.status).toBe(200);
+    const cancellation = (await cancelled.json()) as { operationIds: string[] };
+
+    const workCancellation = await poll(workToken.token, beforeCancellation);
+    expect(workCancellation.items).toEqual([
+      expect.objectContaining({
+        type: "decision_created",
+        payload: expect.objectContaining({
+          workItemId: promotion.workItemId,
+          result: "overridden",
+          override: "cancel",
+        }),
+      }),
+    ]);
+    expect((await poll(feedbackToken.token, beforeCancellation)).items).toEqual([]);
+
+    const cancelOperation = `/v1/projects/${h.projectId}/operations/${cancellation.operationIds[0]}`;
+    expect((await h.app.request(cancelOperation, {
+      headers: { Authorization: `Bearer ${workToken.token}` },
+    })).status).toBe(200);
+    expect((await h.app.request(cancelOperation, {
+      headers: { Authorization: `Bearer ${feedbackToken.token}` },
+    })).status).toBe(403);
+  });
+
+  it("projects token SSE across a full hidden page without exposing hidden payloads", async () => {
+    const owner = await devLogin(h, "event-sse-owner", "maintainer");
+    const zero = await mintCanonicalToken(h, owner, [], "event-sse-zero");
+    const comments = await mintCanonicalToken(
+      h,
+      owner,
+      ["comments:read"],
+      "event-sse-comments",
+    );
+    const after = await h.repos.events.latestId(h.projectId);
+    for (let index = 0; index < 101; index += 1) {
+      await h.repos.events.append({
+        projectId: h.projectId,
+        type: "project_diverged",
+        payload: { internalSecret: `hidden-control-${index}` },
+        createdAt: `2026-07-22T12:00:${String(index % 60).padStart(2, "0")}Z`,
+      });
+    }
+    const visible = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "annotation_created",
+      payload: {
+        annotationId: "sse-comment-visible",
+        chapterId: "chapter-one",
+        kind: "comment",
+        scope: "chapter",
+        internalSecret: "sse-private-field",
+      },
+      createdAt: "2026-07-22T12:01:59Z",
+    });
+    const hiddenSuggestion = await h.repos.events.append({
+      projectId: h.projectId,
+      type: "annotation_created",
+      payload: {
+        annotationId: "sse-suggestion-hidden",
+        chapterId: "chapter-one",
+        kind: "suggestion",
+        scope: "range",
+      },
+      createdAt: "2026-07-22T12:02:00Z",
+    });
+
+    const zeroResponse = await h.app.request(eventsPath(h), {
+      headers: {
+        Authorization: `Bearer ${zero.token}`,
+        "Last-Event-ID": String(after),
+      },
+    });
+    expect(zeroResponse.status).toBe(200);
+    const zeroText = await readStream(zeroResponse, 120);
+    expect(zeroText).not.toContain("event:");
+    expect(zeroText).not.toContain("hidden-control");
+    expect(zeroText).toContain(`id: ${hiddenSuggestion.id}`);
+
+    const commentResponse = await h.app.request(eventsPath(h), {
+      headers: {
+        Authorization: `Bearer ${comments.token}`,
+        "Last-Event-ID": String(after),
+      },
+    });
+    expect(commentResponse.status).toBe(200);
+    const text = await readStream(commentResponse, 200);
+    expect(text).toContain(`id: ${visible.id}`);
+    expect(text).toContain("event: annotation_created");
+    expect(text).toContain("sse-comment-visible");
+    expect(text).not.toContain("sse-suggestion-hidden");
+    expect(text).not.toContain("hidden-control");
+    expect(text).not.toContain("sse-private-field");
   });
 
   it("refuses anonymous SSE so EventSource falls back to filtered polling", async () => {

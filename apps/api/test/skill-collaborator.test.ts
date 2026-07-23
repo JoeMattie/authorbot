@@ -16,6 +16,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import YAML from "yaml";
+import { EDITORIAL_CAPABILITIES } from "@authorbot/domain";
 import { API_SCOPES } from "../src/api-scopes.js";
 
 const SKILL_DIR = fileURLToPath(
@@ -74,19 +75,41 @@ describe("the collaborator skill matches the API", () => {
     expect(unknown, `paths documented but not in the spec: ${unknown.join(", ")}`).toEqual([]);
   });
 
-  it("mentions only scopes that are real, mintable API scopes", () => {
-    // A scope is `<resource>:<verb>` where the resource is one Authorbot
+  it("mentions only capabilities or compatibility scopes that the API knows", () => {
+    // An authority name is `<resource>:<verb>` where the resource is one Authorbot
     // actually has. This deliberately excludes markers like `authorbot:block`,
     // which are not scopes; the point is that a scope the skill *names as a
     // scope* is real, not that every colon in the docs is one.
-    const RESOURCES = ["chapters", "annotations", "work", "submissions", "tokens", "members", "votes"];
+    const RESOURCES = [
+      "chapters",
+      "comments",
+      "suggestions",
+      "replies",
+      "feedback",
+      "work",
+      "summaries",
+      "revisions",
+      "history",
+      "annotations",
+      "submissions",
+      "tokens",
+      "members",
+      "votes",
+    ];
     const re = new RegExp(`\`((?:${RESOURCES.join("|")}):[a-z]+)\``, "g");
     const scopeShaped = new Set([...allText.matchAll(re)].map((m) => m[1] ?? ""));
-    const known = new Set<string>(API_SCOPES);
+    const known = new Set<string>([...API_SCOPES, ...EDITORIAL_CAPABILITIES]);
     const unknown = [...scopeShaped].filter((s) => !known.has(s));
-    expect(unknown, `scope-shaped tokens not in API_SCOPES: ${unknown.join(", ")}`).toEqual([]);
-    // And the skill must actually mention some scopes, or this asserts nothing.
+    expect(unknown, `authority names unknown to the API: ${unknown.join(", ")}`).toEqual([]);
+    // And the skill must actually mention some names, or this asserts nothing.
     expect(scopeShaped.size).toBeGreaterThan(0);
+  });
+
+  it("documents every canonical editorial capability", () => {
+    const api = readFileSync(`${SKILL_DIR}references/api.md`, "utf8");
+    for (const capability of EDITORIAL_CAPABILITIES) {
+      expect(api, `missing capability ${capability}`).toContain(`\`${capability}\``);
+    }
   });
 
   it("documents the direct chapter-draft schema without requiring endpoint probing", () => {
@@ -110,6 +133,34 @@ describe("the collaborator skill matches the API", () => {
     expect(python).toContain('USER_AGENT = "authorbot-agent/1.0"');
     expect(python).toContain('"title": title, "body": body');
     expect(python).toContain('/chapter-submissions"');
+    expect(python).toContain('"chapters:write" in effective');
+    expect(python).toContain("for attempt in range(3)");
+  });
+
+  it("documents exact feedback, Work, revision, planning, and history schemas", () => {
+    const api = readFileSync(`${SKILL_DIR}references/api.md`, "utf8");
+    expect(api).toContain('"kind": "suggestion"');
+    expect(api).toContain('"scope": "range"');
+    expect(api).toContain('"textPosition": { "start": 48, "end": 74 }');
+    expect(api).toContain('"leaseToken": "..."');
+    expect(api).toContain('"proposalType": "chapter_replacement"');
+    expect(api).toContain('"proposalType": "chapter_summary"');
+    expect(api).toContain(
+      "Propose a chapter summary - capabilities `chapters:read` and `summaries:write`",
+    );
+    expect(api).toContain('Use `"proposedContent": ""` to remove');
+    expect(api).toContain('"proposalType": "repository_document"');
+    expect(api).toContain("/history/{revision}/restore");
+  });
+
+  it("documents the bounded story-bible routes without guessed storyRefs paths", () => {
+    const api = readFileSync(`${SKILL_DIR}references/api.md`, "utf8");
+    expect(api).toContain("/v1/projects/{project}/story/outline");
+    expect(api).toContain("/v1/projects/{project}/story/timeline");
+    expect(api).toContain("/v1/projects/{project}/story/characters?limit=20&cursor=");
+    expect(api).toContain('"storyApi": {');
+    expect(api).toContain("Follow `nextCursor` until it is `null`");
+    expect(api).toContain("never probe `/story`, `/story-refs`");
   });
 });
 

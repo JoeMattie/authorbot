@@ -10,14 +10,18 @@
  */
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import type { ProjectRecord, Repositories } from "@authorbot/database";
+import type { AgentTokenRecord, ProjectRecord, Repositories } from "@authorbot/database";
 import {
   checkTokenActive,
   isAgentTokenFormat,
   shouldUpdateLastUsed,
   toTimestamp,
 } from "@authorbot/domain";
-import type { PolicyCapability } from "@authorbot/domain";
+import type {
+  EditorialCapability,
+  LegacyCompatibilityAction,
+  PolicyCapability,
+} from "@authorbot/domain";
 import {
   SAFE_METHODS,
   capabilityForScope,
@@ -28,7 +32,11 @@ import {
   type AccessState,
   type WriteSurface,
 } from "./access-control.js";
-import { apiEffectiveScopes, apiRoleScopes, type ApiScope } from "./api-scopes.js";
+import {
+  sessionCapabilityProjection,
+  tokenCapabilityProjection,
+  type ApiScope,
+} from "./api-scopes.js";
 import { sha256Hex, timingSafeEqual } from "./crypto.js";
 import { consumeRateLimit, rateLimitClassFor, rateLimitedProblem } from "./rate-limit.js";
 import type { AppEnv, AuthContext, Clock } from "./deps.js";
@@ -60,7 +68,14 @@ async function authenticateBearer(
     return null;
   }
   const hash = await sha256Hex(presented);
-  const token = await services.repos.agentTokens.getByTokenHash(hash);
+  let token: AgentTokenRecord | null;
+  try {
+    token = await services.repos.agentTokens.getByTokenHash(hash);
+  } catch {
+    // A malformed JSON grant or an unknown capability mode is an invalid
+    // credential, never an excuse to fall back to the legacy shadow column.
+    return null;
+  }
   // Belt and braces: the unique-index lookup already matched, but compare
   // digests in constant time as the authorization decision.
   if (token === null || !timingSafeEqual(hash, token.tokenHash)) {
@@ -86,13 +101,14 @@ async function authenticateBearer(
     actor.id,
   );
   const membership = membershipRow !== null && membershipRow.revokedAt === null ? membershipRow : null;
+  const projection = tokenCapabilityProjection(token, membership?.role ?? null);
   return {
     kind: "token",
     actor,
     actorRef: actorRefOf(actor),
     membership,
     role: membership?.role ?? null,
-    scopes: membership !== null ? apiEffectiveScopes(token.scopes, membership.role) : [],
+    ...projection,
     tokenId: token.id,
   };
 }
@@ -124,13 +140,14 @@ async function authenticateSession(
       ? null
       : await services.repos.projectMemberships.getByProjectAndActor(project.id, actor.id);
   const membership = membershipRow !== null && membershipRow.revokedAt === null ? membershipRow : null;
+  const projection = sessionCapabilityProjection(membership?.role ?? null);
   return {
     kind: "session",
     actor,
     actorRef: actorRefOf(actor),
     membership,
     role: membership?.role ?? null,
-    scopes: membership !== null ? [...apiRoleScopes(membership.role)] : [],
+    ...projection,
     sessionId: session.id,
   };
 }
@@ -208,6 +225,17 @@ export function authOf(c: Context<AppEnv>): AuthContext {
   return auth;
 }
 
+/** Token-management is an ambient-session control surface, never delegable. */
+export function requireHumanSession(
+  c: Context<AppEnv>,
+  detail = "agent-token credentials cannot manage agent tokens",
+): Response | null {
+  if (authOf(c).kind === "token") {
+    return problem(c, "forbidden", { detail });
+  }
+  return null;
+}
+
 /**
  * Options a route uses to describe the kind of write it is (Phase 7).
  *
@@ -249,6 +277,44 @@ export interface ProjectGuardOptions {
    * them.
    */
   skipRateLimit?: boolean;
+  /**
+   * Exact Phase 11 editorial authority for this endpoint. Every named
+   * capability is required, so callers include prerequisite reads here too.
+   *
+   * Canonical tokens and human sessions use their canonical effective set.
+   * Legacy tokens retain the ordinary `scope` argument's old meaning; the
+   * three old maintainer-only compatibility actions must additionally name
+   * their source-tagged action so they cannot masquerade as canonical grants.
+   */
+  editorial?: EditorialGuardRequirement;
+}
+
+export interface EditorialGuardRequirement {
+  capabilities: readonly EditorialCapability[];
+  legacyAction?: LegacyCompatibilityAction;
+}
+
+/** Credential-only half of the exact editorial guard (project gates live below). */
+export function hasEditorialAuthority(
+  auth: AuthContext,
+  legacyScope: ApiScope | null,
+  requirement: EditorialGuardRequirement,
+): boolean {
+  if (auth.kind === "token" && auth.capabilityMode === "legacy") {
+    if (legacyScope === null || !auth.scopes.includes(legacyScope)) {
+      return false;
+    }
+    return (
+      requirement.legacyAction === undefined ||
+      auth.legacyEffectiveActions.some(
+        ({ action }) => action === requirement.legacyAction,
+      )
+    );
+  }
+
+  return requirement.capabilities.every((capability) =>
+    auth.effectiveCapabilities.includes(capability),
+  );
 }
 
 /**
@@ -312,10 +378,30 @@ export async function requireProjectScope(
       response: problem(c, "forbidden", { detail: "actor is not a member of this project" }),
     };
   }
-  if (scope !== null && !admitsNonMember && !auth.scopes.includes(scope)) {
-    return {
-      response: problem(c, "forbidden", { detail: `actor lacks required scope "${scope}"` }),
-    };
+  if (!admitsNonMember) {
+    if (
+      options.editorial !== undefined &&
+      !hasEditorialAuthority(auth, scope, options.editorial)
+    ) {
+      return {
+        response: problem(c, "forbidden", {
+          detail:
+            "actor lacks required editorial capabilities: " +
+            options.editorial.capabilities.join(", "),
+        }),
+      };
+    }
+    if (
+      options.editorial === undefined &&
+      scope !== null &&
+      !auth.scopes.includes(scope)
+    ) {
+      return {
+        response: problem(c, "forbidden", {
+          detail: `actor lacks required scope "${scope}"`,
+        }),
+      };
+    }
   }
 
   if (access !== null && mutating) {

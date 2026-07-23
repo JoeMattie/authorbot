@@ -243,7 +243,11 @@ export async function devLogin(page: Page, login: string, role: string): Promise
   await form.locator('input[name="login"]').fill(login);
   await form.locator("select").selectOption(role);
   await form.locator('button[type="submit"]').click();
-  await page.locator(".ab-me", { hasText: `Signed in as ${login}` }).waitFor();
+  await page
+    .locator(".ab-account-who, .ab-me")
+    .filter({ hasText: login })
+    .first()
+    .waitFor();
 }
 
 /**
