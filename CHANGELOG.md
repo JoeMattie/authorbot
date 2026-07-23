@@ -29,8 +29,14 @@ always the same commit.
   Tokens can independently read and write comments and suggestions, vote,
   reply, work a lease, submit revisions, review proposals, read history, and
   update summaries within their role ceiling. Control-plane authority remains
-  human-only. The collaborator skill documents these workflows and exposes a
-  bounded story-bible API so agents do not have to probe a deployed site.
+  human-only. Token event feeds and operation polling now enforce those same
+  exact read capabilities instead of exposing unrelated project activity. The
+  collaborator skill documents these workflows and exposes a bounded
+  story-bible API so agents do not have to probe a deployed site.
+- **Editors load reliably on nested and mobile sites.** Books served from a
+  base path keep lazy editor styles under that path. Mobile note forms stay
+  reachable beside their manuscript target, and rich Notes rerenders replace
+  the existing composer instead of duplicating it.
 - **Chapter context is easier to understand and recover.** Chapter rows show
   open feedback and Work counts, summaries flow into the authenticated and
   published Outline views, contributors link to the accepted revisions that
