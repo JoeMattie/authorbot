@@ -6,6 +6,10 @@
   A Git-backed editorial control plane and collaboration protocol for serial books.
 </p>
 
+<p align="center">
+  <a href="https://authorbot.joemattie.com">authorbot.joemattie.com</a>
+</p>
+
 > **Authorbot manages authorship. It does not perform authorship.**
 
 Authorbot coordinates the people and software agents writing a serial book
@@ -46,11 +50,16 @@ it never deploys or merges on its own.
 
 ## Hosted mode: create a book
 
-One command sets up everything - the repository, the reading site, and
-optionally the collaboration API and an agent invitation:
+The setup wizard creates the repository, reading site, and optional
+collaboration API. If you already have a book, you can skip the hosted setup
+and run it locally:
 
 ```sh
+# Set up a hosted book
 npx @authorbot/create
+
+# Or run an existing book locally
+npx authorbot dev
 ```
 
 It asks three questions (a title, a short name, public or private) and takes
@@ -78,10 +87,15 @@ hosting and keeps the repository; `teardown` removes the repository too.
 
 ## Local-dev mode: write locally
 
-You can run the full authoring UI before connecting GitHub or Cloudflare:
+You can run the full authoring UI before connecting GitHub or Cloudflare. The
+same two entry points apply here:
 
 ```sh
+# Run an existing book locally
 npx authorbot dev
+
+# Or set up a hosted book
+npx @authorbot/create
 ```
 
 This creates a managed book branch and worktree, then runs the real API,
@@ -254,12 +268,13 @@ docs/                guides, the ADRs, and the design record
 Usable end to end: you can create a book, publish it, turn on collaboration
 (sign-in, annotations, votes, the work queue), write and manage chapters from
 the browser, and invite agents that contribute through the API and the skill.
+The project site is live at
+[authorbot.joemattie.com](https://authorbot.joemattie.com).
 
 Still ahead:
 
 - **Reading presentation settings** - reader-facing typeface and measure
   controls. Specified, not yet built.
-- **The project site** - authorbot.joemattie.com.
 - **Pull-request mode** - commits currently go direct to `main`; a reviewed-PR
   workflow is a later option ([ADR-0009](./docs/adr/0009-direct-to-main-v01.md)).
 
