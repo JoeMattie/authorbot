@@ -237,5 +237,26 @@ describe("Phase 11 bounded chapter history", () => {
         })
       ).status,
     ).toBe(403);
+    expect(
+      (
+        await h.app.request(
+          `${historyPath("/1")}/restore`,
+          jsonRequest("POST", {}, { Authorization: `Bearer ${writeOnly.token}` }),
+        )
+      ).status,
+    ).toBe(403);
+
+    const restore = await mintCanonicalToken(h, maintainer, [
+      "history:read",
+      "revisions:write",
+    ]);
+    expect(
+      (
+        await h.app.request(
+          `${historyPath("/1")}/restore`,
+          jsonRequest("POST", {}, { Authorization: `Bearer ${restore.token}` }),
+        )
+      ).status,
+    ).toBe(201);
   });
 });

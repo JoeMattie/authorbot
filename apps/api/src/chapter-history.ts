@@ -376,7 +376,11 @@ export function registerChapterHistoryRoutes(ctx: ChapterHistoryContext): void {
     auth,
     idem,
     async (c) => {
-      const allowed = await guard(c, ["revisions:write"]);
+      // A restore request reads deliberately removed or unpublished prose
+      // before retaining it in a revision proposal. Requiring only proposal
+      // write would let a token pair `revisions:write` with `revisions:read`
+      // and use the new proposal as a history-read side channel.
+      const allowed = await guard(c, ["history:read", "revisions:write"]);
       if ("response" in allowed) return allowed.response;
       const parsedRevision = revisionParamSchema.safeParse(c.req.param("revision"));
       if (!parsedRevision.success) {

@@ -468,7 +468,7 @@ Reading removed or unpublished older prose requires `history:read`:
   `compare=current` to compare selected text with current instead.
 
 `POST /v1/projects/{project}/chapters/{chapterId}/history/{revision}/restore`
-with `{}` requires `revisions:write` and returns `201 { proposalId,
+with `{}` requires both `history:read` and `revisions:write` and returns `201 { proposalId,
 status: "pending_review" }`. It creates a proposal against current prose. It
 never rewinds Git or applies immediately.
 

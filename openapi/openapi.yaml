@@ -934,7 +934,7 @@ paths:
       tags: [chapters, revisions]
       summary: Propose restoring an older chapter snapshot.
       description: >-
-        Requires `revisions:write`. This never rewinds Git or applies text
+        Requires both `history:read` and `revisions:write`. This never rewinds Git or applies text
         immediately: it creates an immutable `chapter_replacement` proposal
         with origin `history_restore` against the current chapter revision.
       parameters:
