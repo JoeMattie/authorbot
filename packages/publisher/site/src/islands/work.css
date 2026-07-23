@@ -542,6 +542,10 @@ body:has(.work-page) main {
   font: 500 14px/1.55 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
+.work-page .ab-submit-syncing {
+  border-left-style: dashed;
+}
+
 .work-page .ab-submit-completed {
   border-left-color: var(--green-500, #35ab64);
   background: var(--tint-success, rgb(53 171 100 / 16%));

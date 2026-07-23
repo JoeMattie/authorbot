@@ -79,6 +79,7 @@ authorbot-manuscript-editor:empty {
 }
 
 .ab-manuscript-notes {
+  min-height: 9rem;
   resize: vertical;
 }
 
