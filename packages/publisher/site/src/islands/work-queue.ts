@@ -14,7 +14,7 @@
  * markup is the chapter link, whose href comes from the build-time chapter map
  * (trusted), never from API data. The lease token is never rendered.
  */
-import { type Me, type WorkItem } from "./api.js";
+import { type CompletedWorkItem, type Me, type WorkItem } from "./api.js";
 import { el, srOnly } from "./dom.js";
 import { tallyOrEmpty, tallySummary } from "./vote-view.js";
 import { ClaimPanel, typeLabel, workTypeIcon, type ChapterRef } from "./work-claim.js";
@@ -76,6 +76,9 @@ export class AuthorbotWorkQueue extends HTMLElement {
   private status!: HTMLElement;
   private live!: HTMLElement;
   private moreWrap!: HTMLElement;
+  private completedList!: HTMLElement;
+  private completedStatus!: HTMLElement;
+  private completedMoreWrap!: HTMLElement;
   private panel: ClaimPanel | null = null;
   private cursor: string | null = null;
   private count = 0;
@@ -86,6 +89,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
   private claimErrors = new Map<string, string>();
   private recoveryError: string | null = null;
   private renderedQueueProjection: string | null = null;
+  private renderedCompletedProjection: string | null = null;
 
   /** Injected by tests; `Date.now` in the browser. */
   now: () => number = () => Date.now();
@@ -155,6 +159,9 @@ export class AuthorbotWorkQueue extends HTMLElement {
     }
     await this.load(true, generation, store);
     if (!this.isCurrentMount(generation)) return;
+    await store.getState().ensureCompletedWorkItems();
+    if (!this.isCurrentMount(generation)) return;
+    this.renderCompletedFromStore();
     this.unsubscribe = store.subscribe(() => {
       this.syncFromStore(generation, store);
     });
@@ -173,6 +180,7 @@ export class AuthorbotWorkQueue extends HTMLElement {
     if (state.sessionStatus === "error") {
       this.me = null;
       this.clearQueue("Work queue unavailable. Sign in again to continue.");
+      this.clearCompleted("Completed work unavailable. Sign in again to continue.");
       return;
     }
     if (state.sessionStatus !== "ready") return;
@@ -180,13 +188,9 @@ export class AuthorbotWorkQueue extends HTMLElement {
     if (state.workItemsStatus === "idle") {
       this.clearQueue("Loading work…");
       void state.ensureWorkItems();
-      return;
-    }
-    if (state.workItemsStatus === "ready") {
+    } else if (state.workItemsStatus === "ready") {
       this.renderQueueFromStore();
-      return;
-    }
-    if (state.workItemsStatus === "error") {
+    } else if (state.workItemsStatus === "error") {
       this.clearQueue(
         state.session === null
           ? "Sign in with an editor (or higher) role to view work."
@@ -194,6 +198,12 @@ export class AuthorbotWorkQueue extends HTMLElement {
             ? `Work queue unavailable: ${state.workItemsError ?? "request failed"}`
             : "Your role cannot view the work queue.",
       );
+    }
+    if (state.completedWorkItemsStatus === "idle") {
+      this.clearCompleted("Loading completed work…");
+      void state.ensureCompletedWorkItems();
+    } else {
+      this.renderCompletedFromStore();
     }
   }
 
@@ -208,6 +218,16 @@ export class AuthorbotWorkQueue extends HTMLElement {
     this.syncGlobalCount();
     this.status.hidden = false;
     this.status.textContent = message;
+  }
+
+  private clearCompleted(message: string): void {
+    const projection = `clear:${message}`;
+    if (this.renderedCompletedProjection === projection) return;
+    this.renderedCompletedProjection = projection;
+    this.completedList.textContent = "";
+    this.completedMoreWrap.hidden = true;
+    this.completedStatus.hidden = false;
+    this.completedStatus.textContent = message;
   }
 
   private canClaim(): boolean {
@@ -349,6 +369,50 @@ export class AuthorbotWorkQueue extends HTMLElement {
     }
   }
 
+  private renderCompletedFromStore(): void {
+    const state = this.store.getState();
+    const projection = JSON.stringify([
+      state.completedWorkItemsStatus,
+      state.completedWorkItemsError,
+      state.completedWorkItemsNextCursor,
+      state.completedWorkItemIds.map((id) => state.completedWorkItemsById[id] ?? null),
+    ]);
+    if (projection === this.renderedCompletedProjection) return;
+    this.renderedCompletedProjection = projection;
+
+    if (state.completedWorkItemsStatus === "error") {
+      this.completedStatus.hidden = false;
+      this.completedStatus.textContent =
+        state.session === null
+          ? "Sign in with an editor (or higher) role to view completed work."
+          : state.session.scopes.includes("work:read")
+            ? `Completed work unavailable: ${state.completedWorkItemsError ?? "request failed"}`
+            : "Your role cannot view completed work.";
+      this.completedMoreWrap.hidden = true;
+      return;
+    }
+
+    if (state.completedWorkItemsStatus === "loading") {
+      this.completedStatus.hidden = false;
+      this.completedStatus.textContent =
+        state.completedWorkItemIds.length === 0
+          ? "Loading completed work…"
+          : "Loading more completed work…";
+      this.completedMoreWrap.hidden = true;
+      return;
+    }
+
+    this.completedList.textContent = "";
+    for (const id of state.completedWorkItemIds) {
+      const item = state.completedWorkItemsById[id];
+      if (item !== undefined) this.completedList.append(this.buildCompletedItem(item));
+    }
+    const empty = state.completedWorkItemIds.length === 0;
+    this.completedStatus.hidden = !empty;
+    this.completedStatus.textContent = empty ? "No completed work yet." : "";
+    this.completedMoreWrap.hidden = state.completedWorkItemsNextCursor === null;
+  }
+
   /** Re-read the queue from the top (after a claim, release, or completion). */
   private async reload(
     generation = this.mountGeneration,
@@ -380,6 +444,26 @@ export class AuthorbotWorkQueue extends HTMLElement {
     });
     this.moreWrap.append(more);
 
+    this.completedStatus = el("p", "ab-work-status ab-completed-status");
+    this.completedStatus.setAttribute("role", "status");
+    this.completedStatus.textContent = "Loading completed work…";
+    this.completedList = el("ul", "ab-work-list ab-completed-list");
+    this.completedMoreWrap = el("div", "ab-work-more ab-completed-more");
+    this.completedMoreWrap.hidden = true;
+    const moreCompleted = el("button", "ab-btn ab-completed-more-button", "Load more completed work");
+    moreCompleted.type = "button";
+    moreCompleted.addEventListener("click", () => {
+      moreCompleted.disabled = true;
+      moreCompleted.setAttribute("aria-busy", "true");
+      void store.getState().loadMoreCompletedWorkItems().finally(() => {
+        if (!this.isCurrentMount(generation)) return;
+        moreCompleted.disabled = false;
+        moreCompleted.removeAttribute("aria-busy");
+        this.renderCompletedFromStore();
+      });
+    });
+    this.completedMoreWrap.append(moreCompleted);
+
     this.panel = new ClaimPanel({
       store: this.store,
       project: this.cfg.project,
@@ -396,7 +480,29 @@ export class AuthorbotWorkQueue extends HTMLElement {
       },
     });
 
-    this.append(this.live, this.panel.root, this.status, this.list, this.moreWrap);
+    const active = el("section", "ab-work-active");
+    active.setAttribute("aria-labelledby", "ab-work-active-heading");
+    const activeHeading = el("h2", "ab-work-section-heading", "Open work");
+    activeHeading.id = "ab-work-active-heading";
+    active.append(activeHeading, this.panel.root, this.status, this.list, this.moreWrap);
+
+    const completed = el("section", "ab-work-completed");
+    completed.setAttribute("aria-labelledby", "ab-work-completed-heading");
+    const completedHeading = el("h2", "ab-work-section-heading", "Completed work");
+    completedHeading.id = "ab-work-completed-heading";
+    completed.append(
+      completedHeading,
+      el(
+        "p",
+        "ab-work-section-intro",
+        "Recently completed tasks stay here as compact, attributed records.",
+      ),
+      this.completedStatus,
+      this.completedList,
+      this.completedMoreWrap,
+    );
+
+    this.append(this.live, active, completed);
     this.scaffolded = true;
   }
 
@@ -485,6 +591,83 @@ export class AuthorbotWorkQueue extends HTMLElement {
 
     li.append(this.buildClaimAction(item));
     li.append(srOnly(`Ready work item: ${typeLabel(item.type)} on ${chapter?.title ?? item.chapterId}`));
+    return li;
+  }
+
+  private buildCompletedItem(item: CompletedWorkItem): HTMLElement {
+    const li = el("li", "ab-work-item ab-completed-item");
+    li.dataset["workItemId"] = item.id;
+    const chapterRef = this.cfg.chapters.get(item.chapterId);
+    const chapterLabel = item.chapter?.title ?? chapterRef?.title ?? `Chapter ${item.chapterId}`;
+
+    const head = el("div", "ab-work-head");
+    const type = el("span", "ab-work-type");
+    type.append(workTypeIcon(item.type), document.createTextNode(typeLabel(item.type)));
+    head.append(type, el("span", "ab-work-status-pill ab-work-status-completed", "Completed"));
+    head.append(el("span", "ab-work-head-spacer"));
+    if (chapterRef !== undefined) {
+      const chapter = el("a", "ab-work-chapter", chapterLabel);
+      chapter.href = chapterRef.href;
+      head.append(chapter);
+    } else {
+      head.append(el("span", "ab-work-chapter", chapterLabel));
+    }
+    li.append(head);
+
+    const body = item.source?.body.trim();
+    li.append(
+      el(
+        "p",
+        "ab-work-context ab-completed-body",
+        body === undefined || body.length === 0
+          ? "The original note is no longer available."
+          : truncateStub(body, 260),
+      ),
+    );
+
+    const completedBy = item.completedBy?.displayName ?? "Unknown contributor";
+    const attribution = el("p", "ab-work-meta ab-completed-attribution");
+    attribution.append(
+      document.createTextNode(`Completed by ${completedBy} · ${formatCreatedAt(item.completedAt)}`),
+    );
+    li.append(attribution);
+
+    const metadata = el("p", "ab-work-meta ab-completed-result");
+    const parts: Node[] = [];
+    if (typeof item.resultingRevision === "number") {
+      parts.push(document.createTextNode(`Chapter revision ${item.resultingRevision}`));
+    }
+    if (typeof item.commitSha === "string" && item.commitSha.length > 0) {
+      if (parts.length > 0) parts.push(document.createTextNode(" · "));
+      const commit = el("code", "ab-work-commit", item.commitSha.slice(0, 12));
+      commit.title = item.commitSha;
+      parts.push(document.createTextNode("Commit "), commit);
+    }
+    if (item.approvedBy !== null && item.approvedBy !== undefined) {
+      if (parts.length > 0) parts.push(document.createTextNode(" · "));
+      parts.push(document.createTextNode(`Approved by ${item.approvedBy.displayName}`));
+    }
+    if (parts.length > 0) {
+      metadata.append(...parts);
+      li.append(metadata);
+    }
+
+    const links = el("p", "ab-work-actions ab-completed-links");
+    if (chapterRef !== undefined && item.source !== null) {
+      const source = el("a", "ab-btn ab-completed-source", "Source note");
+      source.href = `${chapterRef.href}#authorbot-note-${encodeURIComponent(item.sourceAnnotationId)}`;
+      links.append(source);
+    }
+    if (typeof item.revisionProposalId === "string" && item.revisionProposalId.length > 0) {
+      const revision = el("a", "ab-btn ab-completed-revision", "Review revision");
+      revision.setAttribute(
+        "href",
+        `../revisions/${encodeURIComponent(item.revisionProposalId)}/`,
+      );
+      links.append(revision);
+    }
+    if (links.childElementCount > 0) li.append(links);
+    li.append(srOnly(`Completed work item: ${typeLabel(item.type)} on ${chapterLabel}`));
     return li;
   }
 
@@ -580,6 +763,11 @@ export class AuthorbotWorkQueue extends HTMLElement {
 function formatCreatedAt(value: string): string {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? value : new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function truncateStub(value: string, limit: number): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit - 1).trimEnd()}…` : normalized;
 }
 
 /**

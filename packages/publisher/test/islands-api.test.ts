@@ -28,6 +28,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("CollabApi completed Work reads", () => {
+  it("requests one bounded page and preserves the opaque cursor", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      json({ items: [{ id: "work-complete-1" }], nextCursor: "next-completed" }, 200),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api().completedWorkItems("older than this", 20);
+
+    expect(result).toEqual({
+      ok: true,
+      value: { items: [{ id: "work-complete-1" }], nextCursor: "next-completed" },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/work-items/completed?limit=20&cursor=older+than+this`,
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe("include");
+  });
+});
+
 describe("CollabApi mutation transport", () => {
   it("reuses an exact caller-supplied idempotency key across retries", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>

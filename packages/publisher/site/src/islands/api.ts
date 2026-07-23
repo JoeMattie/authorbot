@@ -183,6 +183,38 @@ export interface WorkItem {
   support?: VoteTally;
 }
 
+/** Attribution retained on a compact completed-Work history row. */
+export interface CompletedWorkActor {
+  actorId: string;
+  type: string;
+  displayName: string;
+  externalIdentity: string | null;
+}
+
+/**
+ * A completed Work stub. The API deliberately omits submitted manuscript
+ * prose; the source note is enough context for this bounded history view.
+ */
+export interface CompletedWorkItem extends WorkItem {
+  source: {
+    kind: string;
+    scope: string;
+    body: string;
+    status: string;
+  } | null;
+  chapter: {
+    id: string;
+    title: string;
+    slug: string;
+  } | null;
+  completedBy: CompletedWorkActor | null;
+  completedAt: string;
+  resultingRevision: number | null;
+  commitSha: string | null;
+  revisionProposalId: string | null;
+  approvedBy: CompletedWorkActor | null;
+}
+
 /** One event-feed row (Phase 3 contract §5). */
 export interface FeedEvent {
   id: number;
@@ -1187,6 +1219,29 @@ export class CollabApi {
       return { ok: false, status: response.status, message: await problemMessage(response) };
     }
     const body = (await response.json()) as { items: WorkItem[]; nextCursor: string | null };
+    return { ok: true, value: { items: body.items, nextCursor: body.nextCursor ?? null } };
+  }
+
+  /** One explicit page of newest-first completed Work stubs. */
+  async completedWorkItems(
+    cursor?: string,
+    limit = 20,
+  ): Promise<ApiResult<{ items: CompletedWorkItem[]; nextCursor: string | null }>> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    let response: Response;
+    try {
+      response = await this.get(this.projectUrl(`/work-items/completed?${query.toString()}`));
+    } catch {
+      return { ok: false, status: 0, message: "network error" };
+    }
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: await problemMessage(response) };
+    }
+    const body = (await response.json()) as {
+      items: CompletedWorkItem[];
+      nextCursor: string | null;
+    };
     return { ok: true, value: { items: body.items, nextCursor: body.nextCursor ?? null } };
   }
 

@@ -20,6 +20,7 @@ import {
   type ChapterHistoryRestoreAccepted,
   type ChapterProjection,
   type ChapterSource,
+  type CompletedWorkItem,
   type CreateAnnotationAccepted,
   type FeedEvent,
   type LeaseRelease,
@@ -64,6 +65,10 @@ export interface ProjectStoreApi {
   workItems?(cursor?: string): Promise<
     ApiResult<{ items: WorkItem[]; nextCursor: string | null }>
   >;
+  completedWorkItems?(
+    cursor?: string,
+    limit?: number,
+  ): Promise<ApiResult<{ items: CompletedWorkItem[]; nextCursor: string | null }>>;
   revisionProposals?: CollabApi["revisionProposals"];
   revisionProposal?: CollabApi["revisionProposal"];
   repositoryDocumentSource?(
@@ -182,6 +187,11 @@ export interface ProjectStoreState {
   workItemIds: readonly string[];
   workItemsStatus: ResourceStatus;
   workItemsError: string | null;
+  completedWorkItemsById: Readonly<Record<string, CompletedWorkItem>>;
+  completedWorkItemIds: readonly string[];
+  completedWorkItemsStatus: ResourceStatus;
+  completedWorkItemsError: string | null;
+  completedWorkItemsNextCursor: string | null;
   revisionProposalsById: Readonly<Record<string, RevisionProposalSummary>>;
   revisionProposalIds: readonly string[];
   revisionProposalsStatus: ResourceStatus;
@@ -215,6 +225,9 @@ export interface ProjectStoreState {
   refreshReplies(annotationId: string): Promise<void>;
   ensureWorkItems(): Promise<void>;
   refreshWorkItems(): Promise<void>;
+  ensureCompletedWorkItems(): Promise<void>;
+  refreshCompletedWorkItems(): Promise<void>;
+  loadMoreCompletedWorkItems(): Promise<void>;
   ensureRevisionProposals(): Promise<void>;
   refreshRevisionProposals(): Promise<void>;
   ensureRevisionProposal(proposalId: string): Promise<void>;
@@ -291,6 +304,7 @@ export type ProjectStore = StoreApi<ProjectStoreState>;
 const CONNECTION_RETRY_BASE_MS = 500;
 const CONNECTION_RETRY_MAX_MS = 30_000;
 const MAX_WORK_ITEM_PAGES = 10;
+const COMPLETED_WORK_ITEM_PAGE_SIZE = 20;
 const MAX_REVISION_PROPOSAL_PAGES = 10;
 const MAX_CHAPTER_HISTORY_ROWS = 50;
 const MAX_CHAPTER_HISTORY_DETAILS = 8;
@@ -344,6 +358,8 @@ export function createProjectStore(
   const replyQueuedRequests = new Map<string, Promise<void>>();
   let workItemsRequest: Promise<void> | null = null;
   let workItemsQueuedRequest: Promise<void> | null = null;
+  let completedWorkItemsRequest: Promise<void> | null = null;
+  let completedWorkItemsQueuedRequest: Promise<void> | null = null;
   let revisionProposalsRequest: Promise<void> | null = null;
   let revisionProposalsQueuedRequest: Promise<void> | null = null;
   const revisionProposalRequests = new Map<string, Promise<void>>();
@@ -451,6 +467,7 @@ export function createProjectStore(
     annotations: string[];
     replies: string[];
     work: boolean;
+    completedWork: boolean;
     revisions: boolean;
     revisionDetails: string[];
     history: string[];
@@ -467,6 +484,7 @@ export function createProjectStore(
       annotations: Object.keys(state.annotationStatusByChapter),
       replies: Object.keys(state.replyStatusByAnnotation),
       work: state.workItemsStatus !== "idle",
+      completedWork: state.completedWorkItemsStatus !== "idle",
       revisions: state.revisionProposalsStatus !== "idle",
       revisionDetails: Object.keys(state.revisionProposalDetailStatusById),
       history: Object.keys(state.chapterHistoryStatusByChapter),
@@ -489,6 +507,7 @@ export function createProjectStore(
     annotationQueuedRequests.clear();
     replyQueuedRequests.clear();
     workItemsQueuedRequest = null;
+    completedWorkItemsQueuedRequest = null;
     revisionProposalsQueuedRequest = null;
     revisionProposalQueuedRequests.clear();
     chapterHistoryQueuedRequests.clear();
@@ -522,6 +541,11 @@ export function createProjectStore(
       workItemIds: [],
       workItemsStatus: "idle",
       workItemsError: null,
+      completedWorkItemsById: {},
+      completedWorkItemIds: [],
+      completedWorkItemsStatus: "idle",
+      completedWorkItemsError: null,
+      completedWorkItemsNextCursor: null,
       revisionProposalsById: {},
       revisionProposalIds: [],
       revisionProposalsStatus: "idle",
@@ -746,6 +770,10 @@ export function createProjectStore(
       jobs.push(loadWorkItems(true));
       checks.push(() => store.getState().workItemsStatus === "ready");
     }
+    if (refreshWork && store.getState().completedWorkItemsStatus !== "idle") {
+      jobs.push(loadCompletedWorkItems("refresh"));
+      checks.push(() => store.getState().completedWorkItemsStatus === "ready");
+    }
     if (revisionProposalId !== undefined) {
       if (store.getState().revisionProposalsStatus !== "idle") {
         jobs.push(loadRevisionProposals(true));
@@ -900,6 +928,7 @@ export function createProjectStore(
           for (const chapterId of reload.annotations) jobs.push(loadAnnotations(chapterId, true));
           for (const annotationId of reload.replies) jobs.push(loadReplies(annotationId, true));
           if (reload.work) jobs.push(loadWorkItems(true));
+          if (reload.completedWork) jobs.push(loadCompletedWorkItems("refresh"));
           if (reload.revisions) jobs.push(loadRevisionProposals(true));
           for (const proposalId of reload.revisionDetails) {
             jobs.push(loadRevisionProposal(proposalId, true));
@@ -1289,6 +1318,105 @@ export function createProjectStore(
       workItemsRequest = null;
     });
     return workItemsRequest;
+  };
+
+  /**
+   * Load exactly one completed-Work page. Unlike the live queue, history is
+   * intentionally user-paged so a long-running book never pulls its entire
+   * archive into one Worker invocation or browser render.
+   */
+  const loadCompletedWorkItems = (
+    mode: "ensure" | "refresh" | "more",
+  ): Promise<void> => {
+    const current = store.getState();
+    if (mode === "ensure" && current.completedWorkItemsStatus === "ready") {
+      return Promise.resolve();
+    }
+    if (mode === "more" && current.completedWorkItemsNextCursor === null) {
+      return Promise.resolve();
+    }
+    if (completedWorkItemsRequest !== null) {
+      const active = completedWorkItemsRequest;
+      if (mode === "ensure") return active;
+      if (completedWorkItemsQueuedRequest !== null) return completedWorkItemsQueuedRequest;
+      const generation = authorizationGeneration;
+      let queued!: Promise<void>;
+      const next = (): Promise<void> => {
+        if (completedWorkItemsQueuedRequest === queued) {
+          completedWorkItemsQueuedRequest = null;
+        }
+        return generation === authorizationGeneration
+          ? loadCompletedWorkItems(mode)
+          : Promise.resolve();
+      };
+      queued = active.then(next, next);
+      completedWorkItemsQueuedRequest = queued;
+      return queued;
+    }
+
+    const read = api.completedWorkItems;
+    if (read === undefined) {
+      store.setState({
+        completedWorkItemsById: {},
+        completedWorkItemIds: [],
+        completedWorkItemsStatus: "ready",
+        completedWorkItemsError: null,
+        completedWorkItemsNextCursor: null,
+      });
+      return Promise.resolve();
+    }
+
+    const cursor = mode === "more"
+      ? (current.completedWorkItemsNextCursor ?? undefined)
+      : undefined;
+    store.setState({
+      completedWorkItemsStatus: "loading",
+      completedWorkItemsError: null,
+    });
+    const generation = authorizationGeneration;
+    completedWorkItemsRequest = (async () => {
+      const result = await read.call(api, cursor, COMPLETED_WORK_ITEM_PAGE_SIZE);
+      if (generation !== authorizationGeneration) return;
+      if (!result.ok) {
+        store.setState({
+          completedWorkItemsStatus: "error",
+          completedWorkItemsError: result.message,
+        });
+        return;
+      }
+      if (cursor !== undefined && result.value.nextCursor === cursor) {
+        store.setState({
+          completedWorkItemsStatus: "error",
+          completedWorkItemsError: "completed Work pagination returned a repeated cursor",
+        });
+        return;
+      }
+
+      const before = store.getState();
+      const completedWorkItemsById =
+        mode === "more" ? { ...before.completedWorkItemsById } : {};
+      const completedWorkItemIds = mode === "more"
+        ? [...before.completedWorkItemIds]
+        : [];
+      const seen = new Set(completedWorkItemIds);
+      for (const item of result.value.items) {
+        completedWorkItemsById[item.id] = item;
+        if (!seen.has(item.id)) {
+          completedWorkItemIds.push(item.id);
+          seen.add(item.id);
+        }
+      }
+      store.setState({
+        completedWorkItemsById,
+        completedWorkItemIds,
+        completedWorkItemsStatus: "ready",
+        completedWorkItemsError: null,
+        completedWorkItemsNextCursor: result.value.nextCursor,
+      });
+    })().finally(() => {
+      completedWorkItemsRequest = null;
+    });
+    return completedWorkItemsRequest;
   };
 
   const loadRevisionProposals = (force: boolean): Promise<void> => {
@@ -1684,6 +1812,7 @@ export function createProjectStore(
       const requireSession = state.sessionStatus !== "idle";
       const requireChapters = state.chaptersStatus !== "idle";
       const requireWorkItems = state.workItemsStatus !== "idle";
+      const requireCompletedWorkItems = state.completedWorkItemsStatus !== "idle";
       const requireRevisionProposals = state.revisionProposalsStatus !== "idle";
       const requiredHistoryChapters = Object.entries(state.chapterHistoryStatusByChapter)
         .filter(([, status]) => status !== "idle")
@@ -1698,6 +1827,7 @@ export function createProjectStore(
       if (requireSession) jobs.push(loadSession(true));
       if (requireChapters) jobs.push(loadChapters(true));
       if (requireWorkItems) jobs.push(loadWorkItems(true));
+      if (requireCompletedWorkItems) jobs.push(loadCompletedWorkItems("refresh"));
       if (requireRevisionProposals) jobs.push(loadRevisionProposals(true));
       for (const chapterId of requiredHistoryChapters) {
         jobs.push(loadChapterHistory(chapterId, true));
@@ -1730,6 +1860,12 @@ export function createProjectStore(
       if (requireSession && fresh.sessionStatus !== "ready") failed.push("session");
       if (requireChapters && fresh.chaptersStatus !== "ready") failed.push("chapters");
       if (requireWorkItems && fresh.workItemsStatus !== "ready") failed.push("Work");
+      if (
+        requireCompletedWorkItems &&
+        fresh.completedWorkItemsStatus !== "ready"
+      ) {
+        failed.push("completed Work");
+      }
       if (requireRevisionProposals && fresh.revisionProposalsStatus !== "ready") {
         failed.push("revision proposals");
       }
@@ -1994,6 +2130,9 @@ export function createProjectStore(
       void loadReplies(annotationId, true);
     }
     if (store.getState().workItemsStatus !== "idle") void loadWorkItems(true);
+    if (store.getState().completedWorkItemsStatus !== "idle") {
+      void loadCompletedWorkItems("refresh");
+    }
     if (store.getState().chaptersStatus !== "idle") void loadChapters(true);
     if (
       chapterId !== null &&
@@ -3318,6 +3457,11 @@ export function createProjectStore(
     workItemIds: [],
     workItemsStatus: "idle",
     workItemsError: null,
+    completedWorkItemsById: {},
+    completedWorkItemIds: [],
+    completedWorkItemsStatus: "idle",
+    completedWorkItemsError: null,
+    completedWorkItemsNextCursor: null,
     revisionProposalsById: {},
     revisionProposalIds: [],
     revisionProposalsStatus: "idle",
@@ -3351,6 +3495,9 @@ export function createProjectStore(
     refreshReplies: (annotationId) => loadReplies(annotationId, true),
     ensureWorkItems: () => loadWorkItems(false),
     refreshWorkItems: () => loadWorkItems(true),
+    ensureCompletedWorkItems: () => loadCompletedWorkItems("ensure"),
+    refreshCompletedWorkItems: () => loadCompletedWorkItems("refresh"),
+    loadMoreCompletedWorkItems: () => loadCompletedWorkItems("more"),
     ensureRevisionProposals: () => loadRevisionProposals(false),
     refreshRevisionProposals: () => loadRevisionProposals(true),
     ensureRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, false),

@@ -54,6 +54,26 @@ body:has(.work-page) main {
   display: block;
 }
 
+.work-page .ab-work-section-heading {
+  margin: 0 0 14px;
+  color: var(--text-strong, #f1efea);
+  font: 600 18px/1.3 var(--font-display, "Space Grotesk", system-ui, sans-serif);
+  letter-spacing: -0.01em;
+}
+
+.work-page .ab-work-section-intro {
+  max-width: 60ch;
+  margin: -6px 0 18px;
+  color: var(--text-muted, #989289);
+  font: 400 14px/1.55 var(--font-body, "Source Serif 4", Georgia, serif);
+}
+
+.work-page .ab-work-completed {
+  margin-top: 48px;
+  padding-top: 36px;
+  border-top: 1px solid var(--border-subtle, #34302b);
+}
+
 .work-page .ab-work-list {
   display: flex;
   flex-direction: column;
@@ -132,6 +152,11 @@ body:has(.work-page) main {
 }
 
 .work-page .ab-work-status-ready {
+  background: var(--tint-success, rgb(53 171 100 / 16%));
+  color: var(--on-tint-success, #68d391);
+}
+
+.work-page .ab-work-status-completed {
   background: var(--tint-success, rgb(53 171 100 / 16%));
   color: var(--on-tint-success, #68d391);
 }
@@ -293,6 +318,33 @@ body:has(.work-page) main {
 .work-page .ab-work-more {
   margin: 18px 0 0;
   text-align: center;
+}
+
+.work-page .ab-completed-item {
+  border-color: color-mix(in srgb, var(--on-tint-success, #68d391) 28%, var(--border-subtle, #34302b));
+  background: color-mix(in srgb, var(--surface-card, #221f1b) 92%, var(--on-tint-success, #68d391));
+}
+
+.work-page .ab-completed-body {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.work-page .ab-completed-result code {
+  color: var(--text-muted, #989289);
+  font: inherit;
+}
+
+.work-page .ab-completed-links {
+  margin-top: 16px;
+}
+
+.work-page .ab-completed-links .ab-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 /* Claimed-by-you card. The real sessionStorage lease and submit ladder remain intact. */
