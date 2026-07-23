@@ -28,6 +28,7 @@ import {
   isSnapshotPath,
   MAX_BLOB_CONCURRENCY,
   MAX_TEXT_FILE_BYTES,
+  MAX_TREE_INDEX_CACHE_ENTRIES,
   stripFrontmatter,
   TruncatedTreeError,
   type BookRepoReader,
@@ -389,6 +390,47 @@ describe("bounded file history", () => {
     await expect(reader.readTextFileAtCommit(path, original)).resolves.toBe(exampleFiles[path]);
     expect(fake.countRequests("GET", (requestPath) => requestPath.includes("/git/trees/"))).toBe(
       treeReads,
+    );
+  });
+
+  it("bounds historical tree indexes while retaining the current head", async () => {
+    const fake = await seededFake();
+    const path = "chapters/001-baseline.md";
+    const commits = [fake.state.getRef(fake.defaultBranch) as string];
+    for (let revision = 1; revision <= MAX_TREE_INDEX_CACHE_ENTRIES + 1; revision += 1) {
+      commits.push(
+        await fake.state.commitFiles({
+          branch: fake.defaultBranch,
+          files: { [path]: `${exampleFiles[path]}\nRevision ${String(revision)}.\n` },
+          message: `Revision ${String(revision)}`,
+        }),
+      );
+    }
+    const reader = readerFor(fake);
+
+    // Resolve and cache the current head first, then walk more historical
+    // commits than the LRU can retain alongside it.
+    await reader.readTextFile(path);
+    for (const commit of commits.slice(0, -1)) {
+      await reader.readTextFileAtCommit(path, commit);
+    }
+
+    const afterHistory = fake.countRequests("GET", (requestPath) =>
+      requestPath.includes("/git/trees/"),
+    );
+    await reader.readTextFile(path);
+    expect(fake.countRequests("GET", (requestPath) => requestPath.includes("/git/trees/"))).toBe(
+      afterHistory,
+    );
+
+    // The newest historical entry is still resident; the oldest was evicted.
+    await reader.readTextFileAtCommit(path, commits.at(-2) as string);
+    expect(fake.countRequests("GET", (requestPath) => requestPath.includes("/git/trees/"))).toBe(
+      afterHistory,
+    );
+    await reader.readTextFileAtCommit(path, commits[0] as string);
+    expect(fake.countRequests("GET", (requestPath) => requestPath.includes("/git/trees/"))).toBe(
+      afterHistory + 1,
     );
   });
 

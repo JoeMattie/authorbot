@@ -390,6 +390,8 @@ export const MAX_BLOB_CONCURRENCY = 8;
 /** 3 metadata requests + this many blobs stays safely below Worker subrequest ceilings. */
 export const MAX_TEXT_FILE_PAGE_SIZE = 20;
 export const MAX_TEXT_FILE_BYTES = 512 * 1024;
+/** Keep the current head plus at most five historical full-tree indexes. */
+export const MAX_TREE_INDEX_CACHE_ENTRIES = 6;
 const DEFAULT_MAX_FILES = 2000;
 
 export class GitHubBookRepoReader implements BookRepoReader {
@@ -403,12 +405,13 @@ export class GitHubBookRepoReader implements BookRepoReader {
   readonly #fetch: AuthorizedFetch;
   readonly #includePath: (path: string) => boolean;
   /**
-   * Path → entry, keyed by commit sha. A commit is immutable, so this is a
-   * cache that can never go stale; it only ever avoids re-reading a tree we
-   * have already read. The head ref is re-resolved on every call, so a caller
-   * that writes and then reads through the same instance still sees its write.
+   * Bounded LRU of path → entry indexes keyed by immutable commit SHA. Full
+   * recursive trees are large, and this reader lives inside a memoized Durable
+   * Object, so retaining every history selection would eventually exhaust the
+   * Worker. The currently resolved head is pinned while older entries rotate.
    */
   readonly #treeIndex = new Map<string, { treeSha: string; entries: Map<string, TreeEntryRecord> }>();
+  #headCommit: string | null = null;
 
   constructor(options: GitHubBookRepoReaderOptions) {
     this.owner = options.owner;
@@ -469,7 +472,28 @@ export class GitHubBookRepoReader implements BookRepoReader {
     if (typeof sha !== "string" || sha === "") {
       throw new GitHubReadError("missing-ref", `ref heads/${this.branch} carried no commit sha`);
     }
+    this.#headCommit = sha;
+    const cached = this.#treeIndex.get(sha);
+    if (cached !== undefined) {
+      // Map insertion order is the LRU order. Touching the head also prevents
+      // a hot current snapshot from being treated as the oldest history item.
+      this.#treeIndex.delete(sha);
+      this.#treeIndex.set(sha, cached);
+    }
     return sha;
+  }
+
+  #rememberTreeIndex(
+    commitSha: string,
+    index: { treeSha: string; entries: Map<string, TreeEntryRecord> },
+  ): void {
+    this.#treeIndex.delete(commitSha);
+    this.#treeIndex.set(commitSha, index);
+    while (this.#treeIndex.size > MAX_TREE_INDEX_CACHE_ENTRIES) {
+      const evict = [...this.#treeIndex.keys()].find((sha) => sha !== this.#headCommit);
+      if (evict === undefined) return;
+      this.#treeIndex.delete(evict);
+    }
   }
 
   async #rootTreeSha(commitSha: string): Promise<string> {
@@ -492,7 +516,10 @@ export class GitHubBookRepoReader implements BookRepoReader {
     commitSha: string,
   ): Promise<{ treeSha: string; entries: Map<string, TreeEntryRecord> }> {
     const cached = this.#treeIndex.get(commitSha);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.#rememberTreeIndex(commitSha, cached);
+      return cached;
+    }
 
     const treeSha = await this.#rootTreeSha(commitSha);
     const body = await this.#getJson<TreeResponse>(
@@ -513,7 +540,7 @@ export class GitHubBookRepoReader implements BookRepoReader {
       entries.set(path, { sha, size });
     }
     const index = { treeSha, entries };
-    this.#treeIndex.set(commitSha, index);
+    this.#rememberTreeIndex(commitSha, index);
     return index;
   }
 
