@@ -35,6 +35,7 @@ const revision = (value: number, current = false) => ({
   author: null,
   changeSummary: `Revision ${value}`,
   origin: "chapter_edit",
+  status: "published",
   isCurrent: current,
 });
 

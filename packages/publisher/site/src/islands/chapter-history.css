@@ -251,7 +251,8 @@ authorbot-chapter-history-panel[hidden] {
   overflow-wrap: anywhere;
 }
 
-.ab-history-current-badge {
+.ab-history-current-badge,
+.ab-history-state-badge {
   display: inline-flex;
   align-items: center;
   justify-self: start;
@@ -263,6 +264,11 @@ authorbot-chapter-history-panel[hidden] {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.ab-history-state-badge {
+  background: color-mix(in srgb, var(--blue-500, #5d8fc7) 16%, transparent);
+  color: var(--blue-300, #94bcec);
 }
 
 .ab-history-list-limit {
@@ -288,6 +294,25 @@ authorbot-chapter-history-panel[hidden] {
 
 .ab-history-detail-header h3 {
   font-size: clamp(18px, 3vw, 24px);
+}
+
+.ab-history-selected-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 10px 0 0;
+  color: var(--text-faint, #767069);
+  font: 400 10px/1.45 var(--font-mono, monospace);
+}
+
+.ab-history-selected-meta dt,
+.ab-history-selected-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ab-history-selected-meta dt {
+  color: var(--text-muted, #989289);
 }
 
 .ab-history-compare-controls {

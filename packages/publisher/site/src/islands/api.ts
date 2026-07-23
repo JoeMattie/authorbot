@@ -534,6 +534,8 @@ export interface ChapterHistoryRevision {
   author: RevisionProposalActor | null;
   changeSummary: string | null;
   origin: string | null;
+  /** Historical list rows resolve this when the selected snapshot is read. */
+  status: string | null;
   isCurrent: boolean;
 }
 

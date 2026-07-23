@@ -19,6 +19,7 @@ const revision = (value: number, current = false) => ({
   author: { id: "actor-1", displayName: "Writer", type: "human" },
   changeSummary: `Revision ${value}`,
   origin: "chapter_edit",
+  status: "published",
   isCurrent: current,
 });
 

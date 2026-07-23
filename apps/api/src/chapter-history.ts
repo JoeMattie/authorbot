@@ -65,6 +65,8 @@ interface HistoryRevision {
   author: HistoryActor | null;
   changeSummary: string | null;
   origin: string | null;
+  /** Historical list rows stay null until their one selected blob is read. */
+  status: string | null;
   isCurrent: boolean;
 }
 
@@ -180,6 +182,7 @@ export function registerChapterHistoryRoutes(ctx: ChapterHistoryContext): void {
           author: retained?.author ?? actorFromCommit(entry),
           changeSummary: retained?.changeSummary ?? firstCommitLine(entry.message),
           origin: retained?.origin ?? "repository_commit",
+          status: revision === chapter.revision ? chapter.status : null,
           isCurrent: revision === chapter.revision,
         },
       ];
@@ -200,6 +203,7 @@ export function registerChapterHistoryRoutes(ctx: ChapterHistoryContext): void {
         author: null,
         changeSummary: null,
         origin: null,
+        status: chapter.status,
         isCurrent: true,
       }),
       status: chapter.status,
@@ -288,6 +292,7 @@ export function registerChapterHistoryRoutes(ctx: ChapterHistoryContext): void {
       revision,
       contentHash: `sha256:${await sha256Hex(source)}`,
       content: stripBlockMarkers(chapterBodyOf(source)).trim(),
+      status: frontmatter.data.status,
       isCurrent: revision === chapter.revision,
     };
   };

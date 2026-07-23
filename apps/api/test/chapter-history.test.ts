@@ -29,7 +29,7 @@ id: ${CHAPTER_ID}
 slug: baseline
 title: Baseline
 order: 10
-status: published
+status: ${revision === 1 ? "draft" : revision === 2 ? "proposed" : "published"}
 revision: ${String(revision)}
 authors:
   - actor: github:avery-cole
@@ -131,6 +131,7 @@ describe("Phase 11 bounded chapter history", () => {
     expect(body.items[1]).toMatchObject({
       revision: 2,
       contentHash: null,
+      status: null,
       author: { displayName: "continuity-reader", type: null },
       isCurrent: false,
     });
@@ -149,9 +150,10 @@ describe("Phase 11 bounded chapter history", () => {
     expect(body).toMatchObject({
       compare: "previous",
       selected: { revision: 2, content: "Second paragraph." },
-      comparison: { revision: 1, content: "Original paragraph." },
+      comparison: { revision: 1, content: "Original paragraph.", status: "draft" },
       diff: { fromRevision: 1, toRevision: 2, computationLimited: false },
     });
+    expect(body).toMatchObject({ selected: { commitSha: SHAS[2], status: "proposed" } });
     expect((body["diff"] as { unifiedDiff: string }).unifiedDiff).toContain(
       "+Second paragraph.",
     );

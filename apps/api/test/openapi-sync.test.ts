@@ -293,6 +293,7 @@ describe("openapi.yaml is synced with the router", () => {
 
     expect(spec.components.schemas["ChapterHistoryPage"]?.properties?.["items"]?.maxItems)
       .toBe(50);
+    expect(spec.components.schemas["ChapterHistoryRevision"]?.required).toContain("status");
     expect(spec.components.schemas["ChapterHistoryDetail"]?.required).toEqual([
       "chapterId",
       "compare",

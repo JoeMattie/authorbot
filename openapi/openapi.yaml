@@ -4890,7 +4890,7 @@ components:
       type: object
       description: Commit metadata for one projected chapter revision.
       required:
-        [revision, contentHash, commitSha, createdAt, author, changeSummary, origin, isCurrent]
+        [revision, contentHash, commitSha, createdAt, author, changeSummary, origin, status, isCurrent]
       properties:
         revision:
           type: integer
@@ -4919,6 +4919,11 @@ components:
           description: Proposal origin when retained, otherwise `repository_commit`.
           oneOf:
             - type: string
+            - type: "null"
+        status:
+          description: Current publication state, or null until a historical snapshot is selected.
+          oneOf:
+            - $ref: "#/components/schemas/ChapterStatus"
             - type: "null"
         isCurrent:
           type: boolean

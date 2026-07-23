@@ -76,6 +76,10 @@ function plainLabel(value: string | null): string {
     : value.replaceAll("_", " ");
 }
 
+function shortCommit(value: string | null): string {
+  return value === null ? "commit not recorded" : `commit ${value.slice(0, 10)}`;
+}
+
 export class AuthorbotChapterHistoryPanel extends HTMLElement {
   static get observedAttributes(): string[] {
     return ["hidden"];
@@ -436,7 +440,9 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     button.setAttribute("aria-current", item.revision === this.selectedRevision ? "true" : "false");
     button.setAttribute(
       "aria-label",
-      `Revision ${item.revision} of ${page.current.revision}${item.isCurrent ? ", current" : ""}. ${item.changeSummary ?? plainLabel(item.origin)}`,
+      `Revision ${item.revision} of ${page.current.revision}${item.isCurrent ? ", current" : ""}. ${
+        item.status === null ? "" : `${plainLabel(item.status)}. `
+      }${shortCommit(item.commitSha)}. ${item.changeSummary ?? plainLabel(item.origin)}`,
     );
     button.append(
       el("span", "ab-history-revision-number", `Revision ${item.revision}`),
@@ -448,7 +454,8 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       el(
         "span",
         "ab-history-revision-date",
-        `${dateLabel(item.createdAt)}${item.author === null ? "" : ` · ${item.author.displayName}`}`,
+        `${dateLabel(item.createdAt)}${item.author === null ? "" : ` · ${item.author.displayName}`}` +
+          `${item.status === null ? "" : ` · ${plainLabel(item.status)}`} · ${shortCommit(item.commitSha)}`,
       ),
     );
     if (item.isCurrent) button.append(el("span", "ab-history-current-badge", "Current"));
@@ -506,7 +513,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     if (status === "error") {
       const message = state.chapterHistoryDetailErrorByKey[key] ?? "request failed";
       this.detail.replaceChildren(
-        this.detailHeader(selected, page),
+        this.detailHeader(this.historyMetadata(page, selected), page),
         this.comparisonControls(selected, page),
         this.alert(`Revision ${selected} could not be loaded: ${message}`),
       );
@@ -524,14 +531,14 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     }
     if (detail === undefined || status !== "ready") {
       this.detail.replaceChildren(
-        this.detailHeader(selected, page),
+        this.detailHeader(this.historyMetadata(page, selected), page),
         this.comparisonControls(selected, page),
         el("p", "ab-history-detail-loading", "Loading snapshot and comparison…"),
       );
       return;
     }
     const fragment = document.createDocumentFragment();
-    fragment.append(this.detailHeader(detail.selected.revision, page));
+    fragment.append(this.detailHeader(detail.selected, page));
     fragment.append(this.comparisonControls(detail.selected.revision, page));
     const snapshot = el("section", "ab-history-snapshot");
     snapshot.append(
@@ -591,15 +598,37 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     this.focusPendingComparison();
   }
 
-  private detailHeader(revision: number, page: ChapterHistoryPage): HTMLElement {
+  private historyMetadata(
+    page: ChapterHistoryPage,
+    revision: number,
+  ): ChapterHistoryRevision {
+    return page.items.find((item) => item.revision === revision) ?? {
+      ...page.current,
+      revision,
+      status: revision === page.current.revision ? page.current.status : null,
+      isCurrent: revision === page.current.revision,
+    };
+  }
+
+  private detailHeader(item: ChapterHistoryRevision, page: ChapterHistoryPage): HTMLElement {
     const header = el("header", "ab-history-detail-header");
     const copy = el("div");
     copy.append(
       el("p", "ab-history-selected-label", "Selected snapshot"),
-      el("h3", undefined, `Revision ${revision} of ${page.current.revision}`),
+      el("h3", undefined, `Revision ${item.revision} of ${page.current.revision}`),
     );
+    const metadata = el("dl", "ab-history-selected-meta");
+    for (const [label, value] of [
+      ["Publication state", item.status === null ? "Loading with snapshot…" : plainLabel(item.status)],
+      ["Commit", item.commitSha ?? "Not recorded"],
+      ["Time", dateLabel(item.createdAt)],
+      ["Author", item.author?.displayName ?? "Not recorded"],
+    ] as const) {
+      metadata.append(el("dt", undefined, label), el("dd", undefined, value));
+    }
+    copy.append(metadata);
     header.append(copy);
-    if (revision === page.current.revision) {
+    if (item.revision === page.current.revision) {
       header.append(
         el(
           "span",
@@ -607,6 +636,8 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
           page.current.status.toLowerCase() === "published" ? "Current published" : "Current",
         ),
       );
+    } else if (item.status !== null) {
+      header.append(el("span", "ab-history-state-badge", plainLabel(item.status)));
     }
     return header;
   }

@@ -33,6 +33,7 @@ const revision = (value: number, current = false) => ({
   author: { id: "writer-1", displayName: "Writer <script>", type: "human" },
   changeSummary: value === 1 ? "Original chapter" : `Revision ${value}`,
   origin: "chapter_edit",
+  status: "published",
   isCurrent: current,
 });
 
@@ -191,11 +192,17 @@ describe("inline chapter history", () => {
     const revisionTwo = host.querySelector<HTMLButtonElement>(
       '.ab-history-revision[data-revision="2"]',
     )!;
+    expect(revisionTwo.textContent).toContain("commit commit-2");
     revisionTwo.click();
     await expect.poll(() => host.querySelector(".ab-history-detail-header h3")?.textContent).toBe(
       "Revision 2 of 3",
     );
     await expect.poll(() => document.activeElement?.getAttribute("data-revision")).toBe("2");
+    const selectedMetadata = host.querySelector(".ab-history-selected-meta")?.textContent ?? "";
+    expect(selectedMetadata).toContain("Publication statepublished");
+    expect(selectedMetadata).toContain("Commitcommit-2");
+    expect(selectedMetadata).toContain("AuthorWriter <script>");
+    expect(host.querySelector(".ab-history-selected-meta script")).toBeNull();
 
     const currentCompare = host.querySelector<HTMLButtonElement>(
       'button[data-compare="current"]',
