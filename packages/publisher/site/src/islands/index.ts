@@ -11,11 +11,9 @@
 import { AuthorbotAccount } from "./account.js";
 import { AuthorbotChapterActivity } from "./chapter-activity.js";
 import { AuthorbotChapterComposer } from "./chapter-composer.js";
-import { AuthorbotChapterHistory } from "./chapter-history-entry.js";
 import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
 import { loadLazyModule } from "./lazy-module.js";
-import { AuthorbotManuscriptEditor } from "./manuscript-editor-element.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
 
 const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
@@ -24,9 +22,7 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-account", AuthorbotAccount],
   ["authorbot-chapter-activity", AuthorbotChapterActivity],
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
-  ["authorbot-chapter-history", AuthorbotChapterHistory],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
-  ["authorbot-manuscript-editor", AuthorbotManuscriptEditor],
   ["authorbot-new-chapter", AuthorbotNewChapter],
 ];
 
@@ -36,32 +32,42 @@ for (const [tag, constructor] of ELEMENTS) {
   }
 }
 
+function defineLazyElement(
+  selector: string,
+  tag: string,
+  request: () => Promise<CustomElementConstructor>,
+): void {
+  if (document.querySelector(selector) === null) return;
+  void loadLazyModule(request)
+    .then((constructor) => {
+      if (customElements.get(tag) === undefined) customElements.define(tag, constructor);
+    })
+    .catch(() => undefined);
+}
+
+// History exists only on chapter pages and has its own second, click-lazy
+// panel chunk. Keep even its small capability-gated launcher out of the shared
+// reader entry used by the home, Work, Write, and Revisions pages.
+defineLazyElement("authorbot-chapter-history", "authorbot-chapter-history", () =>
+  import("./chapter-history-entry.js").then((module) => module.AuthorbotChapterHistory),
+);
+
+// The launcher handles authorization and source loading, but it is still
+// chapter-only behavior. The much larger Milkdown surface remains behind the
+// launcher's explicit Edit or Notes activation.
+defineLazyElement("authorbot-manuscript-editor", "authorbot-manuscript-editor", () =>
+  import("./manuscript-editor-element.js").then((module) => module.AuthorbotManuscriptEditor),
+);
+
 // The claim editor is substantial and appears only on /work/. Keep it out of
 // every chapter reader's entry payload while preserving the same custom
 // element contract on the page that mounts it.
-if (document.querySelector("authorbot-work-queue") !== null) {
-  void loadLazyModule(() => import("./work-queue.js"))
-    .then(({ AuthorbotWorkQueue }) => {
-      if (customElements.get("authorbot-work-queue") === undefined) {
-        customElements.define("authorbot-work-queue", AuthorbotWorkQueue);
-      }
-    })
-    .catch(() => {
-      // The mount already contains the progressive-enhancement fallback. A
-      // permanent chunk failure must stay handled and leave that copy intact.
-    });
-}
+defineLazyElement("authorbot-work-queue", "authorbot-work-queue", () =>
+  import("./work-queue.js").then((module) => module.AuthorbotWorkQueue),
+);
 
 // The diff queue is maintainer-only and substantially larger than the reader
 // islands. Load it only on /revisions/, preserving the chapter bundle budget.
-if (document.querySelector("authorbot-revision-review") !== null) {
-  void loadLazyModule(() => import("./revision-review.js"))
-    .then(({ AuthorbotRevisionReview }) => {
-      if (customElements.get("authorbot-revision-review") === undefined) {
-        customElements.define("authorbot-revision-review", AuthorbotRevisionReview);
-      }
-    })
-    .catch(() => {
-      // The mount's fallback remains visible after a terminal chunk failure.
-    });
-}
+defineLazyElement("authorbot-revision-review", "authorbot-revision-review", () =>
+  import("./revision-review.js").then((module) => module.AuthorbotRevisionReview),
+);

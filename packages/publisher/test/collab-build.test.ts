@@ -130,7 +130,9 @@ describe("api-url-less build (script-free regression)", () => {
     expect(lazyAssets.some((file) => file.includes("project-store-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("revision-review-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("manuscript-editor-element-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("milkdown-manuscript-surface-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("chapter-history-entry-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("chapter-history-panel-"))).toBe(true);
     expect(additions.filter((file) => !lazyAssets.includes(file))).toEqual([
       path.join("_astro", "authorbot-access.css"),
@@ -330,10 +332,14 @@ describe("collab-enabled build", () => {
     const revisionReview = assets.find((file) => file.startsWith("revision-review-"));
     const workQueue = assets.find((file) => file.startsWith("work-queue-"));
     const manuscript = assets.find((file) => file.startsWith("milkdown-manuscript-surface-"));
+    const manuscriptEntry = assets.find((file) => file.startsWith("manuscript-editor-element-"));
+    const historyEntry = assets.find((file) => file.startsWith("chapter-history-entry-"));
     expect(projectStore).toBeDefined();
     expect(revisionReview).toBeDefined();
     expect(workQueue).toBeDefined();
     expect(manuscript).toBeDefined();
+    expect(manuscriptEntry).toBeDefined();
+    expect(historyEntry).toBeDefined();
 
     const account = await readFile(
       path.join(outCollab, "_astro", "authorbot-account.js"),
@@ -364,12 +370,24 @@ describe("collab-enabled build", () => {
     expect(account).not.toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/revision-review-[\w-]+\.js/);
-    expect(collab).toMatch(/\.\/assets\/chapter-history-panel-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/chapter-history-entry-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
-    expect(collab).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/manuscript-editor-element-[\w-]+\.js/);
     expect(planning).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(planning).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(planning).not.toContain("ProseMirror");
+
+    const historyEntryJs = await readFile(
+      path.join(outCollab, "_astro", "assets", historyEntry!),
+      "utf8",
+    );
+    expect(historyEntryJs).toMatch(/\.\/chapter-history-panel-[\w-]+\.js/);
+
+    const manuscriptEntryJs = await readFile(
+      path.join(outCollab, "_astro", "assets", manuscriptEntry!),
+      "utf8",
+    );
+    expect(manuscriptEntryJs).toMatch(/\.\/milkdown-manuscript-surface-[\w-]+\.js/);
 
     const manuscriptJs = await readFile(
       path.join(outCollab, "_astro", "assets", manuscript!),
