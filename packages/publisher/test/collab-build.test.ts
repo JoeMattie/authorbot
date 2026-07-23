@@ -352,7 +352,7 @@ describe("collab-enabled build", () => {
     expect(js.length).toBeGreaterThan(0);
   });
 
-  it("resolves each retryable lazy chunk beside the stable entries", async () => {
+  it("resolves retryable chunks beside their entries and preloads under the public asset root", async () => {
     const assets = await readdir(path.join(outCollab, "_astro", "assets"));
     const projectStore = assets.find((file) => file.startsWith("project-store-"));
     const revisionReview = assets.find((file) => file.startsWith("revision-review-"));
@@ -399,12 +399,13 @@ describe("collab-enabled build", () => {
       ["authorbot-planning.js", planning],
     ] as const) {
       expect(js, entry).toContain("./assets/");
+      expect(js, entry).toContain('"/_astro/"');
       expect(js, entry).not.toContain('"/assets/');
       expect(js, entry).not.toContain("'/assets/");
     }
-    // Vite may emit entry-specific copies with different content hashes; the
-    // important deployment contract is that each reference stays relative to
-    // its stable entry and points at the intended split chunk.
+    // Vite may emit entry-specific copies with different content hashes. JS
+    // imports stay relative to the stable entry while its preload helper owns
+    // the root-relative public base used for lazy stylesheets.
     expect(account).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(account).not.toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
     expect(account).not.toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
@@ -836,6 +837,7 @@ describe("base-path builds are deployable (ADR-0019 §6)", () => {
       repoPath: exampleRepo,
       outDir: outBase,
       baseUrl: "/my-book",
+      apiUrl: "/my-book",
       logLevel: "error",
     });
   });
@@ -864,6 +866,18 @@ describe("base-path builds are deployable (ADR-0019 §6)", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it("keeps lazy editor scripts and styles root-relative under the base path", async () => {
+    const collab = await readFile(
+      path.join(outBase, "my-book", "_astro", "authorbot-collab.js"),
+      "utf8",
+    );
+    expect(collab).toContain('"/my-book/_astro/"');
+    expect(collab).toMatch(/assets\/manuscript-editor-element-[\w-]+\.js/);
+    expect(collab).toMatch(/assets\/manuscript-editor-element-[\w-]+\.css/);
+    expect(collab).not.toContain("http://");
+    expect(collab).not.toContain("https://");
   });
 
   it("leaves the build manifest at the output root for CI to read", async () => {
