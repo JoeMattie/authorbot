@@ -10,6 +10,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   CollabApi,
+  hasEffectiveCapability,
   type Annotation,
   type ApiResult,
   type ChapterAccepted,
@@ -33,6 +34,7 @@ import {
   type MutationOptions,
   type Operation,
   type OverrideResult,
+  type PublicationSummary,
   type Reply,
   type ReplyAccepted,
   type ReplyWithdrawAccepted,
@@ -52,6 +54,23 @@ import {
   type WithdrawAccepted,
 } from "./api.js";
 import { CollabEvents } from "./events.js";
+import {
+  acceptEditorRevision,
+  beginEditorRevision,
+  chapterEditorRevisionTarget,
+  failEditorRevisionSave,
+  publicationStateFromEvent,
+  reconcileEditorRevisionEvent,
+  reconcileEditorRevisionOperation,
+  reconcileEditorRevisionProposal,
+  reconcileEditorRevisionPublication,
+  repositoryEditorRevisionTarget,
+  resumeEditorRevision,
+  type EditorPublicationState,
+  type EditorRevisionState,
+  type EditorRevisionTarget,
+  type ResumeEditorRevision,
+} from "./editor-revision-state.js";
 
 export type ResourceStatus = "idle" | "loading" | "ready" | "error";
 
@@ -75,6 +94,7 @@ export interface ProjectStoreApi {
   ): Promise<ApiResult<{ items: CompletedWorkItem[]; nextCursor: string | null }>>;
   revisionProposals?: CollabApi["revisionProposals"];
   revisionProposal?: CollabApi["revisionProposal"];
+  publications?(limit?: number): Promise<ApiResult<{ items: PublicationSummary[] }>>;
   repositoryDocumentSource?(
     kind: RepositoryDocumentKind,
     path: string,
@@ -166,6 +186,7 @@ interface OperationContext {
   fingerprint?: string;
   refreshWork?: boolean;
   revisionProposalId?: string;
+  editorTargetKey?: string;
   settlementAttempts?: number;
 }
 
@@ -203,6 +224,10 @@ export interface ProjectStoreState {
   revisionProposalsError: string | null;
   revisionProposalDetailStatusById: Readonly<Record<string, ResourceStatus>>;
   revisionProposalDetailErrorById: Readonly<Record<string, string | null>>;
+  /** Lifecycle retained for direct chapter and planning-document editors. */
+  editorRevisionsByTargetKey: Readonly<Record<string, EditorRevisionState>>;
+  /** Publication callbacks retained so a late proposal event can still settle. */
+  editorPublicationsByCommit: Readonly<Record<string, EditorPublicationState>>;
   chapterHistoryByChapter: Readonly<Record<string, ChapterHistoryPage>>;
   chapterHistoryStatusByChapter: Readonly<Record<string, ResourceStatus>>;
   chapterHistoryErrorByChapter: Readonly<Record<string, string | null>>;
@@ -237,6 +262,11 @@ export interface ProjectStoreState {
   refreshRevisionProposals(): Promise<void>;
   ensureRevisionProposal(proposalId: string): Promise<void>;
   refreshRevisionProposal(proposalId: string): Promise<void>;
+  trackEditorRevision(
+    target: EditorRevisionTarget,
+    revision: ResumeEditorRevision,
+  ): void;
+  forgetEditorRevision(targetKey: string): void;
   ensureChapterHistory(chapterId: string): Promise<void>;
   refreshChapterHistory(chapterId: string): Promise<void>;
   ensureChapterHistoryRevision(
@@ -379,6 +409,7 @@ export function createProjectStore(
   let revisionProposalsQueuedRequest: Promise<void> | null = null;
   const revisionProposalRequests = new Map<string, Promise<void>>();
   const revisionProposalQueuedRequests = new Map<string, Promise<void>>();
+  let editorPublicationsRequest: Promise<void> | null = null;
   const chapterHistoryRequests = new Map<string, Promise<void>>();
   const chapterHistoryQueuedRequests = new Map<string, Promise<void>>();
   const chapterHistoryDetailRequests = new Map<string, Promise<void>>();
@@ -406,6 +437,7 @@ export function createProjectStore(
     }
   >();
   const retainedMutationKeys = new Map<string, string>();
+  const retainedRevisionCorrelations = new Map<string, string>();
   const operationContexts = new Map<string, OperationContext>();
   let store!: ProjectStore;
 
@@ -459,6 +491,23 @@ export function createProjectStore(
 
   const settleCommand = (fingerprint: string): void => {
     retainedMutationKeys.delete(fingerprint);
+    retainedRevisionCorrelations.delete(fingerprint);
+  };
+
+  const retainedRevisionCorrelationFor = (fingerprint: string): string => {
+    const retained = retainedRevisionCorrelations.get(fingerprint);
+    if (retained !== undefined) return retained;
+    const created = mutationId();
+    retainedRevisionCorrelations.set(fingerprint, created);
+    return created;
+  };
+
+  const settleRevisionCommandForCorrelation = (correlationId: string): void => {
+    for (const [fingerprint, retained] of retainedRevisionCorrelations) {
+      if (retained !== correlationId) continue;
+      settleCommand(fingerprint);
+      return;
+    }
   };
 
   const credentialChanged = <T>(): StoreActionResult<T> => ({
@@ -525,6 +574,7 @@ export function createProjectStore(
     completedWorkItemsQueuedRequest = null;
     revisionProposalsQueuedRequest = null;
     revisionProposalQueuedRequests.clear();
+    editorPublicationsRequest = null;
     chapterHistoryQueuedRequests.clear();
     chapterHistoryDetailQueuedRequests.clear();
     clearConnectionRetry();
@@ -536,6 +586,7 @@ export function createProjectStore(
     leaseRecoveryCorrelations.clear();
     localSubmissionCommands.clear();
     retainedMutationKeys.clear();
+    retainedRevisionCorrelations.clear();
     operationContexts.clear();
     authoritativeChapters = {};
     store.setState({
@@ -567,6 +618,8 @@ export function createProjectStore(
       revisionProposalsError: null,
       revisionProposalDetailStatusById: {},
       revisionProposalDetailErrorById: {},
+      editorRevisionsByTargetKey: {},
+      editorPublicationsByCommit: {},
       chapterHistoryByChapter: {},
       chapterHistoryStatusByChapter: {},
       chapterHistoryErrorByChapter: {},
@@ -756,6 +809,105 @@ export function createProjectStore(
     setPendingMutations(pending);
   };
 
+  const applyKnownEditorPublication = (
+    editor: EditorRevisionState,
+    publications = store.getState().editorPublicationsByCommit,
+  ): EditorRevisionState => {
+    if (editor.commitSha === null) return editor;
+    const publication = publications[editor.commitSha];
+    return publication === undefined
+      ? editor
+      : reconcileEditorRevisionPublication(editor, publication);
+  };
+
+  const setEditorRevision = (editor: EditorRevisionState): void => {
+    const settled = applyKnownEditorPublication(editor);
+    store.setState({
+      editorRevisionsByTargetKey: {
+        ...store.getState().editorRevisionsByTargetKey,
+        [settled.target.key]: settled,
+      },
+    });
+  };
+
+  const updateEditorRevision = (
+    targetKey: string,
+    update: (current: EditorRevisionState) => EditorRevisionState,
+  ): void => {
+    const current = store.getState().editorRevisionsByTargetKey[targetKey];
+    if (current === undefined) return;
+    const next = applyKnownEditorPublication(update(current));
+    if (next === current) return;
+    store.setState({
+      editorRevisionsByTargetKey: {
+        ...store.getState().editorRevisionsByTargetKey,
+        [targetKey]: next,
+      },
+    });
+  };
+
+  const editorTargetKeyForProposal = (proposalId: string): string | null => {
+    for (const editor of Object.values(store.getState().editorRevisionsByTargetKey)) {
+      if (editor.proposalId === proposalId) return editor.target.key;
+    }
+    return null;
+  };
+
+  const reconcileProposalIntoEditors = (proposal: RevisionProposalSummary): void => {
+    const targetKey = editorTargetKeyForProposal(proposal.id);
+    if (targetKey === null) return;
+    updateEditorRevision(targetKey, (current) =>
+      reconcileEditorRevisionProposal(current, proposal));
+  };
+
+  const rememberEditorPublication = (publication: EditorPublicationState): void => {
+    const publications = {
+      ...store.getState().editorPublicationsByCommit,
+      [publication.integratedCommit]: publication,
+      ...(publication.deployedCommit === null
+        ? {}
+        : { [publication.deployedCommit]: publication }),
+    };
+    const editors: Record<string, EditorRevisionState> = {};
+    for (const [targetKey, editor] of Object.entries(
+      store.getState().editorRevisionsByTargetKey,
+    )) {
+      editors[targetKey] = applyKnownEditorPublication(editor, publications);
+    }
+    store.setState({
+      editorPublicationsByCommit: publications,
+      editorRevisionsByTargetKey: editors,
+    });
+  };
+
+  const loadEditorPublications = (): Promise<void> => {
+    if (editorPublicationsRequest !== null) return editorPublicationsRequest;
+    const read = api.publications;
+    if (read === undefined) return Promise.resolve();
+    const generation = authorizationGeneration;
+    editorPublicationsRequest = (async () => {
+      const result = await read.call(api, 50);
+      if (generation !== authorizationGeneration || !result.ok) return;
+      // The endpoint is newest-first. Apply oldest-to-newest so the latest
+      // callback for a commit wins when CI reported several build states.
+      for (const item of [...result.value.items].reverse()) {
+        if (
+          typeof item.integratedCommit !== "string" ||
+          typeof item.buildStatus !== "string" ||
+          (item.deployedCommit !== null && typeof item.deployedCommit !== "string")
+        ) continue;
+        rememberEditorPublication({
+          integratedCommit: item.integratedCommit,
+          buildStatus: item.buildStatus,
+          deployedCommit: item.deployedCommit,
+        });
+      }
+    })().finally(() => {
+      editorPublicationsRequest = null;
+    });
+    return editorPublicationsRequest;
+  };
+
   const refreshMutationResources = async (
     chapterId: string | null,
     annotationId: string | null,
@@ -824,6 +976,10 @@ export function createProjectStore(
     // Delete before awaiting reads so a duplicate event or a response-race
     // cache lookup cannot settle the same logical command twice.
     operationContexts.delete(operationId);
+    if (context.editorTargetKey !== undefined) {
+      updateEditorRevision(context.editorTargetKey, (current) =>
+        reconcileEditorRevisionOperation(current, operation));
+    }
     const refreshed = await refreshMutationResources(
       context.chapterId,
       context.replyAnnotationId ?? context.annotationId ?? null,
@@ -1517,6 +1673,7 @@ export function createProjectStore(
         revisionProposalsStatus: "ready",
         revisionProposalsError: null,
       });
+      for (const item of items) reconcileProposalIntoEditors(item);
     })().finally(() => {
       revisionProposalsRequest = null;
     });
@@ -1603,6 +1760,7 @@ export function createProjectStore(
           [proposalId]: null,
         },
       });
+      reconcileProposalIntoEditors(result.value);
     })().finally(() => {
       revisionProposalRequests.delete(proposalId);
     });
@@ -1844,6 +2002,9 @@ export function createProjectStore(
       if (requireWorkItems) jobs.push(loadWorkItems(true));
       if (requireCompletedWorkItems) jobs.push(loadCompletedWorkItems("refresh"));
       if (requireRevisionProposals) jobs.push(loadRevisionProposals(true));
+      if (Object.keys(state.editorRevisionsByTargetKey).length > 0) {
+        jobs.push(loadEditorPublications());
+      }
       for (const chapterId of requiredHistoryChapters) {
         jobs.push(loadChapterHistory(chapterId, true));
       }
@@ -2014,6 +2175,25 @@ export function createProjectStore(
         : typeof event.payload["proposalId"] === "string"
           ? event.payload["proposalId"]
           : null;
+    const publication = publicationStateFromEvent(event);
+    if (publication !== null) rememberEditorPublication(publication);
+    if (event.type.startsWith("revision_proposal_")) {
+      const before = store.getState().editorRevisionsByTargetKey;
+      const editors: Record<string, EditorRevisionState> = {};
+      let changed = false;
+      let acceptedCorrelatedCommand = false;
+      for (const [targetKey, editor] of Object.entries(before)) {
+        const next = applyKnownEditorPublication(reconcileEditorRevisionEvent(editor, event));
+        editors[targetKey] = next;
+        changed ||= next !== editor;
+        acceptedCorrelatedCommand ||= editor.proposalId === null && next.proposalId !== null &&
+          correlationId !== null && editor.correlationId === correlationId;
+      }
+      if (changed) store.setState({ editorRevisionsByTargetKey: editors });
+      if (acceptedCorrelatedCommand && correlationId !== null) {
+        settleRevisionCommandForCorrelation(correlationId);
+      }
+    }
     if (workItemId !== null && event.type === "lease_renewed") {
       const claim = store.getState().activeClaimsByWorkItem[workItemId];
       const expiresAt = event.payload["expiresAt"];
@@ -3334,30 +3514,93 @@ export function createProjectStore(
     command: CreateRevisionProposalCommand,
     fingerprintKind: "chapter" | "summary" | "document",
     chapterId: string | null,
+    target?: EditorRevisionTarget,
   ): Promise<StoreActionResult<RevisionProposalAccepted>> => {
     const write = api.createRevisionProposal;
     if (write === undefined) return unsupported("revision proposal");
     const generation = authorizationGeneration;
     const fingerprint = commandFingerprint(`revision.propose-${fingerprintKind}`, command);
     const key = retainedKeyFor(fingerprint);
+    const correlationId = retainedRevisionCorrelationFor(fingerprint);
+    if (target !== undefined) {
+      setEditorRevision(beginEditorRevision(target, correlationId));
+    }
     const result = await replayOnce(() =>
-      write.call(api, command, { idempotencyKey: key }),
+      write.call(api, command, { idempotencyKey: key, correlationId }),
     );
     if (generation !== authorizationGeneration) return credentialChanged();
     if (!result.ok) {
+      if (target !== undefined) {
+        updateEditorRevision(target.key, (current) =>
+          failEditorRevisionSave(current, result.message));
+      }
+      const confirmed = target === undefined
+        ? undefined
+        : store.getState().editorRevisionsByTargetKey[target.key];
+      if (
+        target !== undefined &&
+        confirmed?.proposalId !== null &&
+        confirmed?.proposalId !== undefined
+      ) {
+        // The feed is authoritative evidence that this exact correlated POST
+        // landed, even when both HTTP attempts lost their responses. Keep the
+        // editor closed on its accepted draft instead of asking for a risky
+        // duplicate submission.
+        const accepted: RevisionProposalAccepted = {
+          proposalId: confirmed.proposalId,
+          operationId: confirmed.operationId,
+          correlationId: confirmed.correlationId ?? correlationId,
+          status: confirmed.phase === "pending_review" || confirmed.phase === "rejected"
+            ? "pending_review"
+            : "applying",
+        };
+        settleCommand(fingerprint);
+        if (store.getState().revisionProposalsStatus !== "idle") {
+          void loadRevisionProposals(true);
+        }
+        if (
+          api.revisionProposal !== undefined &&
+          hasEffectiveCapability(store.getState().session, "revisions:read", "revisions:read")
+        ) {
+          void loadRevisionProposal(accepted.proposalId, false);
+        }
+        void loadEditorPublications();
+        if (accepted.operationId !== null) {
+          await registerOperationContext(accepted.operationId, {
+            kind: "revision.apply",
+            chapterId,
+            workItemId: null,
+            revisionProposalId: accepted.proposalId,
+            editorTargetKey: target.key,
+          });
+        }
+        return { ok: true, value: accepted };
+      }
       if (!shouldReplay(result)) settleCommand(fingerprint);
       return actionFailure(result);
+    }
+    if (target !== undefined) {
+      updateEditorRevision(target.key, (current) =>
+        acceptEditorRevision(current, result.value));
     }
     settleCommand(fingerprint);
     if (store.getState().revisionProposalsStatus !== "idle") {
       void loadRevisionProposals(true);
     }
+    if (
+      api.revisionProposal !== undefined &&
+      hasEffectiveCapability(store.getState().session, "revisions:read", "revisions:read")
+    ) {
+      void loadRevisionProposal(result.value.proposalId, false);
+    }
+    if (target !== undefined) void loadEditorPublications();
     if (result.value.operationId !== null) {
       await registerOperationContext(result.value.operationId, {
         kind: "revision.apply",
         chapterId,
         workItemId: null,
         revisionProposalId: result.value.proposalId,
+        ...(target === undefined ? {} : { editorTargetKey: target.key }),
       });
     }
     return { ok: true, value: result.value };
@@ -3366,12 +3609,22 @@ export function createProjectStore(
   const proposeRepositoryDocument = (
     command: RepositoryDocumentProposalCommand,
   ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
-    proposeRevision(command, "document", null);
+    proposeRevision(
+      command,
+      "document",
+      null,
+      repositoryEditorRevisionTarget(command.targetKind, command.targetPath),
+    );
 
   const proposeChapterRevision = (
     command: ChapterRevisionProposalCommand,
   ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
-    proposeRevision(command, "chapter", command.chapterId);
+    proposeRevision(
+      command,
+      "chapter",
+      command.chapterId,
+      chapterEditorRevisionTarget(command.chapterId),
+    );
 
   const proposeChapterSummary = (
     command: ChapterSummaryProposalCommand,
@@ -3466,6 +3719,7 @@ export function createProjectStore(
         [proposalId]: { ...before, status: optimisticStatus },
       },
     });
+    reconcileProposalIntoEditors({ ...before, status: optimisticStatus });
     const fingerprint = commandFingerprint(
       "revision.review",
       proposalId,
@@ -3484,6 +3738,7 @@ export function createProjectStore(
           [proposalId]: before,
         },
       });
+      reconcileProposalIntoEditors(before);
       if (!shouldReplay(result)) settleCommand(fingerprint);
       if (result.status === 409) {
         void loadRevisionProposals(true);
@@ -3505,13 +3760,22 @@ export function createProjectStore(
         },
       },
     });
+    reconcileProposalIntoEditors({
+      ...current,
+      status: result.value.status || optimisticStatus,
+      ...(result.value.operationId === undefined
+        ? {}
+        : { gitOperationId: result.value.operationId }),
+    });
     if (result.value.operationId !== undefined) {
+      const editorTargetKey = editorTargetKeyForProposal(proposalId) ?? undefined;
       await registerOperationContext(result.value.operationId, {
         kind: "revision.apply",
         chapterId: before.chapterId,
         workItemId: before.workItemId,
         refreshWork: before.workItemId !== null,
         revisionProposalId: proposalId,
+        ...(editorTargetKey === undefined ? {} : { editorTargetKey }),
       });
     }
     return { ok: true, value: result.value };
@@ -3577,6 +3841,8 @@ export function createProjectStore(
     revisionProposalsError: null,
     revisionProposalDetailStatusById: {},
     revisionProposalDetailErrorById: {},
+    editorRevisionsByTargetKey: {},
+    editorPublicationsByCommit: {},
     chapterHistoryByChapter: {},
     chapterHistoryStatusByChapter: {},
     chapterHistoryErrorByChapter: {},
@@ -3611,6 +3877,40 @@ export function createProjectStore(
     refreshRevisionProposals: () => loadRevisionProposals(true),
     ensureRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, false),
     refreshRevisionProposal: (proposalId) => loadRevisionProposal(proposalId, true),
+    trackEditorRevision: (target, revision) => {
+      const existing = store.getState().editorRevisionsByTargetKey[target.key];
+      if (existing?.proposalId !== revision.proposalId) {
+        setEditorRevision(resumeEditorRevision(target, revision));
+      }
+      const loaded = store.getState().revisionProposalsById[revision.proposalId];
+      if (loaded !== undefined) reconcileProposalIntoEditors(loaded);
+      if (
+        api.revisionProposal !== undefined &&
+        hasEffectiveCapability(store.getState().session, "revisions:read", "revisions:read")
+      ) {
+        void loadRevisionProposal(revision.proposalId, false);
+      }
+      void loadEditorPublications();
+      if (revision.operationId !== undefined && revision.operationId !== null) {
+        const operationId = revision.operationId;
+        void registerOperationContext(operationId, {
+          kind: "revision.apply",
+          chapterId: target.chapterId,
+          workItemId: null,
+          revisionProposalId: revision.proposalId,
+          editorTargetKey: target.key,
+        }).then(() => {
+          if (api.operation !== undefined) {
+            void store.getState().refreshOperation(operationId);
+          }
+        });
+      }
+    },
+    forgetEditorRevision: (targetKey) => {
+      const editors = { ...store.getState().editorRevisionsByTargetKey };
+      delete editors[targetKey];
+      store.setState({ editorRevisionsByTargetKey: editors });
+    },
     ensureChapterHistory: (chapterId) => loadChapterHistory(chapterId, false),
     refreshChapterHistory: (chapterId) => loadChapterHistory(chapterId, true),
     ensureChapterHistoryRevision: (chapterId, revision, compare) =>

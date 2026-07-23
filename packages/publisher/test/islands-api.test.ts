@@ -48,6 +48,33 @@ describe("CollabApi completed Work reads", () => {
   });
 });
 
+describe("CollabApi publication reads", () => {
+  it("requests a bounded authenticated publication history", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      json({
+        items: [{
+          id: "publication-1",
+          integratedCommit: "a".repeat(40),
+          buildStatus: "succeeded",
+          deployedCommit: "a".repeat(40),
+        }],
+      }, 200),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api().publications(25);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { items: [{ id: "publication-1", buildStatus: "succeeded" }] },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/publications?limit=25`,
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe("include");
+  });
+});
+
 describe("CollabApi mutation transport", () => {
   it("reuses an exact caller-supplied idempotency key across retries", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>

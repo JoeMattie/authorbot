@@ -485,6 +485,20 @@ and stripped control-plane authority can never reactivate.
 - The editor clearly reports saving, review pending, stale base, rejection,
   approval, and deployment states. Draft text survives recoverable errors and
   navigation warnings prevent accidental loss.
+- Chapter, Outline, Timeline, and Character editors register the accepted
+  proposal in the shared project store under a stable document target. The
+  store reconciles correlated proposal events, authorized proposal and
+  operation reads, and bounded publication reports without allowing a late
+  response to move an editor backward or erase a recoverable failure.
+- After submission, keep the exact proposed draft and its proposal, operation,
+  correlation, and commit identifiers in session storage until the matching
+  commit is reported deployed. Rejection or apply failure reopens that draft;
+  an explicit cancel discards it. A feed event that proves a correlated POST
+  landed takes precedence over a lost HTTP response.
+- Published static HTML remains the reading view through review, Git apply,
+  build, and deployment. The editor reports each of those states and clears
+  the retained draft only after `publication_updated` or the bounded
+  publication API confirms that the proposal's commit is deployed.
 
 ## 7. Slice 6 - chapter-wide discussion threads
 

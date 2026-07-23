@@ -12,8 +12,17 @@ import {
   type RepositoryDocumentKind,
   type RepositoryDocumentProposalCommand,
   type RepositoryDocumentSource,
+  type RevisionProposalAccepted,
 } from "./api.js";
 import { el } from "./dom.js";
+import {
+  editorRevisionMessage,
+  editorRevisionNeedsRecoveryWarning,
+  isEditorRevisionPhase,
+  repositoryEditorRevisionTarget,
+  type EditorRevisionState,
+  type EditorRevisionTarget,
+} from "./editor-revision-state.js";
 import { createLazyManuscriptSurface } from "./manuscript-surface-loader.js";
 import type { ManuscriptSurfaceSession } from "./manuscript-surface.js";
 import type { ProjectStore } from "./project-store.js";
@@ -33,6 +42,12 @@ interface StoredDraft {
   baseContentHash: string;
   content: string;
   changeSummary: string;
+  proposalId?: string;
+  proposalOperationId?: string | null;
+  proposalCorrelationId?: string | null;
+  proposalCommitSha?: string | null;
+  proposalPhase?: string;
+  proposalError?: string | null;
 }
 
 export interface CharacterDocumentParts {
@@ -80,7 +95,7 @@ function draftKey(config: Config): string {
   return `authorbot.planning-document-draft.v1:${config.project}:${config.kind}:${config.path}`;
 }
 
-function readDraft(config: Config, contentHash: string): StoredDraft | null {
+function readDraft(config: Config): StoredDraft | null {
   const storage = storageOrNull();
   if (storage === null) return null;
   try {
@@ -88,14 +103,34 @@ function readDraft(config: Config, contentHash: string): StoredDraft | null {
     if (value === null) return null;
     const parsed = JSON.parse(value) as Partial<StoredDraft>;
     if (
-      parsed.baseContentHash !== contentHash ||
+      typeof parsed.baseContentHash !== "string" ||
       typeof parsed.content !== "string" ||
       typeof parsed.changeSummary !== "string"
     ) {
-      storage.removeItem(draftKey(config));
       return null;
     }
-    return parsed as StoredDraft;
+    return {
+      baseContentHash: parsed.baseContentHash,
+      content: parsed.content,
+      changeSummary: parsed.changeSummary,
+      ...(typeof parsed.proposalId === "string" ? { proposalId: parsed.proposalId } : {}),
+      ...(typeof parsed.proposalOperationId === "string" || parsed.proposalOperationId === null
+        ? { proposalOperationId: parsed.proposalOperationId }
+        : {}),
+      ...(typeof parsed.proposalCorrelationId === "string" ||
+          parsed.proposalCorrelationId === null
+        ? { proposalCorrelationId: parsed.proposalCorrelationId }
+        : {}),
+      ...(typeof parsed.proposalCommitSha === "string" || parsed.proposalCommitSha === null
+        ? { proposalCommitSha: parsed.proposalCommitSha }
+        : {}),
+      ...(typeof parsed.proposalPhase === "string"
+        ? { proposalPhase: parsed.proposalPhase }
+        : {}),
+      ...(typeof parsed.proposalError === "string" || parsed.proposalError === null
+        ? { proposalError: parsed.proposalError }
+        : {}),
+    };
   } catch {
     return null;
   }
@@ -168,13 +203,18 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
   private errorLine: HTMLElement | null = null;
   private statusLine: HTMLElement | null = null;
   private source: RepositoryDocumentSource | null = null;
+  private baseContentHash: string | null = null;
   private characterBody = "";
   private session: ManuscriptSurfaceSession | null = null;
   private started = false;
   private busy = false;
   private generation = 0;
+  private target: EditorRevisionTarget | null = null;
+  private unsubscribeStore: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
+  private closingAcceptedEditor = false;
   private readonly beforeUnload = (event: BeforeUnloadEvent): void => {
-    if (!this.isDirty()) return;
+    if (!this.isDirty() && !this.needsRecoveryWarning()) return;
     event.preventDefault();
   };
 
@@ -192,6 +232,10 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     this.started = false;
     this.busy = false;
     this.generation += 1;
+    this.unsubscribeStore?.();
+    this.unsubscribeStore = null;
+    this.releaseConnection?.();
+    this.releaseConnection = null;
     window.removeEventListener("beforeunload", this.beforeUnload);
     void this.destroyEditor(false);
   }
@@ -213,7 +257,31 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     if (store.getState().sessionStatus !== "ready" || !mayEdit(store)) return;
     this.reading = document.getElementById(this.cfg.readingId);
     if (this.reading === null) return;
+    this.target = repositoryEditorRevisionTarget(this.cfg.kind, this.cfg.path);
     this.renderLauncher();
+    this.unsubscribeStore = store.subscribe((state, before) => {
+      const key = this.target?.key;
+      if (key === undefined ||
+          state.editorRevisionsByTargetKey[key] === before.editorRevisionsByTargetKey[key]) {
+        return;
+      }
+      this.renderLifecycle(state.editorRevisionsByTargetKey[key]);
+    });
+    const stored = readDraft(this.cfg);
+    if (stored?.proposalId !== undefined) {
+      store.getState().trackEditorRevision(this.target, {
+        proposalId: stored.proposalId,
+        operationId: stored.proposalOperationId ?? null,
+        correlationId: stored.proposalCorrelationId ?? null,
+        commitSha: stored.proposalCommitSha ?? null,
+        ...(isEditorRevisionPhase(stored.proposalPhase)
+          ? { phase: stored.proposalPhase }
+          : {}),
+        error: stored.proposalError ?? null,
+      });
+    }
+    this.releaseConnection = store.getState().retainConnection();
+    this.renderLifecycle(store.getState().editorRevisionsByTargetKey[this.target.key]);
   }
 
   private renderLauncher(): void {
@@ -263,9 +331,13 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
       return;
     }
     this.source = result.value;
-    const draft = readDraft(this.cfg, result.value.contentHash);
+    const draft = readDraft(this.cfg);
+    this.baseContentHash = draft?.baseContentHash ?? result.value.contentHash;
     const content = draft?.content ?? result.value.content;
-    this.buildShell(draft?.changeSummary ?? "");
+    this.buildShell(
+      draft?.changeSummary ?? "",
+      draft !== null && draft.baseContentHash !== result.value.contentHash,
+    );
     try {
       if (this.cfg.kind === "character") {
         await this.mountCharacterEditor(content);
@@ -291,7 +363,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     this.reading.hidden = true;
     this.editButton.setAttribute("aria-expanded", "true");
     this.editButton.disabled = false;
-    this.setLauncherStatus("");
+    this.renderLifecycle(this.currentLifecycle());
     window.addEventListener("beforeunload", this.beforeUnload);
     if (this.session !== null) {
       this.session.focus();
@@ -300,12 +372,19 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     }
   }
 
-  private buildShell(changeSummary: string): void {
+  private buildShell(changeSummary: string, staleBase: boolean): void {
     const shellId = `ab-planning-editor-${++editorSequence}`;
     const shell = el("section", "ab-planning-editor-shell");
     shell.id = shellId;
     shell.setAttribute("aria-label", `Editing ${this.cfg.label}`);
     shell.append(el("h2", "ab-planning-editor-title", `Editing ${this.cfg.label}`));
+    if (staleBase) {
+      shell.append(el(
+        "p",
+        "ab-warning ab-planning-stale-warning",
+        "This recovered draft is based on an older repository version. It has not been replaced. Submitting it may report a conflict, and Cancel lets you discard it explicitly.",
+      ));
+    }
     const editorRoot = el("div", "ab-planning-editor-root");
     shell.append(editorRoot);
 
@@ -420,27 +499,46 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     const source = this.source;
     const content = this.currentContent();
     if (source === null || content === null) return false;
-    return content !== canonicalRepositoryContent(source.content) ||
+    return this.baseContentHash !== source.contentHash ||
+      content !== canonicalRepositoryContent(source.content) ||
       (this.summaryInput?.value.trim() ?? "") !== "";
   }
 
   private persistDraft(): void {
     const source = this.source;
     const content = this.currentContent();
-    if (source === null || content === null) return;
-    if (!this.isDirty()) {
+    const baseContentHash = this.baseContentHash;
+    if (source === null || content === null || baseContentHash === null) return;
+    const lifecycle = this.currentLifecycle();
+    const recoverableLifecycle = editorRevisionNeedsRecoveryWarning(lifecycle)
+      ? lifecycle
+      : undefined;
+    if (!this.isDirty() && recoverableLifecycle === undefined) {
       clearDraft(this.cfg);
       return;
     }
     writeDraft(this.cfg, {
-      baseContentHash: source.contentHash,
+      baseContentHash,
       content,
       changeSummary: this.summaryInput?.value ?? "",
+      ...(recoverableLifecycle?.proposalId === null || recoverableLifecycle?.proposalId === undefined
+        ? {}
+        : {
+            proposalId: recoverableLifecycle.proposalId,
+            proposalOperationId: recoverableLifecycle.operationId,
+            proposalCorrelationId: recoverableLifecycle.correlationId,
+            proposalCommitSha: recoverableLifecycle.commitSha,
+            proposalPhase: recoverableLifecycle.phase,
+            proposalError: recoverableLifecycle.error,
+          }),
     });
   }
 
   private async submitEditor(applyImmediately: boolean): Promise<void> {
-    if (this.busy || this.source === null || this.errorLine === null || this.statusLine === null) {
+    if (
+      this.busy || this.source === null || this.baseContentHash === null ||
+      this.errorLine === null || this.statusLine === null
+    ) {
       return;
     }
     if (applyImmediately && !mayApply(this.store)) {
@@ -467,7 +565,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
       proposalType: "repository_document",
       targetKind: this.cfg.kind,
       targetPath: this.cfg.path,
-      baseContentHash: this.source.contentHash,
+      baseContentHash: this.baseContentHash,
       proposedContent: content,
       ...(this.summaryInput?.value.trim()
         ? { changeSummary: this.summaryInput.value.trim() }
@@ -491,16 +589,16 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
         : "";
       this.showEditorError(`${prefix}${result.message}`);
       this.persistDraft();
+      const lifecycle = this.currentLifecycle();
+      if (lifecycle?.proposalId !== null && lifecycle?.proposalId !== undefined) {
+        this.renderLifecycle(lifecycle);
+      }
       return;
     }
 
-    clearDraft(this.cfg);
+    this.persistSubmittedDraft(result.value);
     await this.destroyEditor(false);
-    this.setLauncherStatus(
-      applyImmediately
-        ? "Changes are applying. This page will update after deployment."
-        : "Revision submitted for review.",
-    );
+    this.renderLifecycle(this.currentLifecycle());
     this.editButton?.focus();
   }
 
@@ -526,6 +624,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
       return;
     }
     clearDraft(this.cfg);
+    if (this.target !== null) this.store.getState().forgetEditorRevision(this.target.key);
     await this.destroyEditor(true);
   }
 
@@ -544,6 +643,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     this.errorLine = null;
     this.statusLine = null;
     this.source = null;
+    this.baseContentHash = null;
     this.characterBody = "";
     if (this.reading !== null) this.reading.hidden = false;
     if (this.editButton !== null) {
@@ -551,6 +651,126 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
       this.editButton.removeAttribute("aria-controls");
       if (restoreFocus) this.editButton.focus();
     }
+    this.syncNavigationWarning();
+  }
+
+  private currentLifecycle(): EditorRevisionState | undefined {
+    const key = this.target?.key;
+    return key === undefined ? undefined : this.store.getState().editorRevisionsByTargetKey[key];
+  }
+
+  private needsRecoveryWarning(): boolean {
+    return editorRevisionNeedsRecoveryWarning(this.currentLifecycle());
+  }
+
+  private syncNavigationWarning(): void {
+    window.removeEventListener("beforeunload", this.beforeUnload);
+    if (!this.started || !this.isConnected) return;
+    if (this.isDirty() || this.needsRecoveryWarning()) {
+      window.addEventListener("beforeunload", this.beforeUnload);
+    }
+  }
+
+  private persistSubmittedDraft(accepted: RevisionProposalAccepted): void {
+    const source = this.source;
+    const content = this.currentContent();
+    const baseContentHash = this.baseContentHash;
+    if (source === null || content === null || baseContentHash === null) return;
+    writeDraft(this.cfg, {
+      baseContentHash,
+      content,
+      changeSummary: this.summaryInput?.value ?? "",
+      proposalId: accepted.proposalId,
+      proposalOperationId: accepted.operationId,
+      proposalCorrelationId: accepted.correlationId,
+      proposalCommitSha: null,
+      proposalPhase: this.currentLifecycle()?.phase ?? (accepted.operationId === null
+        ? "pending_review"
+        : "applying"),
+      proposalError: null,
+    });
+  }
+
+  private persistLifecycleMetadata(state: EditorRevisionState): void {
+    if (state.proposalId === null) return;
+    const stored = readDraft(this.cfg);
+    if (stored === null ||
+        (stored.proposalId !== undefined && stored.proposalId !== state.proposalId)) {
+      return;
+    }
+    writeDraft(this.cfg, {
+      ...stored,
+      proposalId: state.proposalId,
+      proposalOperationId: state.operationId,
+      proposalCorrelationId: state.correlationId,
+      proposalCommitSha: state.commitSha,
+      proposalPhase: state.phase,
+      proposalError: state.error,
+    });
+  }
+
+  private renderLifecycle(state: EditorRevisionState | undefined): void {
+    if (state === undefined) {
+      delete this.dataset["editorRevisionPhase"];
+      delete this.dataset["editorProposalId"];
+      if (this.shell === null) this.setLauncherStatus("");
+      if (this.editButton !== null) {
+        this.editButton.disabled = this.busy;
+        this.editButton.textContent = `Edit ${this.cfg.label}`;
+      }
+      this.syncNavigationWarning();
+      return;
+    }
+    this.dataset["editorRevisionPhase"] = state.phase;
+    if (state.proposalId === null) {
+      delete this.dataset["editorProposalId"];
+    } else {
+      this.dataset["editorProposalId"] = state.proposalId;
+    }
+    this.persistLifecycleMetadata(state);
+    if (state.phase === "deployed" && state.proposalId !== null) {
+      const stored = readDraft(this.cfg);
+      if (stored?.proposalId === state.proposalId) clearDraft(this.cfg);
+    }
+    const accepted = state.proposalId !== null && state.phase !== "save_failed" &&
+      state.phase !== "rejected" && state.phase !== "apply_failed";
+    if (this.shell !== null && !this.busy && accepted) {
+      if (!this.closingAcceptedEditor) {
+        this.closingAcceptedEditor = true;
+        void this.destroyEditor(false).finally(() => {
+          this.closingAcceptedEditor = false;
+          if (this.started) this.renderLifecycle(this.currentLifecycle());
+        });
+      }
+      return;
+    }
+    const label = this.cfg.label.toLowerCase();
+    const message = editorRevisionMessage(state, label);
+    const failed = state.phase === "save_failed" || state.phase === "apply_failed" ||
+      state.phase === "deployment_failed";
+    if (this.shell !== null && this.statusLine !== null && this.errorLine !== null) {
+      this.statusLine.textContent = message;
+      this.statusLine.hidden = failed;
+      if (failed) {
+        this.errorLine.textContent = message;
+        this.errorLine.hidden = false;
+      } else {
+        this.errorLine.hidden = true;
+      }
+    } else {
+      this.setLauncherStatus(message, failed);
+    }
+    if (this.editButton !== null && this.shell === null) {
+      const locked = state.phase === "saving" || state.phase === "pending_review" ||
+        state.phase === "applying" || state.phase === "integrated" ||
+        state.phase === "publishing" || state.phase === "deployment_failed";
+      this.editButton.disabled = locked;
+      this.editButton.textContent = state.phase === "rejected" || state.phase === "apply_failed" ||
+          state.phase === "save_failed"
+        ? `Edit submitted ${label} draft`
+        : `Edit ${this.cfg.label}`;
+    }
+    this.syncNavigationWarning();
   }
 
   private setLauncherStatus(message: string, error = false): void {

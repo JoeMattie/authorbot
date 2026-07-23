@@ -22,6 +22,14 @@ import {
   type StoredChapterDraft,
 } from "./chapter-composer-state.js";
 import { el } from "./dom.js";
+import {
+  chapterEditorRevisionTarget,
+  editorRevisionMessage,
+  editorRevisionNeedsRecoveryWarning,
+  isEditorRevisionPhase,
+  type EditorRevisionState,
+  type EditorRevisionTarget,
+} from "./editor-revision-state.js";
 import { createLazyManuscriptSurface } from "./manuscript-surface-loader.js";
 import type {
   ManuscriptSubmitRequest,
@@ -124,8 +132,12 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
   private busy = false;
   private applyImmediately = false;
   private generation = 0;
+  private target: EditorRevisionTarget | null = null;
+  private unsubscribeStore: (() => void) | null = null;
+  private releaseConnection: (() => void) | null = null;
+  private closingAcceptedEditor = false;
   private readonly beforeUnload = (event: BeforeUnloadEvent): void => {
-    if (!this.isDirty()) return;
+    if (!this.isDirty() && !this.needsRecoveryWarning()) return;
     event.preventDefault();
     event.returnValue = true;
   };
@@ -144,6 +156,10 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.started = false;
     this.busy = false;
     this.generation += 1;
+    this.unsubscribeStore?.();
+    this.unsubscribeStore = null;
+    this.releaseConnection?.();
+    this.releaseConnection = null;
     window.removeEventListener("beforeunload", this.beforeUnload);
     void this.destroySession(false);
   }
@@ -170,7 +186,31 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
           .find((node): node is HTMLElement =>
             node instanceof HTMLElement && node.classList.contains("prose")) ?? null;
     if (this.prose === null) return;
+    this.target = chapterEditorRevisionTarget(this.cfg.chapterId);
     this.renderLauncher();
+    this.unsubscribeStore = store.subscribe((state, before) => {
+      const key = this.target?.key;
+      if (key === undefined ||
+          state.editorRevisionsByTargetKey[key] === before.editorRevisionsByTargetKey[key]) {
+        return;
+      }
+      this.renderLifecycle(state.editorRevisionsByTargetKey[key]);
+    });
+    const stored = loadChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    if (stored?.proposalId !== undefined) {
+      store.getState().trackEditorRevision(this.target, {
+        proposalId: stored.proposalId,
+        operationId: stored.proposalOperationId ?? null,
+        correlationId: stored.proposalCorrelationId ?? null,
+        commitSha: stored.proposalCommitSha ?? null,
+        ...(isEditorRevisionPhase(stored.proposalPhase)
+          ? { phase: stored.proposalPhase }
+          : {}),
+        error: stored.proposalError ?? null,
+      });
+    }
+    this.releaseConnection = store.getState().retainConnection();
+    this.renderLifecycle(store.getState().editorRevisionsByTargetKey[this.target.key]);
   }
 
   private renderLauncher(): void {
@@ -472,7 +512,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     }
     this.busy = false;
     this.editButton.disabled = false;
-    this.setLauncherStatus("");
+    this.renderLifecycle(this.currentLifecycle());
     window.addEventListener("beforeunload", this.beforeUnload);
     this.session.focus();
   }
@@ -527,6 +567,9 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     return result.ok
       ? {
           ok: true,
+          proposalId: result.value.proposalId,
+          operationId: result.value.operationId,
+          correlationId: result.value.correlationId,
           message: draft.applyImmediately === true
             ? "Changes are applying. This page will update after deployment."
             : "Revision submitted for review.",
@@ -574,15 +617,29 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       error.hidden = false;
       status.hidden = true;
       this.persistDraft();
+      const lifecycle = this.currentLifecycle();
+      if (lifecycle?.proposalId !== null && lifecycle?.proposalId !== undefined) {
+        this.renderLifecycle(lifecycle);
+      }
       return;
     }
-    clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    if (result.proposalId !== undefined) {
+      this.persistSubmittedDraft(result);
+    } else {
+      // A compatibility handler owns its own durable state and cannot be
+      // reconciled by this store without a proposal identifier.
+      clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    }
     await this.destroySession(false);
-    this.setLauncherStatus(
-      result.message ?? (applyImmediately
-        ? "Changes are applying. This page will update after deployment."
-        : "Revision submitted for review."),
-    );
+    if (result.proposalId === undefined) {
+      this.setLauncherStatus(
+        result.message ?? (applyImmediately
+          ? "Changes are applying. This page will update after deployment."
+          : "Revision submitted for review."),
+      );
+    } else {
+      this.renderLifecycle(this.currentLifecycle());
+    }
     this.editButton?.focus();
   }
 
@@ -592,6 +649,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       return;
     }
     clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    if (this.target !== null) this.store.getState().forgetEditorRevision(this.target.key);
     await this.destroySession(true);
   }
 
@@ -619,6 +677,142 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       this.editButton.setAttribute("aria-expanded", "false");
       if (restoreFocus) this.editButton.focus();
     }
+    this.syncNavigationWarning();
+  }
+
+  private currentLifecycle(): EditorRevisionState | undefined {
+    const key = this.target?.key;
+    return key === undefined ? undefined : this.store.getState().editorRevisionsByTargetKey[key];
+  }
+
+  private needsRecoveryWarning(): boolean {
+    return editorRevisionNeedsRecoveryWarning(this.currentLifecycle());
+  }
+
+  private syncNavigationWarning(): void {
+    window.removeEventListener("beforeunload", this.beforeUnload);
+    if (!this.started || !this.isConnected) return;
+    if (this.isDirty() || this.needsRecoveryWarning()) {
+      window.addEventListener("beforeunload", this.beforeUnload);
+    }
+  }
+
+  private persistSubmittedDraft(result: ManuscriptSubmitResult): void {
+    const source = this.source;
+    const baseRevision = this.baseRevision;
+    const baseContentHash = this.baseContentHash;
+    if (
+      source === null || baseRevision === null || baseContentHash === null ||
+      result.proposalId === undefined
+    ) return;
+    let body: string;
+    try {
+      body = this.session?.getMarkdown() ?? source.body;
+    } catch {
+      return;
+    }
+    saveChapterDraft(storageOrNull(), this.cfg.project, {
+      chapterId: this.cfg.chapterId,
+      title: source.title,
+      body,
+      baseRevision,
+      baseContentHash,
+      changeSummary: this.summaryInput?.value ?? "",
+      notes: this.notesInput?.value ?? "",
+      proposalId: result.proposalId,
+      proposalOperationId: result.operationId ?? null,
+      proposalCorrelationId: result.correlationId ?? null,
+      proposalCommitSha: null,
+      proposalPhase: this.currentLifecycle()?.phase ?? (result.operationId === null
+        ? "pending_review"
+        : "applying"),
+      proposalError: null,
+      caret: null,
+      focus: "body",
+    });
+  }
+
+  private persistLifecycleMetadata(state: EditorRevisionState): void {
+    if (state.proposalId === null) return;
+    const stored = loadChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    if (stored === null ||
+        (stored.proposalId !== undefined && stored.proposalId !== state.proposalId)) {
+      return;
+    }
+    saveChapterDraft(storageOrNull(), this.cfg.project, {
+      ...stored,
+      proposalId: state.proposalId,
+      proposalOperationId: state.operationId,
+      proposalCorrelationId: state.correlationId,
+      proposalCommitSha: state.commitSha,
+      proposalPhase: state.phase,
+      proposalError: state.error,
+    });
+  }
+
+  private renderLifecycle(state: EditorRevisionState | undefined): void {
+    if (state === undefined) {
+      delete this.dataset["editorRevisionPhase"];
+      delete this.dataset["editorProposalId"];
+      if (this.editorShell === null) this.setLauncherStatus("");
+      if (this.editButton !== null) {
+        this.editButton.disabled = this.busy;
+        this.editButton.textContent = "Edit chapter";
+      }
+      this.syncNavigationWarning();
+      return;
+    }
+    this.dataset["editorRevisionPhase"] = state.phase;
+    if (state.proposalId === null) {
+      delete this.dataset["editorProposalId"];
+    } else {
+      this.dataset["editorProposalId"] = state.proposalId;
+    }
+    this.persistLifecycleMetadata(state);
+    if (state.phase === "deployed" && state.proposalId !== null) {
+      const stored = loadChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+      if (stored?.proposalId === state.proposalId) {
+        clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+      }
+    }
+    const accepted = state.proposalId !== null && state.phase !== "save_failed" &&
+      state.phase !== "rejected" && state.phase !== "apply_failed";
+    if (this.editorShell !== null && !this.busy && accepted) {
+      if (!this.closingAcceptedEditor) {
+        this.closingAcceptedEditor = true;
+        void this.destroySession(false).finally(() => {
+          this.closingAcceptedEditor = false;
+          if (this.started) this.renderLifecycle(this.currentLifecycle());
+        });
+      }
+      return;
+    }
+    const message = editorRevisionMessage(state, "chapter");
+    const failed = state.phase === "save_failed" || state.phase === "apply_failed" ||
+      state.phase === "deployment_failed";
+    if (this.editorShell !== null && this.statusLine !== null && this.errorLine !== null) {
+      this.statusLine.textContent = message;
+      this.statusLine.hidden = failed;
+      if (failed) {
+        this.errorLine.textContent = message;
+        this.errorLine.hidden = false;
+      } else {
+        this.errorLine.hidden = true;
+      }
+    } else {
+      this.setLauncherStatus(message, failed);
+    }
+    if (this.editButton !== null && this.editorShell === null) {
+      const locked = state.phase === "saving" || state.phase === "pending_review" ||
+        state.phase === "applying" || state.phase === "integrated" ||
+        state.phase === "publishing" || state.phase === "deployment_failed";
+      this.editButton.disabled = locked;
+      this.editButton.textContent = state.phase === "rejected" || state.phase === "apply_failed" ||
+          state.phase === "save_failed"
+        ? "Edit submitted draft"
+        : "Edit chapter";
+    }
+    this.syncNavigationWarning();
   }
 
   private isDirty(): boolean {
@@ -652,11 +846,16 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     }
     const baseMatchesCurrent = baseRevision === source.revision &&
       baseContentHash === sourceContentHash(source);
+    const lifecycle = this.currentLifecycle();
+    const recoverableLifecycle = editorRevisionNeedsRecoveryWarning(lifecycle)
+      ? lifecycle
+      : undefined;
     if (
       baseMatchesCurrent &&
       canonicalBody(body) === canonicalBody(source.body) &&
       (this.summaryInput?.value.trim() ?? "") === "" &&
-      (this.notesInput?.value.trim() ?? "") === ""
+      (this.notesInput?.value.trim() ?? "") === "" &&
+      recoverableLifecycle?.proposalId == null
     ) {
       clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
       return;
@@ -669,6 +868,16 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       baseContentHash,
       changeSummary: this.summaryInput?.value ?? "",
       notes: this.notesInput?.value ?? "",
+      ...(recoverableLifecycle?.proposalId === null || recoverableLifecycle?.proposalId === undefined
+        ? {}
+        : {
+            proposalId: recoverableLifecycle.proposalId,
+            proposalOperationId: recoverableLifecycle.operationId,
+            proposalCorrelationId: recoverableLifecycle.correlationId,
+            proposalCommitSha: recoverableLifecycle.commitSha,
+            proposalPhase: recoverableLifecycle.phase,
+            proposalError: recoverableLifecycle.error,
+          }),
       caret: null,
       focus: "body",
     });

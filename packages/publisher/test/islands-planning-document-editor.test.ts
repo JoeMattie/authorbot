@@ -15,7 +15,10 @@ import type {
   ManuscriptSurfaceOptions,
   ManuscriptSurfaceSession,
 } from "../site/src/islands/manuscript-surface.js";
-import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
+import {
+  getProjectStore,
+  resetProjectStoresForTests,
+} from "../site/src/islands/project-store.js";
 
 const API = "http://api.test";
 const PROJECT = "hollow-creek-anomaly";
@@ -45,6 +48,7 @@ interface RequestCall {
   url: string;
   method: string;
   body: unknown;
+  correlationId: string | null;
 }
 
 function json(status: number, body: unknown): Response {
@@ -75,16 +79,23 @@ function stubFetch(options: {
   source?: string;
   targetId?: string;
   proposalStatus?: number;
+  proposalNetworkFailures?: number;
   calls?: RequestCall[];
 }): void {
   const kind = options.kind ?? "outline";
   const path = kind === "character" ? CHARACTER_PATH : OUTLINE_PATH;
   const targetId = options.targetId ?? (kind === "character" ? "character:mara" : "outline");
+  let networkFailures = options.proposalNetworkFailures ?? 0;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : undefined;
-    options.calls?.push({ url, method, body });
+    options.calls?.push({
+      url,
+      method,
+      body,
+      correlationId: new Headers(init?.headers).get("X-Correlation-Id"),
+    });
     if (url === `${API}/v1/me`) {
       return json(200, me(options.role ?? "editor", options.capabilities));
     }
@@ -101,6 +112,10 @@ function stubFetch(options: {
       });
     }
     if (url.endsWith("/revision-proposals") && method === "POST") {
+      if (networkFailures > 0) {
+        networkFailures -= 1;
+        throw new Error("connection reset");
+      }
       const status = options.proposalStatus ?? 201;
       return status === 201 || status === 202
         ? json(status, {
@@ -259,7 +274,7 @@ describe("repository planning document editor", () => {
     (document.querySelector(".ab-planning-apply") as HTMLButtonElement).click();
 
     await expect.poll(() => document.querySelector(".ab-planning-launcher-status")?.textContent)
-      .toContain("update after deployment");
+      .toContain("approved and applying");
     expect(document.querySelector<HTMLElement>("#outline-reading")?.hidden).toBe(false);
     expect(calls.find(({ url, method }) => url.endsWith("/revision-proposals") && method === "POST")?.body)
       .toEqual({
@@ -271,6 +286,36 @@ describe("repository planning document editor", () => {
         changeSummary: "Add the premise.",
         applyImmediately: true,
       });
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    store.getState().reconcileEvent({
+      id: 31,
+      type: "revision_proposal_applied",
+      payload: { revisionProposalId: "proposal-1", commitSha: "d".repeat(40) },
+    });
+    store.getState().reconcileEvent({
+      id: 32,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "d".repeat(40),
+        buildStatus: "building",
+        deployedCommit: null,
+      },
+    });
+    await expect.poll(() => document.querySelector(".ab-planning-launcher-status")?.textContent)
+      .toContain("Publishing outline changes");
+    expect(document.querySelector("#outline-reading")?.textContent).toContain("Rendered outline");
+    store.getState().reconcileEvent({
+      id: 33,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "d".repeat(40),
+        buildStatus: "succeeded",
+        deployedCommit: "d".repeat(40),
+      },
+    });
+    await expect.poll(() => document.querySelector(".ab-planning-launcher-status")?.textContent)
+      .toContain("changes are deployed");
+    expect(window.sessionStorage.length).toBe(0);
   });
 
   it("keeps a failed stale draft open, saved, and protected from accidental loss", async () => {
@@ -297,6 +342,42 @@ describe("repository planning document editor", () => {
     (document.querySelector(".ab-planning-actions .ab-btn") as HTMLButtonElement).click();
     await Promise.resolve();
     expect(document.querySelector(".ab-planning-editor-shell")).toBeTruthy();
+  });
+
+  it("restores the static planning view after a late correlated acceptance event", async () => {
+    const calls: RequestCall[] = [];
+    stubFetch({
+      capabilities: ["revisions:write"],
+      proposalNetworkFailures: 2,
+      calls,
+    });
+    mountOutline();
+    await expect.poll(() => document.querySelector(".ab-planning-edit")).toBeTruthy();
+    (document.querySelector(".ab-planning-edit") as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelector(".ab-planning-source")).toBeTruthy();
+    const source = document.querySelector(".ab-planning-source") as HTMLTextAreaElement;
+    source.value = `${OUTLINE}# accepted after transport loss\n`;
+    source.dispatchEvent(new Event("input", { bubbles: true }));
+    (document.querySelector('[data-planning-submit="review"]') as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelector(".ab-planning-error")?.textContent)
+      .toContain("network error");
+
+    const correlationId = calls.find(({ url }) =>
+      url.endsWith("/revision-proposals"))?.correlationId;
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/u);
+    getProjectStore({ apiBase: API, project: PROJECT }).getState().reconcileEvent({
+      id: 34,
+      type: "revision_proposal_created",
+      payload: { proposalId: "proposal-late", correlationId },
+    });
+
+    await expect.poll(() => document.querySelector(".ab-planning-editor-shell")).toBeNull();
+    expect(document.querySelector<HTMLElement>("#outline-reading")?.hidden).toBe(false);
+    expect(document.querySelector(".ab-planning-launcher-status")?.textContent)
+      .toContain("pending review");
+    expect(window.sessionStorage.getItem(
+      `authorbot.planning-document-draft.v1:${PROJECT}:outline:${OUTLINE_PATH}`,
+    )).toContain("proposal-late");
   });
 
   it("edits character frontmatter plus a lazy Milkdown body as one proposal", async () => {
@@ -328,7 +409,8 @@ describe("repository planning document editor", () => {
     lastSurfaceOptions?.onMarkdownChange?.(surfaceMarkdown);
     (document.querySelector('[data-planning-submit="review"]') as HTMLButtonElement).click();
     await expect.poll(() => document.querySelector(".ab-planning-launcher-status")?.textContent)
-      .toBe("Revision submitted for review.");
+      .toContain("pending review");
+    expect(window.sessionStorage.length).toBe(1);
 
     const command = calls.find(
       ({ url, method }) => url.endsWith("/revision-proposals") && method === "POST",

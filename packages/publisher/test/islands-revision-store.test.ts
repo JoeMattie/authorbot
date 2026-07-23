@@ -5,6 +5,10 @@ import type {
   RevisionProposalSummary,
 } from "../site/src/islands/api.js";
 import {
+  chapterEditorRevisionTarget,
+  repositoryEditorRevisionTarget,
+} from "../site/src/islands/editor-revision-state.js";
+import {
   createProjectStore,
   resetProjectStoresForTests,
   type ProjectStoreApi,
@@ -145,5 +149,160 @@ describe("project store revision review", () => {
     resolve({ ok: false, status: 403, message: "review permission was revoked" });
     expect(await command).toMatchObject({ ok: false, kind: "rejected", status: 403 });
     expect(store.getState().revisionProposalsById[PROPOSAL]?.status).toBe("pending_review");
+  });
+
+  it("owns direct-editor saving through matching events even when HTTP loses its response", async () => {
+    let resolve!: (
+      value: Awaited<ReturnType<NonNullable<ProjectStoreApi["createRevisionProposal"]>>>,
+    ) => void;
+    const response = new Promise<
+      Awaited<ReturnType<NonNullable<ProjectStoreApi["createRevisionProposal"]>>>
+    >((done) => {
+      resolve = done;
+    });
+    let correlationId = "";
+    const store = createProjectStore(
+      { apiBase: "", project: PROJECT },
+      api({
+        async meResult() {
+          return {
+            ok: true,
+            value: { ...me, scopes: ["revisions:write"] },
+          };
+        },
+        async createRevisionProposal(_command, options) {
+          correlationId = options?.correlationId ?? "";
+          return response;
+        },
+      }),
+    );
+    await store.getState().ensureSession();
+    const target = chapterEditorRevisionTarget("chapter-1");
+    const submitting = store.getState().proposeChapterRevision({
+      proposalType: "chapter_replacement",
+      chapterId: "chapter-1",
+      baseRevision: 3,
+      baseContentHash: "sha256:before",
+      proposedContent: "After\n",
+    });
+    expect(store.getState().editorRevisionsByTargetKey[target.key]).toMatchObject({
+      phase: "saving",
+      proposalId: null,
+    });
+    expect(correlationId).not.toBe("");
+
+    store.getState().reconcileEvent({
+      id: 10,
+      type: "revision_proposal_created",
+      payload: { proposalId: PROPOSAL, correlationId },
+    });
+    store.getState().reconcileEvent({
+      id: 11,
+      type: "revision_proposal_approved",
+      payload: { proposalId: PROPOSAL, operationId: "operation-1", correlationId },
+    });
+    expect(store.getState().editorRevisionsByTargetKey[target.key]).toMatchObject({
+      phase: "applying",
+      proposalId: PROPOSAL,
+      operationId: "operation-1",
+    });
+
+    resolve({ ok: false, status: 503, message: "the response was lost" });
+    await expect(submitting).resolves.toMatchObject({ ok: true });
+    expect(store.getState().editorRevisionsByTargetKey[target.key]?.phase).toBe("applying");
+
+    store.getState().reconcileEvent({
+      id: 12,
+      type: "revision_proposal_applied",
+      payload: { revisionProposalId: PROPOSAL, commitSha: "a".repeat(40) },
+    });
+    expect(store.getState().editorRevisionsByTargetKey[target.key]?.phase).toBe("integrated");
+    store.getState().reconcileEvent({
+      id: 13,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "a".repeat(40),
+        buildStatus: "building",
+        deployedCommit: null,
+      },
+    });
+    expect(store.getState().editorRevisionsByTargetKey[target.key]).toMatchObject({
+      phase: "publishing",
+      publication: { buildStatus: "building" },
+    });
+    store.getState().reconcileEvent({
+      id: 14,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "a".repeat(40),
+        buildStatus: "succeeded",
+        deployedCommit: "a".repeat(40),
+      },
+    });
+    expect(store.getState().editorRevisionsByTargetKey[target.key]?.phase).toBe("deployed");
+  });
+
+  it("restores planning-editor state from proposal and bounded publication API data", async () => {
+    const approved = {
+      ...summary(),
+      id: "proposal-planning",
+      chapterId: null,
+      proposalType: "repository_document",
+      origin: "direct_edit",
+      workItemId: null,
+      submissionId: null,
+      status: "approved",
+      gitOperationId: "operation-planning",
+      commitSha: "c".repeat(40),
+      target: {
+        kind: "outline",
+        id: "outline",
+        path: "story/outline.yml",
+        label: "Outline",
+      },
+      chapter: null,
+      workItem: null,
+    } satisfies RevisionProposalSummary;
+    const store = createProjectStore(
+      { apiBase: "", project: PROJECT },
+      api({
+        async revisionProposal() {
+          return {
+            ok: true,
+            value: {
+              ...approved,
+              baseContentHash: "sha256:before",
+              baseContent: "Before\n",
+              proposedContent: "After\n",
+              diff: { unifiedDiff: null, computationLimited: false },
+            },
+          };
+        },
+        async publications() {
+          return {
+            ok: true,
+            value: {
+              items: [{
+                id: "publication-1",
+                integratedCommit: "c".repeat(40),
+                buildStatus: "succeeded",
+                deployedCommit: "c".repeat(40),
+              }],
+            },
+          };
+        },
+      }),
+    );
+    await store.getState().ensureSession();
+    const target = repositoryEditorRevisionTarget("outline", "story/outline.yml");
+    store.getState().trackEditorRevision(target, { proposalId: approved.id });
+
+    await expect.poll(() => store.getState().editorRevisionsByTargetKey[target.key]?.phase)
+      .toBe("deployed");
+    expect(store.getState().editorRevisionsByTargetKey[target.key]).toMatchObject({
+      proposalId: approved.id,
+      commitSha: "c".repeat(40),
+      publication: { deployedCommit: "c".repeat(40) },
+    });
   });
 });

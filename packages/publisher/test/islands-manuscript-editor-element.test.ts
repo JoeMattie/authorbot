@@ -16,7 +16,10 @@ import type {
   ManuscriptSurfaceOptions,
   ManuscriptSurfaceSession,
 } from "../site/src/islands/manuscript-surface.js";
-import { resetProjectStoresForTests } from "../site/src/islands/project-store.js";
+import {
+  getProjectStore,
+  resetProjectStoresForTests,
+} from "../site/src/islands/project-store.js";
 
 const API = "http://api.test";
 const PROJECT = "hollow-creek-anomaly";
@@ -56,6 +59,7 @@ interface RequestCall {
   method: string;
   body: unknown;
   idempotencyKey: string | null;
+  correlationId: string | null;
 }
 
 let requests: RequestCall[];
@@ -97,6 +101,7 @@ function stubFetch(options: {
       method,
       body: typeof init?.body === "string" ? JSON.parse(init.body) as unknown : undefined,
       idempotencyKey: headers.get("Idempotency-Key"),
+      correlationId: headers.get("X-Correlation-Id"),
     });
     if (url === `${API}/v1/me`) {
       return new Response(JSON.stringify(me(
@@ -235,7 +240,7 @@ describe("in-place manuscript editor launcher", () => {
     (document.querySelector('[data-manuscript-submit="review"]') as HTMLButtonElement).click();
 
     await expect.poll(() => document.querySelector(".ab-manuscript-launcher-status")?.textContent)
-      .toBe("Revision submitted for review.");
+      .toContain("pending review");
     expect(document.querySelector(".ab-manuscript-editor-shell")).toBeNull();
     expect(document.querySelector<HTMLElement>(".prose")?.hidden).toBe(false);
     const proposal = requests.find(
@@ -252,7 +257,23 @@ describe("in-place manuscript editor launcher", () => {
     });
     expect(proposal?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/u);
     expect(requests.some(({ url }) => url.includes("chapter-submissions"))).toBe(false);
-    expect(window.sessionStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(1);
+    expect(window.sessionStorage.getItem(
+      `authorbot.chapter-draft.${PROJECT}.${CHAPTER}`,
+    )).toContain("proposal-1");
+
+    getProjectStore({ apiBase: API, project: PROJECT }).getState().reconcileEvent({
+      id: 20,
+      type: "revision_proposal_rejected",
+      payload: { proposalId: "proposal-1" },
+    });
+    await expect.poll(() => document.querySelector(".ab-manuscript-launcher-status")?.textContent)
+      .toContain("Revision rejected");
+    expect((document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).disabled)
+      .toBe(false);
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
   });
 
   it("offers one-click apply only to a reviewing maintainer", async () => {
@@ -270,12 +291,45 @@ describe("in-place manuscript editor launcher", () => {
     (document.querySelector(".ab-manuscript-apply") as HTMLButtonElement).click();
 
     await expect.poll(() => document.querySelector(".ab-manuscript-launcher-status")?.textContent)
-      .toContain("update after deployment");
+      .toContain("approved and applying");
     expect(requests.find(({ url, method }) =>
       url.endsWith("/revision-proposals") && method === "POST")?.body).toMatchObject({
         proposalType: "chapter_replacement",
         applyImmediately: true,
       });
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    store.getState().reconcileEvent({
+      id: 21,
+      type: "revision_proposal_applied",
+      payload: { revisionProposalId: "proposal-1", commitSha: "c".repeat(40) },
+    });
+    await expect.poll(() => document.querySelector(".ab-manuscript-launcher-status")?.textContent)
+      .toContain("waiting for publication");
+    expect(document.querySelector(".prose")?.textContent).toContain("Original chapter prose");
+    store.getState().reconcileEvent({
+      id: 22,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "c".repeat(40),
+        buildStatus: "building",
+        deployedCommit: null,
+      },
+    });
+    await expect.poll(() => document.querySelector(".ab-manuscript-launcher-status")?.textContent)
+      .toContain("Publishing chapter changes");
+    expect(document.querySelector(".prose")?.textContent).toContain("Original chapter prose");
+    store.getState().reconcileEvent({
+      id: 23,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "c".repeat(40),
+        buildStatus: "succeeded",
+        deployedCommit: "c".repeat(40),
+      },
+    });
+    await expect.poll(() => document.querySelector(".ab-manuscript-launcher-status")?.textContent)
+      .toContain("changes are deployed");
+    expect(window.sessionStorage.length).toBe(0);
   });
 
   it("retains an ambiguous draft and reuses its idempotency key on retry", async () => {
@@ -305,6 +359,39 @@ describe("in-place manuscript editor launcher", () => {
       .map(({ idempotencyKey }) => idempotencyKey);
     expect(keys).toHaveLength(3);
     expect(new Set(keys).size).toBe(1);
+  });
+
+  it("closes a failed editor when a late correlated feed event proves it landed", async () => {
+    stubFetch({
+      capabilities: ["chapters:read", "revisions:write"],
+      proposalNetworkFailures: 2,
+    });
+    mount();
+    await expect.poll(() => document.querySelector(".ab-manuscript-edit")).toBeTruthy();
+    (document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).click();
+    await expect.poll(() => createSurface.mock.calls.length).toBe(1);
+    surfaceMarkdown = "The server accepted this draft after the response was lost.";
+    lastSurfaceOptions?.onMarkdownChange?.(surfaceMarkdown);
+    (document.querySelector('[data-manuscript-submit="review"]') as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelector(".ab-manuscript-error")?.textContent)
+      .toContain("network error");
+
+    const correlationId = requests.find(({ url }) =>
+      url.endsWith("/revision-proposals"))?.correlationId;
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/u);
+    getProjectStore({ apiBase: API, project: PROJECT }).getState().reconcileEvent({
+      id: 24,
+      type: "revision_proposal_created",
+      payload: { proposalId: "proposal-late", correlationId },
+    });
+
+    await expect.poll(() => document.querySelector(".ab-manuscript-editor-shell")).toBeNull();
+    expect(document.querySelector<HTMLElement>(".prose")?.hidden).toBe(false);
+    expect(document.querySelector(".ab-manuscript-launcher-status")?.textContent)
+      .toContain("pending review");
+    expect(window.sessionStorage.getItem(
+      `authorbot.chapter-draft.${PROJECT}.${CHAPTER}`,
+    )).toContain("proposal-late");
   });
 
   it("restores only an exact-base draft and keeps its loss warning active", async () => {

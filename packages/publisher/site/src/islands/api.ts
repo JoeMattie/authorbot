@@ -717,6 +717,19 @@ export interface RevisionProposalAccepted {
   status: "pending_review" | "applying" | string;
 }
 
+/** One bounded CI publication report used to settle direct-editor deploy state. */
+export interface PublicationSummary {
+  id: string;
+  integratedCommit: string;
+  buildStatus: string;
+  deployedCommit: string | null;
+  publicUrl?: string | null;
+  deployedAt?: string | null;
+  publisherVersion?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // ---- Phase 6 §3.6: settings ------------------------------------------------
 
 /** One governance rule as the settings document carries it (no `version`). */
@@ -1660,6 +1673,14 @@ export class CollabApi {
         },
       },
     };
+  }
+
+  /** Recent bounded publication reports let editor state survive missed feed events. */
+  async publications(limit = 50): Promise<ApiResult<{ items: PublicationSummary[] }>> {
+    return this.jsonResult<{ items: PublicationSummary[] }>(
+      (async () => this.get(this.projectUrl(`/publications?limit=${String(limit)}`)))(),
+      [200],
+    );
   }
 
   /**

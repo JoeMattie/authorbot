@@ -44,10 +44,11 @@ export type PollTransport = (
  * This list is intentionally an allowlist. The event endpoint can be
  * anonymous-readable for a public book, so a newly added server event must be
  * reviewed before the browser starts consuming its payload. The current
- * emitters for `work_item_conflict` and `project_divergence_cleared` include a
- * free-form `reason`; those two are deliberately omitted. Work conflicts are
- * still followed by `operation_completed`, which causes the store to refetch
- * authoritative state. Project divergence is outside the editorial store.
+ * emitters for `work_item_conflict`, `revision_proposal_conflicted`, and
+ * `project_divergence_cleared` include a free-form `reason`; those are
+ * deliberately omitted. Operation completion still causes the store to
+ * refetch authoritative state. Project divergence is outside the editorial
+ * store.
  */
 export const FEED_EVENT_TYPES = [
   "annotation_created",
@@ -68,6 +69,10 @@ export const FEED_EVENT_TYPES = [
   "chapter_revised",
   "chapter_published",
   "chapter_unpublished",
+  "revision_proposal_created",
+  "revision_proposal_approved",
+  "revision_proposal_rejected",
+  "revision_proposal_applied",
   "publication_updated",
   "project_diverged",
   "annotation_needs_reanchor",

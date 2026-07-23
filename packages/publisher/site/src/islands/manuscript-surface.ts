@@ -12,6 +12,10 @@ export interface ManuscriptSubmitResult {
   message?: string;
   /** HTTP-style status when the store rejected the proposal. */
   status?: number;
+  /** Present for the built-in immutable revision-proposal submission path. */
+  proposalId?: string;
+  operationId?: string | null;
+  correlationId?: string | null;
 }
 
 export interface ManuscriptSurfaceOptions {
