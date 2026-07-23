@@ -9,6 +9,39 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.34
+
+- **The full editorial workflow is now available from the site.** Editors can
+  revise chapters with Milkdown Crepe, edit Outline, Timeline, and Character
+  documents in place, submit immutable proposals, and review safe Diff2Html
+  diffs. Maintainers can apply their own edit in one action without bypassing
+  validation, attribution, Git history, or the deployment pipeline.
+- **Notes and discussion now work as complete chapter collaboration tools.**
+  Anchored notes stay in manuscript order, expand with their target, navigate
+  with Previous and Next controls, render inline on mobile, and share the
+  Milkdown reading surface. Chapter-wide discussion supports replies, comment
+  voting, withdrawal, moderation, and one-click promotion to Work.
+- **Work and revision progress remains visible.** Completed Work stays on the
+  Work page with attribution and result links. Submitted edits report review,
+  apply, repository, build, and deployment state while retaining recoverable
+  drafts until the matching commit is live.
+- **Agent permissions are exact and human-equivalent for editorial work.**
+  Tokens can independently read and write comments and suggestions, vote,
+  reply, work a lease, submit revisions, review proposals, read history, and
+  update summaries within their role ceiling. Control-plane authority remains
+  human-only. The collaborator skill documents these workflows and exposes a
+  bounded story-bible API so agents do not have to probe a deployed site.
+- **Chapter context is easier to understand and recover.** Chapter rows show
+  open feedback and Work counts, summaries flow into the authenticated and
+  published Outline views, contributors link to the accepted revisions that
+  credited them, and authorized collaborators can browse, compare, and propose
+  restoring earlier chapter versions.
+- This release includes D1 migrations `0010_phase11_capabilities_expand.sql`,
+  `0011_phase11_revision_proposals.sql`, and
+  `0012_chapter_summaries.sql`. The capability backfill deliberately remains a
+  separate later release after this dual-read Worker is deployed. No
+  book-format migration is required.
+
 ## 0.1.33
 
 - **Collaboration state now stays coherent across the whole site.** Account,
