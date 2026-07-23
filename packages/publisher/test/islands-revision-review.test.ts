@@ -218,6 +218,38 @@ describe("maintainer revision review element", () => {
     expect(approveCall).toMatchObject({ method: "POST", body: {} });
   });
 
+  it("reviews hash-versioned planning documents without inventing a null revision", async () => {
+    const planning = summary(DIRECT, {
+      chapterId: null,
+      proposalType: "repository_document",
+      origin: "document_edit",
+      workItemId: null,
+      submissionId: null,
+      workItem: null,
+      chapter: null,
+      baseRevision: null,
+      currentRevision: null,
+      currentContentHash: "sha256:current-document-hash",
+      target: {
+        kind: "timeline",
+        id: "timeline",
+        path: "story/timeline.yml",
+        label: "Timeline",
+      },
+    });
+    stubApi({ proposals: [planning] });
+    mount();
+
+    await expect.poll(() => document.querySelector(".ab-revision-detail h2")?.textContent)
+      .toBe("Timeline");
+    const text = document.querySelector(".ab-revision-detail")?.textContent ?? "";
+    expect(text).toContain("Base contentsha256:before…");
+    expect(text).toContain("Current contentsha256:current-docu…");
+    expect(text).not.toContain("Base revisionnull");
+    expect(document.querySelector(".ab-revision-warning")).toBeNull();
+    expect(document.querySelector(".ab-revision-approve")?.textContent).toBe("Apply changes");
+  });
+
   it("does not require a rejection note and withholds decisions without review authority", async () => {
     stubApi();
     mount();

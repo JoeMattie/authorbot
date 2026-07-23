@@ -1,5 +1,10 @@
 /** Maintainer revision queue and document-neutral diff review surface. */
-import { isMaintainer, type Me, type RevisionProposalSummary } from "./api.js";
+import {
+  hasEffectiveCapability,
+  isMaintainer,
+  type Me,
+  type RevisionProposalSummary,
+} from "./api.js";
 import { el } from "./dom.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
@@ -26,11 +31,18 @@ function parseConfig(host: HTMLElement): RevisionReviewConfig | null {
 }
 
 function canReadRevisions(me: Me | null): boolean {
-  return me?.scopes.includes("revisions:read") === true;
+  return hasEffectiveCapability(me, "revisions:read", "revisions:read");
 }
 
 function canReviewRevisions(me: Me | null): boolean {
-  return isMaintainer(me) && me?.scopes.includes("revisions:review") === true;
+  return isMaintainer(me) &&
+    hasEffectiveCapability(me, "revisions:review", "revisions:review");
+}
+
+function compactHash(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "Unavailable";
+  const hash = value.startsWith("sha256:") ? value.slice("sha256:".length) : value;
+  return `sha256:${hash.slice(0, 12)}…`;
 }
 
 function dateLabel(value: string): string {
@@ -281,14 +293,19 @@ export class AuthorbotRevisionReview extends HTMLElement {
     const meta = el("dl", "ab-revision-meta");
     this.meta(meta, "Proposed by", proposal.author?.displayName ?? "Unknown contributor");
     this.meta(meta, "Created", dateLabel(proposal.createdAt));
-    this.meta(meta, "Base revision", String(proposal.baseRevision));
-    this.meta(
-      meta,
-      "Current revision",
-      targetDocument.currentRevision === null
-        ? "Unavailable"
-        : String(targetDocument.currentRevision),
-    );
+    if (proposal.baseRevision === null) {
+      this.meta(meta, "Base content", compactHash(proposal.baseContentHash));
+      this.meta(meta, "Current content", compactHash(proposal.currentContentHash));
+    } else {
+      this.meta(meta, "Base revision", String(proposal.baseRevision));
+      this.meta(
+        meta,
+        "Current revision",
+        targetDocument.currentRevision === null
+          ? "Unavailable"
+          : String(targetDocument.currentRevision),
+      );
+    }
     if (proposal.workItem != null) {
       const workLink = el("a", "ab-revision-work", `Work · ${workTypeLabel(proposal.workItem.type)}`);
       workLink.href = `${this.cfg.base}work/`;

@@ -1,9 +1,14 @@
 ---
 import Icon from "../../components/Icon.astro";
+import PlanningEditor from "../../components/PlanningEditor.astro";
 import Base from "../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
 
 const timeline = site.timeline;
+const timelineReadingId = "story-timeline-document";
+const planningStyles = site.collab
+  ? [`${site.basePath}_astro/authorbot-planning.css`]
+  : [];
 const locationName = (slug: string): string =>
   slug
     .split("-")
@@ -12,7 +17,11 @@ const locationName = (slug: string): string =>
     .join(" ");
 ---
 
-<Base title={`Timeline · ${site.book.title}`} activeNav="timeline">
+<Base
+  title={`Timeline · ${site.book.title}`}
+  activeNav="timeline"
+  extraStylesHrefs={planningStyles}
+>
   <div class="story-page story-timeline-page">
     <header class="story-page-header">
       <p class="story-eyebrow">Timeline{timeline?.calendar ? ` · ${timeline.calendar}` : ""}</p>
@@ -22,68 +31,77 @@ const locationName = (slug: string): string =>
         belongs to, and the facts it pins down.
       </p>
     </header>
-    {
-      timeline === null || timeline.events.length === 0 ? (
-        <p class="story-empty">This book has no timeline yet.</p>
-      ) : (
-        <ol class="story-timeline">
-          {timeline.events.map((event) => (
-            <li class="story-timeline-event">
-              <p class="story-timeline-time">{event.displayTime}</p>
-              <article class="story-timeline-card">
-                <h2>{event.title}</h2>
-                <div class="story-timeline-meta">
-                  {event.participants.length > 0 && (
-                    <span>
-                      <Icon name="users" size={14} />
+    <PlanningEditor
+      kind="timeline"
+      targetId="timeline"
+      path={site.planningDocuments.timelinePath}
+      label="Timeline"
+      readingId={timelineReadingId}
+    />
+    <div id={timelineReadingId}>
+      {
+        timeline === null || timeline.events.length === 0 ? (
+          <p class="story-empty">This book has no timeline yet.</p>
+        ) : (
+          <ol class="story-timeline">
+            {timeline.events.map((event) => (
+              <li class="story-timeline-event">
+                <p class="story-timeline-time">{event.displayTime}</p>
+                <article class="story-timeline-card">
+                  <h2>{event.title}</h2>
+                  <div class="story-timeline-meta">
+                    {event.participants.length > 0 && (
                       <span>
-                        {event.participants.map((participant, index) => (
-                          <>
-                            {index > 0 && ", "}
-                            {participant.href ? (
-                              <a href={participant.href}>{participant.name}</a>
-                            ) : (
-                              participant.name
-                            )}
-                          </>
-                        ))}
+                        <Icon name="users" size={14} />
+                        <span>
+                          {event.participants.map((participant, index) => (
+                            <>
+                              {index > 0 && ", "}
+                              {participant.href ? (
+                                <a href={participant.href}>{participant.name}</a>
+                              ) : (
+                                participant.name
+                              )}
+                            </>
+                          ))}
+                        </span>
                       </span>
-                    </span>
-                  )}
-                  {event.locations.length > 0 && (
-                    <span>
-                      <Icon name="map-pin" size={14} />
-                      <span>{event.locations.map(locationName).join(", ")}</span>
-                    </span>
-                  )}
-                  {event.chapters.length > 0 && (
-                    <span>
-                      <Icon name="book-open" size={14} />
+                    )}
+                    {event.locations.length > 0 && (
                       <span>
-                        {event.chapters.map((chapter, index) => (
-                          <>
-                            {index > 0 && ", "}
-                            {chapter.href ? (
-                              <a href={chapter.href}>{chapter.title}</a>
-                            ) : (
-                              chapter.title
-                            )}
-                          </>
-                        ))}
+                        <Icon name="map-pin" size={14} />
+                        <span>{event.locations.map(locationName).join(", ")}</span>
                       </span>
-                    </span>
+                    )}
+                    {event.chapters.length > 0 && (
+                      <span>
+                        <Icon name="book-open" size={14} />
+                        <span>
+                          {event.chapters.map((chapter, index) => (
+                            <>
+                              {index > 0 && ", "}
+                              {chapter.href ? (
+                                <a href={chapter.href}>{chapter.title}</a>
+                              ) : (
+                                chapter.title
+                              )}
+                            </>
+                          ))}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  {event.facts.length > 0 && (
+                    <ul class="story-timeline-facts">
+                      {event.facts.map((fact) => <li>{fact}</li>)}
+                    </ul>
                   )}
-                </div>
-                {event.facts.length > 0 && (
-                  <ul class="story-timeline-facts">
-                    {event.facts.map((fact) => <li>{fact}</li>)}
-                  </ul>
-                )}
-              </article>
-            </li>
-          ))}
-        </ol>
-      )
-    }
+                </article>
+              </li>
+            ))}
+          </ol>
+        )
+      }
+    </div>
   </div>
 </Base>

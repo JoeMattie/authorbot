@@ -102,6 +102,7 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
   const entries = [
     { input: "src/islands/index.ts", js: "authorbot-collab.js" },
     { input: "src/islands/account-entry.ts", js: "authorbot-account.js" },
+    { input: "src/islands/planning-entry.ts", js: "authorbot-planning.js" },
     { input: "src/islands/settings.ts", js: "authorbot-settings.js" },
     { input: "src/islands/access.ts", js: "authorbot-access.js" },
   ] as const;
@@ -138,6 +139,7 @@ async function buildIslands(siteRoot: string, outDir: string): Promise<void> {
   // §3 CSP works without 'unsafe-inline' styles.
   for (const [source, target] of [
     ["collab.css", "authorbot-collab.css"],
+    ["planning-editor.css", "authorbot-planning.css"],
     ["access.css", "authorbot-access.css"],
     ["settings.css", "authorbot-settings.css"],
     ["work.css", "authorbot-work.css"],

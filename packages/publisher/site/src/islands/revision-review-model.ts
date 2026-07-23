@@ -71,6 +71,12 @@ export function revisionWarning(
           : `The current document at revision ${document.currentRevision} no longer matches this proposal's base revision ${proposal.baseRevision}. Applying will validate the change and may create a conflict; it will not overwrite the current version silently.`,
     };
   }
+  // Repository documents are content-hash versioned rather than carrying a
+  // synthetic chapter revision. A matching hash is a known-good current base,
+  // not an "unavailable revision" warning.
+  if (document.kind !== "chapter" || proposal.baseRevision === null) {
+    return null;
+  }
   if (document.currentRevision === null) {
     return {
       tone: "unknown",
@@ -93,7 +99,7 @@ export function revisionWarning(
 export function revisionActionCopy(
   proposal: RevisionProposalSummary,
 ): RevisionReviewActionCopy {
-  return proposal.origin === "direct_edit"
+  return proposal.origin === "direct_edit" || proposal.origin === "document_edit"
     ? {
         approveLabel: "Apply changes",
         explanation:

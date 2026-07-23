@@ -1,14 +1,23 @@
 ---
 import Outline from "../../components/Outline.astro";
+import PlanningEditor from "../../components/PlanningEditor.astro";
 import Base from "../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
 
 const chapterSummaries = site.chapters.filter(
   (chapter) => chapter.status === "published" && chapter.summary,
 );
+const outlineReadingId = "story-outline-document";
+const planningStyles = site.collab
+  ? [`${site.basePath}_astro/authorbot-planning.css`]
+  : [];
 ---
 
-<Base title={`Story outline · ${site.book.title}`} activeNav="outline">
+<Base
+  title={`Story outline · ${site.book.title}`}
+  activeNav="outline"
+  extraStylesHrefs={planningStyles}
+>
   <div class="story-page story-outline-page">
     <header class="story-page-header">
       <p class="story-eyebrow">
@@ -20,13 +29,22 @@ const chapterSummaries = site.chapters.filter(
         that resists it, and the outcome it leaves behind.
       </p>
     </header>
-    {
-      site.outline === null || site.outline.length === 0 ? (
-        <p class="story-empty">This book has no outline yet.</p>
-      ) : (
-        <Outline nodes={site.outline} />
-      )
-    }
+    <PlanningEditor
+      kind="outline"
+      targetId="outline"
+      path={site.planningDocuments.outlinePath}
+      label="Outline"
+      readingId={outlineReadingId}
+    />
+    <div id={outlineReadingId}>
+      {
+        site.outline === null || site.outline.length === 0 ? (
+          <p class="story-empty">This book has no outline yet.</p>
+        ) : (
+          <Outline nodes={site.outline} />
+        )
+      }
+    </div>
     {
       chapterSummaries.length > 0 && (
         <section class="story-chapter-summaries" aria-labelledby="chapter-summaries-title">

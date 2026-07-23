@@ -52,8 +52,11 @@ describe("revision review presentation model", () => {
   it("uses the generic target for future repository documents", () => {
     const timeline = proposal({
       chapterId: null,
-      proposalType: "document_replacement",
+      proposalType: "repository_document",
+      origin: "document_edit",
+      baseRevision: null,
       currentRevision: null,
+      currentContentHash: "sha256:current",
       target: {
         kind: "timeline",
         id: "story-timeline",
@@ -70,7 +73,8 @@ describe("revision review presentation model", () => {
       label: "Timeline",
       currentRevision: null,
     });
-    expect(revisionWarning(timeline)?.tone).toBe("unknown");
+    expect(revisionWarning(timeline)).toBeNull();
+    expect(revisionActionCopy(timeline)).toMatchObject({ approveLabel: "Apply changes" });
   });
 
   it("keeps chapter-only responses backward compatible", () => {

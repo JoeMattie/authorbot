@@ -1,0 +1,198 @@
+authorbot-planning-document-editor {
+  display: block;
+}
+
+authorbot-planning-document-editor:empty {
+  display: none;
+}
+
+.ab-btn {
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 7px;
+  background: var(--surface-raised, var(--surface));
+  color: var(--text-body, var(--fg));
+  font: 600 12px/1.3 var(--font-display, "Space Grotesk", system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.ab-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ab-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.ab-primary {
+  border-color: var(--blue-600, var(--link));
+  background: var(--blue-600, var(--link));
+  color: var(--gray-50, white);
+}
+
+.ab-field-label {
+  display: block;
+  color: var(--text-muted, var(--muted));
+  font-size: 0.78rem;
+}
+
+.ab-input,
+.ab-textarea {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 7px;
+  background: var(--surface-sunken, var(--bg));
+  color: var(--text-strong, var(--fg));
+  font: inherit;
+}
+
+.ab-input:focus,
+.ab-textarea:focus {
+  border-color: var(--border-focus, var(--blue-500, var(--link)));
+  outline: 0;
+  box-shadow: var(--ring, 0 0 0 3px rgba(66, 88, 222, 0.22));
+}
+
+.ab-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ab-error {
+  color: #a03434;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ab-error {
+    color: #e09a9a;
+  }
+}
+
+.ab-planning-launcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  margin: 0 0 1.25rem;
+}
+
+.ab-planning-launcher-status {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--text-muted, var(--muted));
+  text-align: right;
+}
+
+.ab-planning-editor-shell {
+  width: 100%;
+  margin: 0 0 2rem;
+}
+
+.ab-planning-editor-title {
+  margin: 0 0 0.9rem;
+  color: var(--text-strong, var(--fg));
+  font-size: 1.2rem;
+}
+
+.ab-planning-editor-root {
+  width: 100%;
+}
+
+.ab-planning-source-field,
+.ab-planning-metadata-field,
+.ab-planning-summary-field {
+  display: grid;
+  gap: 7px;
+}
+
+.ab-planning-source,
+.ab-planning-metadata {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 10px;
+  background: var(--surface-card, var(--bg));
+  color: var(--text-body, var(--fg));
+  font: 400 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  tab-size: 2;
+}
+
+.ab-planning-source {
+  min-height: min(62vh, 44rem);
+  padding: 1rem;
+}
+
+.ab-planning-metadata {
+  min-height: 12rem;
+  padding: 0.9rem 1rem;
+}
+
+.ab-planning-body-label {
+  margin: 1.2rem 0 7px;
+}
+
+.ab-planning-milkdown-root {
+  width: 100%;
+  min-height: 22rem;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 12px;
+  background: var(--surface-card, var(--bg));
+  box-shadow: var(--shadow-md, 0 10px 28px rgba(0, 0, 0, 0.16));
+}
+
+.ab-planning-milkdown-root .milkdown,
+.ab-planning-milkdown-root .ProseMirror {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+}
+
+.ab-planning-milkdown-root .ProseMirror {
+  min-height: 22rem;
+  padding: 2rem clamp(1.1rem, 5vw, 3rem);
+  color: var(--text-body, var(--fg));
+  font: 400 18px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
+}
+
+.ab-planning-milkdown-root .ProseMirror:focus-visible,
+.ab-planning-source:focus-visible,
+.ab-planning-metadata:focus-visible {
+  outline: 2px solid var(--blue-500, var(--link));
+  outline-offset: 3px;
+}
+
+.ab-planning-summary-field {
+  margin-top: 1rem;
+}
+
+.ab-planning-summary {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.ab-planning-error,
+.ab-planning-status {
+  margin: 10px 0 0;
+}
+
+.ab-planning-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .ab-planning-launcher .ab-planning-edit,
+  .ab-planning-actions .ab-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .ab-planning-milkdown-root .ProseMirror {
+    padding: 1.2rem 1rem;
+  }
+}

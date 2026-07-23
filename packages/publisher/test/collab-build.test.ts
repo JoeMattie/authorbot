@@ -137,6 +137,8 @@ describe("api-url-less build (script-free regression)", () => {
       path.join("_astro", "authorbot-account.js"),
       path.join("_astro", "authorbot-collab.css"),
       path.join("_astro", "authorbot-collab.js"),
+      path.join("_astro", "authorbot-planning.css"),
+      path.join("_astro", "authorbot-planning.js"),
       path.join("_astro", "authorbot-revisions.css"),
       path.join("_astro", "authorbot-settings.css"),
       path.join("_astro", "authorbot-settings.js"),
@@ -180,7 +182,12 @@ describe("api-url-less build (script-free regression)", () => {
         collab = collab
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
+          .replace(/<link rel="stylesheet" href="[^"]*authorbot-planning\.css">/, "")
           .replace(/<authorbot-collab[^>]*>\s*<\/authorbot-collab>/, "")
+          .replace(
+            /<authorbot-planning-document-editor[^>]*>\s*<\/authorbot-planning-document-editor>/,
+            "",
+          )
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           .replace(/<authorbot-chapter-activity[^>]*>\s*<\/authorbot-chapter-activity>/, "")
@@ -198,6 +205,7 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<div class="chapter-authoring">\s*<\/div>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-account\.js"><\/script>/, "")
+          .replace(/<script type="module" src="[^"]*authorbot-planning\.js"><\/script>/, "")
           .replace(/>\s+</g, "> <");
         plain = plain
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
@@ -233,10 +241,12 @@ describe("collab-enabled build", () => {
     expect(page).toContain("<authorbot-account");
   });
 
-  it("puts the account strip on story pages without loading collaboration UI", async () => {
+  it("puts the account strip and planning entry on the Outline page", async () => {
     const page = await readFile(path.join(outCollab, "story/index.html"), "utf8");
     expect(page).toContain("<authorbot-account");
     expect(page).toContain('<script type="module" src="/_astro/authorbot-account.js">');
+    expect(page).toContain('<script type="module" src="/_astro/authorbot-planning.js">');
+    expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-planning.css">');
     expect(page).not.toContain("authorbot-collab.js");
   });
 
@@ -253,7 +263,41 @@ describe("collab-enabled build", () => {
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-collab.css">');
   });
 
-  it("hydrates story identity with only the lightweight account entry", async () => {
+  it("stamps each editable story document with its canonical repository identity", async () => {
+    for (const [relPath, expected] of [
+      [
+        "story/index.html",
+        ['data-kind="outline"', 'data-target-id="outline"', 'data-path="story/outline.yml"'],
+      ],
+      [
+        "story/timeline/index.html",
+        ['data-kind="timeline"', 'data-target-id="timeline"', 'data-path="story/timeline.yml"'],
+      ],
+      [
+        "story/characters/mara-voss/index.html",
+        [
+          'data-kind="character"',
+          'data-target-id="character:mara-voss"',
+          'data-path="story/characters/mara-voss.md"',
+        ],
+      ],
+    ] as const) {
+      const html = await readFile(path.join(outCollab, relPath), "utf8");
+      expect(html, relPath).toContain("<authorbot-planning-document-editor");
+      for (const value of expected) expect(html, relPath).toContain(value);
+      expect(html, relPath).toContain("authorbot-planning.js");
+      expect(html, relPath).toContain("authorbot-planning.css");
+    }
+
+    const index = await readFile(
+      path.join(outCollab, "story/characters/index.html"),
+      "utf8",
+    );
+    expect(index).not.toContain("authorbot-planning-document-editor");
+    expect(index).not.toContain("authorbot-planning.js");
+  });
+
+  it("hydrates story identity without loading chapter collaboration UI", async () => {
     for (const relPath of [
       "story/index.html",
       "story/timeline/index.html",
@@ -295,9 +339,14 @@ describe("collab-enabled build", () => {
       path.join(outCollab, "_astro", "authorbot-collab.js"),
       "utf8",
     );
+    const planning = await readFile(
+      path.join(outCollab, "_astro/authorbot-planning.js"),
+      "utf8",
+    );
     for (const [entry, js] of [
       ["authorbot-account.js", account],
       ["authorbot-collab.js", collab],
+      ["authorbot-planning.js", planning],
     ] as const) {
       expect(js, entry).toContain("./assets/");
       expect(js, entry).not.toContain('"/assets/');
@@ -313,6 +362,9 @@ describe("collab-enabled build", () => {
     expect(collab).toMatch(/\.\/assets\/revision-review-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
+    expect(planning).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
+    expect(planning).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
+    expect(planning).not.toContain("ProseMirror");
 
     const manuscriptJs = await readFile(
       path.join(outCollab, "_astro", "assets", manuscript!),

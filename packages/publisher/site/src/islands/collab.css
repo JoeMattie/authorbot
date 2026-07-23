@@ -584,7 +584,6 @@ authorbot-manuscript-editor:empty {
 }
 
 .ab-drawer-panel .ab-card-shell {
-  position: static;
   margin: 0.6rem 0;
 }
 
@@ -2062,7 +2061,6 @@ authorbot-manuscript-editor:empty {
 
 .ab-discussion-composer .ab-composer,
 .ab-discussion-thread {
-  position: static;
   width: 100%;
   box-sizing: border-box;
 }

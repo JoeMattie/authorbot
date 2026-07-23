@@ -524,7 +524,7 @@ export interface RevisionProposalSummary {
   workItemId: string | null;
   submissionId: string | null;
   authorActorId: string;
-  baseRevision: number;
+  baseRevision: number | null;
   changeSummary: string | null;
   notes: string | null;
   status: string;
@@ -566,6 +566,39 @@ export interface RevisionReviewResult {
   status: string;
   correlationId: string;
   operationId?: string;
+}
+
+export type RepositoryDocumentKind = "outline" | "timeline" | "character";
+
+/** Canonical source and immutable base identity for one planning document. */
+export interface RepositoryDocumentSource {
+  target: {
+    kind: RepositoryDocumentKind;
+    id: string;
+    path: string;
+    label: string;
+  };
+  content: string;
+  contentHash: string;
+}
+
+export interface RepositoryDocumentProposalCommand {
+  proposalType: "repository_document";
+  targetKind: RepositoryDocumentKind;
+  targetPath: string;
+  baseContentHash: string;
+  proposedContent: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
+}
+
+/** A normal proposal is pending review; an atomic maintainer apply is queued. */
+export interface RevisionProposalAccepted {
+  proposalId: string;
+  operationId: string | null;
+  correlationId: string;
+  status: "pending_review" | "applying" | string;
 }
 
 // ---- Phase 6 §3.6: settings ------------------------------------------------

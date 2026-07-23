@@ -27,6 +27,10 @@ import {
   type OverrideResult,
   type Reply,
   type ReplyAccepted,
+  type RepositoryDocumentKind,
+  type RepositoryDocumentProposalCommand,
+  type RepositoryDocumentSource,
+  type RevisionProposalAccepted,
   type RevisionProposalDetail,
   type RevisionProposalSummary,
   type RevisionReviewResult,
@@ -58,6 +62,14 @@ export interface ProjectStoreApi {
   >;
   revisionProposals?: CollabApi["revisionProposals"];
   revisionProposal?: CollabApi["revisionProposal"];
+  repositoryDocumentSource?(
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<ApiResult<RepositoryDocumentSource>>;
+  createRevisionProposal?(
+    command: RepositoryDocumentProposalCommand,
+    options?: MutationOptions,
+  ): Promise<ApiResult<RevisionProposalAccepted>>;
   reviewRevisionProposal?: CollabApi["reviewRevisionProposal"];
   operation?(operationId: string): Promise<Operation | null>;
   eventsUrl?(): string;
@@ -230,6 +242,13 @@ export interface ProjectStoreState {
     command: WorkSubmission,
   ): Promise<StoreActionResult<SubmissionAccepted>>;
   readChapterSource(chapterId: string): Promise<StoreActionResult<ChapterSource>>;
+  readRepositoryDocument(
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<StoreActionResult<RepositoryDocumentSource>>;
+  proposeRepositoryDocument(
+    command: RepositoryDocumentProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>>;
   createChapter(command: ChapterCreateCommand): Promise<StoreActionResult<ChapterAccepted>>;
   reviseChapter(command: ChapterReviseCommand): Promise<StoreActionResult<ChapterAccepted>>;
   setChapterPublication(
@@ -246,9 +265,35 @@ const MAX_WORK_ITEM_PAGES = 10;
 const MAX_REVISION_PROPOSAL_PAGES = 10;
 const MAX_OPERATION_SETTLEMENT_RETRIES = 4;
 
+/** Planning writes live in the lazy store chunk, not the 35 KB reader entry. */
+class ProjectStoreApiClient extends CollabApi implements ProjectStoreApi {
+  async repositoryDocumentSource(
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<ApiResult<RepositoryDocumentSource>> {
+    const query = new URLSearchParams({ kind, path });
+    return this.jsonResult<RepositoryDocumentSource>(
+      (async () =>
+        this.get(this.projectUrl(`/repository-documents/source?${query.toString()}`)))(),
+      [200],
+    );
+  }
+
+  async createRevisionProposal(
+    command: RepositoryDocumentProposalCommand,
+    options?: MutationOptions,
+  ): Promise<ApiResult<RevisionProposalAccepted>> {
+    return this.jsonResult<RevisionProposalAccepted>(
+      this.post(this.projectUrl("/revision-proposals"), command, options),
+      [201, 202],
+      { mutation: true, subject: "revision proposal" },
+    );
+  }
+}
+
 export function createProjectStore(
   config: ProjectStoreConfig,
-  api: ProjectStoreApi = new CollabApi(config.apiBase, config.project),
+  api: ProjectStoreApi = new ProjectStoreApiClient(config.apiBase, config.project),
 ): ProjectStore {
   let sessionRequest: Promise<void> | null = null;
   let chaptersRequest: Promise<void> | null = null;
@@ -2723,6 +2768,49 @@ export function createProjectStore(
     return result.ok ? { ok: true, value: result.value } : actionFailure(result);
   };
 
+  const readRepositoryDocument = async (
+    kind: RepositoryDocumentKind,
+    path: string,
+  ): Promise<StoreActionResult<RepositoryDocumentSource>> => {
+    const read = api.repositoryDocumentSource;
+    if (read === undefined) return unsupported("repository document source");
+    const generation = authorizationGeneration;
+    const result = await read.call(api, kind, path);
+    if (generation !== authorizationGeneration) return credentialChanged();
+    return result.ok ? { ok: true, value: result.value } : actionFailure(result);
+  };
+
+  const proposeRepositoryDocument = async (
+    command: RepositoryDocumentProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> => {
+    const write = api.createRevisionProposal;
+    if (write === undefined) return unsupported("repository document proposal");
+    const generation = authorizationGeneration;
+    const fingerprint = commandFingerprint("revision.propose-document", command);
+    const key = retainedKeyFor(fingerprint);
+    const result = await replayOnce(() =>
+      write.call(api, command, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      if (!shouldReplay(result)) settleCommand(fingerprint);
+      return actionFailure(result);
+    }
+    settleCommand(fingerprint);
+    if (store.getState().revisionProposalsStatus !== "idle") {
+      void loadRevisionProposals(true);
+    }
+    if (result.value.operationId !== null) {
+      await registerOperationContext(result.value.operationId, {
+        kind: "revision.apply",
+        chapterId: null,
+        workItemId: null,
+        revisionProposalId: result.value.proposalId,
+      });
+    }
+    return { ok: true, value: result.value };
+  };
+
   const writeChapter = async (
     command: ChapterCreateCommand | ChapterReviseCommand,
   ): Promise<StoreActionResult<ChapterAccepted>> => {
@@ -2971,6 +3059,8 @@ export function createProjectStore(
     releaseClaim,
     submitClaim,
     readChapterSource,
+    readRepositoryDocument,
+    proposeRepositoryDocument,
     createChapter: (command) => writeChapter(command),
     reviseChapter: (command) => writeChapter(command),
     setChapterPublication,
