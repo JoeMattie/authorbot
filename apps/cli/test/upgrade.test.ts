@@ -301,11 +301,15 @@ describe("authorbot upgrade --check", () => {
         repairRequired: boolean;
         repairBlocked: boolean;
         migrationBaseline: string | null;
+        formatMigrationRequired: boolean | null;
+        migrations: unknown[] | null;
       };
       expect(report).toMatchObject({
         repairRequired: true,
         repairBlocked: true,
         migrationBaseline: null,
+        formatMigrationRequired: null,
+        migrations: null,
       });
       expect(git.calls).toEqual([]);
       expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
@@ -321,7 +325,7 @@ describe("authorbot upgrade - no upgrade available", () => {
     const io = captureIo();
     expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(0);
     expect(io.stdout()).toContain("already on 1.1.0");
-    expect(git.calls).toEqual([]);
+    expect(git.calls).toEqual(["currentBranch", "head"]);
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
   });
 });
@@ -683,6 +687,30 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     expect(staticManifest.devDependencies["@authorbot/api"]).toBeUndefined();
   });
 
+  it("repairs a stale lock-only API pin after the manifest pin was removed", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    await writeToolchainLock(repoPath, {
+      cliSpec: "1.1.0",
+      cliVersion: "1.1.0",
+      apiSpec: "1.0.0",
+      apiVersion: "1.0.0",
+    });
+    const git = fakeGit();
+
+    expect(await runUpgrade([repoPath], captureIo().io, makeDeps({ git }))).toBe(0);
+
+    expect(git.pullRequest?.title).toBe("Repair Authorbot 1.1.0 toolchain");
+    const lock = JSON.parse(
+      await nodeFs.readFile(path.join(repoPath, "package-lock.json")),
+    ) as { packages: Record<string, unknown> };
+    expect(
+      (lock.packages[""] as { devDependencies: Record<string, string> }).devDependencies[
+        "@authorbot/api"
+      ],
+    ).toBeUndefined();
+    expect(lock.packages["node_modules/@authorbot/api"]).toBeUndefined();
+  });
+
   it("makes a single commit when only the pin moves", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const git = fakeGit();
@@ -786,6 +814,53 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     expect(git.branches).toEqual([]);
     expect(io.stderr()).toContain("current branch changed from main to other-work");
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("rechecks HEAD after migration and relocking to catch same-branch commits", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let headChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      headChecks += 1;
+      return headChecks === 1 ? "sha-base" : "sha-new-commit";
+    };
+    const io = captureIo();
+
+    expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(2);
+
+    expect(headChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("HEAD changed from sha-base to sha-new-commit");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("anchors branch creation to the reviewed HEAD if a commit lands in the final gap", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const git = fakeGit();
+    let liveHead = "sha-reviewed";
+    let branchChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      return liveHead;
+    };
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      if (branchChecks === 2) {
+        // Models another process committing after the final HEAD check but
+        // immediately before createBranch starts.
+        liveHead = "sha-unreviewed-race";
+      }
+      return "main";
+    };
+
+    expect(await runUpgrade([repoPath], captureIo().io, makeDeps({ git }))).toBe(0);
+
+    expect(git.branchStarts).toHaveLength(1);
+    expect(git.branchStarts[0]?.startPoint).toBe("sha-reviewed");
+    expect(git.branchStarts[0]?.startPoint).not.toBe(liveHead);
   });
 
   it("describes already-satisfied repair migrations without claiming only a pin changed", async () => {

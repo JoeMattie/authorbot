@@ -128,6 +128,14 @@ helper, and `node_modules` are alignment inputs, not format evidence. Missing,
 malformed, contradictory, or newer lock evidence blocks unchanged rather than
 guessing which migrations already ran.
 
+For a mutating run, the helper records both the current branch and exact HEAD
+before reading repository state, then rechecks HEAD, branch, and cleanliness
+immediately before creating its branch. This catches same-branch commits as
+well as ordinary uncommitted edits made while migration or relocking was in
+progress. Branch creation names that recorded HEAD as its explicit start point,
+so even a commit in the final gap cannot become the pull request's unnoticed
+base.
+
 No release can change an executable which was already published before this
 bootstrap existed. A book whose installed helper predates this behavior needs
 one explicit launch of a new package:

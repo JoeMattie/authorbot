@@ -160,6 +160,7 @@ export interface FakeGit extends GitPort {
   readonly calls: string[];
   readonly commits: { message: string; paths: readonly string[] }[];
   readonly branches: string[];
+  readonly branchStarts: { name: string; startPoint?: string }[];
   pullRequest?: PullRequestRequest;
   clean: boolean;
   failAt?: GitStep;
@@ -169,10 +170,12 @@ export function fakeGit(overrides: Partial<Pick<FakeGit, "clean" | "failAt">> = 
   const calls: string[] = [];
   const commits: { message: string; paths: readonly string[] }[] = [];
   const branches: string[] = [];
+  const branchStarts: { name: string; startPoint?: string }[] = [];
   const git: FakeGit = {
     calls,
     commits,
     branches,
+    branchStarts,
     clean: overrides.clean ?? true,
     ...(overrides.failAt === undefined ? {} : { failAt: overrides.failAt }),
     async isClean() {
@@ -183,10 +186,18 @@ export function fakeGit(overrides: Partial<Pick<FakeGit, "clean" | "failAt">> = 
       calls.push("currentBranch");
       return "main";
     },
-    async createBranch(_repo: string, name: string) {
+    async head() {
+      calls.push("head");
+      return "sha-base";
+    },
+    async createBranch(_repo: string, name: string, startPoint?: string) {
       calls.push(`createBranch ${name}`);
       maybeFail(git, "createBranch");
       branches.push(name);
+      branchStarts.push({
+        name,
+        ...(startPoint === undefined ? {} : { startPoint }),
+      });
     },
     async checkout(_repo: string, name: string) {
       calls.push(`checkout ${name}`);

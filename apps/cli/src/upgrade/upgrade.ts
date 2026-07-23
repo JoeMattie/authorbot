@@ -282,6 +282,7 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
   const effectivePlan = planFromAudit(plan, audit, deps);
   const actionRequired = plan.upgradeAvailable || audit.repairRequired;
   const migrationRequired = effectivePlan.migrations.length > 0;
+  const repairBlocked = audit.blockedReason !== undefined;
 
   if (options.json) {
     io.out(
@@ -292,24 +293,26 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
           upgradeAvailable: plan.upgradeAvailable,
           actionRequired,
           repairRequired: audit.repairRequired,
-          repairBlocked: audit.blockedReason !== undefined,
+          repairBlocked,
           repairIssues: audit.repairRequired ? audit.issues : [],
           migrationBaseline: audit.repairRequired ? audit.baseline?.raw ?? null : plan.current.raw,
           repairBlockReason: audit.blockedReason ?? null,
-          formatMigrationRequired: migrationRequired,
-          migrations: effectivePlan.migrations.map(({ migration }) => ({
-            id: migration.id,
-            from: migration.from,
-            to: migration.to,
-            description: migration.description,
-          })),
+          formatMigrationRequired: repairBlocked ? null : migrationRequired,
+          migrations: repairBlocked
+            ? null
+            : effectivePlan.migrations.map(({ migration }) => ({
+                id: migration.id,
+                from: migration.from,
+                to: migration.to,
+                description: migration.description,
+              })),
           newerMajorAvailable: plan.newerMajor?.raw ?? null,
         },
         null,
         2,
       ),
     );
-  } else if (audit.blockedReason !== undefined) {
+  } else if (repairBlocked) {
     io.err(`authorbot: toolchain repair is required at ${plan.target.raw}, but it is blocked:`);
     for (const issue of audit.issues) {
       io.err(`  - ${issue}`);
@@ -355,7 +358,7 @@ async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): 
     }
   }
 
-  if (audit.blockedReason !== undefined) {
+  if (repairBlocked) {
     return 2;
   }
   if (!actionRequired) {
@@ -516,7 +519,25 @@ async function auditToolchain(
     }
     for (const packageName of AUTHORBOT_RUNTIME_PACKAGES) {
       const dependency = directDependency(manifest, packageName);
+      const lockedDependency =
+        root === undefined ? undefined : directDependency(root, packageName);
       if (dependency === undefined) {
+        if (lockedDependency !== undefined) {
+          issues.push(
+            `package-lock.json still records direct ${packageName} ${lockedDependency.spec}, ` +
+              "but package.json has no direct pin",
+          );
+          const staleResolved =
+            packages === undefined
+              ? undefined
+              : objectField(packages, `node_modules/${packageName}`)?.["version"];
+          if (staleResolved !== undefined) {
+            issues.push(
+              `package-lock.json still resolves direct ${packageName} to ` +
+                `${String(staleResolved)} after its manifest pin was removed`,
+            );
+          }
+        }
         continue;
       }
       const lockedSpec =
@@ -629,6 +650,13 @@ function verifyToolchainLock(
   for (const packageName of AUTHORBOT_RUNTIME_PACKAGES) {
     const dependency = directDependency(manifest, packageName);
     if (dependency === undefined) {
+      const staleDirect = directDependency(root, packageName);
+      if (staleDirect !== undefined) {
+        throw new Error(
+          `package-lock.json kept a stale direct ${packageName} root spec ` +
+            `${staleDirect.spec} after its manifest pin was removed`,
+        );
+      }
       continue;
     }
     const lockedSpec = objectField(root, dependency.field)?.[packageName];
@@ -778,6 +806,16 @@ async function runUpgradeFlow(
   io: CliIo,
   deps: UpgradeDeps,
 ): Promise<number> {
+  // Capture repository identity before reading the manifest or lock. A
+  // same-branch commit during registry lookup, migration, or relocking leaves
+  // a clean tree and the same branch name; only HEAD proves those reads still
+  // describe the checkout we are about to branch from.
+  const preparationIdentity = options.dryRun
+    ? undefined
+    : {
+        branch: await deps.git.currentBranch(options.repoPath),
+        head: await deps.git.head(options.repoPath),
+      };
   const plan = await resolvePlan(deps, {
     repoPath: options.repoPath,
     ...(options.to === undefined ? {} : { to: options.to }),
@@ -791,6 +829,9 @@ async function runUpgradeFlow(
       io.out(
         JSON.stringify(
           {
+            ...(options.dryRun
+              ? { dryRun: true, toolchainRelockVerified: false, wouldAbort: true }
+              : {}),
             upgraded: false,
             current: plan.current.raw,
             target: plan.target.raw,
@@ -799,6 +840,8 @@ async function runUpgradeFlow(
             repairBlocked: true,
             repairIssues: audit.issues,
             migrationBaseline: null,
+            formatMigrationRequired: null,
+            migrations: null,
             reason: audit.blockedReason,
           },
           null,
@@ -864,7 +907,9 @@ async function runUpgradeFlow(
     );
     return 2;
   }
-  const originalBranch = await deps.git.currentBranch(plan.repoPath);
+  const originalBranch =
+    preparationIdentity?.branch ?? (await deps.git.currentBranch(plan.repoPath));
+  const originalHead = preparationIdentity?.head ?? (await deps.git.head(plan.repoPath));
 
   const outcome = await migrateWorkingCopy(effectivePlan, deps, io);
   if (outcome.newErrors.length > 0) {
@@ -917,6 +962,15 @@ async function runUpgradeFlow(
     );
     return 2;
   }
+  const headBeforeCreate = await deps.git.head(plan.repoPath);
+  if (headBeforeCreate !== originalHead) {
+    io.err(
+      `authorbot: HEAD changed from ${originalHead} to ${headBeforeCreate} while the ` +
+        "operation was being prepared. No branch or repository change was made; inspect the " +
+        "new commit and run the command again.",
+    );
+    return 2;
+  }
   const branchBeforeCreate = await deps.git.currentBranch(plan.repoPath);
   if (branchBeforeCreate !== originalBranch) {
     io.err(
@@ -933,7 +987,7 @@ async function runUpgradeFlow(
   const completed: string[] = [];
 
   try {
-    await deps.git.createBranch(plan.repoPath, branch);
+    await deps.git.createBranch(plan.repoPath, branch, originalHead);
     completed.push(`created branch ${branch}`);
 
     if (toolchainChanged) {

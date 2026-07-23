@@ -554,8 +554,18 @@ export const nodeGit: GitPort = {
     const { stdout } = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], repo);
     return stdout.trim();
   },
-  async createBranch(repo, name) {
-    await run("git", ["checkout", "-b", name], repo);
+  async head(repo) {
+    const { stdout } = await run("git", ["rev-parse", "HEAD"], repo);
+    return stdout.trim();
+  },
+  async createBranch(repo, name, startPoint) {
+    await run(
+      "git",
+      startPoint === undefined
+        ? ["checkout", "-b", name]
+        : ["checkout", "-b", name, startPoint],
+      repo,
+    );
   },
   async checkout(repo, name) {
     await run("git", ["checkout", name], repo);

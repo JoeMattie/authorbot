@@ -47,8 +47,14 @@ export interface GitPort {
   /** True when the working tree and index have no changes. */
   isClean(repo: string): Promise<boolean>;
   currentBranch(repo: string): Promise<string>;
-  /** Create `name` from the current HEAD and switch to it. */
-  createBranch(repo: string, name: string): Promise<void>;
+  /** Exact commit currently checked out. Used to detect same-branch races. */
+  head(repo: string): Promise<string>;
+  /**
+   * Create `name` and switch to it. When `startPoint` is provided, the branch
+   * must be anchored to that exact commit rather than whatever HEAD happens to
+   * contain when the subprocess starts.
+   */
+  createBranch(repo: string, name: string, startPoint?: string): Promise<void>;
   checkout(repo: string, name: string): Promise<void>;
   deleteBranch(repo: string, name: string): Promise<void>;
   /** Stage the given paths and commit them. Returns the new commit sha. */
