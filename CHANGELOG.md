@@ -9,6 +9,33 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.38
+
+- **Authorbot now has a complete local authoring mode.** `authorbot dev` runs
+  the real API and browser UI against a managed branch and persistent Git
+  worktree, with private SQLite state outside the book repository. It needs no
+  Cloudflare account or GitHub connection, and needs no network after the
+  packages are installed. Companion commands report status, print the private
+  starter agent environment, reset operational state without touching Git,
+  open a draft book pull request, and remove only worktrees Git can prove are
+  safe to clean up.
+- **Local editing follows the repository instead of fighting it.** API reads
+  are pinned to committed `HEAD`, while the preview can show direct editor
+  saves immediately. API writes pause while the worktree is dirty or on the
+  wrong branch, and resume after an explicit forward-moving author commit.
+  Local maintainer sign-in uses a one-use bootstrap link, book-specific
+  cookies, a stable `local:` identity, and a private full-editor starter token.
+- **The local browser loop is fast enough for Authorbot development.**
+  Astro/Vite serves the only browser origin and proxies the private loopback
+  API. Book and UI changes reload without throwing away SQLite or tokens, the
+  local toolbar reports branch and projection state, and a pending reload
+  waits when a form or editor has unsaved input. Backend source edits still
+  require restarting `authorbot dev`.
+- Local authoring uses Node's built-in SQLite instead of a native module.
+  Authorbot's CLI and local runtime now require Node 22.13 or newer. Cloudflare
+  remains the hosted production runtime. This release has no book-format
+  migration and no new D1 migration.
+
 ## 0.1.37
 
 - **Cloudflare D1 can now apply the Phase 3B capability backfill.** The 0.1.36

@@ -135,9 +135,11 @@ runs `npx authorbot validate` and `npx authorbot build`. It needs the network
 and takes a couple of minutes. Run it before every release; it is the closest
 thing to being an author that exists in this repository.
 
-`check:author-ci` covers the static-site path (`@authorbot/cli` and its runtime
-closure), which is what every book installs. It deliberately does not install
-`@authorbot/api`, because a static-only book has no reason to.
+`check:author-ci` covers `@authorbot/cli` and derives its complete workspace
+dependency closure from the package manifests. Local authoring makes
+`@authorbot/api` a lazy CLI dependency, so the rehearsal packs that API and
+its dependencies too. It does not start the API during the static validation
+and build check.
 
 `check:api-tarball` covers the collaborative path. It packs every publishable
 package into a temporary release set, installs the API and its declared

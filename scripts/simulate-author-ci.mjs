@@ -31,10 +31,30 @@ import { PUBLISHABLE } from "./publishable.mjs";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const keep = process.argv.includes("--keep");
 
-// The CLI's runtime closure. @authorbot/api and its dependencies are not
-// installed by a static-only book, and pulling them in would mean building a
-// native SQLite module for no reason.
-const CLI_CLOSURE = ["packages/schemas", "packages/markdown", "packages/publisher", "apps/cli"];
+// Derive the CLI's complete local workspace closure instead of maintaining a
+// second dependency list by hand. Local authoring makes @authorbot/api a lazy
+// CLI dependency, so every unreleased @authorbot package in that closure must
+// come from the rehearsal's tarballs rather than the public registry.
+const publishablePackages = await Promise.all(
+  PUBLISHABLE.map(async (dir) => ({
+    dir,
+    pkg: JSON.parse(await readFile(join(ROOT, dir, "package.json"), "utf8")),
+  })),
+);
+const packageByName = new Map(publishablePackages.map((entry) => [entry.pkg.name, entry]));
+const requiredNames = new Set(["@authorbot/cli"]);
+const pendingNames = ["@authorbot/cli"];
+while (pendingNames.length > 0) {
+  const name = pendingNames.pop();
+  const entry = packageByName.get(name);
+  if (entry === undefined) continue;
+  for (const dependency of Object.keys(entry.pkg.dependencies ?? {})) {
+    if (!packageByName.has(dependency) || requiredNames.has(dependency)) continue;
+    requiredNames.add(dependency);
+    pendingNames.push(dependency);
+  }
+}
+const CLI_CLOSURE = publishablePackages.filter((entry) => requiredNames.has(entry.pkg.name));
 
 const run = (cmd, args, opts = {}) =>
   execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], ...opts });
@@ -48,8 +68,7 @@ const book = join(work, "book");
 try {
   step("Packing the CLI and its runtime dependencies");
   const tarballs = {};
-  for (const dir of CLI_CLOSURE) {
-    const pkg = JSON.parse(await readFile(join(ROOT, dir, "package.json"), "utf8"));
+  for (const { dir, pkg } of CLI_CLOSURE) {
     run("pnpm", ["--filter", pkg.name, "pack", "--pack-destination", vendor], { cwd: ROOT });
     tarballs[pkg.name] = `${pkg.name.replace("@", "").replace("/", "-")}-${pkg.version}.tgz`;
     console.log(`   ${pkg.name} → ${tarballs[pkg.name]}`);
