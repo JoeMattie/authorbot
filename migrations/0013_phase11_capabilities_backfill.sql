@@ -29,7 +29,36 @@ DELETE FROM _phase11_capabilities_backfill;
 -- shield. That prevents the SQL translation used during a direct version skip
 -- from drifting from the translation applied to existing rows.
 CREATE VIEW IF NOT EXISTS _phase11_legacy_token_projection AS
-WITH decoded AS (
+WITH
+-- Cloudflare D1 caps a compound SELECT at five terms. Keep these ordered
+-- catalogs as VALUES tables rather than expanding them into UNION ALL chains.
+legacy_scope_order(ordinal, scope) AS (
+  VALUES
+    (1, 'chapters:read'),
+    (2, 'annotations:read'),
+    (3, 'annotations:write'),
+    (4, 'work:read'),
+    (5, 'work:claim'),
+    (6, 'submissions:write'),
+    (7, 'votes:write')
+),
+legacy_capability_map(ordinal, capability, source_scope) AS (
+  VALUES
+    (1, 'chapters:read', 'chapters:read'),
+    (2, 'comments:read', 'annotations:read'),
+    (3, 'suggestions:read', 'annotations:read'),
+    (4, 'comments:write', 'annotations:write'),
+    (5, 'suggestions:write', 'annotations:write'),
+    (6, 'replies:write', 'annotations:write'),
+    (8, 'suggestions:vote', 'votes:write'),
+    (9, 'feedback:withdraw-own', 'annotations:write'),
+    (11, 'work:read', 'work:read'),
+    (13, 'work:claim', 'work:claim'),
+    (14, 'work:submit', 'submissions:write'),
+    (17, 'chapters:write', 'submissions:write'),
+    (18, 'chapters:publish', 'submissions:write')
+),
+decoded AS (
   SELECT
     id AS token_id,
     CASE
@@ -66,46 +95,11 @@ WITH decoded AS (
             -- Match parseLegacyScopes: de-duplicate known names and store
             -- them in LEGACY_EDITORIAL_SCOPES order, independent of the old
             -- writer's input order.
-            SELECT 1 AS ordinal, 'chapters:read' AS scope
+            SELECT scope
+              FROM legacy_scope_order
              WHERE EXISTS (
                SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'chapters:read'
-             )
-            UNION ALL
-            SELECT 2, 'annotations:read'
-             WHERE EXISTS (
-               SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'annotations:read'
-             )
-            UNION ALL
-            SELECT 3, 'annotations:write'
-             WHERE EXISTS (
-               SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'annotations:write'
-             )
-            UNION ALL
-            SELECT 4, 'work:read'
-             WHERE EXISTS (
-               SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'work:read'
-             )
-            UNION ALL
-            SELECT 5, 'work:claim'
-             WHERE EXISTS (
-               SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'work:claim'
-             )
-            UNION ALL
-            SELECT 6, 'submissions:write'
-             WHERE EXISTS (
-               SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'submissions:write'
-             )
-            UNION ALL
-            SELECT 7, 'votes:write'
-             WHERE EXISTS (
-               SELECT 1 FROM json_each(decoded.valid_scopes)
-                WHERE value = 'votes:write'
+                WHERE value = legacy_scope_order.scope
              )
             ORDER BY ordinal
           )
@@ -145,82 +139,11 @@ SELECT
         FROM (
           -- Keep this in the canonical EDITORIAL_CAPABILITIES order. No
           -- prerequisite or later-slice capability is synthesized.
-          SELECT 1 AS ordinal, 'chapters:read' AS capability
+          SELECT capability
+            FROM legacy_capability_map
            WHERE EXISTS (
              SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'chapters:read'
-           )
-          UNION ALL
-          SELECT 2, 'comments:read'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'annotations:read'
-           )
-          UNION ALL
-          SELECT 3, 'suggestions:read'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'annotations:read'
-           )
-          UNION ALL
-          SELECT 4, 'comments:write'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'annotations:write'
-           )
-          UNION ALL
-          SELECT 5, 'suggestions:write'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'annotations:write'
-           )
-          UNION ALL
-          SELECT 6, 'replies:write'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'annotations:write'
-           )
-          UNION ALL
-          SELECT 8, 'suggestions:vote'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'votes:write'
-           )
-          UNION ALL
-          SELECT 9, 'feedback:withdraw-own'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'annotations:write'
-           )
-          UNION ALL
-          SELECT 11, 'work:read'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'work:read'
-           )
-          UNION ALL
-          SELECT 13, 'work:claim'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'work:claim'
-           )
-          UNION ALL
-          SELECT 14, 'work:submit'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'submissions:write'
-           )
-          UNION ALL
-          SELECT 17, 'chapters:write'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'submissions:write'
-           )
-          UNION ALL
-          SELECT 18, 'chapters:publish'
-           WHERE EXISTS (
-             SELECT 1 FROM json_each(normalized.valid_scopes)
-              WHERE value = 'submissions:write'
+              WHERE value = legacy_capability_map.source_scope
            )
           ORDER BY ordinal
         )

@@ -9,6 +9,24 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.37
+
+- **Cloudflare D1 can now apply the Phase 3B capability backfill.** The 0.1.36
+  form of migration `0013_phase11_capabilities_backfill.sql` used compound
+  `UNION ALL` projections inside a persistent compatibility view. Each catalog
+  exceeded D1's five-term compound-select limit, so upgraded books stopped
+  safely before deploying the new Worker. The corrected pending migration now
+  uses compact `VALUES` lookup tables while preserving the exact scope
+  sanitation, capability ordering, audit trail, and rollback guard
+  while staying within D1's limit. A Wrangler-backed regression applies the
+  complete migration chain in the same local D1 runtime used by Cloudflare's
+  tooling so this class of failure is caught before release.
+- Version 0.1.36 is superseded by this hotfix. Books whose 0.1.36 publish
+  stopped at migration 0013 can upgrade normally to 0.1.37; Wrangler did not
+  record the failed migration, so the corrected file is applied on the next
+  publish before deployment. This release adds no new migration filename and
+  no book-format migration.
+
 ## 0.1.36
 
 - **Legacy agent-token rows now have a canonical capability projection.** D1

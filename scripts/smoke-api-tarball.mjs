@@ -222,7 +222,7 @@ try {
   if (beyondBoundary !== undefined) {
     throw new Error(
       `installed @authorbot/api unexpectedly contains ${beyondBoundary}; ` +
-        "v0.1.36 ends at migration 0013",
+        "v0.1.37 ends at migration 0013",
     );
   }
 
