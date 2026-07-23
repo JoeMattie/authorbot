@@ -6,6 +6,7 @@ import {
   CommandError,
   createNodeLockfile,
   createNodeUpgradeBootstrap,
+  createNpmReleases,
   createWranglerCli,
   nodeLockfile,
   resolveExecutableInvocation,
@@ -295,6 +296,62 @@ exit 23
   );
 });
 
+describe("npm release resolution", () => {
+  it("uses npm in the book repository with offline, cache, and custom-registry settings intact", async () => {
+    const repo = await tempDirectory();
+    const env = {
+      npm_config_offline: "true",
+      npm_config_cache: "D:\\npm-cache",
+      npm_config_registry: "https://registry.example.test/",
+      npm_config_userconfig: "D:\\author\\.npmrc",
+      npm_config__authToken: "registry-token",
+    };
+    const calls: {
+      file: string;
+      args: string[];
+      cwd: string;
+      env: NodeJS.ProcessEnv;
+      platform: NodeJS.Platform;
+    }[] = [];
+    const releases = createNpmReleases(
+      env,
+      "win32",
+      async (file, args, cwd, receivedEnv, platform) => {
+        calls.push({ file, args, cwd, env: receivedEnv, platform });
+        return {
+          stdout: JSON.stringify(["1.0.0", "1.1.0"]),
+          stderr: "",
+        };
+      },
+    );
+
+    await expect(releases.listVersions("@authorbot/cli", repo)).resolves.toEqual([
+      "1.0.0",
+      "1.1.0",
+    ]);
+    expect(calls).toEqual([
+      {
+        file: "npm",
+        args: ["view", "@authorbot/cli", "versions", "--json"],
+        cwd: repo,
+        env,
+        platform: "win32",
+      },
+    ]);
+  });
+
+  it("fails closed when npm does not return version metadata", async () => {
+    const releases = createNpmReleases(
+      {},
+      "linux",
+      async () => ({ stdout: "not-json", stderr: "" }),
+    );
+    await expect(
+      releases.listVersions("@authorbot/cli", await tempDirectory()),
+    ).rejects.toThrow(/npm returned invalid release metadata/);
+  });
+});
+
 describe("node upgrade bootstrap", () => {
   it("runs an exact book-local target without invoking npm", async () => {
     const repo = await tempDirectory();
@@ -329,6 +386,8 @@ process.exitCode = 11;
     const bootstrap = await createNodeUpgradeBootstrap({
       ...process.env,
       AUTHORBOT_BOOTSTRAP_TEST_MARKER: marker,
+      npm_config_offline: "true",
+      npm_config_cache: path.join(repo, "offline-cache"),
       PATH: "",
     });
 
@@ -418,7 +477,7 @@ process.exitCode = 11;
   );
 
   it(
-    "acquires an exact target under simulated Windows and preserves cleanup exit status",
+    "acquires an exact target from npm's configured offline cache under simulated Windows",
     async () => {
       const repo = await tempDirectory();
       const fakeBin = path.join(repo, "fake-bin");

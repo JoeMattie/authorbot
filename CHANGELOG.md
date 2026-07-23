@@ -26,8 +26,10 @@ always the same commit.
   accepted only from coherent committed CLI lock evidence. Dry runs regenerate
   and verify the lockfile in a throwaway copy. Windows launches npm, npx, and
   Wrangler through validated JavaScript entry points under the current Node
-  executable, without enabling a command shell. Existing helpers from before
-  0.1.35 still need one explicit
+  executable, without enabling a command shell. Exact `--to` targets require
+  no registry metadata lookup; implicit discovery uses npm's configured
+  offline cache, registry, userconfig, and authentication. Existing helpers
+  from before 0.1.35 still need one explicit
   `npx --yes @authorbot/cli@0.1.35 upgrade --to 0.1.35` launch; ordinary
   `npx authorbot upgrade` self-bootstraps after that.
 - This is a focused capability-writer-gate and upgrade-safety release. It adds

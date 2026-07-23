@@ -609,24 +609,59 @@ export const nodeGit: GitPort = {
   },
 };
 
-export const npmReleases: ReleasesPort = {
-  async listVersions(packageName) {
-    const url = `https://registry.npmjs.org/${packageName.replace("/", "%2f")}`;
-    const response = await fetch(url, { headers: { accept: "application/json" } });
-    if (!response.ok) {
-      throw new Error(`npm registry returned ${response.status} for ${packageName}`);
-    }
-    const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null || !("versions" in body)) {
-      throw new Error(`npm registry returned no versions for ${packageName}`);
-    }
-    const versions = (body as { versions: unknown }).versions;
-    if (typeof versions !== "object" || versions === null) {
-      throw new Error(`npm registry returned no versions for ${packageName}`);
-    }
-    return Object.keys(versions as Record<string, unknown>);
-  },
-};
+type NodeCommandRunner = (
+  file: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+) => Promise<{ stdout: string; stderr: string }>;
+
+/**
+ * Resolve implicit upgrade targets through npm itself.
+ *
+ * A direct fetch to registry.npmjs.org silently ignored npm's offline cache,
+ * custom registry, userconfig, and authentication. Running `npm view` through
+ * the same shell-free adapter as relocking and bootstrap acquisition makes
+ * those settings authoritative and keeps project `.npmrc` lookup rooted in
+ * the book repository.
+ */
+export function createNpmReleases(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  execute: NodeCommandRunner = run,
+): ReleasesPort {
+  return {
+    async listVersions(packageName, repoPath) {
+      const { stdout } = await execute(
+        "npm",
+        ["view", packageName, "versions", "--json"],
+        repoPath,
+        env,
+        platform,
+      );
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch (error) {
+        throw new Error(
+          `npm returned invalid release metadata for ${packageName}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const values = typeof parsed === "string" ? [parsed] : parsed;
+      if (
+        !Array.isArray(values) ||
+        values.some((version) => typeof version !== "string")
+      ) {
+        throw new Error(`npm returned invalid release metadata for ${packageName}`);
+      }
+      return values as string[];
+    },
+  };
+}
+
+export const npmReleases: ReleasesPort = createNpmReleases();
 
 const D1_MIGRATION_RE = /\b(\d{4}_[\w.-]+\.sql)\b/g;
 

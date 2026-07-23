@@ -1445,6 +1445,12 @@ async function runRollback(
     io.err(`authorbot: --rollback expects a version like 1.4.0, got "${requested}"`);
     return 2;
   }
+  const preparationIdentity = options.dryRun
+    ? undefined
+    : {
+        branch: await deps.git.currentBranch(options.repoPath),
+        head: await deps.git.head(options.repoPath),
+      };
   const plan = await resolvePlan(deps, { repoPath: options.repoPath, to: requested });
   const current = plan.current;
   if (compareVersions(plan.target, current) >= 0) {
@@ -1492,13 +1498,42 @@ async function runRollback(
     reportRelockFailure(io, error);
     return 1;
   }
-  const originalBranch = await deps.git.currentBranch(plan.repoPath);
+  const originalBranch =
+    preparationIdentity?.branch ?? (await deps.git.currentBranch(plan.repoPath));
+  const originalHead = preparationIdentity?.head ?? (await deps.git.head(plan.repoPath));
   const branch = branchName("rollback", plan.target, deps.now());
   const base = options.base ?? (await readDefaultBranch(deps.fs, plan.repoPath));
   const completed: string[] = [];
 
+  if (!(await deps.git.isClean(plan.repoPath))) {
+    io.err(
+      "authorbot: the working tree changed while the rollback was being prepared. " +
+        "Nothing from the prepared copy was written and no branch was created; commit or " +
+        "stash the new changes, then run the command again.",
+    );
+    return 2;
+  }
+  const headBeforeCreate = await deps.git.head(plan.repoPath);
+  if (headBeforeCreate !== originalHead) {
+    io.err(
+      `authorbot: HEAD changed from ${originalHead} to ${headBeforeCreate} while the ` +
+        "rollback was being prepared. No branch or repository change was made; inspect the " +
+        "new commit and run the command again.",
+    );
+    return 2;
+  }
+  const branchBeforeCreate = await deps.git.currentBranch(plan.repoPath);
+  if (branchBeforeCreate !== originalBranch) {
+    io.err(
+      `authorbot: the current branch changed from ${originalBranch} to ${branchBeforeCreate} ` +
+        "while the rollback was being prepared. No branch or repository change was made; " +
+        "return to the intended branch and run the command again.",
+    );
+    return 2;
+  }
+
   try {
-    await deps.git.createBranch(plan.repoPath, branch);
+    await deps.git.createBranch(plan.repoPath, branch, originalHead);
     completed.push(`created branch ${branch}`);
     await deps.fs.writeFile(path.join(plan.repoPath, "package.json"), toolchainFiles.packageJson);
     await deps.fs.writeFile(path.join(plan.repoPath, "package-lock.json"), toolchainFiles.packageLock);
@@ -1529,7 +1564,7 @@ async function runRollback(
     completed.push("opened the pull request");
     io.out(`authorbot: pull request opened: ${url}`);
   } catch (error) {
-    reportPartial(io, completed, branch, originalBranch, error);
+    reportPartial(io, completed, branch, originalBranch, error, "rollback");
     return 1;
   }
 

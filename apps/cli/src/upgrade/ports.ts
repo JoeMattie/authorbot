@@ -67,7 +67,7 @@ export interface GitPort {
 /** Published releases of a package. */
 export interface ReleasesPort {
   /** Every published version of `packageName`, unordered. */
-  listVersions(packageName: string): Promise<string[]>;
+  listVersions(packageName: string, repoPath: string): Promise<string[]>;
 }
 
 export interface D1MigrationResult {
@@ -128,7 +128,7 @@ export interface LockfilePort {
 }
 
 export interface UpgradeBootstrapRequest {
-  /** Exact published CLI release which must own the upgrade. */
+  /** Exact selected CLI release which must own the upgrade. */
   readonly targetVersion: string;
   /** Book repository used to look for an already-installed exact match. */
   readonly repoPath: string;

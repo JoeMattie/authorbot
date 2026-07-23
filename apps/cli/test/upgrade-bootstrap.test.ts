@@ -10,6 +10,7 @@ import { runUpgrade } from "../src/upgrade/upgrade.js";
 import {
   captureIo,
   cleanupTempDirs,
+  failingReleases,
   fakeGit,
   fakeReleases,
   makeBookRepo,
@@ -111,7 +112,7 @@ describe("authorbot upgrade self-bootstrap", () => {
         makeDeps({
           git,
           bootstrap,
-          releases: fakeReleases(["1.0.0", "1.1.0"]),
+          releases: failingReleases("explicit parent must not request release metadata"),
         }),
       ),
     ).toBe(17);
@@ -380,7 +381,9 @@ describe("authorbot upgrade self-bootstrap", () => {
           makeDeps({
             git,
             bootstrap: childBootstrap,
-            releases: fakeReleases(["1.0.0", "1.1.0"]),
+            releases: failingReleases(
+              "explicit target child must not request release metadata",
+            ),
             migrations,
           }),
         );
@@ -395,7 +398,7 @@ describe("authorbot upgrade self-bootstrap", () => {
         makeDeps({
           git,
           bootstrap: parentBootstrap,
-          releases: fakeReleases(["1.0.0", "1.1.0"]),
+          releases: failingReleases("explicit parent must not request release metadata"),
           migrations,
         }),
       ),

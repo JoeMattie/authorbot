@@ -200,11 +200,20 @@ describe("authorbot upgrade --check", () => {
     expect(await runUpgrade([repoPath, "--check"], io.io, deps)).toBe(CHECK_EXIT_NONE);
   });
 
-  it("rejects a --to that is not published", async () => {
+  it("does not consult release metadata for an explicit exact --to target", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const io = captureIo();
-    expect(await runUpgrade([repoPath, "--check", "--to", "9.9.9"], io.io, makeDeps())).toBe(2);
-    expect(io.stderr()).toContain("is not published");
+    expect(
+      await runUpgrade(
+        [repoPath, "--check", "--to", "9.9.9"],
+        io.io,
+        makeDeps({
+          releases: failingReleases("release metadata must not be requested"),
+        }),
+      ),
+    ).toBe(CHECK_EXIT_AVAILABLE);
+    expect(io.stdout()).toContain("upgrade available: 1.0.0 -> 9.9.9");
+    expect(io.stderr()).toBe("");
   });
 
   it("reports equal-version repair separately and selects migrations only from coherent CLI lock evidence", async () => {
@@ -1053,6 +1062,115 @@ describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
     expect(io.stderr()).toContain("npm rollback relock failed while offline");
     expect(io.stderr()).toContain("before creating a branch");
+  });
+
+  it("stops when the worktree becomes dirty while rollback relocking runs", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let cleanChecks = 0;
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      cleanChecks += 1;
+      return cleanChecks === 1;
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({ git }),
+      ),
+    ).toBe(2);
+
+    expect(cleanChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("working tree changed while the rollback was being prepared");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("stops when a same-branch commit lands during rollback relocking", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let headChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      headChecks += 1;
+      return headChecks === 1 ? "sha-rollback-base" : "sha-new-commit";
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({ git }),
+      ),
+    ).toBe(2);
+
+    expect(headChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("HEAD changed from sha-rollback-base to sha-new-commit");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("stops when the current branch changes during rollback relocking", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let branchChecks = 0;
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      return branchChecks === 1 ? "main" : "other-work";
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({ git }),
+      ),
+    ).toBe(2);
+
+    expect(branchChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("current branch changed from main to other-work");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("anchors rollback to the reviewed HEAD if a commit lands in the final gap", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const git = fakeGit();
+    let liveHead = "sha-reviewed-rollback";
+    let branchChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      return liveHead;
+    };
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      if (branchChecks === 2) {
+        liveHead = "sha-unreviewed-rollback-race";
+      }
+      return "main";
+    };
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        captureIo().io,
+        makeDeps({ git }),
+      ),
+    ).toBe(0);
+
+    expect(git.branchStarts).toHaveLength(1);
+    expect(git.branchStarts[0]?.startPoint).toBe("sha-reviewed-rollback");
+    expect(git.branchStarts[0]?.startPoint).not.toBe(liveHead);
   });
 
   it("reports a book left invalid by the rollback and exits 1", async () => {

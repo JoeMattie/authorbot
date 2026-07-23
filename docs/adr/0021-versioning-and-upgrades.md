@@ -109,6 +109,14 @@ registry, userconfig, and authentication settings. It removes only npm
 configuration known to be invalid when inherited from the outer `npx`
 process, currently `allow_scripts`.
 
+An explicit `--to <version>` never performs a release-metadata lookup. The
+exact local helper can therefore run fully offline, and npm acquisition itself
+is the fail-closed proof that a nonlocal target is available. Implicit target
+selection runs `npm view` from the book repository instead of fetching the
+public registry directly. That keeps npm's project and user configuration,
+offline cache, custom registry, and authentication authoritative for both
+selection and acquisition.
+
 On Windows, npm and npx are command scripts which cannot be launched by
 `execFile` without a shell. The helper does not enable one. It validates npm's
 absolute JavaScript launcher path, or an existing launcher in npm's standard
