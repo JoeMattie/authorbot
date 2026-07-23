@@ -78,6 +78,7 @@ import {
 } from "./deps.js";
 import { uuidv7 } from "./ids.js";
 import {
+  deleteInactiveLeaseDocumentSnapshotStatement,
   expireLeaseForWorkItemStatements,
   expireLeaseStatements,
   mintLeaseToken,
@@ -880,6 +881,7 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       };
       await deps.db.batch([
         repos.leases.releaseStatement(lease.id, timestamp),
+        deleteInactiveLeaseDocumentSnapshotStatement(deps.db, lease.id),
         workItemCas(workItem.id, "leased", "ready", timestamp),
         auditStatement({
           projectId: guard.project.id,
