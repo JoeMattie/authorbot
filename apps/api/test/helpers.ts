@@ -8,9 +8,9 @@ import {
   applyMigrations,
   openSqliteDatabase,
   type SqliteAdapter,
-} from "@authorbot/database";
+} from "@authorbot/database/testing";
 import type { Hono } from "hono";
-import type { Repositories } from "@authorbot/database";
+import type { Repositories } from "@authorbot/database/testing";
 import { createApi, type AuthorbotApi } from "../src/app.js";
 import type {
   AppConfig,

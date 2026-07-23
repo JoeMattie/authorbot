@@ -23,7 +23,7 @@ import {
   type SqliteAdapter,
   type SubmissionRecord,
   type WorkItemRecord,
-} from "@authorbot/database";
+} from "@authorbot/database/testing";
 import { toTimestamp } from "@authorbot/domain";
 
 const execFileAsync = promisify(execFile);

@@ -2367,7 +2367,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         return problem(c, "internal", { detail: "project not seeded" });
       }
       const { login, role } = parsed.data;
-      const externalIdentity = `github:${login}`;
+      const externalIdentity = `${deps.config.devActorNamespace ?? "github"}:${login}`;
       const timestamp = now();
 
       let actor = await repos.actors.getByExternalIdentity(externalIdentity);

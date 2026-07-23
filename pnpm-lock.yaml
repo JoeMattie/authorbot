@@ -44,9 +44,6 @@ importers:
         specifier: ^4.0.0
         version: 4.4.3
     devDependencies:
-      '@authorbot/cli':
-        specifier: workspace:*
-        version: link:../cli
       '@cloudflare/workers-types':
         specifier: ^4.0.0
         version: 4.20260702.1
@@ -65,6 +62,12 @@ importers:
 
   apps/cli:
     dependencies:
+      '@authorbot/api':
+        specifier: workspace:*
+        version: link:../api
+      '@authorbot/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@authorbot/markdown':
         specifier: workspace:*
         version: link:../../packages/markdown
@@ -133,10 +136,6 @@ importers:
         version: 5.9.3
 
   packages/database:
-    dependencies:
-      better-sqlite3:
-        specifier: ^12.0.0
-        version: 12.11.1
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.0.0
@@ -147,6 +146,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      better-sqlite3:
+        specifier: ^12.0.0
+        version: 12.11.1
       typescript:
         specifier: ^5.6.0
         version: 5.9.3

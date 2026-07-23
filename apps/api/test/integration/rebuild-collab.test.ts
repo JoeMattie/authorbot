@@ -7,7 +7,7 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { openSqliteDatabase } from "@authorbot/database";
+import { openSqliteDatabase } from "@authorbot/database/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   cloneExampleBookRepo,

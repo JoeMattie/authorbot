@@ -10,7 +10,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { openSqliteDatabase } from "@authorbot/database";
+import { openSqliteDatabase } from "@authorbot/database/testing";
 import {
   CHAPTER_1,
   EXAMPLE_ANNOTATION_ID,

@@ -12,8 +12,8 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { applyMigrations, createRepositories, openSqliteDatabase } from "@authorbot/database";
-import type { Repositories } from "@authorbot/database";
+import { applyMigrations, createRepositories, openSqliteDatabase } from "@authorbot/database/testing";
+import type { Repositories } from "@authorbot/database/testing";
 import { configFromBindings, createWorkerRuntime, type WorkerBindings } from "../src/worker.js";
 import type { AuthorbotApi } from "../src/app.js";
 import { seedProject } from "../src/seed.js";

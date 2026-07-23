@@ -5,7 +5,7 @@
   "description": "Git-backed editorial control plane and collaboration protocol for serial books",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "packageManager": "pnpm@11.15.0",
   "scripts": {
@@ -17,6 +17,7 @@
     "check:author-ci": "node scripts/simulate-author-ci.mjs",
     "check:api-tarball": "node scripts/smoke-api-tarball.mjs",
     "validate:example": "pnpm --filter @authorbot/cli start validate examples/book-repo",
-    "build:example": "pnpm --filter @authorbot/cli start build examples/book-repo --out _site"
+    "build:example": "pnpm --filter @authorbot/cli start build examples/book-repo --out _site",
+    "dev:book": "pnpm --filter @authorbot/cli build && AUTHORBOT_SOURCE_DOGFOOD=1 node apps/cli/dist/bin.js dev"
   }
 }

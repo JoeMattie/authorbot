@@ -23,7 +23,28 @@ where readers sign in, leave annotations, and agents pick up work.
 
 ---
 
-## Create a book
+## Hosted and local-dev modes
+
+Authorbot supports two ways to run the same book workflow:
+
+- **Hosted mode** is the shared production service. The reading site and API
+  run together on Cloudflare, operational state lives in D1, and a GitHub App
+  commits accepted work to the book repository. Readers, maintainers, and
+  agents can collaborate from the public book address. The setup wizard
+  creates and connects all of it.
+- **Local-dev mode** is the private authoring and dogfood stack. Astro/Vite and
+  the Node API bind only to `127.0.0.1`, operational state lives in a private
+  SQLite database, and Authorbot works on a managed Git branch and worktree.
+  It needs no Cloudflare account or GitHub connection, and needs no network
+  access after the packages are installed.
+
+Both modes use the same book format, API rules, database schema, publisher,
+browser UI, attribution, and narrow Git commit path. Local-dev mode is for
+fast private iteration and source development. Hosted mode is for a durable,
+shared book. A local session can validate and open a draft pull request, but
+it never deploys or merges on its own.
+
+## Hosted mode: create a book
 
 One command sets up everything - the repository, the reading site, and
 optionally the collaboration API and an agent invitation:
@@ -55,6 +76,27 @@ lists everything it created, with how to remove it, at the end.
 To take it back down again, `npx @authorbot/create unpublish` removes the
 hosting and keeps the repository; `teardown` removes the repository too.
 
+## Local-dev mode: write locally
+
+You can run the full authoring UI before connecting GitHub or Cloudflare:
+
+```sh
+npx authorbot dev
+```
+
+This creates a managed book branch and worktree, then runs the real API,
+SQLite, and Astro/Vite UI on `http://localhost:4321`. It binds to loopback
+only. Browser and agent writes become narrow Git commits on the managed
+branch, and direct editor saves stay yours to commit.
+
+Local state and tokens live in the OS state directory, outside the book
+checkout. `authorbot dev status` shows where everything is. Use
+`authorbot dev agent-env` to load the private starter token, and
+`authorbot dev pr` when the book branch is ready for a draft pull request.
+
+The full command list, Git rules, source-dogfood flow, and safety boundaries
+are in [docs/local-authoring.md](./docs/local-authoring.md).
+
 ## How it works
 
 Three planes, kept deliberately separate:
@@ -63,11 +105,13 @@ Three planes, kept deliberately separate:
   full history live in your repository as Markdown and YAML. If Authorbot
   vanished, your book would be intact and readable.
 - **A database is operational state.** Sessions, votes, leases, and the work
-  queue live in Cloudflare D1 - rebuildable from Git, never the source of
-  truth. A restore loses in-flight coordination, never prose.
-- **The API is the only write path.** Humans and agents submit through it; it
-  validates, applies deterministic rules, records attribution, and commits.
-  Nobody - no person, no agent - writes to the repository directly.
+  queue live in Cloudflare D1 in hosted mode and private Node SQLite in
+  local-dev mode. It is rebuildable from Git and is never the source of truth.
+  A restore loses in-flight coordination, never prose.
+- **The API is the normal write path.** Humans and agents submit through it;
+  it validates, applies deterministic rules, records attribution, and commits.
+  Local-dev mode also lets an author edit the managed worktree directly. API
+  writes pause until the author explicitly commits those editor changes.
 
 A change's life: a reader leaves a suggestion → it collects votes → a
 governance rule you set turns it into a work item → someone (or an agent)
@@ -178,7 +222,7 @@ packages/
   markdown/          frontmatter, stable block IDs, prose safety checks
   domain/            governance rules, scopes, leases, submissions
   rule-engine/       the deterministic suggestion → work-item evaluator
-  database/          SqlDatabase portability layer (D1 + better-sqlite3)
+  database/          SqlDatabase portability layer (D1 + built-in Node SQLite)
   git-github/        the GitHub App reader/writer: atomic commits, no force push
   repo-coordinator/  per-project serialization and reconciliation
   publisher/         the static site publisher (Astro 5) and collaboration islands
@@ -195,7 +239,8 @@ docs/                guides, the ADRs, and the design record
 ## Documentation
 
 - [How it works](./docs/how-it-works.md) - the system, with diagrams
-- [GitHub App setup](./docs/github-app-setup.md) - the collaboration app, by hand
+- [Local authoring](./docs/local-authoring.md) - run the full authoring loop offline
+- [GitHub App setup](./docs/github-app-setup.md) - legacy manual recovery reference; the wizard handles setup
 - [Runbook](./docs/runbook.md) - failure modes, backup and restore, key rotation
 - [Releasing](./docs/npm-release.md) - how a version reaches npm
 - [Follow-up work](./docs/follow-up-work.md) - the live queue after the current implementation slice

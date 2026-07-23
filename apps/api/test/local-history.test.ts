@@ -1,7 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LocalFsBookRepoReader } from "../src/projection/local-fs.js";
+import {
+  HeadPinnedLocalBookRepoReader,
+  LocalFsBookRepoReader,
+} from "../src/projection/local-fs.js";
 import {
   cloneExampleBookRepo,
   git,
@@ -155,6 +158,27 @@ describe("LocalFsBookRepoReader repository history", () => {
       await expect(
         reader.readTextFileAtCommit(PROJECT_ID, renamedPath, entry.commitSha),
       ).resolves.toEqual({ outcome: "found", source: latestSource });
+    }
+  });
+});
+
+describe("HeadPinnedLocalBookRepoReader", () => {
+  it("keeps API reads on committed HEAD while the preview worktree is dirty", async () => {
+    const clone = await cloneExampleBookRepo();
+    try {
+      const reader = new HeadPinnedLocalBookRepoReader(clone.workTreePath);
+      const chapter = join(clone.workTreePath, CHAPTER_PATH);
+      const committed = await readFile(chapter, "utf8");
+      await writeFile(chapter, `${committed}\nUncommitted preview text.\n`, "utf8");
+
+      await expect(reader.readTextFile(CHAPTER_PATH)).resolves.toBe(committed);
+      const page = await reader.listTextFiles("chapters/*.md", { limit: 10 });
+      expect(page.headCommit).toMatch(/^[0-9a-f]{40}$/u);
+      expect(page.files.find((file) => file.path === CHAPTER_PATH)?.source).toBe(committed);
+      const snapshot = await reader.readSnapshot();
+      expect(snapshot.chapters).toHaveLength(3);
+    } finally {
+      await clone.cleanup();
     }
   });
 });

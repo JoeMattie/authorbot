@@ -16,7 +16,7 @@
  * never `None`).
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { applyMigrations, openSqliteDatabase } from "@authorbot/database/testing";
 import { createApi, type AuthorbotApi } from "../src/app.js";
 import { configFromBindings, type WorkerBindings } from "../src/worker.js";
 import { normalizeBasePath } from "../src/base-path.js";

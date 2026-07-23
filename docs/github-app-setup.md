@@ -1,5 +1,11 @@
 # Setting up the GitHub App
 
+> **The Authorbot wizard handles this entire setup.** Start with
+> `npx @authorbot/create`. It creates the GitHub App through GitHub's manifest
+> flow and installs its credentials without asking you to copy a private key.
+> This page remains only as a manual recovery and troubleshooting reference.
+> We may remove it once those cases are covered elsewhere.
+
 This is the operator's guide to giving an Authorbot deployment read and write
 access to its book repository. Everything here is done in a browser and a
 terminal - you do not need to read or change any source code.

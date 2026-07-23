@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { applyMigrations, openSqliteDatabase } from "@authorbot/database/testing";
 import { EDITORIAL_CAPABILITIES } from "@authorbot/domain";
 import { beforeAll, describe, expect, it } from "vitest";
 import YAML from "yaml";

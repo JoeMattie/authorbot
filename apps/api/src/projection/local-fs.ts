@@ -14,7 +14,8 @@
  */
 import { execFile } from "node:child_process";
 import type { Dirent } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import {
   isContainedRepoPath,
@@ -438,6 +439,155 @@ export class LocalFsBookRepoReader implements BookRepoReader, RepositoryHistoryR
       }
     }
     return { annotations, replies };
+  }
+}
+
+/**
+ * Local-authoring reader whose API view comes only from one resolved Git HEAD.
+ *
+ * The publisher intentionally reads the live filesystem so editor saves can
+ * preview immediately. API task bundles and reconciliation must not do that:
+ * they read committed literary truth while the HTTP guard pauses writes over
+ * a dirty worktree.
+ */
+export class HeadPinnedLocalBookRepoReader
+  implements BookRepoReader, RepositoryHistoryReader {
+  private readonly history: LocalFsBookRepoReader;
+  private readonly root: string;
+
+  constructor(repoPath: string) {
+    this.root = resolve(repoPath);
+    this.history = new LocalFsBookRepoReader(repoPath);
+  }
+
+  async readTextFile(path: string): Promise<string | null> {
+    if (!isSafeGitPath(path)) return null;
+    const head = await this.head();
+    const result = await this.git(["show", `${head}:${normalizeRepoPath(path)}`], MAX_TEXT_FILE_BYTES);
+    return result.code === 0 ? result.stdout : null;
+  }
+
+  async listTextFiles(
+    glob: string,
+    options: { after?: string; limit?: number } = {},
+  ): Promise<RepoTextFilePage> {
+    if (!isContainedRepoPath(glob) ||
+        (options.after !== undefined && !isContainedRepoPath(options.after))) {
+      return { headCommit: null, files: [], nextAfter: null };
+    }
+    const head = await this.head();
+    const paths = (await this.trackedTextPaths(head))
+      .filter((candidate) => repoPathMatchesGlob(candidate, glob))
+      .filter((candidate) => options.after === undefined || candidate > options.after);
+    const limit = Math.max(
+      1,
+      Math.min(MAX_TEXT_FILE_PAGE_SIZE, Math.trunc(options.limit ?? MAX_TEXT_FILE_PAGE_SIZE)),
+    );
+    const selected = paths.slice(0, limit);
+    const files: Array<{ path: string; source: string }> = [];
+    for (const filePath of selected) {
+      const result = await this.git(["show", `${head}:${filePath}`], MAX_TEXT_FILE_BYTES);
+      if (result.code !== 0) throw new Error(`failed to read ${filePath} at ${head}`);
+      files.push({ path: filePath, source: result.stdout });
+    }
+    return {
+      headCommit: head,
+      files,
+      nextAfter:
+        paths.length > selected.length && selected.length > 0
+          ? (selected[selected.length - 1] as string)
+          : null,
+    };
+  }
+
+  async readSnapshot(): Promise<BookRepoSnapshot> {
+    const head = await this.head();
+    const scratch = await mkdtemp(join(tmpdir(), "authorbot-head-snapshot-"));
+    try {
+      const relevant = (await this.trackedTextPaths(head)).filter((filePath) =>
+        /^chapters\/[^/]+\.md$/u.test(filePath) ||
+        /^\.authorbot\/annotations\/[^/]+\/(?:annotation\.md|replies\/[^/]+\.md)$/u.test(filePath) ||
+        /^\.authorbot\/decisions\/[^/]+\.yml$/u.test(filePath) ||
+        /^\.authorbot\/work-items\/[^/]+\.md$/u.test(filePath)
+      );
+      for (const filePath of relevant) {
+        const result = await this.git(["show", `${head}:${filePath}`], MAX_TEXT_FILE_BYTES);
+        if (result.code !== 0) throw new Error(`failed to read ${filePath} at ${head}`);
+        const target = join(scratch, ...filePath.split("/"));
+        await mkdir(resolve(target, ".."), { recursive: true });
+        await writeFile(target, result.stdout, "utf8");
+      }
+      return await new LocalFsBookRepoReader(scratch).readSnapshot();
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  }
+
+  listFileHistory(
+    projectId: string,
+    path: string,
+    options: { page?: number; limit?: number } = {},
+  ): Promise<RepositoryHistoryListResult> {
+    return this.history.listFileHistory(projectId, path, options);
+  }
+
+  readTextFileAtCommit(
+    projectId: string,
+    path: string,
+    commitSha: string,
+  ): Promise<RepositorySourceReadResult> {
+    return this.history.readTextFileAtCommit(projectId, path, commitSha);
+  }
+
+  private async head(): Promise<string> {
+    const result = await this.git(["rev-parse", "--verify", "HEAD"], 1024);
+    const sha = result.stdout.trim();
+    if (result.code !== 0 || !/^[0-9a-f]{40}$/u.test(sha)) {
+      throw new Error("local worktree has no valid HEAD commit");
+    }
+    return sha;
+  }
+
+  private async trackedTextPaths(head: string): Promise<string[]> {
+    const result = await this.git(["ls-tree", "-r", "-z", "--format=%(objectmode) %(path)", head], 4 * 1024 * 1024);
+    if (result.code !== 0) throw new Error(`failed to list files at ${head}`);
+    return result.stdout
+      .split("\0")
+      .filter(Boolean)
+      .flatMap((entry) => {
+        const match = entry.match(/^100(?:644|755) (.+)$/su);
+        const filePath = match?.[1];
+        return filePath !== undefined && isSafeGitPath(filePath) ? [filePath] : [];
+      })
+      .sort();
+  }
+
+  private git(args: readonly string[], maxBuffer: number): Promise<GitResult> {
+    return new Promise((resolveCommand, rejectCommand) => {
+      execFile(
+        "git",
+        args,
+        {
+          cwd: this.root,
+          env: {
+            ...process.env,
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_SYSTEM: "/dev/null",
+            GIT_OPTIONAL_LOCKS: "0",
+            LC_ALL: "C",
+          },
+          encoding: "utf8",
+          maxBuffer,
+        },
+        (error, stdout) => {
+          if (error !== null && typeof error.code !== "number") {
+            rejectCommand(error);
+            return;
+          }
+          resolveCommand({ code: error === null ? 0 : Number(error.code), stdout });
+        },
+      );
+    });
   }
 }
 

@@ -5,7 +5,14 @@
  * manifest.
  */
 
-export { buildSite, VIRTUAL_MODULE_ID, type BuildSiteOptions } from "./build.js";
+export {
+  buildSite,
+  startDevSite,
+  VIRTUAL_MODULE_ID,
+  type BuildSiteOptions,
+  type DevSite,
+  type StartDevSiteOptions,
+} from "./build.js";
 export {
   basePathOf,
   chapterRoutePath,

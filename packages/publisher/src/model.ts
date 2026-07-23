@@ -175,4 +175,8 @@ export interface SiteModel {
   };
   /** Collaboration-islands config, or null for a script-free build. */
   collab: SiteCollab | null;
+  /** Present only in `authorbot dev`; never serialized into a production build. */
+  localDev?: {
+    bootstrapPath: string;
+  };
 }

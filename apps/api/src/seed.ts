@@ -73,7 +73,9 @@ export async function seedProject(
     const fresh = {
       id: uuidv7(clock.now()),
       type: "human" as const,
-      displayName: config.initialMaintainer.slice(config.initialMaintainer.indexOf(":") + 1),
+      displayName:
+        config.initialMaintainerDisplayName ??
+        config.initialMaintainer.slice(config.initialMaintainer.indexOf(":") + 1),
       externalIdentity: config.initialMaintainer,
       ownerActorId: null,
       status: "active",

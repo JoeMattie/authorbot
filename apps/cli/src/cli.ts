@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BUILD_USAGE, runBuild } from "./build.js";
+import { DEV_USAGE } from "./dev-usage.js";
 import { UPGRADE_USAGE, runUpgrade } from "./upgrade/upgrade.js";
 import type { Finding, ValidationReport } from "./validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "./validate/index.js";
@@ -23,6 +24,7 @@ const TOP_USAGE = `Usage: authorbot <command> [options]
 Commands:
   validate <path>   validate a book repository (Phase 0 contract)
   build <repo>      build the static reading site (Phase 1 contract)
+  dev [path]        local authoring in a managed Git worktree
   upgrade [path]    move to a newer Authorbot release, as a pull request
                     (ADR-0021)
 
@@ -86,11 +88,20 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
     return 2;
   }
   if (command === "-h" || command === "--help" || command === "help") {
-    io.out(`${TOP_USAGE}\n\n${USAGE}\n\n${BUILD_USAGE}\n\n${UPGRADE_USAGE}`);
+    io.out(`${TOP_USAGE}\n\n${USAGE}\n\n${BUILD_USAGE}\n\n${DEV_USAGE}\n\n${UPGRADE_USAGE}`);
     return 0;
   }
   if (command === "build") {
     return runBuild(rest, io);
+  }
+  if (command === "dev") {
+    try {
+      const { runDev } = await import("./local-authoring.js");
+      return await runDev(rest, io);
+    } catch (error) {
+      io.err(`authorbot: ${error instanceof Error ? error.message : String(error)}`);
+      return 2;
+    }
   }
   if (command === "upgrade") {
     return runUpgrade(rest, io);

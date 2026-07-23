@@ -191,6 +191,7 @@ describe("package.json", () => {
     expect(parsed.name).toBe(identity.slug);
     expect(parsed.devDependencies["@authorbot/cli"]).toBe(TOOLCHAIN_VERSION);
     expect(parsed.scripts["validate"]).toBe("authorbot validate .");
+    expect(parsed.scripts["dev"]).toBe("authorbot dev .");
   });
 });
 

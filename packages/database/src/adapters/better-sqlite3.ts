@@ -1,5 +1,5 @@
 /**
- * better-sqlite3 adapter (Node: tests and local dev). `batch` executes inside
+ * better-sqlite3 adapter (workspace tests only). `batch` executes inside
  * a better-sqlite3 transaction so a mid-batch failure rolls everything back.
  */
 import BetterSqlite3 from "better-sqlite3";

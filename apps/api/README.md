@@ -2,7 +2,8 @@
 
 Phase 2 API (contract §3-§6): a Hono 4 app targeting Cloudflare Workers with
 all business wiring runtime-agnostic - the same `createApp(deps)` serves under
-`wrangler dev` (D1) and in Node tests (better-sqlite3).
+`wrangler dev` (D1), local authoring (built-in Node SQLite), and Node tests
+(better-sqlite3).
 
 ## Layout
 
@@ -179,7 +180,7 @@ createApp(deps: AppDeps): Hono            // contract-shaped entry point
 createApi(deps: AppDeps): AuthorbotApi    // + { repos, index, bootstrap(), rebuild() }
 
 interface AppDeps {
-  db: SqlDatabase;                        // @authorbot/database (D1 or better-sqlite3)
+  db: SqlDatabase;                        // @authorbot/database (D1 or SQLite)
   config: AppConfig;
   identityProvider: IdentityProvider;     // createDevIdentityProvider() | createGitHubIdentityProvider(...)
   clock?: Clock;

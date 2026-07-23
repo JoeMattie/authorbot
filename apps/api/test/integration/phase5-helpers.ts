@@ -26,7 +26,7 @@ import {
   openSqliteDatabase,
   type Repositories,
   type SqliteAdapter,
-} from "@authorbot/database";
+} from "@authorbot/database/testing";
 import { GitHubBookRepoReader, GitHubBookRepoWriter } from "@authorbot/git-github";
 import { createFakeGitHub, type FakeGitHub } from "@authorbot/git-github/testing";
 import type { BookRepoWriter } from "@authorbot/repo-coordinator";

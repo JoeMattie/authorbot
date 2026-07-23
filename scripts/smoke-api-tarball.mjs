@@ -17,8 +17,18 @@
  *   node scripts/smoke-api-tarball.mjs --keep
  *   node scripts/smoke-api-tarball.mjs --release-dir <existing tarball directory>
  */
-import { execFileSync } from "node:child_process";
-import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:net";
+import {
+  access,
+  cp,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -111,6 +121,7 @@ try {
         // project and accidentally masking a missing API dependency.
         dependencies: {
           "@authorbot/api": apiTarball,
+          "@authorbot/cli": tarballs.get("@authorbot/cli"),
         },
         overrides: Object.fromEntries(
           [...tarballs].filter(
@@ -228,6 +239,74 @@ try {
 
   console.log(`Migrations present: ${required.join(", ")}`);
   console.log("Migration boundary: 0013.");
+
+  step("Starting local authoring from the installed CLI without native SQLite");
+  await expectMissing(join(scratch, "node_modules/better-sqlite3"));
+  const book = join(scratch, "book");
+  await cp(join(ROOT, "examples/book-repo"), book, { recursive: true });
+  run("git", ["init", "-b", "main"], { cwd: book });
+  run("git", ["add", "."], { cwd: book });
+  run(
+    "git",
+    [
+      "-c",
+      "user.name=Tarball Smoke",
+      "-c",
+      "user.email=tarball-smoke@localhost",
+      "commit",
+      "-m",
+      "Initial book",
+    ],
+    { cwd: book },
+  );
+  const port = await freePort();
+  const cli = join(scratch, "node_modules/@authorbot/cli/dist/bin.js");
+  const state = join(scratch, "state");
+  const child = spawn(
+    process.execPath,
+    [cli, "dev", book, "--port", String(port)],
+    {
+      cwd: scratch,
+      env: { ...process.env, XDG_STATE_HOME: state, NO_UPDATE_NOTIFIER: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let childOutput = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    childOutput += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    childOutput += chunk;
+  });
+  try {
+    await waitFor(
+      () => childOutput.includes("Authorbot local authoring:"),
+      15_000,
+      () => `installed local authoring did not start:\n${childOutput}`,
+    );
+    const response = await fetch(`http://127.0.0.1:${String(port)}/`);
+    if (!response.ok) {
+      throw new Error(`installed local site returned ${String(response.status)}`);
+    }
+    const html = await response.text();
+    if (!html.includes("Authorbot local") || !html.includes("authorbot-local-toolbar")) {
+      throw new Error("installed local site did not render the local authoring toolbar");
+    }
+  } finally {
+    child.kill("SIGINT");
+    const exited = await Promise.race([
+      new Promise((resolveExit) => child.once("exit", () => resolveExit(true))),
+      new Promise((resolveTimeout) => setTimeout(() => resolveTimeout(false), 5_000)),
+    ]);
+    if (!exited) {
+      child.kill("SIGKILL");
+      throw new Error("installed local authoring did not exit within 5 seconds of SIGINT");
+    }
+  }
+  console.log(`Installed local authoring served http://127.0.0.1:${String(port)}.`);
+
   console.log("\nAPI tarball smoke passed. Nothing was published.");
 } finally {
   if (keep) {
@@ -248,6 +327,39 @@ function run(file, commandArgs, options) {
     maxBuffer: 32 * 1024 * 1024,
     ...options,
   });
+}
+
+async function expectMissing(path) {
+  try {
+    await access(path);
+  } catch {
+    return;
+  }
+  throw new Error(`lifecycle-blocked install unexpectedly contains ${path}`);
+}
+
+async function freePort() {
+  const server = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  if (typeof address !== "object" || address === null) {
+    server.close();
+    throw new Error("could not allocate a loopback smoke-test port");
+  }
+  await new Promise((resolveClose) => server.close(resolveClose));
+  return address.port;
+}
+
+async function waitFor(predicate, timeoutMs, errorMessage) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(errorMessage());
 }
 
 /** npm and pnpm are command shims rather than native executables on Windows. */

@@ -5,6 +5,8 @@
  * configured deployment could exercise book-repo content outside tests.
  */
 import type { AddressInfo } from "node:net";
+import { once } from "node:events";
+import { request as httpRequest } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createNodeDevApi, serveNodeDevApi, type NodeDevApi } from "../src/dev-server.js";
 import {
@@ -68,6 +70,7 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
   it("bootstraps the projection from the repo and mirrors mutations inline over HTTP", async () => {
     const server = serveNodeDevApi(dev, 0);
     try {
+      await once(server, "listening");
       const port = (server.address() as AddressInfo).port;
       const base = `http://127.0.0.1:${port}`;
 
@@ -151,6 +154,61 @@ describe("Node dev entry (BOOK_REPO_PATH)", () => {
       const log = await git(clone.workTreePath, "log", "-1", "--format=%B");
       expect(log).toContain(`Authorbot-Annotation: ${annotationId}`);
     } finally {
+      server.close();
+    }
+  });
+
+  it("rejects unexpected Host headers at the Node bridge", async () => {
+    const server = serveNodeDevApi(dev, 0);
+    try {
+      await once(server, "listening");
+      const port = (server.address() as AddressInfo).port;
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const request = httpRequest({
+          hostname: "127.0.0.1",
+          port,
+          path: "/v1/me",
+          headers: { Host: "hostile.example" },
+        }, (response) => {
+          response.resume();
+          response.once("end", () => resolve(response.statusCode));
+        });
+        request.once("error", reject);
+        request.end();
+      });
+      expect(status).toBe(421);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it("streams SSE headers and the retry frame without waiting for the stream to end", async () => {
+    const server = serveNodeDevApi(dev, 0);
+    try {
+      await once(server, "listening");
+      const port = (server.address() as AddressInfo).port;
+      const base = `http://127.0.0.1:${port}`;
+      const login = await fetch(`${base}/v1/dev/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: base },
+        body: JSON.stringify({ login: "stream-user", role: "reader" }),
+      });
+      const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0] as string;
+      const controller = new AbortController();
+      const response = await fetch(
+        `${base}/v1/projects/hollow-creek-anomaly/events`,
+        { headers: { Cookie: cookie, Accept: "text/event-stream" }, signal: controller.signal },
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      const reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+      const first = await reader!.read();
+      expect(new TextDecoder().decode(first.value)).toContain("retry:");
+      controller.abort();
+    } finally {
+      server.closeAllConnections();
       server.close();
     }
   });

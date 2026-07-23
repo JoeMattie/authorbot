@@ -15,7 +15,6 @@ export {
   type D1PreparedStatementLike,
   type D1ResultLike,
 } from "./adapters/d1.js";
-export { openSqliteDatabase, SqliteAdapter } from "./adapters/better-sqlite3.js";
 export {
   applyMigrations,
   listMigrationFiles,

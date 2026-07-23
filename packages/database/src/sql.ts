@@ -2,9 +2,9 @@
  * Minimal SQL portability interface (Phase 2 contract §2).
  *
  * Repositories are written exclusively against `SqlDatabase`; the two
- * adapters (Cloudflare D1 for production, better-sqlite3 for tests and local
- * Node) implement it over the same SQL dialect. No adapter-specific SQL may
- * appear in repositories.
+ * adapters (Cloudflare D1 for production, built-in SQLite for local Node, and
+ * better-sqlite3 in the test suite) implement it over the same SQL dialect.
+ * No adapter-specific SQL may appear in repositories.
  */
 
 /** Values that can be bound to a statement or returned in a row. */
@@ -40,16 +40,16 @@ export interface SqlDatabase {
   /**
    * Execute the statements in order as one atomic unit: if any statement
    * fails, none of the batch's effects persist. (D1 `batch` is an implicit
-   * transaction; the better-sqlite3 adapter wraps a transaction.)
+   * transaction; both Node adapters wrap a transaction.)
    */
   batch(statements: SqlStatement[]): Promise<SqlRunResult[]>;
 }
 
 /**
  * A database that can additionally execute a multi-statement SQL script
- * (including triggers). Required by the migration runner; the better-sqlite3
- * adapter implements it natively. Production D1 migrations are applied with
- * `wrangler d1 migrations apply`, not this interface.
+ * (including triggers). Required by the migration runner; both Node adapters
+ * implement it natively. Production D1 migrations are applied with `wrangler
+ * d1 migrations apply`, not this interface.
  */
 export interface SqlScriptDatabase extends SqlDatabase {
   exec(sql: string): Promise<void>;
