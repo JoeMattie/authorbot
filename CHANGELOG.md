@@ -17,8 +17,15 @@ always the same commit.
   `0013_phase11_capabilities_backfill.sql` migration. It fills missing
   canonical capability data while retaining legacy mode and the ordinary
   legacy scopes that the deployed Worker still reads.
-- This is the isolated capability-backfill release. It adds no product feature
-  or book-format migration, and it does not begin Phase 3C legacy retirement.
+- **The upgrade helper now repairs a stale local toolchain before changing a
+  book.** Forward upgrades hand off to the exact target CLI in a throwaway
+  install when `node_modules` does not match the repository pin. That target
+  aligns the CLI and API packages, regenerates the lockfile, and preserves the
+  child exit code and JSON output. Existing helpers from before 0.1.35 still
+  need one explicit `npx --yes @authorbot/cli@0.1.35 upgrade --to 0.1.35`
+  launch; ordinary `npx authorbot upgrade` self-bootstraps after that.
+- This is a focused capability-backfill and upgrade-safety release. It adds no
+  book-format migration, and it does not begin Phase 3C legacy retirement.
 
 ## 0.1.34
 

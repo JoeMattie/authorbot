@@ -15,11 +15,12 @@ retire order in the Phase 11 contract. Do not combine these steps.
    deployed through the normal Authorbot upgrade path. Its expand migration,
    Worker, publisher, and editorial flows were verified healthy before the
    backfill release was prepared.
-2. **Ship the capability backfill separately.** v0.1.35 carries the prepared
-   `0013_phase11_capabilities_backfill.sql` migration. Validate it against
-   legacy, canonical, revoked, and expired token rows, then merge and release it
-   independently. The backfill must remain idempotent, preserve legacy mode,
-   and leave ordinary legacy scopes available to the deployed dual-read Worker.
+2. **Ship the capability backfill after expand.** v0.1.35 carries the prepared
+   `0013_phase11_capabilities_backfill.sql` migration alongside an unrelated
+   upgrade-helper safety fix, but no other capability-migration phase. Validate
+   the backfill against legacy, canonical, revoked, and expired token rows. It
+   must remain idempotent, preserve legacy mode, and leave ordinary legacy
+   scopes available to the deployed dual-read Worker.
 3. **Wait on Phase 3C legacy retirement.** Do not retire the legacy read path or
    remove its storage during either release above. Phase 3C starts only after
    the documented compatibility window, supported token rows have been
