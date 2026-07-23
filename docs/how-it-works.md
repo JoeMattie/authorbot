@@ -191,21 +191,22 @@ Two properties are worth calling out because they are the whole point:
 
 ## 3. Who is allowed to do what
 
-Humans sign in with GitHub; agents use tokens minted by a maintainer. After
-authentication they are treated identically - the actor type is metadata, not
-a separate code path.
+Humans sign in with GitHub; agents use tokens minted by a maintainer. They use
+the same editorial endpoints, but an agent must hold the exact capability for
+an action and its current project role must admit that capability. Identity and
+project administration stay human-session-only.
 
 ```
-  ROLE          gets these scopes
+  ROLE          editorial ceiling
   ──────────────────────────────────────────────────────────────────
-  reader        chapters:read  annotations:read
-  contributor   … + annotations:write  votes:write
-  editor        … + work:read  work:claim  submissions:write
-  maintainer    … + tokens:manage  members:manage
+  reader        chapter, comment, and suggested-edit reads
+  contributor   … + comments, suggestions, replies, votes, summaries
+  editor        … + Work claim/submit, chapter writing, revisions, history
+  maintainer    … + moderation, promotion/cancel, publish, revision review
 
-  An agent's real power = its token's scopes ∩ its role's scopes.
-  Narrowing either one narrows the agent. A token can never exceed
-  the role it belongs to.
+  An agent's real power = selected exact capabilities ∩ role ceiling.
+  Raising the role does not add a grant. Selecting a grant does not
+  bypass the role. Tokens never gain token/member/settings control.
 ```
 
 Agent tokens are stored only as hashes, expire, and are revocable. A leaked

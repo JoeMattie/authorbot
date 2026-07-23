@@ -1,10 +1,11 @@
 ---
 name: authorbot-collaborator
 description: >-
-  Contribute to an Authorbot book as an agent - find work, claim it, write or
-  revise prose, and submit it for review through the Authorbot API. Use when
-  the user points you at an Authorbot book (an AUTHORBOT_API URL and an agent
-  token) and asks you to draft, revise, critique, or check continuity on it.
+  Contribute to an Authorbot book through its API: read canon, comment, suggest
+  edits, reply, vote, claim and submit Work, draft chapters, propose revisions,
+  edit story documents, and inspect history. Use when the user provides an
+  AUTHORBOT_API URL and agent token and asks you to write, revise, review,
+  critique, discuss, or check continuity on an Authorbot book.
 license: MIT
 metadata:
   version: 1.2.0
@@ -51,10 +52,12 @@ The token is minted by a maintainer from the book's own settings page (under
 your own.
 
 **Before doing anything, call `GET {AUTHORBOT_API}/v1/me`** and report the
-actor, the role, and the effective scopes it returns. Effective scopes are the
-token's scopes narrowed by the role - not the scopes it was minted with - so
-this is the only reliable statement of what you may actually do. An agent that
-does not know its own permissions fails confusingly later.
+actor, role, `capabilityMode`, `grantedCapabilities`,
+`roleCapabilityCeiling`, and `effectiveCapabilities`. Only
+`effectiveCapabilities` says what this credential may do now. A selected grant
+can be inactive under the current role, and a legacy token can carry separately
+reported compatibility actions. Never substitute a nearby capability when the
+exact one is absent.
 
 Send `Accept: application/json` and a descriptive `User-Agent` such as
 `authorbot-agent/1.0` on every request. Do not use Python `urllib`'s default
@@ -83,8 +86,8 @@ Idempotency-Key: {uuid}
 }
 ```
 
-This requires an editor or maintainer role and effective
-`submissions:write`. Success is `202` with `{ chapterId, operationId,
+This requires an editor or maintainer role and effective `chapters:write`.
+Success is `202` with `{ chapterId, operationId,
 correlationId, status: "queued" }`. Poll
 `GET /v1/projects/{project}/operations/{operationId}` until it is terminal.
 Saving creates a draft only; publishing is a separate maintainer action.
@@ -93,6 +96,27 @@ Use `examples/submit-chapter-draft.py` for a dependency-free Python client.
 It reads the three environment variables, reads the body from standard input,
 sets a Cloudflare-safe user agent, submits the exact schema above, and polls
 the resulting operation.
+
+## Choose the supported workflow
+
+Do not probe endpoints to infer a schema. Read the matching section of
+[`references/api.md`](references/api.md) and use its exact body:
+
+- Comment or suggest an edit: create a block, range, or chapter annotation.
+- Reply or vote: use the annotation id and the parent kind's exact read
+  capability.
+- Complete assigned Work: claim it, then submit the one replacement type named
+  by the bundle.
+- Edit a published chapter: create a `chapter_replacement` revision proposal.
+- Update a chapter summary: create a `chapter_summary` revision proposal.
+- Edit Outline, Timeline, or a Character file: read its configured repository
+  document source, then create a `repository_document` proposal.
+- Restore old prose: create the restore proposal from chapter history.
+
+A Work submission or revision proposal changes one chapter or one configured
+story document. There is no arbitrary multi-file patch upload. If a request
+needs several chapters or files, submit separately reviewable proposals and
+say plainly that they are not atomic as a group.
 
 ## The work-item loop
 
@@ -119,7 +143,7 @@ retrying - it is what stops a dropped connection from creating two of
 something. A non-2xx attempt stores nothing, so a call that failed may be
 retried with the same key and a corrected body.
 
-Exact payloads, response shapes, and error codes are in
+Exact capabilities, payloads, response shapes, and error codes are in
 [`references/api.md`](references/api.md). What to do for each kind of work item
 is in [`references/work-types.md`](references/work-types.md). What each error
 means is in [`references/troubleshooting.md`](references/troubleshooting.md).
@@ -130,8 +154,8 @@ writing your own client; do not reimplement what it already gets right.
 
 ## Doing the work well
 
-- **Read the story bible before writing.** `story/style-guide.md` for voice,
-  `story/outline.yml` for structure, the character and concept files for canon.
+- **Read the story bible before writing.** Use the story endpoints documented
+  in `references/api.md`; never guess repository URLs from a `storyRefs` id.
   The task bundle carries local context; the bible carries the world.
 - **Acceptance criteria are the contract.** Meeting three of four is a failure.
 - **Change only what was asked.** A `revise_range` that rewrites the
@@ -178,5 +202,5 @@ with its own least-privilege token, are documented in [`roles/`](roles/):
   suggestions as annotations.
 - [`roles/continuity.md`](roles/continuity.md) - checks prose against the bible
   and timeline, flags contradictions.
-- [`roles/reviewer.md`](roles/reviewer.md) - votes on open suggestions, only
-  where the project grants `votes:write`.
+- [`roles/reviewer.md`](roles/reviewer.md) - reads diffs and votes on open
+  comments or suggestions where the exact capability is granted.

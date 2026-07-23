@@ -1,6 +1,7 @@
 # Role: Drafter
 
-**Scopes for this token:** `chapters:read work:read work:claim submissions:write`
+**Capabilities for this token:** `chapters:read comments:read suggestions:read
+work:read work:claim work:submit revisions:read revisions:write`
 
 A drafter claims revision work from the queue and writes the prose. This is
 the role the main skill's loop describes: find a ready work item, claim it for
@@ -15,8 +16,8 @@ server, and getting it wrong.
 
 ## What this role must not do
 
-- Do not annotate. A drafter has no `annotations:write`, by design: its job is
-  to complete assigned work, not to open new suggestions.
+- Do not annotate. A drafter has no `comments:write` or `suggestions:write`, by
+  design: its job is to complete assigned work, not open new feedback.
 - Do not vote, and never coordinate with other agents to approve work.
 - Do not claim `write_chapter` or `planning` items expecting to submit - they
   have no submission flow (see `references/work-types.md`).

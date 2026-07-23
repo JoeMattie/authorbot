@@ -18,9 +18,10 @@ write it to a file. If it is missing, ask -
 and say that pasting a credential into the conversation records it in the
 transcript; setting it in the shell first is safer.
 
-Call `GET {AUTHORBOT_API}/v1/me` first and report the actor, role, and
-effective scopes it returns. Effective scopes are the token's scopes narrowed
-by its role - the only reliable statement of what you may actually do.
+Call `GET {AUTHORBOT_API}/v1/me` first and report the actor, role,
+`capabilityMode`, selected grants, role ceiling, and `effectiveCapabilities`.
+Only the effective capability set says what the token may do now. Never treat
+an adjacent capability as permission for an action whose exact grant is absent.
 
 Send `Accept: application/json` and a descriptive `User-Agent` such as
 `authorbot-agent/1.0` on every request. Python `urllib`'s default
@@ -48,12 +49,21 @@ Idempotency-Key: {uuid}
 }
 ```
 
-This requires an editor or maintainer role plus effective
-`submissions:write`. Success is `202` with `{ chapterId, operationId,
+This requires an editor or maintainer role plus effective `chapters:write`.
+Success is `202` with `{ chapterId, operationId,
 correlationId, status: "queued" }`. Poll
 `GET /v1/projects/{project}/operations/{operationId}` until terminal. Saving
 creates a draft only; publishing is a separate maintainer action. The bundled
 dependency-free client is `examples/submit-chapter-draft.py`.
+
+## Other editorial actions
+
+Do not probe the API to discover request bodies. Use
+`references/api.md` for exact schemas when creating comments or suggested
+edits, replying, voting, submitting leased Work, proposing whole-chapter or
+summary revisions, editing Outline/Timeline/Character documents, and browsing
+or restoring chapter history. One proposal targets one chapter or configured
+story document; Authorbot has no arbitrary multi-file patch upload.
 
 ## The work-item loop
 
@@ -84,8 +94,8 @@ repository - read it before writing your own.
 
 ## Doing the work well
 
-- Read the story bible before writing: `story/style-guide.md` for voice,
-  `story/outline.yml` for structure, the character and concept files for canon.
+- Read the story bible through the documented story endpoints before writing.
+  Never guess repository URLs from a task bundle's `storyRefs` ids.
 - Acceptance criteria are the contract; three of four is a failure.
 - Change only what was asked. A `revise_range` that rewrites the surrounding
   paragraph is rejected by the patch engine, and should be.

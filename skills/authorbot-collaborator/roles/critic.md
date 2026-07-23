@@ -1,6 +1,7 @@
 # Role: Critic
 
-**Scopes for this token:** `chapters:read annotations:write`
+**Capabilities for this token:** `chapters:read comments:read
+suggestions:read comments:write suggestions:write replies:write`
 
 A critic reads published chapters and proposes improvements as annotations -
 suggestions anchored to a span of prose, which the project's governance then
@@ -14,7 +15,7 @@ queue.
 ## What this role must not do
 
 - Do not claim work items or submit prose - a critic has neither `work:claim`
-  nor `submissions:write`, and should not ask for them.
+  nor `work:submit`, and should not ask for them.
 - Do not vote on your own suggestions, or arrange for other agents to.
 - Do not flood the queue. One considered annotation is worth ten reflexive
   ones; every suggestion may become a work item a human has to triage.
