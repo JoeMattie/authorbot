@@ -321,13 +321,14 @@ retire across releases because author CI applies a migration before deploying
 its matching Worker. A migration must never leave the still-running prior
 Worker unable to understand active token rows.
 
-**Slice 3A dual-write gate status:** v0.1.34 deployed the dual-reader, but its
+**Slice 3B release gate status:** v0.1.34 deployed the dual-reader, but its
 deprecated `{scopes}` mint request still wrote a null canonical projection.
-That is not sufficient for a one-shot backfill because author CI applies the
-migration before deploying its matching Worker. v0.1.35 therefore adds the
-missing legacy-request dual write and deliberately does not package
-`0013_phase11_capabilities_backfill.sql`. Slice 3B is reserved for v0.1.36 and
-can ship only after this writer is deployed and verified healthy.
+That was not sufficient for a one-shot backfill because author CI applies the
+migration before deploying its matching Worker. v0.1.35 added the missing
+legacy-request dual write without packaging
+`0013_phase11_capabilities_backfill.sql`; that Worker is now deployed and
+verified healthy. v0.1.36 can therefore carry the Slice 3B backfill while
+leaving legacy mode authoritative.
 
 1. **Expand and dual-write gate releases.** Add a nullable `capabilities_v2`
    column and a `capability_mode` column defaulting to `legacy` on

@@ -201,9 +201,9 @@ describe("Phase 11 agent-token capabilities", () => {
       ],
     });
 
-    // Slice 3B will populate this projection but deliberately leave
-    // mode=legacy. The deployed dual-reader must keep legacy scopes
-    // authoritative before, during, and after that later migration.
+    // The v0.1.36 Slice 3B migration populates this projection but deliberately
+    // leaves mode=legacy. The already-deployed v0.1.35 dual-reader and writer
+    // must keep legacy scopes authoritative before, during, and after it.
     await h.db
       .prepare(`UPDATE agent_tokens SET capabilities_v2 = ? WHERE id = ?`)
       .bind(
