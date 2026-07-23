@@ -131,6 +131,7 @@ describe("api-url-less build (script-free regression)", () => {
     expect(lazyAssets.some((file) => file.includes("work-queue-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("revision-review-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("manuscript-editor-element-"))).toBe(true);
+    expect(lazyAssets.some((file) => file.includes("chapter-summary-editor-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("milkdown-manuscript-surface-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("chapter-history-entry-"))).toBe(true);
     expect(lazyAssets.some((file) => file.includes("chapter-history-panel-"))).toBe(true);
@@ -207,6 +208,10 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<li data-collab-nav="work">[\s\S]*?<\/li>/, "")
           .replace(/<span[^>]*data-collab-nav="divider"[^>]*><\/span>/, "")
           .replace(/<authorbot-manuscript-editor[^>]*>\s*<\/authorbot-manuscript-editor>/, "")
+          .replace(
+            /<authorbot-chapter-summary-editor[^>]*>\s*<\/authorbot-chapter-summary-editor>/,
+            "",
+          )
           .replace(/<authorbot-chapter-composer[^>]*>[\s\S]*?<\/authorbot-chapter-composer>/, "")
           .replace(/<div class="chapter-authoring">\s*<\/div>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
@@ -333,12 +338,14 @@ describe("collab-enabled build", () => {
     const workQueue = assets.find((file) => file.startsWith("work-queue-"));
     const manuscript = assets.find((file) => file.startsWith("milkdown-manuscript-surface-"));
     const manuscriptEntry = assets.find((file) => file.startsWith("manuscript-editor-element-"));
+    const summaryEditor = assets.find((file) => file.startsWith("chapter-summary-editor-"));
     const historyEntry = assets.find((file) => file.startsWith("chapter-history-entry-"));
     expect(projectStore).toBeDefined();
     expect(revisionReview).toBeDefined();
     expect(workQueue).toBeDefined();
     expect(manuscript).toBeDefined();
     expect(manuscriptEntry).toBeDefined();
+    expect(summaryEditor).toBeDefined();
     expect(historyEntry).toBeDefined();
 
     const account = await readFile(
@@ -373,6 +380,7 @@ describe("collab-enabled build", () => {
     expect(collab).toMatch(/\.\/assets\/chapter-history-entry-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/work-queue-[\w-]+\.js/);
     expect(collab).toMatch(/\.\/assets\/manuscript-editor-element-[\w-]+\.js/);
+    expect(collab).toMatch(/\.\/assets\/chapter-summary-editor-[\w-]+\.js/);
     expect(planning).toMatch(/\.\/assets\/project-store-[\w-]+\.js/);
     expect(planning).toMatch(/\.\/assets\/milkdown-manuscript-surface-[\w-]+\.js/);
     expect(planning).not.toContain("ProseMirror");
@@ -472,6 +480,27 @@ describe("collab-enabled build", () => {
     const css = await readFile(path.join(outCollab, "_astro/authorbot-history.css"), "utf8");
     expect(css).toContain("prefers-reduced-motion: reduce");
     expect(css).toContain("authorbot-chapter-history-panel[hidden]");
+  });
+
+  it("mounts the capability-gated summary editor beside the published chapter deck", async () => {
+    const chapter = await readFile(
+      path.join(outCollab, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    const mount = /<authorbot-chapter-summary-editor[^>]*>/.exec(chapter)?.[0] ?? "";
+    expect(mount).toContain(`data-api-base="${API_URL}"`);
+    expect(mount).toContain('data-project="hollow-creek-anomaly"');
+    expect(mount).toContain('data-chapter-id="019cadfd-8900-7140-98fb-ceff64cada33"');
+    expect(mount).toContain('data-chapter-title="Baseline"');
+    expect(chapter.indexOf("chapter-deck")).toBeLessThan(
+      chapter.indexOf("authorbot-chapter-summary-editor"),
+    );
+
+    const plain = await readFile(
+      path.join(outPlain, "chapters/baseline/index.html"),
+      "utf8",
+    );
+    expect(plain).not.toContain("authorbot-chapter-summary-editor");
   });
 
   it("emits the /write/ and /settings/ pages only for a collab build", async () => {

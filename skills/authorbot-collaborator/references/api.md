@@ -394,7 +394,11 @@ Fetch `/chapters/{chapterId}/source`, then:
 }
 ```
 
-### Propose a chapter summary - capabilities `revisions:write` and `summaries:write`
+### Propose a chapter summary - capabilities `chapters:read` and `summaries:write`
+
+This workflow is available at the contributor role floor and does not require
+`revisions:write`. First fetch `/chapters/{chapterId}/source` and copy its
+`revision` and `contentHash` exactly:
 
 ```json
 {
@@ -406,6 +410,11 @@ Fetch `/chapters/{chapterId}/source`, then:
   "changeSummary": "Reflects the chapter's new outcome"
 }
 ```
+
+Use `"proposedContent": ""` to remove the current summary. Include optional
+`notes` for the reviewer. Ordinary submission creates a pending proposal;
+`applyImmediately: true` remains maintainer-only and additionally requires
+`revisions:review`.
 
 ### Propose an Outline, Timeline, or Character change - capability `revisions:write`
 

@@ -38,6 +38,7 @@ interface Operation {
 interface SchemaNode {
   $ref?: string;
   type?: string;
+  description?: string;
   const?: unknown;
   enum?: string[];
   maxItems?: number;
@@ -361,6 +362,18 @@ describe("openapi.yaml is synced with the router", () => {
       "baseContentHash",
       "proposedContent",
     ]);
+    const createOperation = spec.paths["/v1/projects/{projectId}/revision-proposals"]?.post;
+    expect(createOperation?.description).toContain(
+      "`chapters:read` plus `summaries:write`",
+    );
+    expect(createOperation?.description).toContain("contributor role floor");
+    expect(createOperation?.description).toContain(
+      "maintainer role plus `revisions:review`",
+    );
+    expect(
+      spec.components.schemas["CreateChapterSummaryProposal"]
+        ?.properties?.["proposedContent"]?.description,
+    ).toContain("empty string removes");
   });
 
   it("documents authenticated, bounded story-bible reads and claim-bundle links", () => {

@@ -88,6 +88,16 @@ const chapterCharacters = site.characters.filter((character) =>
             </p>
             <h1>{chapter.title}</h1>
             {chapter.summary && <p class="chapter-deck">{chapter.summary}</p>}
+            {
+              collab && (
+                <authorbot-chapter-summary-editor
+                  data-api-base={collab.apiBase}
+                  data-project={collab.projectSlug}
+                  data-chapter-id={chapter.id}
+                  data-chapter-title={chapter.title}
+                />
+              )
+            }
             {(site.book.showAttribution || chapterCharacters.length > 0) && (
               <div class="chapter-credit-row">
                 {site.book.showAttribution && chapter.primaryAuthor && (

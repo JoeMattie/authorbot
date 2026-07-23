@@ -59,6 +59,14 @@ defineLazyElement("authorbot-manuscript-editor", "authorbot-manuscript-editor", 
   import("./manuscript-editor-element.js").then((module) => module.AuthorbotManuscriptEditor),
 );
 
+// Summary authoring is chapter-only and source remains click-lazy. Keep its
+// capability gate and form out of the shared reader entry.
+defineLazyElement("authorbot-chapter-summary-editor", "authorbot-chapter-summary-editor", () =>
+  import("./chapter-summary-editor.js").then((module) =>
+    module.AuthorbotChapterSummaryEditor
+  ),
+);
+
 // The claim editor is substantial and appears only on /work/. Keep it out of
 // every chapter reader's entry payload while preserving the same custom
 // element contract on the page that mounts it.

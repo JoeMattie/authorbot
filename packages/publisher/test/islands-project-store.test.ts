@@ -525,6 +525,60 @@ describe("project-scoped editorial store", () => {
     expect(store.getState().annotationIdsByChapter[CHAPTER]).toEqual([ANNOTATION]);
   });
 
+  it("retains one key for a chapter-summary proposal until a replay is proven", async () => {
+    const keys: string[] = [];
+    let calls = 0;
+    const store = await readyStore(
+      baseApi({
+        async createRevisionProposal(command, options) {
+          expect(command).toMatchObject({
+            proposalType: "chapter_summary",
+            chapterId: CHAPTER,
+            proposedContent: "A revised chapter summary.",
+          });
+          calls += 1;
+          keys.push(options?.idempotencyKey ?? "");
+          if (calls <= 2) {
+            return {
+              ok: false,
+              status: 0,
+              message: "response lost",
+              ambiguous: true,
+            };
+          }
+          return {
+            ok: true,
+            value: {
+              proposalId: "summary-proposal-1",
+              operationId: null,
+              correlationId: "summary-correlation-1",
+              status: "pending_review",
+            },
+          };
+        },
+      }),
+    );
+    const command = {
+      proposalType: "chapter_summary" as const,
+      chapterId: CHAPTER,
+      baseRevision: 4,
+      baseContentHash: `sha256:${"a".repeat(64)}`,
+      proposedContent: "A revised chapter summary.",
+    };
+
+    await expect(store.getState().proposeChapterSummary(command)).resolves.toMatchObject({
+      ok: false,
+      kind: "ambiguous",
+    });
+    await expect(store.getState().proposeChapterSummary(command)).resolves.toMatchObject({
+      ok: true,
+      value: { proposalId: "summary-proposal-1" },
+    });
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toBeTruthy();
+    expect(new Set(keys).size).toBe(1);
+  });
+
   it("retains an ambiguous command key across generic reads until same-key replay proves it", async () => {
     const keys: string[] = [];
     let annotationReads = 0;

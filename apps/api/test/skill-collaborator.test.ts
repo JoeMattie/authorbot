@@ -145,6 +145,10 @@ describe("the collaborator skill matches the API", () => {
     expect(api).toContain('"leaseToken": "..."');
     expect(api).toContain('"proposalType": "chapter_replacement"');
     expect(api).toContain('"proposalType": "chapter_summary"');
+    expect(api).toContain(
+      "Propose a chapter summary - capabilities `chapters:read` and `summaries:write`",
+    );
+    expect(api).toContain('Use `"proposedContent": ""` to remove');
     expect(api).toContain('"proposalType": "repository_document"');
     expect(api).toContain("/history/{revision}/restore");
   });

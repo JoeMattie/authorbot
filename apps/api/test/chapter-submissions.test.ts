@@ -498,6 +498,45 @@ describe("publish / unpublish (contract §3.5: deliberately distinct from writin
     expect(bodyOf(after)).toBe(bodyOf(original));
     expect(after).not.toMatch(/---\n\n\n/);
   });
+
+  it("removes a summary through the reviewed metadata proposal and Git pipeline", async () => {
+    const { chapterId } = await createChapter({
+      title: "The Ridge",
+      body: PROSE,
+      summary: "An initial navigation summary.",
+    });
+    expect((await act(chapterId, "publish")).status).toBe(202);
+    await harness.mirror.drain(harness.projectId);
+    const before = await harness.repos.chapters.getById(chapterId);
+    if (before === null) throw new Error("published chapter projection missing");
+
+    const response = await harness.app.request(
+      `/v1/projects/${harness.projectId}/revision-proposals`,
+      {
+        method: "POST",
+        headers: headers(maintainer),
+        body: JSON.stringify({
+          proposalType: "chapter_summary",
+          chapterId,
+          baseRevision: before.revision,
+          baseContentHash: before.contentHash,
+          proposedContent: "",
+          changeSummary: "Remove the chapter summary.",
+          applyImmediately: true,
+        }),
+      },
+    );
+    expect(response.status, await response.text()).toBe(202);
+    await harness.mirror.drain(harness.projectId);
+
+    const after = await harness.repos.chapters.getById(chapterId);
+    const source = harness.repoFiles.get(after?.path ?? "") ?? "";
+    const frontmatter = chapterFrontmatterSchema.parse(
+      parseChapterMarkdown(source).frontmatter,
+    );
+    expect(frontmatter.summary).toBeUndefined();
+    expect(frontmatter.revision).toBe(before.revision + 1);
+  });
 });
 
 describe("authorization matrix (contract §3.5)", () => {

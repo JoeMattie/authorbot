@@ -594,13 +594,16 @@ paths:
       tags: [revisions]
       summary: Propose a chapter, summary, or configured planning-document replacement.
       description: >-
-        Requires `revisions:write`; summary proposals additionally require
-        `summaries:write`. Repository-document proposals address only the
-        configured outline, timeline, or character paths and use a content hash
-        rather than a chapter revision as their concurrency base.
-        `applyImmediately` also requires `revisions:review` and still creates
-        the immutable reviewed proposal before enqueueing the linked write.
-        Legacy scopes never translate to these capabilities.
+        Chapter replacements and repository documents require
+        `revisions:write`. Chapter-summary proposals instead require
+        `chapters:read` plus `summaries:write` and are available at the
+        contributor role floor. Repository-document proposals address only
+        the configured outline, timeline, or character paths and use a content
+        hash rather than a chapter revision as their concurrency base.
+        `applyImmediately` additionally requires maintainer role plus
+        `revisions:review` and still creates the immutable reviewed proposal,
+        self-review audit, and linked Git write atomically. Legacy scopes never
+        translate to these capabilities.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -4802,6 +4805,7 @@ components:
         proposedContent:
           type: string
           maxLength: 2000
+          description: Replacement summary. An empty string removes the summary.
         changeSummary:
           type: string
           minLength: 1

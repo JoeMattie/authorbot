@@ -108,7 +108,10 @@ Do not probe endpoints to infer a schema. Read the matching section of
 - Complete assigned Work: claim it, then submit the one replacement type named
   by the bundle.
 - Edit a published chapter: create a `chapter_replacement` revision proposal.
-- Update a chapter summary: create a `chapter_summary` revision proposal.
+- Update or remove a chapter summary: read the exact chapter source, then
+  create a `chapter_summary` revision proposal with effective `chapters:read`
+  and `summaries:write`. This is a contributor workflow; it does not require
+  `revisions:write`.
 - Edit Outline, Timeline, or a Character file: read its configured repository
   document source, then create a `repository_document` proposal.
 - Read canon before writing: call the exact `/story/outline`,

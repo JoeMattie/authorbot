@@ -171,6 +171,7 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
       | "revisions:read"
       | "revisions:write"
       | "revisions:review"
+      | "chapters:read"
       | "summaries:write"
     )[],
   ) =>
@@ -671,7 +672,7 @@ export function registerRevisionProposalRoutes(ctx: RevisionProposalsContext): v
     const command = parsed.data;
     const writeCapabilities =
       command.proposalType === "chapter_summary"
-        ? (["revisions:write", "summaries:write"] as const)
+        ? (["chapters:read", "summaries:write"] as const)
         : (["revisions:write"] as const);
     const required =
       command.applyImmediately === true
@@ -1255,7 +1256,7 @@ function chapterWriteCommand(
       intent: {
         baseRevision: input.baseRevision,
         ...(input.proposalType === "chapter_summary"
-          ? { summary: input.proposedContent }
+          ? { summary: input.proposedContent === "" ? null : input.proposedContent }
           : { body: input.proposedContent }),
       },
     },

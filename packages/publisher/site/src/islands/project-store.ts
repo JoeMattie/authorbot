@@ -20,6 +20,7 @@ import {
   type ChapterHistoryRestoreAccepted,
   type ChapterProjection,
   type ChapterRevisionProposalCommand,
+  type ChapterSummaryProposalCommand,
   type ChapterSource,
   type CompletedWorkItem,
   type CreateRevisionProposalCommand,
@@ -295,6 +296,9 @@ export interface ProjectStoreState {
   ): Promise<StoreActionResult<RevisionProposalAccepted>>;
   proposeChapterRevision(
     command: ChapterRevisionProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>>;
+  proposeChapterSummary(
+    command: ChapterSummaryProposalCommand,
   ): Promise<StoreActionResult<RevisionProposalAccepted>>;
   createChapter(command: ChapterCreateCommand): Promise<StoreActionResult<ChapterAccepted>>;
   reviseChapter(command: ChapterReviseCommand): Promise<StoreActionResult<ChapterAccepted>>;
@@ -3245,7 +3249,7 @@ export function createProjectStore(
 
   const proposeRevision = async (
     command: CreateRevisionProposalCommand,
-    fingerprintKind: "chapter" | "document",
+    fingerprintKind: "chapter" | "summary" | "document",
     chapterId: string | null,
   ): Promise<StoreActionResult<RevisionProposalAccepted>> => {
     const write = api.createRevisionProposal;
@@ -3285,6 +3289,11 @@ export function createProjectStore(
     command: ChapterRevisionProposalCommand,
   ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
     proposeRevision(command, "chapter", command.chapterId);
+
+  const proposeChapterSummary = (
+    command: ChapterSummaryProposalCommand,
+  ): Promise<StoreActionResult<RevisionProposalAccepted>> =>
+    proposeRevision(command, "summary", command.chapterId);
 
   const writeChapter = async (
     command: ChapterCreateCommand | ChapterReviseCommand,
@@ -3585,6 +3594,7 @@ export function createProjectStore(
     readRepositoryDocument,
     proposeRepositoryDocument,
     proposeChapterRevision,
+    proposeChapterSummary,
     createChapter: (command) => writeChapter(command),
     reviseChapter: (command) => writeChapter(command),
     setChapterPublication,

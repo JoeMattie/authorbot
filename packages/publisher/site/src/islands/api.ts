@@ -706,8 +706,21 @@ export interface ChapterRevisionProposalCommand {
   applyImmediately?: boolean;
 }
 
+/** Hash-bound chapter metadata proposal. An empty value removes the summary. */
+export interface ChapterSummaryProposalCommand {
+  proposalType: "chapter_summary";
+  chapterId: string;
+  baseRevision: number;
+  baseContentHash: string;
+  proposedContent: string;
+  changeSummary?: string;
+  notes?: string;
+  applyImmediately?: boolean;
+}
+
 export type CreateRevisionProposalCommand =
   | ChapterRevisionProposalCommand
+  | ChapterSummaryProposalCommand
   | RepositoryDocumentProposalCommand;
 
 /** A normal proposal is pending review; an atomic maintainer apply is queued. */

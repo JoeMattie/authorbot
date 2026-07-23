@@ -369,6 +369,86 @@ authorbot-manuscript-editor:empty {
   text-align: right;
 }
 
+/* ==== Reviewable chapter-summary metadata editor ========================== */
+
+authorbot-chapter-summary-editor {
+  display: block;
+  margin-top: 0.7rem;
+}
+
+authorbot-chapter-summary-editor:empty {
+  display: none;
+}
+
+.ab-summary-launcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.ab-summary-edit {
+  padding: 0.38rem 0.7rem;
+  color: var(--text-muted, var(--muted));
+}
+
+.ab-summary-launcher-status {
+  flex: 1 1 22rem;
+  margin: 0;
+  color: var(--text-muted, var(--muted));
+  font-size: 0.82rem;
+}
+
+.ab-summary-editor-shell {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 10px;
+  background: var(--surface-card, var(--bg));
+}
+
+.ab-summary-editor-heading,
+.ab-summary-editor-guidance,
+.ab-summary-editor-error,
+.ab-summary-editor-status {
+  margin: 0;
+}
+
+.ab-summary-editor-heading {
+  color: var(--text-strong, var(--fg));
+  font-size: 1rem;
+}
+
+.ab-summary-editor-guidance,
+.ab-summary-editor-field .ab-field-help {
+  color: var(--text-muted, var(--muted));
+  font-size: 0.82rem;
+}
+
+.ab-summary-editor-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ab-summary-editor-field .ab-field-label {
+  margin: 0;
+}
+
+.ab-summary-editor-input {
+  min-height: 6.5rem;
+}
+
+.ab-summary-editor-notes {
+  min-height: 5.5rem;
+}
+
+.ab-summary-editor-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .ab-manuscript-editor-shell {
   width: 100%;
   margin: 0 0 2rem;
@@ -513,6 +593,16 @@ authorbot-manuscript-editor:empty {
 }
 
 @media (max-width: 639.9px) {
+  .ab-summary-edit,
+  .ab-summary-editor-actions .ab-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .ab-summary-launcher-status {
+    flex-basis: 100%;
+  }
+
   .ab-manuscript-launcher {
     margin-top: 0;
   }

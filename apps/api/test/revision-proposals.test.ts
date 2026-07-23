@@ -233,23 +233,52 @@ describe("Phase 11 revision proposal HTTP pipeline", () => {
     expect(await readable.json()).toMatchObject({ baseContent: BASE_BODY });
   });
 
-  it("requires exact write and summary capabilities and accepts canonical editor agents", async () => {
+  it("admits summary contributors with exact read/write grants and reserves apply for maintainers", async () => {
     const summaryBody = directCommand({
       proposalType: "chapter_summary",
       proposedContent: "A sharper summary.",
     });
     const contributor = await devLogin(h, "summary-contributor", "contributor");
     const contributorAttempt = await createDirect(summaryBody, contributor);
-    expect(contributorAttempt.response.status).toBe(403);
+    expect(contributorAttempt.response.status).toBe(201);
+    expect(
+      await h.repos.revisionProposals.getById(
+        contributorAttempt.body["proposalId"] as string,
+      ),
+    ).toMatchObject({
+      proposalType: "chapter_summary",
+      origin: "summary_proposal",
+      baseContent: "Existing summary",
+      proposedContent: "A sharper summary.",
+    });
 
-    const writeOnly = await mintCanonicalToken(h, maintainer, ["revisions:write"]);
-    const noSummary = await h.app.request(
+    const summaryOnly = await mintCanonicalToken(h, maintainer, ["summaries:write"]);
+    const missingRead = await h.app.request(
       proposalPath(h),
       jsonRequest("POST", summaryBody, {
-        Authorization: `Bearer ${writeOnly.token}`,
+        Authorization: `Bearer ${summaryOnly.token}`,
       }),
     );
-    expect(noSummary.status).toBe(403);
+    expect(missingRead.status).toBe(403);
+
+    const contributorAgent = await mintCanonicalToken(h, maintainer, [
+      "chapters:read",
+      "summaries:write",
+    ]);
+    await h.db
+      .prepare(`UPDATE project_memberships SET role = 'contributor' WHERE actor_id = ?`)
+      .bind(contributorAgent.actorId)
+      .run();
+    const agentAccepted = await h.app.request(
+      proposalPath(h),
+      jsonRequest("POST", {
+        ...summaryBody,
+        proposedContent: "Summary from a contributor agent.",
+      }, {
+        Authorization: `Bearer ${contributorAgent.token}`,
+      }),
+    );
+    expect(agentAccepted.status).toBe(201);
 
     const legacyWriter = await mintToken(h, maintainer, [
       "chapters:read",
@@ -264,33 +293,59 @@ describe("Phase 11 revision proposal HTTP pipeline", () => {
     );
     expect(legacyAttempt.status).toBe(403);
 
-    const immediateWithoutReview = await h.app.request(
+    const immediateContributor = await h.app.request(
       proposalPath(h),
-      jsonRequest("POST", directCommand({ applyImmediately: true }), {
-        Authorization: `Bearer ${writeOnly.token}`,
-      }),
+      jsonRequest("POST", { ...summaryBody, applyImmediately: true }, { Cookie: contributor }),
     );
-    expect(immediateWithoutReview.status).toBe(403);
-    expect(await h.repos.revisionProposals.listByProject(h.projectId)).toHaveLength(0);
+    expect(immediateContributor.status).toBe(403);
 
-    const summaryWriter = await mintCanonicalToken(h, maintainer, [
-      "revisions:write",
+    const maintainerSummaryWriter = await mintCanonicalToken(h, maintainer, [
+      "chapters:read",
       "summaries:write",
+      "revisions:review",
     ]);
-    const accepted = await h.app.request(
+    await h.db
+      .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
+      .bind(maintainerSummaryWriter.actorId)
+      .run();
+    const applied = await h.app.request(
       proposalPath(h),
-      jsonRequest("POST", summaryBody, {
-        Authorization: `Bearer ${summaryWriter.token}`,
+      jsonRequest("POST", {
+        ...summaryBody,
+        proposedContent: "",
+        applyImmediately: true,
+      }, {
+        Authorization: `Bearer ${maintainerSummaryWriter.token}`,
       }),
     );
-    expect(accepted.status).toBe(201);
-    const acceptedBody = (await accepted.json()) as { proposalId: string };
-    expect(await h.repos.revisionProposals.getById(acceptedBody.proposalId)).toMatchObject({
-      proposalType: "chapter_summary",
-      origin: "summary_proposal",
-      baseContent: "Existing summary",
-      proposedContent: "A sharper summary.",
+    expect(applied.status).toBe(202);
+    const appliedBody = (await applied.json()) as {
+      proposalId: string;
+      operationId: string;
+    };
+    expect(await h.repos.revisionProposals.getById(appliedBody.proposalId)).toMatchObject({
+      status: "applying",
+      reviewedByActorId: maintainerSummaryWriter.actorId,
+      gitOperationId: appliedBody.operationId,
     });
+    expect(await h.repos.outbox.getByGitOperationId(appliedBody.operationId)).toMatchObject({
+      kind: "chapter.write",
+      payload: {
+        revisionProposalId: appliedBody.proposalId,
+        intent: { baseRevision: 3, summary: null },
+      },
+    });
+    const audit = await h.db
+      .prepare(
+        `SELECT action FROM audit_events
+          WHERE target_type = 'revision_proposal' AND target_id = ? ORDER BY action`,
+      )
+      .bind(appliedBody.proposalId)
+      .all<{ action: string }>();
+    expect(audit.map(({ action }) => action)).toEqual([
+      "revision_proposal.approve",
+      "revision_proposal.create",
+    ]);
   });
 
   it("reads, proposes, reviews, and one-click applies repository planning documents", async () => {
