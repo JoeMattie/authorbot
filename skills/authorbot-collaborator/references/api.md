@@ -356,7 +356,14 @@ A `range_replacement` must be single-line - any `\n` or `\r` in its `content`
 is `400`. Empty `content` is a deletion, legal only for `range_replacement`.
 
 ### `GET /v1/projects/{project}/operations/{operationId}`
-Capability `chapters:read`. Poll until terminal:
+You may poll an operation created by your own authenticated write. Reading an
+operation created by someone else requires the exact read capability for its
+domain: `chapters:read`, `comments:read`, `suggestions:read`, `work:read`, or
+`revisions:read`. Unknown, ambiguous, and project-control operations are never
+exposed to agent tokens. A denied operation returns `403`; do not probe other
+operation IDs.
+
+Poll your returned operation until terminal:
 `{ id, state, attempts, commitSha, error, ... }`. Terminal states are
 `committed`, `verified`, `failed`. A `committed` operation whose `error` parses
 to `{ "code": "submission-conflict" }` means the chapter was left untouched and
@@ -489,6 +496,10 @@ Server-sent events. Add `?poll=1` for a JSON page
 `Last-Event-ID` header or `?after={id}`. Streams close after 5 minutes; too
 many concurrent streams from one address is `429` with `Retry-After`. Events
 are notifications only - refetch the authoritative resource after reconnecting.
+Agent-token feeds contain only field-projected events for domains the token can
+read. Hidden rows still advance the cursor, so gaps in event IDs are normal;
+never infer or probe them. Unknown, ambiguous, and project-control events are
+omitted.
 
 ## Rate limits
 
