@@ -16,15 +16,15 @@ retire order in the Phase 11 contract. Do not combine these steps.
    publisher, and editorial flows were verified healthy. Its deprecated
    legacy mint request still writes a null canonical projection, so this alone
    does not open the one-shot backfill gate.
-2. **Deploy the dual-write gate.** v0.1.35 makes every legacy mint populate the
+2. **Dual-write gate deployed.** v0.1.35 makes every legacy mint populate the
    exact safe canonical projection while leaving legacy mode authoritative. It
-   also carries the upgrade-helper safety fixes, but no D1 migration. Deploy
-   and verify this Worker before preparing the backfill release.
-3. **Ship the capability backfill after the writer gate.** v0.1.36 can add
-   `0013_phase11_capabilities_backfill.sql` only after v0.1.35 is live.
-   Validate it against legacy, canonical, revoked, and expired token rows. It
-   must remain idempotent, preserve legacy mode, and leave ordinary legacy
-   scopes available to the deployed dual-reader.
+   carries the upgrade-helper safety fixes but no D1 migration. Its Worker is
+   deployed and verified healthy, so the backfill gate is open.
+3. **Ship the capability backfill after the writer gate.** v0.1.36 adds
+   `0013_phase11_capabilities_backfill.sql` after v0.1.35 is live. Its tests
+   cover every legacy scope combination plus canonical, revoked, expired,
+   unknown, and malformed rows. It remains idempotent, preserves legacy mode,
+   and leaves ordinary legacy scopes available to the deployed dual-reader.
 4. **Wait on Phase 3C legacy retirement.** Do not retire the legacy read path or
    remove its storage during the releases above. Phase 3C starts only after
    the documented compatibility window, supported token rows have been

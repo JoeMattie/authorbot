@@ -349,10 +349,9 @@ leaving legacy mode authoritative.
    values from legacy scopes but leaves those rows in legacy mode and leaves
    their ordinary legacy scopes intact. The deployed expand Worker can serve
    before, during, and after this migration. The migration removes
-   control-plane and unknown
-   names from the legacy column as an intentional security reduction and
-   records an audit event. Revoked and expired tokens remain revoked or
-   expired.
+   control-plane and unknown names from the legacy column as an intentional
+   security reduction and records an audit event. Revoked and expired tokens
+   remain revoked or expired.
 3. **Retire releases.** Legacy-mode endpoint semantics remain until the
    maintainer explicitly converts a token or a documented major-version
    contract window permits their removal. After all supported rows are

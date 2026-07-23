@@ -372,7 +372,7 @@ describe("Phase 11 slice 3B capability backfill", () => {
     db.close();
   });
 
-  it("requires the deployed 3A dual-reader before its one-shot application", async () => {
+  it("requires the deployed v0.1.35 dual-writer before its one-shot application", async () => {
     const migrationsDir = await mkdtemp(join(tmpdir(), "authorbot-phase11-gate-"));
     await copyMigrationsBefore(migrationsDir, "0010_");
     const db = openSqliteDatabase(":memory:");
@@ -421,9 +421,9 @@ describe("Phase 11 slice 3B capability backfill", () => {
       )
       .all<StoredToken>();
     for (const row of after) {
-      // An old reader still sees the exact ordinary scopes. The deployed 3A
-      // dual-reader still treats mode=legacy as authoritative and derives the
-      // same canonical projection before and after the backfill.
+      // An old reader still sees the exact ordinary scopes. The deployed
+      // v0.1.35 Worker treats mode=legacy as authoritative and derives the same
+      // canonical projection before and after the backfill.
       expect(JSON.parse(row.scopes)).toEqual(["annotations:read", "work:claim"]);
       expect(JSON.parse(row.capabilities_v2 ?? "null")).toEqual(
         expectedCapabilities(JSON.parse(row.scopes) as string[]),
@@ -433,8 +433,9 @@ describe("Phase 11 slice 3B capability backfill", () => {
 
     // This old-worker-shaped write deliberately names no new columns. SQLite
     // therefore applies the expand defaults and leaves a NULL projection. It
-    // proves why 0013 cannot run while the pre-3A writer is still deployed: a
-    // one-shot migration cannot backfill a row written after it completes.
+    // proves why 0013 cannot run while the pre-v0.1.35 writer is still
+    // deployed: a one-shot migration cannot backfill a row written after it
+    // completes.
     const afterBackfillOldWriterId = tokenId(3002);
     await oldWorkerInsert(db, afterBackfillOldWriterId, ["chapters:read"]).run();
     expect(

@@ -1,12 +1,13 @@
 -- Phase 11 slice 3B: backfill the canonical projection of legacy agent-token
--- authority after the slice 3A expand Worker has been deployed.
+-- authority after the slice 3A dual-write Worker has been deployed.
 --
 -- RELEASE GATE: DO NOT package or apply this migration until the slice 3A
--- dual-read Worker (v0.1.34) is deployed and healthy. Author CI applies a
--- release's migrations before its Worker, so 0013 must ship in a release after
--- 3A, never in the 3A release itself. An older Worker can still read the
--- ordinary legacy scopes retained below, but an older writer could insert a
--- new NULL capabilities_v2 row after this one-shot backfill had passed it.
+-- dual-read and dual-write Worker (v0.1.35) is deployed and healthy. Author CI
+-- applies a release's migrations before its Worker, so 0013 must ship in a
+-- release after the writer gate, never in that gate release itself. An older
+-- Worker can still read the ordinary legacy scopes retained below, but an
+-- older writer could insert a new NULL capabilities_v2 row after this
+-- one-shot backfill had passed it.
 --
 -- This is the backfill step only. It deliberately does not perform slice 3C:
 -- legacy rows remain in capability_mode='legacy', and the scopes column stays

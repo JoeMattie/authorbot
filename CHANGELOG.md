@@ -9,6 +9,20 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.36
+
+- **Legacy agent-token rows now have a canonical capability projection.** D1
+  migration `0013_phase11_capabilities_backfill.sql` translates every
+  legacy-mode token after the v0.1.35 dual-writer gate. It leaves
+  `capability_mode` as `legacy`, keeps ordinary legacy scopes authoritative,
+  and does not change expiry or revocation state. Unknown and control-plane
+  scope names are removed as an intentional authority reduction and recorded
+  in the audit trail; malformed legacy scope sets fail closed.
+- This is the Phase 3B backfill only. It includes no book-format migration and
+  does not retire the legacy reader, change legacy endpoint behavior, or remove
+  legacy storage. Phase 3C remains separately gated by its compatibility and
+  rollback window.
+
 ## 0.1.35
 
 - **Legacy agent-token requests now maintain the canonical projection.** The
