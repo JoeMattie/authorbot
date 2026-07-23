@@ -83,6 +83,41 @@ bundle already carries it. `GET .../chapters/{id}/source` needs
 `chapters:read`; it returns marker-free body, exact revision, content hash,
 status, title, and summary for safe proposal or draft editing.
 
+## Story bible - capability `chapters:read`
+
+Read canon through these authenticated endpoints before drafting or revising:
+
+- `GET /v1/projects/{project}/story/outline`
+- `GET /v1/projects/{project}/story/timeline`
+- `GET /v1/projects/{project}/story/characters?limit=20&cursor=`
+
+Outline returns `{ path, contentHash, outline, links }`; Timeline returns
+`{ path, contentHash, timeline, links }`. Characters returns
+`{ items: [{ path, contentHash, character, body }], nextCursor, links }`.
+`limit` is 1 through 20. Follow `nextCursor` until it is `null` before treating
+the character bible as complete.
+
+A claimed task bundle includes the same canonical, root-relative routes under
+`context.storyApi`:
+
+```json
+{
+  "storyRefs": ["character-id"],
+  "storyApi": {
+    "outline": "/v1/projects/{project}/story/outline",
+    "timeline": "/v1/projects/{project}/story/timeline",
+    "characters": "/v1/projects/{project}/story/characters"
+  }
+}
+```
+
+Use those links as returned, including any deployment base path. `storyRefs`
+are stable canon ids, not URL fragments or repository paths. Match them to ids
+in the returned story documents; never probe `/story`, `/story-refs`, or a
+guessed path derived from an id. These reads validate configured `book.yml`
+paths and bound each Character page so one Worker invocation does not fan out
+over the whole repository.
+
 ## Direct draft chapter authoring - capability `chapters:write`
 
 This is separate from work-item submissions. It requires an editor or
@@ -257,7 +292,10 @@ target, priority, createdAt, updatedAt }`.
   "lease": { "id", "token", "expiresAt", "maxExpiresAt", "renewalPromptAt" },
   "document": { "chapterId", "revision", "contentHash", "source" },
   "target": { "blockId?", "exact?", "start?", ... },
-  "context": { "annotationBody", "chapterSummary", "storyRefs": [...] },
+  "context": {
+    "annotationBody", "chapterSummary", "storyRefs": [...],
+    "storyApi": { "outline", "timeline", "characters" }
+  },
   "submissionSchema": "authorbot.submission/range-replacement/v1" | null
 }
 ```

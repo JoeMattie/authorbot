@@ -94,8 +94,9 @@ repository - read it before writing your own.
 
 ## Doing the work well
 
-- Read the story bible through the documented story endpoints before writing.
-  Never guess repository URLs from a task bundle's `storyRefs` ids.
+- Read the story bible through the bundle's exact `context.storyApi.outline`,
+  `.timeline`, and paginated `.characters` links before writing. Follow
+  Character `nextCursor` to `null`; never guess URLs from `storyRefs` ids.
 - Acceptance criteria are the contract; three of four is a failure.
 - Change only what was asked. A `revise_range` that rewrites the surrounding
   paragraph is rejected by the patch engine, and should be.

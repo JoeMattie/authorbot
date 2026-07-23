@@ -148,6 +148,16 @@ describe("the collaborator skill matches the API", () => {
     expect(api).toContain('"proposalType": "repository_document"');
     expect(api).toContain("/history/{revision}/restore");
   });
+
+  it("documents the bounded story-bible routes without guessed storyRefs paths", () => {
+    const api = readFileSync(`${SKILL_DIR}references/api.md`, "utf8");
+    expect(api).toContain("/v1/projects/{project}/story/outline");
+    expect(api).toContain("/v1/projects/{project}/story/timeline");
+    expect(api).toContain("/v1/projects/{project}/story/characters?limit=20&cursor=");
+    expect(api).toContain('"storyApi": {');
+    expect(api).toContain("Follow `nextCursor` until it is `null`");
+    expect(api).toContain("never probe `/story`, `/story-refs`");
+  });
 });
 
 /** Content between `<!-- BEGIN NAME ... -->` and `<!-- END NAME -->`, or null. */

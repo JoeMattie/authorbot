@@ -111,6 +111,9 @@ Do not probe endpoints to infer a schema. Read the matching section of
 - Update a chapter summary: create a `chapter_summary` revision proposal.
 - Edit Outline, Timeline, or a Character file: read its configured repository
   document source, then create a `repository_document` proposal.
+- Read canon before writing: call the exact `/story/outline`,
+  `/story/timeline`, and paginated `/story/characters` links returned under a
+  claim bundle's `context.storyApi`; never turn a `storyRefs` id into a URL.
 - Restore old prose: create the restore proposal from chapter history.
 
 A Work submission or revision proposal changes one chapter or one configured
@@ -154,9 +157,11 @@ writing your own client; do not reimplement what it already gets right.
 
 ## Doing the work well
 
-- **Read the story bible before writing.** Use the story endpoints documented
-  in `references/api.md`; never guess repository URLs from a `storyRefs` id.
-  The task bundle carries local context; the bible carries the world.
+- **Read the story bible before writing.** Use `context.storyApi.outline`,
+  `.timeline`, and paginated `.characters` exactly as returned, following each
+  Character `nextCursor` to `null`. Never guess a repository URL or probe
+  `/story-refs` from a `storyRefs` id. The task bundle carries local context;
+  the bible carries the world.
 - **Acceptance criteria are the contract.** Meeting three of four is a failure.
 - **Change only what was asked.** A `revise_range` that rewrites the
   surrounding paragraph will be rejected by the patch engine, and should be -
