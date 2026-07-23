@@ -79,6 +79,23 @@ export interface AgentTokenMeta {
   owner: AccessActor | null;
   /** Membership role - half of the token's effective authority. */
   role: string | null;
+  /**
+   * Whether this token still uses a legacy umbrella-scope compatibility row
+   * or the exact, deny-by-default editorial capability model.
+   */
+  capabilityMode?: "legacy" | "canonical";
+  /** Exact capabilities selected by the maintainer. */
+  grantedCapabilities?: string[];
+  /** Capabilities the token's current project role is allowed to exercise. */
+  roleCapabilityCeiling?: string[];
+  /** The intersection that is enforced on the token's next request. */
+  effectiveCapabilities?: string[];
+  /** Old maintainer actions preserved only while a legacy row stays legacy. */
+  legacyEffectiveActions?: Array<{
+    action: string;
+    source: "legacy-scope";
+    sourceScope: string;
+  }>;
   expired: boolean;
 }
 
@@ -250,16 +267,31 @@ export class AccessApi extends CollabApi {
    */
   async mintAgentToken(
     name: string,
-    scopes: readonly string[],
+    capabilities: readonly string[],
     expiresInDays: number,
   ): Promise<ApiResult<AgentTokenMeta & { token: string }>> {
     return this.jsonResult<AgentTokenMeta & { token: string }>(
       this.post(this.projectUrl("/agent-tokens"), {
         name,
-        scopes: [...scopes],
+        capabilities: [...capabilities],
         expiresInDays,
       }),
       [201, 200],
+    );
+  }
+
+  /** Replace one active token's complete canonical capability set in place. */
+  async updateTokenCapabilities(
+    tokenId: string,
+    capabilities: readonly string[],
+  ): Promise<ApiResult<AgentTokenMeta>> {
+    return this.jsonResult<AgentTokenMeta>(
+      this.mutate(
+        "PUT",
+        this.projectUrl(`/agent-tokens/${encodeURIComponent(tokenId)}/capabilities`),
+        { capabilities: [...capabilities] },
+      ),
+      [200],
     );
   }
 

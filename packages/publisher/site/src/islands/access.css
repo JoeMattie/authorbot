@@ -549,11 +549,63 @@
   gap: 0.5rem;
 }
 
+.ab-capability-picker,
+.ab-token-capability-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.ab-token-capability-editor {
+  margin-top: 0.35rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.ab-capability-presets {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ab-capability-preset-buttons,
+.ab-token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.ab-capability-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 0.75rem;
+}
+
+.ab-capability-group {
+  margin: 0;
+  align-content: start;
+}
+
+.ab-capability-group-intro,
+.ab-capability-summary-empty,
+.ab-capability-inactive,
+.ab-capability-impact-note {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.ab-capability-group-intro {
+  opacity: 0.82;
+}
+
 .ab-access-scope {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto minmax(8rem, auto) 1fr auto;
   gap: 0.5rem;
-  align-items: baseline;
+  align-items: start;
   font-weight: 400;
 }
 
@@ -564,6 +616,54 @@
 
 .ab-access-scope-means {
   opacity: 0.8;
+}
+
+.ab-capability-impact {
+  border-color: #a45f19;
+  color: #8b4d0f;
+}
+
+.ab-capability-summary {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--link);
+  border-radius: 5px;
+}
+
+.ab-capability-summary-heading {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+
+.ab-capability-summary-list {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.ab-capability-summary-item + .ab-capability-summary-item {
+  margin-top: 0.2rem;
+}
+
+.ab-capability-inactive,
+.ab-capability-impact-note,
+.ab-capability-legacy-note {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border-left: 3px solid #a45f19;
+}
+
+.ab-capability-impact-note {
+  font-weight: 600;
+}
+
+@media (max-width: 42rem) {
+  .ab-access-scope {
+    grid-template-columns: auto 1fr;
+  }
+
+  .ab-access-scope-means,
+  .ab-capability-impact {
+    grid-column: 2;
+  }
 }
 
 /* The token, shown once. It has to be readable and selectable at a glance:

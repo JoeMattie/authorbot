@@ -118,23 +118,105 @@ function initials(value: string): string {
   return letters.join("").toUpperCase();
 }
 
+interface CapabilityOption {
+  readonly capability: string;
+  readonly label: string;
+  readonly description: string;
+  /** A selected grant that deserves an explicit warning before saving. */
+  readonly highImpact?: boolean;
+  /** The project-role floor. It is a ceiling, never an implied grant. */
+  readonly roleFloor: "reader" | "contributor" | "editor" | "maintainer";
+}
+
+interface CapabilityGroup {
+  readonly name: string;
+  readonly description: string;
+  readonly options: readonly CapabilityOption[];
+}
+
+interface CapabilityPicker {
+  readonly element: HTMLElement;
+  selected(): string[];
+}
+
 /**
- * The scopes a maintainer can put on an agent token, and whether one is on by
- * default.
+ * Exact editorial capabilities exposed by the deployed API.
  *
- * `tokens:manage` and `members:manage` are absent on purpose: an agent's
- * effective authority is its scopes intersected with its role, agent
- * memberships are pinned to editor, and neither is in an editor's bundle. An
- * agent that could mint tokens or change membership would be an agent that
- * could promote itself.
+ * Identity, token, membership, settings, repository integration, deployment,
+ * and other project-control authority is deliberately absent. A token may do
+ * the same EDITORIAL work as a human only when a maintainer selects the exact
+ * grant and the token actor's project role admits it.
  */
-const MINTABLE_SCOPES: ReadonlyArray<readonly [string, string, boolean]> = [
-  ["chapters:read", "Read the book's chapters.", true],
-  ["work:read", "See the work queue.", true],
-  ["work:claim", "Claim an item so two agents do not write the same chapter.", true],
-  ["submissions:write", "Submit a draft for review.", true],
-  ["annotations:read", "Read comments left on the prose.", false],
-  ["annotations:write", "Leave comments of its own.", false],
+export const AGENT_CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
+  {
+    name: "Read",
+    description: "Choose each kind of book material the agent may inspect.",
+    options: [
+      { capability: "chapters:read", label: "Read chapters", description: "Read chapter prose and metadata.", roleFloor: "reader" },
+      { capability: "comments:read", label: "Read comments", description: "Read comments and their replies.", roleFloor: "reader" },
+      { capability: "suggestions:read", label: "Read suggested edits", description: "Read suggested edits, diffs, and their replies.", roleFloor: "reader" },
+    ],
+  },
+  {
+    name: "Discuss",
+    description: "Comment, suggest, reply, vote, withdraw, or moderate.",
+    options: [
+      { capability: "comments:write", label: "Write comments", description: "Create block, range, and whole-chapter comments.", roleFloor: "contributor" },
+      { capability: "suggestions:write", label: "Suggest edits", description: "Create block, range, and whole-chapter suggested edits.", roleFloor: "contributor" },
+      { capability: "replies:write", label: "Reply", description: "Reply to comments or suggested edits it can read.", roleFloor: "contributor" },
+      { capability: "comments:vote", label: "Vote on comments", description: "Approve, reject, abstain, or clear a vote on an open comment.", roleFloor: "contributor" },
+      { capability: "suggestions:vote", label: "Vote on suggested edits", description: "Approve, reject, abstain, or clear a vote on an open suggested edit.", roleFloor: "contributor" },
+      { capability: "feedback:withdraw-own", label: "Withdraw its own feedback", description: "Withdraw comments, suggestions, or replies created by this token.", roleFloor: "contributor" },
+      { capability: "feedback:moderate", label: "Moderate feedback", description: "Approve queued feedback or change another contributor's feedback state.", highImpact: true, roleFloor: "maintainer" },
+    ],
+  },
+  {
+    name: "Work",
+    description: "Use the shared Work queue and submit completed assignments.",
+    options: [
+      { capability: "work:read", label: "Read Work", description: "See Work items and non-secret lease state.", roleFloor: "editor" },
+      { capability: "work:promote", label: "Promote feedback to Work", description: "Accept an open comment or suggested edit into the Work queue.", highImpact: true, roleFloor: "maintainer" },
+      { capability: "work:claim", label: "Claim Work", description: "Claim, renew, recover, and release eligible Work items.", roleFloor: "editor" },
+      { capability: "work:submit", label: "Submit completed Work", description: "Submit a patch while holding its valid lease.", roleFloor: "editor" },
+      { capability: "work:cancel", label: "Cancel Work", description: "Cancel an eligible Work item with an audited reason.", highImpact: true, roleFloor: "maintainer" },
+    ],
+  },
+  {
+    name: "Chapters",
+    description: "Create drafts, update summaries, and control publication.",
+    options: [
+      { capability: "summaries:write", label: "Update chapter summaries", description: "Submit a new summary for a chapter.", roleFloor: "contributor" },
+      { capability: "chapters:write", label: "Write draft chapters", description: "Create or revise a draft through the chapter API.", roleFloor: "editor" },
+      { capability: "chapters:publish", label: "Publish chapters", description: "Publish or unpublish a chapter and trigger its normal deployment path.", highImpact: true, roleFloor: "maintainer" },
+    ],
+  },
+  {
+    name: "Revisions",
+    description: "Submit, read, and decide reviewable manuscript changes.",
+    options: [
+      { capability: "revisions:read", label: "Read proposed revisions", description: "Read proposal metadata, content, and diffs.", roleFloor: "editor" },
+      { capability: "revisions:write", label: "Submit revisions", description: "Submit chapter or planning-document changes for review.", roleFloor: "editor" },
+      { capability: "revisions:review", label: "Approve revisions", description: "Approve or reject revisions, including one-click direct edits with an audit trail.", highImpact: true, roleFloor: "maintainer" },
+    ],
+  },
+  {
+    name: "History",
+    description: "Inspect prior chapter text without granting revision review.",
+    options: [
+      { capability: "history:read", label: "Read chapter history", description: "Browse removed, unpublished, and earlier chapter versions.", roleFloor: "editor" },
+    ],
+  },
+] as const;
+
+const CAPABILITY_OPTIONS = AGENT_CAPABILITY_GROUPS.flatMap((group) => group.options);
+const CAPABILITY_NAMES = CAPABILITY_OPTIONS.map(({ capability }) => capability);
+const MINT_DEFAULT_CAPABILITIES = ["chapters:read"] as const;
+
+const CAPABILITY_PRESETS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["Critic", ["chapters:read", "comments:read", "suggestions:read", "comments:write", "suggestions:write", "replies:write", "comments:vote", "suggestions:vote", "feedback:withdraw-own"]],
+  ["Reviewer", ["chapters:read", "comments:read", "suggestions:read", "revisions:read", "history:read"]],
+  ["Drafter", ["chapters:read", "comments:read", "suggestions:read", "work:read", "work:claim", "work:submit", "summaries:write", "chapters:write", "revisions:read", "revisions:write"]],
+  ["Work contributor", ["chapters:read", "comments:read", "suggestions:read", "work:read", "work:claim", "work:submit", "revisions:write"]],
 ];
 
 const POLICY_DISPLAY_LABEL: Readonly<Record<AnnotationPolicy, string>> = Object.freeze({
@@ -851,21 +933,132 @@ export class AuthorbotAccess extends HTMLElement {
     return section;
   }
 
+  /** Build the exact-capability picker shared by create and edit. */
+  private capabilityPicker(
+    idPrefix: string,
+    initial: readonly string[],
+    roleCeiling: readonly string[],
+  ): CapabilityPicker {
+    const wrapper = el("div", "ab-capability-picker");
+    const boxes = new Map<string, HTMLInputElement>();
+    const knownInitial = new Set(initial.filter((name) => CAPABILITY_NAMES.includes(name)));
+    const ceiling = new Set(roleCeiling);
+
+    const presets = el("fieldset", "ab-capability-presets");
+    presets.append(el("legend", "ab-access-field", "Start with a preset (optional)"));
+    const presetButtons = el("div", "ab-capability-preset-buttons");
+    for (const [name, capabilities] of CAPABILITY_PRESETS) {
+      const button = el("button", "ab-btn ab-capability-preset", name) as HTMLButtonElement;
+      button.type = "button";
+      button.addEventListener("click", () => {
+        const selected = new Set(capabilities);
+        for (const [capability, box] of boxes) {
+          box.checked = selected.has(capability);
+        }
+        paintSummary();
+      });
+      presetButtons.append(button);
+    }
+    const clear = el("button", "ab-btn ab-capability-preset", "Clear") as HTMLButtonElement;
+    clear.type = "button";
+    clear.addEventListener("click", () => {
+      for (const box of boxes.values()) box.checked = false;
+      paintSummary();
+    });
+    presetButtons.append(clear);
+    presets.append(presetButtons);
+    wrapper.append(presets);
+
+    const groups = el("div", "ab-capability-groups");
+    for (const group of AGENT_CAPABILITY_GROUPS) {
+      const fieldset = el("fieldset", "ab-access-scopes ab-capability-group");
+      fieldset.append(el("legend", "ab-access-field", group.name));
+      fieldset.append(el("p", "ab-capability-group-intro", group.description));
+      for (const option of group.options) {
+        const row = el("label", "ab-access-scope");
+        const box = el("input", "ab-capability-checkbox") as HTMLInputElement;
+        box.type = "checkbox";
+        box.id = `${idPrefix}-${option.capability.replace(":", "-")}`;
+        box.value = option.capability;
+        box.checked = knownInitial.has(option.capability);
+        box.addEventListener("change", paintSummary);
+        boxes.set(option.capability, box);
+        const label = el("span", "ab-access-scope-name", option.label);
+        const description = el("span", "ab-access-scope-means", option.description);
+        row.append(box, label, description);
+        if (option.highImpact === true) {
+          row.append(el("span", "ab-badge ab-capability-impact", "High impact"));
+        }
+        fieldset.append(row);
+      }
+      groups.append(fieldset);
+    }
+    wrapper.append(groups);
+
+    const summary = el("section", "ab-capability-summary");
+    summary.setAttribute("aria-live", "polite");
+    wrapper.append(summary);
+
+    const selected = (): string[] =>
+      CAPABILITY_NAMES.filter((capability) => boxes.get(capability)?.checked === true);
+
+    function paintSummary(): void {
+      const grants = selected();
+      summary.textContent = "";
+      summary.append(el("h5", "ab-capability-summary-heading", "This token can"));
+      if (grants.length === 0) {
+        summary.append(
+          el(
+            "p",
+            "ab-capability-summary-empty",
+            "Nothing yet. It will authenticate, but it will have no editorial access until you add a capability.",
+          ),
+        );
+        return;
+      }
+
+      const list = el("ul", "ab-capability-summary-list");
+      for (const capability of grants) {
+        const option = CAPABILITY_OPTIONS.find((candidate) => candidate.capability === capability);
+        if (option !== undefined) {
+          list.append(el("li", "ab-capability-summary-item", `${option.label}: ${option.description}`));
+        }
+      }
+      summary.append(list);
+
+      const inactive = grants.filter((capability) => !ceiling.has(capability));
+      if (inactive.length > 0) {
+        summary.append(
+          el(
+            "p",
+            "ab-capability-inactive",
+            `Inactive at the current project role: ${inactive.join(", ")}. The grants stay selected, but the API will deny them until a human maintainer raises this agent's role.`,
+          ),
+        );
+      }
+      const impactful = grants.filter(
+        (capability) =>
+          CAPABILITY_OPTIONS.find((candidate) => candidate.capability === capability)?.highImpact ===
+          true,
+      );
+      if (impactful.length > 0) {
+        summary.append(
+          el(
+            "p",
+            "ab-capability-impact-note",
+            `High-impact grants selected: ${impactful.join(", ")}. These can moderate, promote or cancel Work, publish chapters, or approve revisions when the agent also has the required role.`,
+          ),
+        );
+      }
+    }
+
+    paintSummary();
+    return { element: wrapper, selected };
+  }
+
   /**
-   * Minting an agent token.
-   *
-   * This is the control the product did not have. `POST /agent-tokens` needs
-   * a maintainer *session*, a cookie a browser holds, and the only thing
-   * that ever asked for it was the setup wizard, which wanted a bearer token
-   * no author has ever been issued, then pointed at this page to "mint one
-   * from your book's settings". This page could list tokens and revoke them,
-   * and not make one. Both roads led here, and there was nothing here.
-   *
-   * The default scopes are the narrowest set that lets an agent do the loop
-   * end to end: read chapters, find and claim work, submit a draft. Writing
-   * annotations and voting are offered but off, because an agent that comments
-   * on its own submissions is a decision to make deliberately rather than by
-   * accepting a default.
+   * Minting starts with chapter read only. Every write, vote, Work action,
+   * review, and sensitive-history read is an explicit maintainer choice.
    */
   private mintControl(): HTMLElement {
     const control = el("div", "ab-access-control ab-access-mint");
@@ -896,37 +1089,32 @@ export class AuthorbotAccess extends HTMLElement {
     days.value = "30";
     daysLabel.append(days);
 
-    const scopeSet = el("fieldset", "ab-access-scopes");
-    scopeSet.append(el("legend", "ab-access-field", "What it may do"));
-    const boxes: HTMLInputElement[] = [];
-    for (const [scope, description, on] of MINTABLE_SCOPES) {
-      const row = el("label", "ab-access-scope");
-      const box = el("input", "") as HTMLInputElement;
-      box.type = "checkbox";
-      box.value = scope;
-      box.checked = on;
-      boxes.push(box);
-      row.append(box, el("span", "ab-access-scope-name", scope));
-      row.append(el("span", "ab-access-scope-means", description));
-      scopeSet.append(row);
-    }
+    const editorCeiling = CAPABILITY_OPTIONS.filter(
+      ({ roleFloor }) => roleFloor !== "maintainer",
+    ).map(({ capability }) => capability);
+    const picker = this.capabilityPicker(
+      "ab-mint-capability",
+      MINT_DEFAULT_CAPABILITIES,
+      editorCeiling,
+    );
 
-    const submit = el("button", "ab-btn ab-primary", "Create token") as HTMLButtonElement;
+    const submit = el(
+      "button",
+      "ab-btn ab-primary ab-create-token",
+      "Create token",
+    ) as HTMLButtonElement;
     submit.type = "submit";
     const slot = el("div", "ab-access-mint-slot");
 
-    form.append(nameLabel, daysLabel, scopeSet, submit);
+    form.append(nameLabel, daysLabel, picker.element, submit);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const scopes = boxes.filter((box) => box.checked).map((box) => box.value);
-      if (scopes.length === 0) {
-        this.showError("Choose at least one thing the token may do.");
-        return;
-      }
       submit.disabled = true;
-      void this.applyMint(name.value.trim(), scopes, Number(days.value), slot).finally(() => {
-        submit.disabled = false;
-      });
+      void this.applyMint(name.value.trim(), picker.selected(), Number(days.value), slot).finally(
+        () => {
+          submit.disabled = false;
+        },
+      );
     });
 
     control.append(form, slot);
@@ -945,12 +1133,12 @@ export class AuthorbotAccess extends HTMLElement {
    */
   private async applyMint(
     name: string,
-    scopes: readonly string[],
+    capabilities: readonly string[],
     expiresInDays: number,
     slot: HTMLElement,
   ): Promise<void> {
     this.clearMessages();
-    const result = await this.api.mintAgentToken(name, scopes, expiresInDays);
+    const result = await this.api.mintAgentToken(name, capabilities, expiresInDays);
     if (!result.ok) {
       this.showError(result.message);
       return;
@@ -1012,26 +1200,50 @@ export class AuthorbotAccess extends HTMLElement {
       facts.append(pair);
     };
     fact("Owner", token.owner?.displayName ?? "Not recorded");
-    /**
-     * Both halves of the token's authority. Its scopes alone would OVERSTATE
-     * what it can do: the effective grant is the token's scopes intersected
-     * with its membership role, and an agent working a locked book is exactly
-     * the one holding `maintainer` here.
-     */
+    /** Both halves matter: selected grants intersect the current role ceiling. */
     fact("Membership role", token.role === null ? "No membership, it can do nothing" : roleLabel(token.role as Role));
-    fact("Permissions", token.scopes.length === 0 ? "None" : token.scopes.join(", "));
+    const granted = token.grantedCapabilities ?? token.scopes;
+    const effective = token.effectiveCapabilities ?? token.scopes;
+    const effectiveSet = new Set(effective);
+    const inactive = granted.filter((capability) => !effectiveSet.has(capability));
+    fact(
+      "Permission mode",
+      token.capabilityMode === "legacy" ? "Legacy compatibility" : "Exact capabilities",
+    );
+    fact("Granted", granted.length === 0 ? "None" : granted.join(", "));
+    fact("Effective now", effective.length === 0 ? "None" : effective.join(", "));
+    fact("Inactive at this role", inactive.length === 0 ? "None" : inactive.join(", "));
+    if ((token.legacyEffectiveActions?.length ?? 0) > 0) {
+      fact(
+        "Legacy-only actions",
+        token.legacyEffectiveActions
+          ?.map(({ action, sourceScope }) => `${action} via ${sourceScope}`)
+          .join(", ") ?? "None",
+      );
+    }
     fact("Created", formatWhen(token.createdAt, "at an unrecorded time"));
     fact("Last used", formatWhen(token.lastUsedAt, "Never used"));
     fact("Expires", formatWhen(token.expiresAt, "Not recorded"));
     item.append(facts);
 
     if (state === "active") {
+      const actions = el("div", "ab-access-row-actions ab-token-actions");
+      const edit = el(
+        "button",
+        "ab-btn ab-edit-token-capabilities",
+        "Edit permissions",
+      ) as HTMLButtonElement;
+      edit.type = "button";
       const revoke = el("button", "ab-btn ab-danger ab-revoke-token", `Revoke “${token.name}”`);
       revoke.type = "button";
-      const slot = el("div", "ab-access-confirm-slot");
+      const revokeSlot = el("div", "ab-access-confirm-slot");
+      const editSlot = el("div", "ab-token-capability-slot");
+      edit.addEventListener("click", () => {
+        this.openTokenCapabilityEditor(token, edit, editSlot);
+      });
       revoke.addEventListener("click", () => {
         this.openConfirm({
-          slot,
+          slot: revokeSlot,
           trigger: revoke,
           heading: `Revoke the token “${token.name}”?`,
           consequences: tokenRevocationConsequence(token.name),
@@ -1040,9 +1252,90 @@ export class AuthorbotAccess extends HTMLElement {
           run: () => this.applyTokenRevocation(token),
         });
       });
-      item.append(revoke, slot);
+      actions.append(edit, revoke);
+      item.append(actions, editSlot, revokeSlot);
     }
     return item;
+  }
+
+  private openTokenCapabilityEditor(
+    token: AgentTokenMeta,
+    trigger: HTMLButtonElement,
+    slot: HTMLElement,
+  ): void {
+    if (slot.childElementCount > 0) return;
+    trigger.disabled = true;
+    const form = el("form", "ab-token-capability-editor") as HTMLFormElement;
+    form.append(el("h4", "ab-access-control-name", `Permissions for ${token.name}`));
+    if (token.capabilityMode === "legacy") {
+      form.append(
+        el(
+          "p",
+          "ab-access-note ab-capability-legacy-note",
+          "This token still uses legacy umbrella permissions. Saving converts it to exact capabilities. Any legacy-only action disappears unless you select its named capability here.",
+        ),
+      );
+    }
+    const roleCeiling =
+      token.roleCapabilityCeiling ??
+      CAPABILITY_OPTIONS.filter(
+        ({ roleFloor }) => token.role === "maintainer" || roleFloor !== "maintainer",
+      ).map(({ capability }) => capability);
+    const picker = this.capabilityPicker(
+      `ab-token-${token.id}`,
+      token.grantedCapabilities ?? [],
+      roleCeiling,
+    );
+    form.append(picker.element);
+
+    const actions = el("div", "ab-access-row-actions");
+    const save = el(
+      "button",
+      "ab-btn ab-primary ab-save-token-capabilities",
+      "Save permissions",
+    ) as HTMLButtonElement;
+    save.type = "submit";
+    const cancel = el(
+      "button",
+      "ab-btn ab-cancel-token-capabilities",
+      "Cancel",
+    ) as HTMLButtonElement;
+    cancel.type = "button";
+    cancel.addEventListener("click", () => {
+      slot.textContent = "";
+      trigger.disabled = false;
+      trigger.focus();
+    });
+    actions.append(save, cancel);
+    form.append(actions);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      save.disabled = true;
+      cancel.disabled = true;
+      void this.applyTokenCapabilities(token, picker.selected()).finally(() => {
+        save.disabled = false;
+        cancel.disabled = false;
+      });
+    });
+    slot.append(form);
+    form.querySelector<HTMLInputElement>("input")?.focus();
+  }
+
+  private async applyTokenCapabilities(
+    token: AgentTokenMeta,
+    capabilities: readonly string[],
+  ): Promise<void> {
+    this.clearMessages();
+    const result = await this.api.updateTokenCapabilities(token.id, capabilities);
+    if (!result.ok) {
+      this.showError(result.message);
+      return;
+    }
+    await this.load();
+    this.report([
+      `Permissions for “${token.name}” were updated without rotating its secret.`,
+      "The exact capability set takes effect on the token's next request and the before/after change is in the audit log.",
+    ]);
   }
 
   private async applyTokenRevocation(token: AgentTokenMeta): Promise<void> {
