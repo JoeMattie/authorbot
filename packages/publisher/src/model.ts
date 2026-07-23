@@ -12,6 +12,17 @@
 /** Chapter statuses that can appear in a build (archived is never included). */
 export type IncludedChapterStatus = "draft" | "proposed" | "published";
 
+export interface ChapterCredit {
+  actor: string;
+  label: string;
+  /**
+   * Accepted chapter revisions durably credited to this actor by the
+   * repository attribution artifact. Empty when an older/manual repository
+   * has only the frontmatter credit and cannot support an exact history link.
+   */
+  acceptedRevisions: number[];
+}
+
 export interface SiteChapter {
   id: string;
   slug: string;
@@ -26,9 +37,9 @@ export interface SiteChapter {
   /** Ready-to-render names, using an agent token name when one was captured. */
   authorLabels: string[];
   /** First frontmatter credit: the chapter's originating author. */
-  primaryAuthor: { actor: string; label: string } | null;
+  primaryAuthor: ChapterCredit | null;
   /** Later accepted prose/metadata credits, deduplicated in first-seen order. */
-  contributors: { actor: string; label: string }[];
+  contributors: ChapterCredit[];
   /**
    * Route path relative to the site root, no leading or trailing slash
    * (e.g. `chapters/baseline`), derived from `publication.chapter_url`.

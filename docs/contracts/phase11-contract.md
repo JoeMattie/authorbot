@@ -515,6 +515,13 @@ and stripped control-plane authority can never reactivate.
   publication state, and a readable inline diff against either the adjacent
   revision or the current version. Unchanged context stays available around
   additions and deletions.
+- When a chapter's canonical `.authorbot/attribution/<chapter-id>.yml` maps a
+  displayed contributor to accepted revisions, the chapter and book index
+  link that contributor's name to their latest credited stop in this history.
+  The link is emitted only for a collaboration build, opens only after the
+  viewer passes `history:read`, and never guesses an identity/profile URL from
+  the display label. Older or hand-maintained repositories without an exact
+  artifact row keep the truthful plain-text credit.
 - The current published version is always unmistakable. Browsing history is
   read-only. `Propose restoring this version` creates a new proposal through
   the slice 4 review workflow; it never rewinds Git or publishes directly.

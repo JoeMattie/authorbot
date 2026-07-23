@@ -24,6 +24,7 @@ interface ChapterHistoryConfig {
   chapterTitle: string;
   chapterRevision: number;
   chapterStatus: string;
+  initialRevision: number | null;
 }
 
 function parseConfig(host: HTMLElement): ChapterHistoryConfig | null {
@@ -42,6 +43,7 @@ function parseConfig(host: HTMLElement): ChapterHistoryConfig | null {
   ) {
     return null;
   }
+  const initialRevision = Number(host.dataset.initialRevision);
   return {
     apiBase,
     project,
@@ -50,6 +52,10 @@ function parseConfig(host: HTMLElement): ChapterHistoryConfig | null {
     chapterTitle,
     chapterRevision: revision,
     chapterStatus,
+    initialRevision:
+      Number.isSafeInteger(initialRevision) && initialRevision >= 1
+        ? initialRevision
+        : null,
   };
 }
 
@@ -118,6 +124,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     const cfg = parseConfig(this);
     if (cfg === null) return;
     this.cfg = cfg;
+    this.selectedRevision = cfg.initialRevision;
     this.scaffold();
     this.addEventListener("keydown", this.onKeydown);
     void this.connectStore(generation);
@@ -143,6 +150,17 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     } else {
       this.sync();
     }
+  }
+
+  /** Select a revision requested by a static contributor attribution link. */
+  showRevision(revision: number): void {
+    if (!Number.isSafeInteger(revision) || revision < 1) return;
+    this.selectedRevision = revision;
+    this.comparison = "previous";
+    this.restoreError = null;
+    if (!this.started) return;
+    this.live.textContent = `Selected accepted revision ${revision}. Loading its snapshot.`;
+    this.sync();
   }
 
   private isCurrent(generation = this.generation): boolean {
@@ -437,6 +455,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     const button = el("button", "ab-history-revision");
     button.type = "button";
     button.dataset.revision = String(item.revision);
+    button.id = `authorbot-history-revision-${String(item.revision)}`;
     button.setAttribute("aria-current", item.revision === this.selectedRevision ? "true" : "false");
     button.setAttribute(
       "aria-label",

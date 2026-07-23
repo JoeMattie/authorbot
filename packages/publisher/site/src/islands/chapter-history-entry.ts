@@ -3,6 +3,7 @@ import { hasEffectiveCapability, type Me } from "./api.js";
 import { el } from "./dom.js";
 import { loadLazyModule } from "./lazy-module.js";
 import { loadProjectStore } from "./project-store-loader.js";
+import { chapterHistoryRevisionFromHash } from "../lib/chapter-history-link.js";
 
 interface ChapterHistoryEntryConfig {
   apiBase: string;
@@ -16,6 +17,10 @@ interface ChapterHistoryEntryConfig {
 
 interface ChapterHistoryPanelModule {
   AuthorbotChapterHistoryPanel: CustomElementConstructor;
+}
+
+interface ChapterHistoryPanelElement extends HTMLElement {
+  showRevision?: (revision: number) => void;
 }
 
 type PanelLoader = () => Promise<ChapterHistoryPanelModule>;
@@ -76,9 +81,10 @@ export class AuthorbotChapterHistory extends HTMLElement {
   private started = false;
   private generation = 0;
   private button: HTMLButtonElement | null = null;
-  private panel: HTMLElement | null = null;
+  private panel: ChapterHistoryPanelElement | null = null;
   private status: HTMLSpanElement | null = null;
   private terminalChunkFailure = false;
+  private panelId: string | null = null;
 
   connectedCallback(): void {
     if (this.started) return;
@@ -93,6 +99,7 @@ export class AuthorbotChapterHistory extends HTMLElement {
   disconnectedCallback(): void {
     this.started = false;
     this.generation += 1;
+    globalThis.removeEventListener?.("hashchange", this.onHashChange);
   }
 
   private isCurrent(generation = this.generation): boolean {
@@ -105,7 +112,11 @@ export class AuthorbotChapterHistory extends HTMLElement {
       if (!this.isCurrent(generation)) return;
       await store.getState().ensureSession();
       if (!this.isCurrent(generation)) return;
-      if (canReadHistory(store.getState().session)) this.scaffold();
+      if (canReadHistory(store.getState().session)) {
+        this.scaffold();
+        globalThis.addEventListener?.("hashchange", this.onHashChange);
+        void this.openLinkedRevision();
+      }
     } catch {
       // History is supplemental. A failed shared chunk leaves the reader intact.
     }
@@ -115,6 +126,7 @@ export class AuthorbotChapterHistory extends HTMLElement {
     if (this.button !== null) return;
     this.textContent = "";
     const panelId = `ab-chapter-history-${++panelSequence}`;
+    this.panelId = panelId;
     const button = el("button", "ab-history-trigger");
     button.type = "button";
     button.setAttribute("aria-expanded", "false");
@@ -132,20 +144,24 @@ export class AuthorbotChapterHistory extends HTMLElement {
     this.status = status;
   }
 
-  private async toggle(panelId: string): Promise<void> {
+  private async toggle(panelId: string, revision: number | null = null): Promise<void> {
     const button = this.button;
     if (button === null) return;
     if (this.panel !== null) {
       const opening = this.panel.hidden;
       this.panel.hidden = !opening;
       button.setAttribute("aria-expanded", String(opening));
-      if (opening) this.panel.focus();
+      if (opening) {
+        if (revision !== null) this.panel.showRevision?.(revision);
+        this.panel.focus();
+      }
       return;
     }
     if (this.terminalChunkFailure) {
       this.showStatus("History could not load. Reload the page to try again.");
       return;
     }
+    if (button.disabled) return;
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     this.showStatus("Loading chapter history…");
@@ -158,9 +174,16 @@ export class AuthorbotChapterHistory extends HTMLElement {
           module.AuthorbotChapterHistoryPanel,
         );
       }
-      const panel = document.createElement("authorbot-chapter-history-panel");
+      const panel = document.createElement(
+        "authorbot-chapter-history-panel",
+      ) as ChapterHistoryPanelElement;
       panel.id = panelId;
       for (const [key, value] of Object.entries(this.cfg)) panel.dataset[key] = value;
+      const latestLinkedRevision = chapterHistoryRevisionFromHash(
+        globalThis.location?.hash ?? "",
+      );
+      const initialRevision = latestLinkedRevision ?? revision;
+      if (initialRevision !== null) panel.dataset.initialRevision = String(initialRevision);
       panel.tabIndex = -1;
       panel.addEventListener("authorbot-history-close", () => this.closePanel());
       this.append(panel);
@@ -199,4 +222,20 @@ export class AuthorbotChapterHistory extends HTMLElement {
     this.status.textContent = "";
     this.status.hidden = true;
   }
+
+  private async openLinkedRevision(): Promise<void> {
+    const panelId = this.panelId;
+    if (panelId === null) return;
+    const revision = chapterHistoryRevisionFromHash(globalThis.location?.hash ?? "");
+    if (revision === null) return;
+    if (this.panel !== null && !this.panel.hidden) {
+      this.panel.showRevision?.(revision);
+      return;
+    }
+    await this.toggle(panelId, revision);
+  }
+
+  private readonly onHashChange = (): void => {
+    void this.openLinkedRevision();
+  };
 }

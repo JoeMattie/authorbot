@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Collab from "../components/Collab.astro";
+import ContributorCredits from "../components/ContributorCredits.astro";
 import Icon from "../components/Icon.astro";
 import { SITE_CSP } from "../lib/csp.js";
 import { site } from "virtual:authorbot-site";
@@ -104,9 +105,10 @@ const chapterCharacters = site.characters.filter((character) =>
                   <span class="chapter-byline">by {chapter.primaryAuthor.label}</span>
                 )}
                 {site.book.showAttribution && chapter.contributors.length > 0 && (
-                  <span class="chapter-contributors">
-                    contributors {chapter.contributors.map((credit) => credit.label).join(", ")}
-                  </span>
+                  <ContributorCredits
+                    contributors={chapter.contributors}
+                    historyAvailable={collab !== null}
+                  />
                 )}
                 {chapterCharacters.map((character) => (
                   <a class="character-chip" href={character.href}>{character.name}</a>
@@ -133,9 +135,11 @@ const chapterCharacters = site.characters.filter((character) =>
                   <span>By {chapter.primaryAuthor.label}</span>
                 )}
                 {site.book.showAttribution && chapter.contributors.length > 0 && (
-                  <span>
-                    Contributors: {chapter.contributors.map((credit) => credit.label).join(", ")}
-                  </span>
+                  <ContributorCredits
+                    contributors={chapter.contributors}
+                    historyAvailable={collab !== null}
+                    prefix="Contributors:"
+                  />
                 )}
               </footer>
             )

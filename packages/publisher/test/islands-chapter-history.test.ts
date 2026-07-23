@@ -148,6 +148,7 @@ function mount(): AuthorbotChapterHistory {
 
 beforeEach(() => {
   document.body.textContent = "";
+  globalThis.history.replaceState(null, "", "/");
   resetProjectStoresForTests();
   setChapterHistoryPanelLoaderForTests(async () => ({ AuthorbotChapterHistoryPanel }));
 });
@@ -159,6 +160,30 @@ afterEach(() => {
 });
 
 describe("inline chapter history", () => {
+  it("opens the exact accepted revision named by a contributor history link", async () => {
+    stubApi();
+    const loader = vi.fn(async () => ({ AuthorbotChapterHistoryPanel }));
+    setChapterHistoryPanelLoaderForTests(loader);
+    globalThis.history.replaceState(null, "", "/#authorbot-history-revision-2");
+
+    const host = mount();
+
+    await expect.poll(() => host.querySelector(".ab-history-detail-header h3")?.textContent).toBe(
+      "Revision 2 of 3",
+    );
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(host.querySelector(".ab-history-trigger")?.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      host.querySelector('[data-revision="2"]')?.id,
+    ).toBe("authorbot-history-revision-2");
+
+    globalThis.history.replaceState(null, "", "/#authorbot-history-revision-1");
+    globalThis.dispatchEvent(new HashChangeEvent("hashchange"));
+    await expect.poll(() => host.querySelector(".ab-history-detail-header h3")?.textContent).toBe(
+      "Revision 1 of 3",
+    );
+  });
+
   it("loads only on expansion, walks to the original, compares current, restores a proposal, and returns focus on Escape", async () => {
     stubApi();
     const loader = vi.fn(async () => ({ AuthorbotChapterHistoryPanel }));

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { parseChapterMarkdown } from "@authorbot/markdown";
 import {
+  attributionSchema,
   bookConfigSchema,
   chapterFrontmatterSchema,
   characterSchema,
@@ -243,6 +244,47 @@ async function loadBook(repoPath: string): Promise<BookConfig> {
 interface RepoChapter {
   frontmatter: ChapterFrontmatter;
   html: string;
+  /** Canonical accepted revision numbers, keyed by public actor ref. */
+  acceptedRevisionsByActor: ReadonlyMap<string, readonly number[]>;
+}
+
+async function loadAcceptedRevisions(
+  repoPath: string,
+  chapter: ChapterFrontmatter,
+  warnings: string[],
+): Promise<ReadonlyMap<string, readonly number[]>> {
+  const rel = `.authorbot/attribution/${chapter.id}.yml`;
+  const source = await readTextIfExists(path.join(repoPath, rel));
+  if (source === undefined) return new Map();
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(source);
+  } catch {
+    warnings.push(`ignored ${rel}: attribution is not valid YAML`);
+    return new Map();
+  }
+  const result = attributionSchema.safeParse(parsed);
+  if (!result.success || result.data.chapter_id !== chapter.id) {
+    warnings.push(`ignored ${rel}: attribution fails authorbot.attribution/v1`);
+    return new Map();
+  }
+
+  const revisionsByActor = new Map<string, Set<number>>();
+  for (const entry of result.data.entries) {
+    // A schema-valid hand edit may still name a future revision. History
+    // cannot resolve it yet, so do not publish a dead link.
+    if (entry.revision > chapter.revision) continue;
+    const revisions = revisionsByActor.get(entry.actor) ?? new Set<number>();
+    revisions.add(entry.revision);
+    revisionsByActor.set(entry.actor, revisions);
+  }
+  return new Map(
+    [...revisionsByActor].map(([actor, revisions]) => [
+      actor,
+      [...revisions].sort((a, b) => a - b),
+    ]),
+  );
 }
 
 async function loadRepoChapters(
@@ -268,6 +310,11 @@ async function loadRepoChapters(
     chapters.push({
       frontmatter: result.data,
       html: renderAstToHtml(parsed.ast, { rawHtmlAllowed }),
+      acceptedRevisionsByActor: await loadAcceptedRevisions(
+        repoPath,
+        result.data,
+        warnings,
+      ),
     });
   }
   return chapters;
@@ -583,7 +630,11 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
       const credits = fm.authors.map((author) => {
         const [kind, identifier = author.actor] = author.actor.split(":", 2);
         const label = author.name ?? identifier;
-        return { actor: author.actor, label: `${label}${kind === "agent" ? " (agent)" : ""}` };
+        return {
+          actor: author.actor,
+          label: `${label}${kind === "agent" ? " (agent)" : ""}`,
+          acceptedRevisions: [...(chapter.acceptedRevisionsByActor.get(author.actor) ?? [])],
+        };
       });
       const primaryAuthor = credits[0] ?? null;
       const contributorActors = new Set<string>(

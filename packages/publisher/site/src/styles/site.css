@@ -356,19 +356,28 @@ h1:first-child,
   border-bottom: 1px solid var(--border-default);
 }
 
-.chapter-index a {
+.chapter-index-card {
+  position: relative;
+  border-radius: 8px;
+  transition: background 120ms ease-out, transform 120ms ease-out;
+}
+
+.chapter-index-primary {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 24px;
   gap: 16px;
   align-items: start;
   padding: 26px 12px;
-  border-radius: 8px;
   color: inherit;
-  transition: background 120ms ease-out, transform 120ms ease-out;
 }
 
-.chapter-index a:hover {
+.chapter-index-card:hover,
+.chapter-index-card:focus-within {
   background: var(--surface-card);
+}
+
+.chapter-index-card-with-contributors .chapter-index-primary {
+  padding-bottom: 43px;
 }
 
 .chapter-order,
@@ -386,7 +395,8 @@ h1:first-child,
   transition: transform 120ms ease-out, color 120ms ease-out;
 }
 
-.chapter-index a:hover .chapter-row-arrow {
+.chapter-index-card:hover .chapter-row-arrow,
+.chapter-index-card:focus-within .chapter-row-arrow {
   transform: translateX(3px);
   color: var(--text-link);
 }
@@ -456,9 +466,28 @@ h1:first-child,
 }
 
 .chapter-index .chapter-contributors {
-  margin-top: 3px;
+  position: absolute;
+  right: 48px;
+  bottom: 23px;
+  left: 62px;
+  z-index: 1;
+  overflow: hidden;
   color: var(--text-faint);
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-contributor-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 0.2em;
+}
+
+.chapter-contributor-link:hover {
+  color: var(--text-link);
+  text-decoration-color: currentColor;
 }
 
 .empty-state {
@@ -852,10 +881,20 @@ table.timeline tbody th {
     font-size: 18px;
   }
 
-  .chapter-index a {
+  .chapter-index-primary {
     grid-template-columns: 27px minmax(0, 1fr) 18px;
     gap: 10px;
     padding: 22px 4px;
+  }
+
+  .chapter-index-card-with-contributors .chapter-index-primary {
+    padding-bottom: 39px;
+  }
+
+  .chapter-index .chapter-contributors {
+    right: 32px;
+    bottom: 19px;
+    left: 41px;
   }
 
   .chapter-index-heading strong {

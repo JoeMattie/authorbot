@@ -44,6 +44,13 @@ async function collectFiles(dir: string): Promise<string[]> {
 const rel = (dir: string, files: string[]): string[] =>
   files.map((file) => path.relative(dir, file)).sort();
 
+const normalizeContributorCreditWhitespace = (html: string): string =>
+  html.replace(
+    /<span class="chapter-contributors">([\s\S]*?)<\/span>/g,
+    (_match, content: string) =>
+      `<span class="chapter-contributors">${content.replace(/\s+/g, " ").trim()}</span>`,
+  );
+
 beforeAll(async () => {
   outPlain = await mkdtemp(path.join(os.tmpdir(), "authorbot-2b-plain-"));
   outCollab = await mkdtemp(path.join(os.tmpdir(), "authorbot-2b-collab-"));
@@ -184,7 +191,7 @@ describe("api-url-less build (script-free regression)", () => {
         // The CSP meta is stripped from BOTH sides now: prose pages emit it in
         // either build (design §19.4), so it is no longer an island insertion,
         // while the island-only pages still add one the plain build lacks.
-        collab = collab
+        collab = normalizeContributorCreditWhitespace(collab
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-collab\.css">/, "")
           .replace(/<link rel="stylesheet" href="[^"]*authorbot-planning\.css">/, "")
@@ -202,6 +209,10 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           .replace(/<authorbot-chapter-activity[^>]*>\s*<\/authorbot-chapter-activity>/, "")
           .replace(/<authorbot-chapter-history[^>]*>\s*<\/authorbot-chapter-history>/, "")
+          .replace(
+            /<a class="chapter-contributor-link"[^>]*>([^<]*)<\/a>/g,
+            "$1",
+          )
           .replace(/ data-chapter-activity-id="[^"]*"/g, "")
           .replace(/<span data-chapter-activity-slot hidden><\/span>/g, "")
           .replace(/<div[^>]*data-collab-only="chapter-tools"[^>]*>\s*<\/div>/, "")
@@ -221,10 +232,10 @@ describe("api-url-less build (script-free regression)", () => {
           .replace(/<script type="module" src="[^"]*authorbot-collab\.js"><\/script>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-account\.js"><\/script>/, "")
           .replace(/<script type="module" src="[^"]*authorbot-planning\.js"><\/script>/, "")
-          .replace(/>\s+</g, "> <");
-        plain = plain
+          .replace(/>\s+</g, "> <"));
+        plain = normalizeContributorCreditWhitespace(plain
           .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "")
-          .replace(/>\s+</g, "> <");
+          .replace(/>\s+</g, "> <"));
       }
       expect(collab, file).toBe(plain);
     }

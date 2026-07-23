@@ -1,13 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
+import ContributorCredits from "../components/ContributorCredits.astro";
 import Icon from "../components/Icon.astro";
 import { site } from "virtual:authorbot-site";
-
-const compactContributors = (contributors: { label: string }[]): string => {
-  const shown = contributors.slice(0, 2).map((credit) => credit.label).join(", ");
-  const remaining = contributors.length - 2;
-  return remaining > 0 ? `${shown} +${String(remaining)}` : shown;
-};
 
 // Phase 6 contract §3.5: the "New chapter" button belongs where an author
 // starts - the book's front page - so a book with no chapters at all still
@@ -75,29 +70,39 @@ const logline =
         <ol class="chapter-index">
           {site.chapters.map((chapter, index) => (
             <li data-chapter-activity-id={collab ? chapter.id : undefined}>
-              <a href={chapter.href}>
-                <span class="chapter-order">{String(index + 1).padStart(2, "0")}</span>
-                <span class="chapter-index-copy">
-                  <span class="chapter-index-heading">
-                    <strong>{chapter.title}</strong>
-                    <span class={`status-pill status-${chapter.status}`}>{chapter.status}</span>
-                    <span class="chapter-revision">rev {chapter.revision}</span>
-                    {collab && <span data-chapter-activity-slot hidden></span>}
+              <div
+                class:list={[
+                  "chapter-index-card",
+                  chapter.contributors.length > 0 && "chapter-index-card-with-contributors",
+                ]}
+              >
+                <a class="chapter-index-primary" href={chapter.href}>
+                  <span class="chapter-order">{String(index + 1).padStart(2, "0")}</span>
+                  <span class="chapter-index-copy">
+                    <span class="chapter-index-heading">
+                      <strong>{chapter.title}</strong>
+                      <span class={`status-pill status-${chapter.status}`}>{chapter.status}</span>
+                      <span class="chapter-revision">rev {chapter.revision}</span>
+                      {collab && <span data-chapter-activity-slot hidden></span>}
+                    </span>
+                    {chapter.summary && <span class="chapter-summary">{chapter.summary}</span>}
+                    {chapter.primaryAuthor && (
+                      <span class="chapter-byline">
+                        by {chapter.primaryAuthor.label}
+                      </span>
+                    )}
                   </span>
-                  {chapter.summary && <span class="chapter-summary">{chapter.summary}</span>}
-                  {chapter.primaryAuthor && (
-                    <span class="chapter-byline">
-                      by {chapter.primaryAuthor.label}
-                    </span>
-                  )}
-                  {chapter.contributors.length > 0 && (
-                    <span class="chapter-contributors">
-                      contributors {compactContributors(chapter.contributors)}
-                    </span>
-                  )}
-                </span>
-                <span class="chapter-row-arrow" aria-hidden="true"><Icon name="arrow-right" size={18} /></span>
-              </a>
+                  <span class="chapter-row-arrow" aria-hidden="true"><Icon name="arrow-right" size={18} /></span>
+                </a>
+                {chapter.contributors.length > 0 && (
+                  <ContributorCredits
+                    contributors={chapter.contributors}
+                    chapterHref={chapter.href}
+                    historyAvailable={collab !== null}
+                    limit={2}
+                  />
+                )}
+              </div>
             </li>
           ))}
         </ol>

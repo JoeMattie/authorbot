@@ -32,11 +32,13 @@ interface ChapterSpec {
   order: number;
   status: string;
   title?: string;
+  revision?: number;
   /** File name override (defaults to `<slug>.md`). */
   file?: string;
   author?: string;
   authorName?: string;
   contributors?: { actor: string; name?: string }[];
+  attribution?: { revision: number; actor: string }[];
 }
 
 async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
@@ -54,6 +56,7 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
     ].join("\n"),
   );
   await mkdir(path.join(dir, "chapters"), { recursive: true });
+  await mkdir(path.join(dir, ".authorbot", "attribution"), { recursive: true });
   for (const chapter of chapters) {
     await writeFile(
       path.join(dir, "chapters", chapter.file ?? `${chapter.slug}.md`),
@@ -65,7 +68,7 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
         `title: ${chapter.title ?? chapter.slug}`,
         `order: ${chapter.order}`,
         `status: ${chapter.status}`,
-        "revision: 1",
+        `revision: ${chapter.revision ?? 1}`,
         "authors:",
         `  - actor: ${chapter.author ?? "github:someone"}`,
         ...(chapter.authorName === undefined ? [] : [`    name: ${chapter.authorName}`]),
@@ -80,6 +83,21 @@ async function makeRepo(chapters: ChapterSpec[]): Promise<string> {
         "",
       ].join("\n"),
     );
+    if (chapter.attribution !== undefined) {
+      await writeFile(
+        path.join(dir, ".authorbot", "attribution", `${chapter.id}.yml`),
+        [
+          "schema: authorbot.attribution/v1",
+          `chapter_id: ${chapter.id}`,
+          "entries:",
+          ...chapter.attribution.flatMap((entry) => [
+            `  - revision: ${entry.revision}`,
+            `    actor: ${entry.actor}`,
+          ]),
+          "",
+        ].join("\n"),
+      );
+    }
   }
   return dir;
 }
@@ -125,13 +143,52 @@ describe("loadSiteModel - chapter selection and ordering", () => {
     expect(model.chapters[0]?.primaryAuthor).toEqual({
       actor: "github:joe",
       label: "Joe Mattie",
+      acceptedRevisions: [],
     });
     expect(model.chapters[0]?.contributors).toEqual([
       {
         actor: "agent:019f86bc-b85d-70ae-8ff5-1e6e55da458f",
         label: "continuity-reader (agent)",
+        acceptedRevisions: [],
       },
-      { actor: "github:editor", label: "Casey Editor" },
+      { actor: "github:editor", label: "Casey Editor", acceptedRevisions: [] },
+    ]);
+  });
+
+  it("attaches exact accepted revisions from the canonical attribution artifact", async () => {
+    const repo = await makeRepo([
+      {
+        id: CH[0],
+        slug: "credited",
+        order: 10,
+        status: "published",
+        revision: 3,
+        author: "github:joe",
+        contributors: [
+          { actor: "agent:continuity", name: "continuity-reader" },
+          { actor: "github:editor", name: "Casey Editor" },
+        ],
+        attribution: [
+          { revision: 1, actor: "github:joe" },
+          { revision: 3, actor: "agent:continuity" },
+          { revision: 2, actor: "agent:continuity" },
+          { revision: 2, actor: "agent:continuity" },
+          // A future, hand-written artifact row cannot resolve in History.
+          { revision: 9, actor: "github:editor" },
+        ],
+      },
+    ]);
+
+    const { model } = await loadSiteModel({ repoPath: repo });
+
+    expect(model.chapters[0]?.primaryAuthor?.acceptedRevisions).toEqual([1]);
+    expect(model.chapters[0]?.contributors).toEqual([
+      {
+        actor: "agent:continuity",
+        label: "continuity-reader (agent)",
+        acceptedRevisions: [2, 3],
+      },
+      { actor: "github:editor", label: "Casey Editor", acceptedRevisions: [] },
     ]);
   });
 
