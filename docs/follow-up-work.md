@@ -10,10 +10,9 @@ request, release, deployment, migration, or branch cleanup has completed.
 The capability migration must continue to follow the expand, backfill, and
 retire order in the Phase 11 contract. Do not combine these steps.
 
-1. **Ship the feature and expand release.** Finish integrating the in-flight
-   editor deployment-state change, run the full validation suite, merge the
-   reviewed feature pull request, and cut its release. This release must deploy
-   the dual-read Worker before any capability backfill runs.
+1. **Ship the feature and expand release.** Run the full validation suite,
+   merge the reviewed feature pull request, and cut its release. This release
+   must deploy the dual-read Worker before any capability backfill runs.
 2. **Deploy that release to a book.** Upgrade at least one book through the
    normal Authorbot upgrade path and verify that the expand migration, Worker,
    publisher, and editorial flows are healthy. This deployment is a hard gate
