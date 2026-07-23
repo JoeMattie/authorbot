@@ -22,6 +22,14 @@ function annotationFixture(
 }
 
 describe("repositories", () => {
+  it("round-trips the current chapter summary in the projection", async () => {
+    const { db, repos, chapter } = await seedBasics();
+    expect((await repos.chapters.getById(chapter.id))?.summary).toBe(chapter.summary);
+    await repos.chapters.upsert({ ...chapter, summary: null });
+    expect((await repos.chapters.getById(chapter.id))?.summary).toBeNull();
+    db.close();
+  });
+
   it("round-trips legacy and canonical agent-token capability state", async () => {
     const { db, repos, project, actor } = await seedBasics();
     const token = (overrides: Partial<AgentTokenRecord> = {}): AgentTokenRecord => ({

@@ -200,6 +200,8 @@ export interface ChapterProjectionRecord {
   path: string;
   slug: string;
   title: string;
+  /** Current validated chapter-frontmatter summary, never public by itself. */
+  summary: string | null;
   /** Frontmatter order; null only during migration before the next rebuild. */
   order: number | null;
   status: ChapterStatus;

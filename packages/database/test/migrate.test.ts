@@ -31,7 +31,53 @@ describe("migration runner", () => {
     const files = await listMigrationFiles(MIGRATIONS_DIR);
     expect(files).toContain("0001_phase2.sql");
     expect(files).toContain("0011_phase11_revision_proposals.sql");
+    expect(files).toContain("0012_chapter_summaries.sql");
     expect(files).toEqual([...files].sort());
+  });
+
+  it("adds a nullable summary to existing chapter projections", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "authorbot-summary-migration-"));
+    const files = await listMigrationFiles(MIGRATIONS_DIR);
+    for (const name of files.filter((name) => name < "0012_")) {
+      await copyFile(join(MIGRATIONS_DIR, name), join(dir, name));
+    }
+    const db = openSqliteDatabase(":memory:");
+    await applyMigrations(db, dir);
+    await db
+      .prepare(
+        `INSERT INTO projects
+           (id, slug, repo, default_branch, status, created_at, updated_at)
+         VALUES ('01900000-0000-7000-8000-000000000001', 'book', 'owner/book',
+                 'main', 'active', '2026-07-22T00:00:00Z', '2026-07-22T00:00:00Z')`,
+      )
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO chapters
+           (id, project_id, path, slug, title, chapter_order, status, revision,
+            content_hash, block_ids, updated_at)
+         VALUES ('01900000-0000-7000-8000-000000000002',
+                 '01900000-0000-7000-8000-000000000001', 'chapters/one.md',
+                 'one', 'One', 10, 'draft', 1, 'sha256:one', '[]',
+                 '2026-07-22T00:00:00Z')`,
+      )
+      .run();
+    await copyFile(
+      join(MIGRATIONS_DIR, "0012_chapter_summaries.sql"),
+      join(dir, "0012_chapter_summaries.sql"),
+    );
+    const result = await applyMigrations(db, dir);
+    expect(result.applied).toEqual(["0012_chapter_summaries.sql"]);
+    const before = await db
+      .prepare(`SELECT summary FROM chapters LIMIT 1`)
+      .first<{ summary: string | null }>();
+    expect(before?.summary).toBeNull();
+    await db.prepare(`UPDATE chapters SET summary = 'Current draft summary'`).run();
+    const after = await db
+      .prepare(`SELECT summary FROM chapters LIMIT 1`)
+      .first<{ summary: string | null }>();
+    expect(after?.summary).toBe("Current draft summary");
+    db.close();
   });
 
   it("applies pending migrations and creates every contract §2 table", async () => {

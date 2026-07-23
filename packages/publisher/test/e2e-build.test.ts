@@ -269,6 +269,7 @@ describe("buildSite on examples/book-repo", () => {
     expect(outline).not.toContain(
       "At higher sampling rates the drift resolves into structure",
     );
+    expect(outline).not.toContain("authorbot-outline-summaries");
     // Both relationships point into the excluded draft subtree, so neither
     // its title nor its relationship copy may leak into a public build.
     expect(outline).not.toContain("foreshadows");

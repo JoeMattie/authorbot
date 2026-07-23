@@ -6,6 +6,38 @@ authorbot-planning-document-editor:empty {
   display: none;
 }
 
+authorbot-outline-summaries {
+  display: block;
+}
+
+authorbot-outline-summaries:empty {
+  display: none;
+}
+
+.ab-current-chapter-summaries {
+  margin-top: 2rem;
+}
+
+.ab-outline-summary-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.ab-outline-summary-title {
+  font-weight: 700;
+}
+
+.ab-outline-summary-empty {
+  color: var(--text-muted, var(--muted));
+  font-style: italic;
+}
+
+.ab-outline-summaries-error {
+  margin: 1rem 0 0;
+}
+
 .ab-btn {
   min-height: 2rem;
   padding: 0.35rem 0.7rem;

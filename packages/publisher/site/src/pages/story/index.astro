@@ -8,6 +8,7 @@ const chapterSummaries = site.chapters.filter(
   (chapter) => chapter.status === "published" && chapter.summary,
 );
 const outlineReadingId = "story-outline-document";
+const publishedSummariesId = "story-published-chapter-summaries";
 const planningStyles = site.collab
   ? [`${site.basePath}_astro/authorbot-planning.css`]
   : [];
@@ -47,20 +48,33 @@ const planningStyles = site.collab
     </div>
     {
       chapterSummaries.length > 0 && (
-        <section class="story-chapter-summaries" aria-labelledby="chapter-summaries-title">
+        <section
+          id={publishedSummariesId}
+          class="story-chapter-summaries"
+          aria-labelledby="chapter-summaries-title"
+        >
           <header>
             <p class="story-eyebrow">Generated from current chapter metadata</p>
             <h2 id="chapter-summaries-title">Chapter summaries</h2>
           </header>
           <ol>
             {chapterSummaries.map((chapter) => (
-              <li>
+              <li data-chapter-summary-id={chapter.id}>
                 <a href={chapter.href}>{chapter.title}</a>
                 <p>{chapter.summary}</p>
               </li>
             ))}
           </ol>
         </section>
+      )
+    }
+    {
+      site.collab && (
+        <authorbot-outline-summaries
+          data-api-base={site.collab.apiBase}
+          data-project={site.collab.projectSlug}
+          data-static-id={publishedSummariesId}
+        ></authorbot-outline-summaries>
       )
     }
   </div>

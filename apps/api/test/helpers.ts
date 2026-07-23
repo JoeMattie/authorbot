@@ -69,6 +69,7 @@ export function fixtureSnapshot(): BookRepoSnapshot {
           status: "published",
           revision: 3,
           authors: [{ actor: "github:avery-cole" }],
+          summary: "A published chapter summary from the repository projection.",
         },
         path: "chapters/001-baseline.md",
         contentHash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",

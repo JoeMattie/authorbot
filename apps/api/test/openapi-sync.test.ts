@@ -439,6 +439,31 @@ describe("openapi.yaml is synced with the router", () => {
     ).toBe("#/components/schemas/ChapterSummary");
   });
 
+  it("documents authenticated current chapter summaries on the bounded chapter list", () => {
+    const chapter = spec.components.schemas["Chapter"] as
+      | {
+          required?: string[];
+          properties?: Record<string, unknown>;
+        }
+      | undefined;
+    expect(chapter?.required).toContain("summary");
+    expect(chapter?.properties?.["summary"]).toEqual(
+      expect.objectContaining({
+        oneOf: expect.arrayContaining([
+          expect.objectContaining({ type: "string" }),
+          expect.objectContaining({ type: "null" }),
+        ]),
+      }),
+    );
+
+    const chapterList = spec.paths["/v1/projects/{projectId}/chapters"]?.["get"] as
+      | { description?: string }
+      | undefined;
+    expect(chapterList?.description).toContain("chapters:read");
+    expect(chapterList?.description).toContain("draft and proposed");
+    expect(chapterList?.description).toContain("published summaries");
+  });
+
   it("documents optional authentication for the public event-poll representation", () => {
     const events = spec.paths["/v1/projects/{projectId}/events"]?.["get"] as
       | { security?: Record<string, never[]>[] }

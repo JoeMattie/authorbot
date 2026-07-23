@@ -33,13 +33,14 @@ export class ChaptersRepository {
     return this.db
       .prepare(
         `INSERT INTO chapters
-           (id, project_id, path, slug, title, chapter_order, status, revision,
+           (id, project_id, path, slug, title, summary, chapter_order, status, revision,
             content_hash, head_commit, last_published_commit, block_ids, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            path = excluded.path,
            slug = excluded.slug,
            title = excluded.title,
+           summary = excluded.summary,
            chapter_order = excluded.chapter_order,
            status = excluded.status,
            revision = excluded.revision,
@@ -55,6 +56,7 @@ export class ChaptersRepository {
         record.path,
         record.slug,
         record.title,
+        record.summary,
         record.order,
         record.status,
         record.revision,
@@ -227,6 +229,7 @@ function mapChapter(row: SqlRow): ChapterProjectionRecord {
     path: String(row["path"]),
     slug: String(row["slug"]),
     title: String(row["title"]),
+    summary: row["summary"] === null ? null : String(row["summary"]),
     order: row["chapter_order"] === null ? null : Number(row["chapter_order"]),
     status: String(row["status"]) as ChapterProjectionRecord["status"],
     revision: Number(row["revision"]),

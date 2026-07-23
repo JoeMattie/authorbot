@@ -327,6 +327,8 @@ export interface ChapterComposeOutcome {
   content: string;
   slug: string;
   title: string;
+  /** Current validated frontmatter summary after this write. */
+  summary: string | null;
   /** Chapter frontmatter order persisted into the projection. */
   order: number;
   status: "draft" | "proposed" | "published" | "archived";
@@ -1438,6 +1440,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         path: outcome.chapterPath,
         slug: outcome.slug,
         title: outcome.title,
+        summary: outcome.summary,
         order: outcome.order,
         status: outcome.status,
         revision: outcome.revision,

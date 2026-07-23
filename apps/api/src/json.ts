@@ -57,6 +57,7 @@ export function chapterJson(chapter: ChapterProjectionRecord): Record<string, un
     path: chapter.path,
     slug: chapter.slug,
     title: chapter.title,
+    summary: chapter.summary,
     order: chapter.order,
     status: chapter.status,
     revision: chapter.revision,

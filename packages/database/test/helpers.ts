@@ -75,6 +75,7 @@ export async function seedBasics(): Promise<Seeded> {
     path: "chapters/01-signal.md",
     slug: "signal",
     title: "Signal",
+    summary: "A signal appears where nobody expected one.",
     order: 10,
     status: "draft",
     revision: 1,

@@ -789,6 +789,12 @@ paths:
       operationId: listChapters
       tags: [chapters]
       summary: List chapter projections.
+      description: >-
+        Requires the exact `chapters:read` capability. The authenticated,
+        cursor-bounded projection includes each chapter's current frontmatter
+        summary and every lifecycle status, including draft and proposed.
+        Public Outline HTML does not call this endpoint and remains limited to
+        published summaries captured at build time.
       parameters:
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
@@ -5083,7 +5089,7 @@ components:
       type: object
       description: Chapter projection (design §9.1), rebuilt from the book repository.
       required:
-        [id, projectId, path, slug, title, order, status, revision, contentHash, updatedAt]
+        [id, projectId, path, slug, title, summary, order, status, revision, contentHash, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -5096,6 +5102,11 @@ components:
           $ref: "#/components/schemas/Slug"
         title:
           type: string
+        summary:
+          description: Current validated chapter-frontmatter summary.
+          oneOf:
+            - type: string
+            - type: "null"
         order:
           description: Chapter reading order from frontmatter; null only while a migrated projection awaits refresh.
           oneOf:

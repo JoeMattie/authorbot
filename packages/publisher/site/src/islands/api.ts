@@ -487,6 +487,10 @@ export interface ChapterProjection {
   path: string;
   slug: string;
   title: string;
+  /** Current authenticated frontmatter summary, including unpublished chapters. */
+  summary: string | null;
+  /** Canonical frontmatter reading order. */
+  order: number | null;
   status: "draft" | "proposed" | "published" | "archived";
   revision: number;
   updatedAt: string;

@@ -307,6 +307,7 @@ function chapterComposer(): ChapterComposer {
         content: chapterSourceFixture(seed.chapterId, 3),
         slug: "signal",
         title: "Signal",
+        summary: "Current signal summary.",
         order: 10,
         status: "draft" as const,
         revision: 3,

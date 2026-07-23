@@ -30,6 +30,8 @@ const chapter = (openSuggestions = 1): ChapterProjection => ({
   path: "manuscript/chapter.md",
   slug: "chapter",
   title: "Chapter",
+  summary: null,
+  order: 10,
   status: "published",
   revision: 4,
   updatedAt: "2026-07-22T00:00:00Z",

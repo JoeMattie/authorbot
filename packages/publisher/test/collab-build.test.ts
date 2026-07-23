@@ -194,6 +194,10 @@ describe("api-url-less build (script-free regression)", () => {
             /<authorbot-planning-document-editor[^>]*>\s*<\/authorbot-planning-document-editor>/,
             "",
           )
+          .replace(
+            /<authorbot-outline-summaries[^>]*>\s*<\/authorbot-outline-summaries>/,
+            "",
+          )
           .replace(/<authorbot-new-chapter[^>]*>\s*<\/authorbot-new-chapter>/, "")
           .replace(/<authorbot-draft-chapters[^>]*>\s*<\/authorbot-draft-chapters>/, "")
           .replace(/<authorbot-chapter-activity[^>]*>\s*<\/authorbot-chapter-activity>/, "")
@@ -258,6 +262,12 @@ describe("collab-enabled build", () => {
     expect(page).toContain('<script type="module" src="/_astro/authorbot-account.js">');
     expect(page).toContain('<script type="module" src="/_astro/authorbot-planning.js">');
     expect(page).toContain('<link rel="stylesheet" href="/_astro/authorbot-planning.css">');
+    const summaries = /<authorbot-outline-summaries[^>]*>/.exec(page)?.[0] ?? "";
+    expect(summaries).toContain(`data-api-base="${API_URL}"`);
+    expect(summaries).toContain('data-project="hollow-creek-anomaly"');
+    expect(summaries).toContain(
+      'data-static-id="story-published-chapter-summaries"',
+    );
     expect(page).not.toContain("authorbot-collab.js");
   });
 

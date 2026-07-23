@@ -103,6 +103,7 @@ export async function setupDatabase(): Promise<SeededDatabase> {
     path: "chapters/01-signal.md",
     slug: "signal",
     title: "Signal",
+    summary: "A signal changes the investigation.",
     order: 10,
     status: "draft",
     revision: 2,

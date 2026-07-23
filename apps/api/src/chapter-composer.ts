@@ -267,6 +267,7 @@ export function createChapterComposer(options: CreateChapterComposerOptions): Ch
       content,
       slug: fm.slug,
       title: fm.title,
+      summary: fm.summary ?? null,
       order: fm.order,
       status: fm.status,
       revision: fm.revision,
