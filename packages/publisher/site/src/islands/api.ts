@@ -5,6 +5,12 @@
  */
 import type { ComposerKind, ComposerScope } from "./composer-state.js";
 import type { RangeSelector } from "./selection.js";
+import {
+  hasEffectiveCapability,
+  hasLegacyEffectiveAction,
+} from "./effective-capabilities.js";
+
+export { hasEffectiveCapability, hasLegacyEffectiveAction } from "./effective-capabilities.js";
 
 export interface MeActor {
   id: string;
@@ -80,36 +86,6 @@ export function isMaintainer(me: Me | null): boolean {
  * API. `legacyScope` is only a rolling-deploy fallback for a Worker that
  * predates Phase 11 and therefore omitted the canonical fields entirely.
  */
-export function hasEffectiveCapability(
-  me: Me | null,
-  capability: string,
-  legacyScope?: string,
-): boolean {
-  if (me === null) return false;
-  if (Array.isArray(me.effectiveCapabilities)) {
-    return me.effectiveCapabilities.includes(capability);
-  }
-  return legacyScope !== undefined && me.scopes.includes(legacyScope);
-}
-
-/** High-impact compatibility actions are source-tagged, never inferred. */
-export function hasLegacyEffectiveAction(
-  me: Me | null,
-  action: string,
-  oldWorkerScope?: string,
-): boolean {
-  if (me === null) return false;
-  if (Array.isArray(me.legacyEffectiveActions)) {
-    return me.legacyEffectiveActions.some((entry) => entry.action === action);
-  }
-  // A canonical-capability response with no matching source-tagged action is
-  // an authoritative denial. Only a genuinely old response gets the fallback.
-  if (me.capabilityMode !== undefined || me.effectiveCapabilities !== undefined) {
-    return false;
-  }
-  return oldWorkerScope !== undefined && me.scopes.includes(oldWorkerScope);
-}
-
 export interface AnnotationTarget {
   blockId: string;
   textPosition?: { start: number; end: number };

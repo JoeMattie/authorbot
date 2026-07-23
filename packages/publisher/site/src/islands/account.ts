@@ -23,7 +23,8 @@
  * be reached it renders nothing, exactly like the other islands, chrome that
  * leads nowhere is worse than no chrome.
  */
-import { hasEffectiveCapability, type Me, type Role } from "./api.js";
+import type { Me, Role } from "./api.js";
+import { hasEffectiveCapability } from "./effective-capabilities.js";
 import { el } from "./dom.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";

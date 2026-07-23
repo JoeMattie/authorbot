@@ -336,15 +336,27 @@ describe("collab-enabled build", () => {
     const projectStore = assets.find((file) => file.startsWith("project-store-"));
     const revisionReview = assets.find((file) => file.startsWith("revision-review-"));
     const workQueue = assets.find((file) => file.startsWith("work-queue-"));
-    const manuscript = assets.find((file) => file.startsWith("milkdown-manuscript-surface-"));
-    const manuscriptEntry = assets.find((file) => file.startsWith("manuscript-editor-element-"));
+    const manuscript = assets.find((file) =>
+      file.startsWith("milkdown-manuscript-surface-") && file.endsWith(".js")
+    );
+    const manuscriptLoader = assets.find((file) =>
+      file.startsWith("manuscript-surface-loader-") && file.endsWith(".js")
+    );
+    const manuscriptEntry = assets.find((file) =>
+      file.startsWith("manuscript-editor-element-") && file.endsWith(".js")
+    );
+    const notesMode = assets.find((file) =>
+      file.startsWith("collab-notes-mode-") && file.endsWith(".js")
+    );
     const summaryEditor = assets.find((file) => file.startsWith("chapter-summary-editor-"));
     const historyEntry = assets.find((file) => file.startsWith("chapter-history-entry-"));
     expect(projectStore).toBeDefined();
     expect(revisionReview).toBeDefined();
     expect(workQueue).toBeDefined();
     expect(manuscript).toBeDefined();
+    expect(manuscriptLoader).toBeDefined();
     expect(manuscriptEntry).toBeDefined();
+    expect(notesMode).toBeDefined();
     expect(summaryEditor).toBeDefined();
     expect(historyEntry).toBeDefined();
 
@@ -395,7 +407,19 @@ describe("collab-enabled build", () => {
       path.join(outCollab, "_astro", "assets", manuscriptEntry!),
       "utf8",
     );
-    expect(manuscriptEntryJs).toMatch(/\.\/milkdown-manuscript-surface-[\w-]+\.js/);
+    expect(manuscriptEntryJs).toMatch(/\.\/manuscript-surface-loader-[\w-]+\.js/);
+
+    const notesModeJs = await readFile(
+      path.join(outCollab, "_astro", "assets", notesMode!),
+      "utf8",
+    );
+    expect(notesModeJs).toMatch(/\.\/manuscript-surface-loader-[\w-]+\.js/);
+
+    const manuscriptLoaderJs = await readFile(
+      path.join(outCollab, "_astro", "assets", manuscriptLoader!),
+      "utf8",
+    );
+    expect(manuscriptLoaderJs).toMatch(/\.\/milkdown-manuscript-surface-[\w-]+\.js/);
 
     const manuscriptJs = await readFile(
       path.join(outCollab, "_astro", "assets", manuscript!),

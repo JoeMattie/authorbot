@@ -14,6 +14,7 @@ import {
   type ChapterSource,
   type Me,
 } from "./api.js";
+import "./manuscript-editor-element.css";
 import {
   clearChapterDraft,
   loadChapterDraft,

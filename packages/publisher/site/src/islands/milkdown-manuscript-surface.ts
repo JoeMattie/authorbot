@@ -38,6 +38,7 @@ import type {
   ChapterNotesTargetAdapter,
   TargetVisibilityListener,
 } from "./chapter-notes-presentation.js";
+import "./milkdown-manuscript-surface.css";
 import type {
   ManuscriptSubmitResult,
   ManuscriptSurfaceOptions,

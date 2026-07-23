@@ -6,6 +6,7 @@
  * metadata proposal. A successful submit closes immediately, while the deck
  * changes only after the Git write is deployed.
  */
+import "./chapter-summary-editor.css";
 import {
   hasEffectiveCapability,
   roleOf,

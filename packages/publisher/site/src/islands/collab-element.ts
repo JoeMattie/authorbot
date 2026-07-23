@@ -44,8 +44,8 @@ import {
 import { captureRange, type CapturedSelection } from "./selection.js";
 import { clearRangeHighlights, rangeForSelector } from "./range-highlight.js";
 import { VoteControl } from "./vote-control.js";
-import { createLazyManuscriptSurface } from "./manuscript-surface-loader.js";
-import type { ManuscriptSurfaceSession } from "./manuscript-surface.js";
+import type { CollabNotesModeController } from "./collab-notes-mode.js";
+import { loadLazyModule } from "./lazy-module.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 import {
@@ -259,10 +259,9 @@ export class AuthorbotCollab extends HTMLElement {
   private targetAdapter!: ChapterNotesTargetAdapter;
   private staticTargetAdapter!: StaticChapterNotesTargetAdapter;
   private stopTargetVisibility: (() => void) | null = null;
-  private notesSurface: ManuscriptSurfaceSession | null = null;
-  private notesSurfaceRoot: HTMLElement | null = null;
-  private notesModeBusy = false;
-  private notesActivation = 0;
+  private notesMode: CollabNotesModeController | null = null;
+  private notesModeRequest: Promise<CollabNotesModeController | null> | null = null;
+  private notesModeActive = false;
 
   private mql!: MediaQueryList;
   private started = false;
@@ -333,7 +332,11 @@ export class AuthorbotCollab extends HTMLElement {
     this.releaseConnection = null;
     this.stopTargetVisibility?.();
     this.stopTargetVisibility = null;
-    void this.destroyNotesSurface(false);
+    const notesMode = this.notesMode;
+    this.notesMode = null;
+    void notesMode?.close(false);
+    void this.notesModeRequest?.then((pending) => pending?.close(false));
+    this.notesModeRequest = null;
     if (this.refetchTimer !== undefined) {
       window.clearTimeout(this.refetchTimer);
       this.refetchTimer = undefined;
@@ -605,150 +608,105 @@ export class AuthorbotCollab extends HTMLElement {
 
   /** Called by the chapter editor before it takes ownership of the manuscript. */
   async prepareForExternalMode(): Promise<boolean> {
-    if (this.notesSurface === null && this.notesSurfaceRoot === null) return true;
-    await this.destroyNotesSurface(true);
+    const mode = this.notesMode ?? await this.notesModeRequest;
+    if (mode?.active === true) await mode.close(true);
     return true;
   }
 
   private async toggleNotesSurface(): Promise<void> {
-    if (this.notesModeBusy) return;
-    if (this.notesSurface !== null || this.notesSurfaceRoot !== null) {
-      await this.destroyNotesSurface(true);
-      return;
-    }
     if (!this.canReadChapter()) return;
     const generation = this.mountGeneration;
-    const activation = ++this.notesActivation;
-    this.notesModeBusy = true;
     this.notesModeBtn.disabled = true;
     this.notesModeStatus.textContent = "Loading the rich Notes view…";
+    const mode = await this.ensureNotesMode(generation);
+    if (mode === null || !this.isCurrentMount(generation)) return;
+    await mode.toggle();
+  }
 
-    const editor = [...document.querySelectorAll<HTMLElement>("authorbot-manuscript-editor")]
-      .find((candidate) => candidate.dataset.chapterId === this.cfg?.chapterId) as
-        | (HTMLElement & { prepareForExternalMode?: () => Promise<boolean> })
-        | undefined;
-    if (editor?.prepareForExternalMode !== undefined) {
-      const ready = await editor.prepareForExternalMode();
-      if (!ready || !this.isCurrentMount(generation) || activation !== this.notesActivation) {
-        this.notesModeBusy = false;
-        this.notesModeBtn.disabled = false;
-        this.notesModeStatus.textContent = ready ? "" : "The chapter edit is still open.";
-        return;
-      }
-    }
-
-    const read = await this.store.getState().readChapterSource((this.cfg as Config).chapterId);
-    if (!this.isCurrentMount(generation) || activation !== this.notesActivation) return;
-    if (!read.ok || read.value.chapterId !== this.cfg?.chapterId) {
-      this.notesModeBusy = false;
-      this.notesModeBtn.disabled = false;
-      this.notesModeStatus.textContent = `The rich Notes view could not open: ${
-        read.ok ? "the source response did not match this chapter" : read.message
-      }.`;
-      return;
-    }
-
-    const root = el("div", "ab-manuscript-notes-root");
-    this.notesSurfaceRoot = root;
-    this.proseEl.insertAdjacentElement("afterend", root);
-    try {
-      const session = await createLazyManuscriptSurface({
-        root,
-        markdown: read.value.body,
-        blockIds: this.blocks.map((block) => block.id.slice(2)),
-        activation: "notes",
-        accessibleName: `Notes for ${read.value.title}`,
-        allowBlockNotes: this.canWrite(),
-        onBlockNote: (blockId, returnFocus) => {
-          if (!this.canWrite()) {
-            this.promptSignIn();
-            return;
-          }
-          this.openComposer(
-            {
+  private ensureNotesMode(
+    generation: number,
+  ): Promise<CollabNotesModeController | null> {
+    if (this.notesMode !== null) return Promise.resolve(this.notesMode);
+    if (this.notesModeRequest !== null) return this.notesModeRequest;
+    const request = loadLazyModule(() => import("./collab-notes-mode.js"))
+      .then(({ createCollabNotesModeController }) => {
+        const mode = createCollabNotesModeController({
+          chapterId: (this.cfg as Config).chapterId,
+          prose: this.proseEl,
+          blockIds: this.blocks.map((block) => block.id.slice(2)),
+          current: () => this.isCurrentMount(generation),
+          canRead: () => this.canReadChapter(),
+          canWrite: () => this.canWrite(),
+          prepareEditor: async () => {
+            const editor = [...document.querySelectorAll<HTMLElement>(
+              "authorbot-manuscript-editor",
+            )].find((candidate) => candidate.dataset.chapterId === this.cfg?.chapterId) as
+              | (HTMLElement & { prepareForExternalMode?: () => Promise<boolean> })
+              | undefined;
+            return editor?.prepareForExternalMode === undefined
+              ? true
+              : editor.prepareForExternalMode();
+          },
+          readSource: () => this.store.getState().readChapterSource((this.cfg as Config).chapterId),
+          onBlockNote: (blockId, returnFocus) => {
+            if (!this.canWrite()) return this.promptSignIn();
+            this.openComposer({
               kind: this.canComment() ? "comment" : "suggestion",
               scope: "block",
               blockId,
               selector: null,
               body: "",
-            },
-            returnFocus,
-          );
-        },
-        onNoteActivate: (annotationId) => this.activateAnnotation(annotationId, true),
-        onBlockHover: (blockId, active) => this.setBlockHighlight(blockId, active),
+            }, returnFocus);
+          },
+          onNoteActivate: (annotationId) => this.activateAnnotation(annotationId, true),
+          onBlockHover: (blockId, active) => this.setBlockHighlight(blockId, active),
+          onActivated: (session) => {
+            clearRangeHighlights(this.proseEl);
+            this.notesModeActive = true;
+            this.proseEl.hidden = true;
+            this.targetAdapter = session.notes;
+            this.visibleBlockIds.clear();
+            this.observeTargetVisibility();
+            this.notesModeBtn.textContent = "Static reading view";
+            this.notesModeBtn.setAttribute("aria-pressed", "true");
+            this.renderAll();
+          },
+          onDeactivated: () => {
+            if (this.composer.phase !== "closed") this.closeComposer();
+            this.stopTargetVisibility?.();
+            this.stopTargetVisibility = null;
+            this.notesModeActive = false;
+            this.proseEl.hidden = false;
+            this.targetAdapter = this.staticTargetAdapter;
+            this.visibleBlockIds.clear();
+            if (this.started && this.isConnected) {
+              this.observeTargetVisibility();
+              if (this.scaffolded) this.renderAll();
+            }
+            this.notesModeBtn.textContent = "Read with notes";
+            this.notesModeBtn.setAttribute("aria-pressed", "false");
+          },
+          setBusy: (busy) => {
+            this.notesModeBtn.disabled = busy;
+          },
+          setStatus: (message) => {
+            this.notesModeStatus.textContent = message;
+          },
+        });
+        if (this.isCurrentMount(generation)) this.notesMode = mode;
+        return mode;
+      })
+      .catch(() => {
+        this.notesModeRequest = null;
+        if (this.isCurrentMount(generation)) {
+          this.notesModeBtn.disabled = false;
+          this.notesModeStatus.textContent =
+            "The rich Notes view could not load. Try again.";
+        }
+        return null;
       });
-      if (
-        !this.isCurrentMount(generation) ||
-        activation !== this.notesActivation ||
-        this.notesSurfaceRoot !== root
-      ) {
-        await session.destroy();
-        root.remove();
-        return;
-      }
-      clearRangeHighlights(this.proseEl);
-      this.notesSurface = session;
-      this.proseEl.hidden = true;
-      this.targetAdapter = session.notes;
-      this.visibleBlockIds.clear();
-      this.observeTargetVisibility();
-      this.notesModeBtn.textContent = "Static reading view";
-      this.notesModeBtn.setAttribute("aria-pressed", "true");
-      this.notesModeStatus.textContent = "Rich Notes view opened.";
-      this.renderAll();
-      session.focus();
-    } catch (caught) {
-      if (this.notesSurfaceRoot === root) this.notesSurfaceRoot = null;
-      root.remove();
-      this.notesModeStatus.textContent = `The rich Notes view could not open: ${
-        caught instanceof Error ? caught.message : String(caught)
-      }`;
-    } finally {
-      if (this.isCurrentMount(generation)) {
-        this.notesModeBusy = false;
-        this.notesModeBtn.disabled = false;
-      }
-    }
-  }
-
-  private async destroyNotesSurface(announce: boolean): Promise<void> {
-    this.notesActivation += 1;
-    this.notesModeBusy = true;
-    if (this.composer.phase !== "closed") this.closeComposer();
-    this.stopTargetVisibility?.();
-    this.stopTargetVisibility = null;
-    const session = this.notesSurface;
-    const root = this.notesSurfaceRoot;
-    this.notesSurface = null;
-    this.notesSurfaceRoot = null;
-    if (session !== null) {
-      try {
-        await session.destroy();
-      } catch {
-        // Mode switching must restore the static manuscript even if a lazy
-        // editor chunk fails while tearing down its presentation-only state.
-      }
-    }
-    root?.remove();
-    this.proseEl.hidden = false;
-    if (this.staticTargetAdapter !== undefined) {
-      this.targetAdapter = this.staticTargetAdapter;
-      this.visibleBlockIds.clear();
-      if (this.started && this.isConnected) {
-        this.observeTargetVisibility();
-        if (this.scaffolded) this.renderAll();
-      }
-    }
-    if (this.notesModeBtn !== undefined) {
-      this.notesModeBtn.textContent = "Read with notes";
-      this.notesModeBtn.setAttribute("aria-pressed", "false");
-      this.notesModeBtn.disabled = false;
-    }
-    if (announce && this.notesModeStatus !== undefined) {
-      this.notesModeStatus.textContent = "Static reading view restored.";
-    }
-    this.notesModeBusy = false;
+    this.notesModeRequest = request;
+    return request;
   }
 
   private readonly onWindowLoad = (): void => this.layout();
@@ -1005,8 +963,8 @@ export class AuthorbotCollab extends HTMLElement {
     if (projectionUnchanged) return;
     this.me = state.session;
     if (sessionChanged) this.memberNames = new Map();
-    if (this.notesSurface !== null && (sessionChanged || !this.canReadChapter())) {
-      void this.destroyNotesSurface(false);
+    if (this.notesMode?.active === true && (sessionChanged || !this.canReadChapter())) {
+      void this.notesMode.close(false);
     }
     const nextAnnotations = ids.flatMap((id) => state.annotationsById[id] ?? []);
     const onlyVoteDataChanged =
@@ -1595,7 +1553,7 @@ export class AuthorbotCollab extends HTMLElement {
     if (blockId === null) {
       return null;
     }
-    if (this.notesSurface !== null) {
+    if (this.notesModeActive) {
       const block = this.targetAdapter.elementFor(blockId);
       if (block !== null) block.tabIndex = -1;
       return block;
