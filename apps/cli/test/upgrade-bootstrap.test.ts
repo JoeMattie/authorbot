@@ -4,6 +4,7 @@ import type {
   UpgradeBootstrapPort,
   UpgradeBootstrapRequest,
 } from "../src/upgrade/ports.js";
+import { renderTransientBootstrapCommand } from "../src/upgrade/bootstrap.js";
 import { runUpgrade } from "../src/upgrade/upgrade.js";
 import {
   captureIo,
@@ -70,6 +71,27 @@ async function writeLockedVersion(
 }
 
 describe("authorbot upgrade self-bootstrap", () => {
+  it("renders recovery paths for both POSIX shells and Windows cmd", () => {
+    expect(
+      renderTransientBootstrapCommand(
+        "1.1.0",
+        ["/home/joe/My Book", "--to", "1.1.0"],
+        "linux",
+      ),
+    ).toBe(
+      "npx --yes @authorbot/cli@1.1.0 upgrade '/home/joe/My Book' --to 1.1.0",
+    );
+    expect(
+      renderTransientBootstrapCommand(
+        "1.1.0",
+        ["C:\\Users\\Joe\\My Book", "--to", "1.1.0"],
+        "win32",
+      ),
+    ).toBe(
+      'npx --yes @authorbot/cli@1.1.0 upgrade "C:\\Users\\Joe\\My Book" --to 1.1.0',
+    );
+  });
+
   it("hands a forward upgrade to the exact target before the stale helper can mutate", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0", apiPin: "0.9.7" });
     const before = await snapshot(repoPath);

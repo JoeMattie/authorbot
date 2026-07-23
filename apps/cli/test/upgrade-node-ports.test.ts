@@ -201,6 +201,33 @@ process.exitCode = 11;
     });
   });
 
+  it("rejects a real pre-spawn failure so the caller can make the unchanged guarantee", async () => {
+    const repo = await tempDirectory();
+    const packageRoot = path.join(repo, "node_modules", "@authorbot", "cli");
+    const dist = path.join(packageRoot, "dist");
+    await mkdir(dist, { recursive: true });
+    await writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@authorbot/cli",
+        version: "9.8.7",
+        type: "module",
+        bin: { authorbot: "./dist/bin.mjs" },
+      }),
+    );
+    await writeFile(path.join(dist, "bin.mjs"), "process.exitCode = 0;\n");
+    const bootstrap = await createNodeUpgradeBootstrap(process.env);
+
+    await expect(
+      bootstrap.handoff({
+        targetVersion: "9.8.7",
+        repoPath: repo,
+        cwd: path.join(repo, "does-not-exist"),
+        args: [".", "--to", "9.8.7"],
+      }),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it.runIf(process.platform !== "win32")(
     "reports signal exits as post-start uncertainty instead of a clean-repository claim",
     async () => {

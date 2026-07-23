@@ -137,6 +137,29 @@ function shellArgument(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
 
+function windowsCommandArgument(value: string): string {
+  if (/^[A-Za-z0-9_./:@=+\\-]+$/.test(value)) {
+    return value;
+  }
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+/** Render the one-time exact-package recovery command for the caller's shell. */
+export function renderTransientBootstrapCommand(
+  version: string,
+  originalArgs: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const render = platform === "win32" ? windowsCommandArgument : shellArgument;
+  return [
+    "npx",
+    "--yes",
+    `@authorbot/cli@${version}`,
+    "upgrade",
+    ...originalArgs.map(render),
+  ].join(" ");
+}
+
 /**
  * Return `undefined` when this process is the suitable helper and may
  * continue. Otherwise return the delegated child exit code (or a fail-closed
@@ -208,13 +231,7 @@ export async function ensureUpgradeBootstrap(
         "transiently:",
     );
     io.err(
-      [
-        "  npx",
-        "--yes",
-        `@authorbot/cli@${desired.raw}`,
-        "upgrade",
-        ...originalArgs.map(shellArgument),
-      ].join(" "),
+      `  ${renderTransientBootstrapCommand(desired.raw, originalArgs)}`,
     );
     return 1;
   }
