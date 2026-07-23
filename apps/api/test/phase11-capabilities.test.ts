@@ -135,8 +135,8 @@ describe("Phase 11 agent-token capabilities", () => {
   });
 
   it("sanitizes a legacy mint before its response, storage, idempotency claim, and audits", async () => {
-    const scopes = [...LEGACY_AGENT_SCOPES];
-    const sanitizedScopes = scopes.filter(
+    const scopes = [...LEGACY_AGENT_SCOPES].reverse();
+    const sanitizedScopes = [...LEGACY_AGENT_SCOPES].filter(
       (scope) => scope !== "tokens:manage" && scope !== "members:manage",
     );
     const key = "phase11-legacy-mint-sanitized";
@@ -181,11 +181,16 @@ describe("Phase 11 agent-token capabilities", () => {
       .all<{ actor_id: string | null; metadata: string }>();
     expect(sanitationAudits).toHaveLength(1);
     const sanitationAudit = sanitationAudits[0];
+    const maintainerActor = await h.repos.actors.getByExternalIdentity(
+      "github:phase11-maintainer",
+    );
+    expect(maintainerActor).not.toBeNull();
+    expect(sanitationAudit?.actor_id).toBe(maintainerActor?.id);
     expect(JSON.parse(sanitationAudit?.metadata ?? "null")).toMatchObject({
       source: "legacy-mint",
       capabilityMode: "legacy",
       reason: "control-plane-or-unknown-scope",
-      removedScopes: ["tokens:manage", "members:manage"],
+      removedScopes: ["members:manage", "tokens:manage"],
       retainedScopes: sanitizedScopes,
     });
 
@@ -197,7 +202,7 @@ describe("Phase 11 agent-token capabilities", () => {
       )
       .bind(body.id)
       .first<{ actor_id: string | null; metadata: string }>();
-    expect(mintAudit?.actor_id).toBe(sanitationAudit?.actor_id);
+    expect(mintAudit?.actor_id).toBe(maintainerActor?.id);
     expect(JSON.parse(mintAudit?.metadata ?? "null")).toMatchObject({
       capabilityMode: "legacy",
       capabilities: grantedCapabilities,
@@ -207,12 +212,14 @@ describe("Phase 11 agent-token capabilities", () => {
     const replay = await request();
     expect(replay.status).toBe(201);
     expect(replay.headers.get("x-idempotency-replayed")).toBe("true");
-    expect(await replay.json()).toMatchObject({
+    const replayBody = (await replay.json()) as Record<string, unknown>;
+    expect(replayBody).toMatchObject({
       id: body.id,
       scopes: sanitizedScopes,
       grantedCapabilities,
       tokenRedacted: true,
     });
+    expect(replayBody).not.toHaveProperty("token");
     const finalSanitationCount = await h.db
       .prepare(
         `SELECT COUNT(*) AS count FROM audit_events
@@ -222,6 +229,30 @@ describe("Phase 11 agent-token capabilities", () => {
       .bind(body.id)
       .first<{ count: number }>();
     expect(finalSanitationCount?.count).toBe(1);
+  });
+
+  it("rejects duplicate legacy scope names before minting", async () => {
+    const response = await h.app.request(
+      `/v1/projects/${h.projectId}/agent-tokens`,
+      jsonRequest(
+        "POST",
+        {
+          name: "duplicate-legacy-agent",
+          scopes: ["chapters:read", "chapters:read"],
+        },
+        { Cookie: maintainer, "Idempotency-Key": "phase11-duplicate-legacy-scope" },
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      title: "Request validation failed",
+    });
+    expect(
+      await h.db
+        .prepare(`SELECT COUNT(*) AS count FROM agent_tokens WHERE name = ?`)
+        .bind("duplicate-legacy-agent")
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("dual-reads legacy rows and identifies preserved actions by source", async () => {

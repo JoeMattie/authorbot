@@ -351,14 +351,19 @@ leaving legacy mode authoritative.
    stale `capabilities_v2` values from legacy scopes but leaves those rows in
    legacy mode and leaves their ordinary legacy scopes intact. The deployed
    expand Worker can serve before, during, and after this migration. The
-   migration removes
-   control-plane and unknown names from the legacy column as an intentional
-   security reduction and records an audit event. Revoked and expired tokens
-   remain revoked or expired. Because books may skip versions or roll a Worker
-   back, the migration first installs a persistent database guard that applies
-   the same sanitization and translation to every later legacy insert and to
-   updates of `scopes`, `capabilities_v2`, or `capability_mode`. The guard stays
-   in place until Slice 3C retires legacy mode.
+   migration removes control-plane and unknown names from the legacy column as
+   an intentional security reduction and records an audit event. It also
+   corrects stored redacted mint-replay bodies that named those removed scopes;
+   the original mint audit remains immutable and the sanitation event records
+   the correction. Revoked and expired tokens remain revoked or expired.
+   Because books may skip versions or roll a Worker back, the migration first
+   installs a persistent database guard. It projects safe legacy inserts and
+   authority-field updates, but aborts a write that contains malformed,
+   control-plane, or unknown scopes. That makes an old Worker fail and retry
+   instead of returning or auditing a successful grant different from storage.
+   The v0.1.36 Worker sanitizes deprecated input before writing, so valid
+   compatibility requests continue normally. The guard stays in place until
+   Slice 3C retires legacy mode.
 3. **Retire releases.** Legacy-mode endpoint semantics remain until the
    maintainer explicitly converts a token or a documented major-version
    contract window permits their removal. After all supported rows are

@@ -14,20 +14,15 @@ number promises to the people who pinned it.
 | `@authorbot/cli` | the `authorbot` binary - `validate`, `build`, `upgrade` | author CI, local use |
 | `@authorbot/api` | prebuilt Worker entry, Durable Object, and D1 migrations | `wrangler.jsonc` `main` |
 | `@authorbot/create` | the setup wizard | `npx @authorbot/create` |
+| `authorbot` | the unscoped alias forwarding to `@authorbot/cli` | `npx authorbot` |
 
-`@authorbot/create` does not exist yet - Phase 6 §1 builds it. Whoever adds
-`apps/create` must also add it to `scripts/publishable.mjs` and give it the
-same packaging fields as the rest; see *Adding a package to the release* at the
-bottom. Until then it is listed here because ADR-0022 names it, not because it
-ships.
-
-Seven more packages - `schemas`, `markdown`, `domain`, `rule-engine`,
+Eight supporting packages - `schemas`, `markdown`, `domain`, `rule-engine`,
 `database`, `repo-coordinator`, `git-github`, `publisher` - are published
-because the three above depend on them. **They are not a public contract.**
-Their exports may change in any release, including a patch. Do not import them
-directly; if you need something they hold, ask for it to be re-exported from
-`@authorbot/cli` or `@authorbot/api`, where it will be covered by the promises
-below.
+because the public entry packages depend on them. **They are not a public
+contract.** Their exports may change in any release, including a patch. Do not
+import them directly; if you need something they hold, ask for it to be
+re-exported from `@authorbot/cli` or `@authorbot/api`, where it will be covered
+by the promises below.
 
 The publishable set lives in one place, `scripts/publishable.mjs`, which the
 packaging check, the version check, and the packer all read.
@@ -290,9 +285,11 @@ toolchain reading files a newer one rewrote (ADR-0021 §5).
 - **Database:** there is no automatic down-migration. Applied D1 migrations
   remain in place when the toolchain pin moves backward. Expand/contract makes
   this survivable: the previous Worker can run against the expanded schema.
-  For v0.1.36, the persistent capability-projection triggers also remain and
-  intentionally normalize legacy writes made by that old Worker. They are the
-  rollback guard, not state that the rollback removes.
+  For v0.1.36, the persistent capability-projection triggers also remain. They
+  project safe legacy writes made by an old Worker and reject a write that
+  would still need scope sanitation, avoiding a successful response that
+  disagrees with storage. They are the rollback guard, not state that the
+  rollback removes.
 
 Re-validate after any rollback. `authorbot upgrade` does this for you in both
 directions.

@@ -13,6 +13,7 @@
  */
 import { WizardError } from "../errors.js";
 import type { Stage, StageOutcome, WizardContext } from "../context.js";
+import { TOOLCHAIN_VERSION } from "../scaffold/render.js";
 import { resolveTool, runTool } from "../toolchain.js";
 import { requireBookDirectory } from "./shared.js";
 
@@ -97,7 +98,7 @@ export const upgradeStage: Stage = async (ctx: WizardContext): Promise<StageOutc
     if (/unknown command|not a command|unrecognized/i.test(output)) {
       throw new WizardError(
         "The installed Authorbot toolchain is too old to understand `authorbot upgrade`.",
-        "Update it by hand once - `npm install --save-dev @authorbot/cli@latest` in your book directory - and every upgrade after that can use this command.",
+        `Launch the current helper once without installing it into the book: \`npx --yes @authorbot/cli@${TOOLCHAIN_VERSION} upgrade --to ${TOOLCHAIN_VERSION}\` in your book directory. After its pull request is merged and you run \`npm install\`, ordinary \`npx authorbot upgrade\` owns later handoffs automatically.`,
       );
     }
     throw new WizardError(

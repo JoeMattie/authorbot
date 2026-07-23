@@ -17,12 +17,16 @@ always the same commit.
   books may safely skip straight from an older supported Worker. It leaves
   `capability_mode` as `legacy`, keeps ordinary legacy scopes authoritative,
   and does not change expiry or revocation state. Unknown and control-plane
-  scope names are removed as an intentional authority reduction and recorded
-  in the audit trail; malformed legacy scope sets fail closed. A persistent
-  database guard applies the same translation to legacy inserts and authority
-  updates, so a direct version skip or Worker rollback cannot reopen a
-  post-backfill gap. Deprecated legacy mint responses and audits now report
-  the same sanitized scopes that are actually stored.
+  scope names already stored are removed as an intentional authority reduction
+  and recorded in the audit trail; malformed legacy scope sets fail closed.
+  Historical mint replay bodies are updated to the corrected scopes without
+  rewriting the original audit event. A persistent database guard projects
+  safe old-Worker writes and rejects a later legacy write that still needs
+  scope sanitation, so a direct version skip or Worker rollback cannot reopen
+  a post-backfill gap or return a misleading success. The v0.1.36 Worker
+  sanitizes deprecated legacy mint requests before the write, so its response,
+  replay, mint audit, and stored row agree; the sanitation event preserves what
+  was removed.
 - This is the Phase 3B backfill only. It includes no book-format migration and
   does not retire legacy authorization semantics, remove the legacy
   compatibility endpoint, or remove legacy storage. The compatibility guard

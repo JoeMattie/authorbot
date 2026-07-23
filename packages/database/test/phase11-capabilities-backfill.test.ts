@@ -66,8 +66,22 @@ interface StoredAudit extends SqlRow {
   metadata: string;
 }
 
+interface TimestampedAudit extends StoredAudit {
+  id: string;
+  created_at: string;
+}
+
 const tokenId = (ordinal: number): string =>
   `01900000-0000-7000-8000-${ordinal.toString(16).padStart(12, "0")}`;
+
+function uuidV7TimestampMillis(id: string): number {
+  return Number.parseInt(id.replaceAll("-", "").slice(0, 12), 16);
+}
+
+function uuidV7At(millis: number, suffix: string): string {
+  const timestamp = Math.trunc(millis).toString(16).padStart(12, "0");
+  return `${timestamp.slice(0, 8)}-${timestamp.slice(8)}-7000-8000-${suffix.padStart(12, "0")}`;
+}
 
 function expectedCapabilities(scopes: readonly string[]): string[] {
   const has = new Set(scopes);
@@ -136,9 +150,15 @@ function oldWorkerInsert(
   db: SqliteAdapter,
   id: string,
   scopes: string | readonly string[],
-  options: { expiresAt?: string; revokedAt?: string | null } = {},
+  options: {
+    expiresAt?: string;
+    revokedAt?: string | null;
+    actorId?: string;
+    createdBy?: string;
+  } = {},
 ) {
   const encoded = typeof scopes === "string" ? scopes : JSON.stringify(scopes);
+  const actorId = options.actorId ?? ACTOR_ID;
   return db
     .prepare(
       `INSERT INTO agent_tokens
@@ -149,10 +169,10 @@ function oldWorkerInsert(
     .bind(
       id,
       PROJECT_ID,
-      ACTOR_ID,
+      actorId,
       `hash-${id}`,
       encoded,
-      ACTOR_ID,
+      options.createdBy ?? actorId,
       CREATED_AT,
       options.expiresAt ?? ACTIVE_EXPIRY,
       options.revokedAt ?? null,
@@ -165,6 +185,7 @@ function expandedWorkerInsert(
   scopes: string | readonly string[],
   capabilitiesV2: string | readonly string[] | null,
   capabilityMode: "legacy" | "canonical" = "legacy",
+  actorId = ACTOR_ID,
 ) {
   const encodedScopes = typeof scopes === "string" ? scopes : JSON.stringify(scopes);
   const encodedCapabilities =
@@ -184,12 +205,12 @@ function expandedWorkerInsert(
     .bind(
       id,
       PROJECT_ID,
-      ACTOR_ID,
+      actorId,
       `hash-${id}`,
       encodedScopes,
       encodedCapabilities,
       capabilityMode,
-      ACTOR_ID,
+      actorId,
       CREATED_AT,
       ACTIVE_EXPIRY,
     );
@@ -199,19 +220,28 @@ function v0134WorkerInsert(
   db: SqliteAdapter,
   id: string,
   scopes: string | readonly string[],
+  actorId = ACTOR_ID,
 ) {
   // v0.1.34 already used the expanded repository shape: it named both new
   // columns explicitly, writing NULL plus legacy rather than relying on their
   // database defaults.
-  return expandedWorkerInsert(db, id, scopes, null, "legacy");
+  return expandedWorkerInsert(db, id, scopes, null, "legacy", actorId);
 }
 
 function v0135WorkerInsert(
   db: SqliteAdapter,
   id: string,
   scopes: readonly string[],
+  actorId = ACTOR_ID,
 ) {
-  return expandedWorkerInsert(db, id, scopes, expectedCapabilities(scopes), "legacy");
+  return expandedWorkerInsert(
+    db,
+    id,
+    scopes,
+    expectedCapabilities(scopes),
+    "legacy",
+    actorId,
+  );
 }
 
 async function totalChanges(db: SqliteAdapter): Promise<number> {
@@ -383,13 +413,17 @@ describe("Phase 11 slice 3B capability backfill", () => {
 
     const audits = await db
       .prepare(
-        `SELECT actor_id, action, target_type, target_id, correlation_id, metadata
+        `SELECT id, actor_id, action, target_type, target_id, correlation_id,
+                metadata, created_at
            FROM audit_events
           WHERE action = 'agent_token.legacy_scopes.sanitized'
           ORDER BY target_id`,
       )
-      .all<StoredAudit>();
+      .all<TimestampedAudit>();
     const auditsByTarget = new Map(audits.map((row) => [row.target_id, row]));
+    for (const audit of audits) {
+      expect(uuidV7TimestampMillis(audit.id)).toBe(Date.parse(audit.created_at));
+    }
 
     for (let mask = 0; mask < combinations; mask += 1) {
       const original = LEGACY_AGENT_SCOPES.filter(
@@ -552,11 +586,13 @@ describe("Phase 11 slice 3B capability backfill", () => {
     });
 
     const unsafeId = tokenId(3003);
-    await oldWorkerInsert(db, unsafeId, [
-      "tokens:manage",
-      "annotations:read",
-      "future:admin",
-    ]).run();
+    await expect(
+      oldWorkerInsert(db, unsafeId, [
+        "tokens:manage",
+        "annotations:read",
+        "future:admin",
+      ]).run(),
+    ).rejects.toThrow(/scopes require sanitation/);
     expect(
       await db
         .prepare(
@@ -565,17 +601,14 @@ describe("Phase 11 slice 3B capability backfill", () => {
         )
         .bind(unsafeId)
         .first<Pick<StoredToken, "scopes" | "capabilities_v2" | "capability_mode">>(),
-    ).toEqual({
-      scopes: '["annotations:read"]',
-      capabilities_v2: '["comments:read","suggestions:read"]',
-      capability_mode: "legacy",
-    });
+    ).toBeNull();
 
-    // An old writer changing scopes after migration is normalized too. The
-    // trigger overwrites the prior projection instead of leaving it stale.
+    // A rollback writer can still make a safe authority change. The trigger
+    // preserves the exact scopes that Worker will return and refreshes the
+    // projection instead of leaving it stale.
     await db
       .prepare(`UPDATE agent_tokens SET scopes = ? WHERE id = ?`)
-      .bind('["submissions:write","members:manage"]', duringExpandId)
+      .bind('["submissions:write"]', duringExpandId)
       .run();
     expect(
       await db
@@ -591,6 +624,9 @@ describe("Phase 11 slice 3B capability backfill", () => {
       capability_mode: "legacy",
     });
 
+    // Rewriting an old response behind its back would make the HTTP body and
+    // mint audit lie. Unsafe legacy writes therefore fail atomically and leave
+    // no guard audit behind.
     const guardedAudits = await db
       .prepare(
         `SELECT actor_id, action, target_type, target_id, correlation_id, metadata
@@ -600,22 +636,7 @@ describe("Phase 11 slice 3B capability backfill", () => {
           ORDER BY target_id`,
       )
       .all<StoredAudit>();
-    expect(guardedAudits.map((audit) => audit.target_id)).toEqual([
-      duringExpandId,
-      unsafeId,
-    ]);
-    expect(JSON.parse(guardedAudits[0]?.metadata ?? "null")).toMatchObject({
-      migration: BACKFILL_MIGRATION,
-      reason: "control-plane-or-unknown-scope",
-      removedScopes: ["members:manage"],
-      retainedScopes: ["submissions:write"],
-    });
-    expect(JSON.parse(guardedAudits[1]?.metadata ?? "null")).toMatchObject({
-      migration: BACKFILL_MIGRATION,
-      reason: "control-plane-or-unknown-scope",
-      removedScopes: ["tokens:manage", "future:admin"],
-      retainedScopes: ["annotations:read"],
-    });
+    expect(guardedAudits).toEqual([]);
 
     const projectionAudits = await db
       .prepare(
@@ -629,19 +650,16 @@ describe("Phase 11 slice 3B capability backfill", () => {
     expect(projectionAudits.map((audit) => audit.target_id)).toEqual([
       duringExpandId,
       afterBackfillOldWriterId,
-      unsafeId,
     ]);
     expect(JSON.parse(projectionAudits[0]?.metadata ?? "null")).toMatchObject({
       migration: BACKFILL_MIGRATION,
       reason: "stale-projection",
       capabilities: ["work:submit", "chapters:write", "chapters:publish"],
     });
-    for (const audit of projectionAudits.slice(1)) {
-      expect(JSON.parse(audit.metadata)).toMatchObject({
-        migration: BACKFILL_MIGRATION,
-        reason: "missing-projection",
-      });
-    }
+    expect(JSON.parse(projectionAudits[1]?.metadata ?? "null")).toMatchObject({
+      migration: BACKFILL_MIGRATION,
+      reason: "missing-projection",
+    });
 
     const schemaObjects = await db
       .prepare(
@@ -662,21 +680,355 @@ describe("Phase 11 slice 3B capability backfill", () => {
     db.close();
   });
 
-  it("normalizes every old-writer scope combination after backfill", async () => {
+  it("rolls back complete old-Worker batches when a legacy write needs sanitation", async () => {
+    const { db, migrationsDir } = await preBackfillDatabase();
+    await seedIdentity(db);
+    await applyBackfill(db, migrationsDir);
+    await db.exec("PRAGMA recursive_triggers = ON");
+
+    const actorId = tokenId(6000);
+    const membershipId = tokenId(6001);
+    const unsafeTokenId = tokenId(6002);
+    const auditId = tokenId(6003);
+    const idempotencyId = tokenId(6004);
+    const actorInsert = db
+      .prepare(
+        `INSERT INTO actors
+           (id, type, display_name, external_identity, owner_actor_id, status, created_at)
+         VALUES (?, 'agent', 'old-worker-agent', ?, NULL, 'active', ?)`,
+      )
+      .bind(actorId, `agent:${actorId}`, CREATED_AT);
+    const membershipInsert = db
+      .prepare(
+        `INSERT INTO project_memberships
+           (id, project_id, actor_id, role, scopes, created_at, revoked_at)
+         VALUES (?, ?, ?, 'editor', ?, ?, NULL)`,
+      )
+      .bind(
+        membershipId,
+        PROJECT_ID,
+        actorId,
+        JSON.stringify(LEGACY_EDITORIAL_SCOPES),
+        CREATED_AT,
+      );
+    const auditInsert = db
+      .prepare(
+        `INSERT INTO audit_events
+           (id, project_id, actor_id, action, target_type, target_id,
+            correlation_id, metadata, created_at)
+         VALUES (?, ?, ?, 'agent_token.mint.started', 'agent_token', ?,
+                 'old-worker-batch', '{}', ?)`,
+      )
+      .bind(auditId, PROJECT_ID, actorId, unsafeTokenId, CREATED_AT);
+    const idempotencyInsert = db
+      .prepare(
+        `INSERT INTO idempotency_keys
+           (id, project_id, actor_id, key, request_hash, response_status,
+            response_body, created_at)
+         VALUES (?, ?, ?, 'old-worker-batch', 'hash', 201, '{}', ?)`,
+      )
+      .bind(idempotencyId, PROJECT_ID, ACTOR_ID, CREATED_AT);
+
+    await expect(
+      db.batch([
+        actorInsert,
+        membershipInsert,
+        auditInsert,
+        idempotencyInsert,
+        v0135WorkerInsert(
+          db,
+          unsafeTokenId,
+          ["annotations:read", "tokens:manage"],
+          actorId,
+        ),
+      ]),
+    ).rejects.toThrow(/scopes require sanitation/);
+
+    for (const [table, id] of [
+      ["actors", actorId],
+      ["project_memberships", membershipId],
+      ["agent_tokens", unsafeTokenId],
+      ["audit_events", auditId],
+      ["idempotency_keys", idempotencyId],
+    ] as const) {
+      expect(
+        await db
+          .prepare(`SELECT id FROM ${table} WHERE id = ?`)
+          .bind(id)
+          .first<{ id: string }>(),
+        `${table} survived the rejected old-Worker batch`,
+      ).toBeNull();
+    }
+
+    const safeTokenId = tokenId(6005);
+    await v0135WorkerInsert(
+      db,
+      safeTokenId,
+      ["annotations:read", "work:claim"],
+    ).run();
+    const updateAuditId = tokenId(6006);
+    const updateMarker = db
+      .prepare(
+        `INSERT INTO audit_events
+           (id, project_id, actor_id, action, target_type, target_id,
+            correlation_id, metadata, created_at)
+         VALUES (?, ?, ?, 'agent_token.update.started', 'agent_token', ?,
+                 'old-worker-update-batch', '{}', ?)`,
+      )
+      .bind(updateAuditId, PROJECT_ID, ACTOR_ID, safeTokenId, CREATED_AT);
+    const unsafeUpdate = db
+      .prepare(`UPDATE agent_tokens SET scopes = ? WHERE id = ?`)
+      .bind('["annotations:read","members:manage"]', safeTokenId);
+
+    await expect(db.batch([updateMarker, unsafeUpdate])).rejects.toThrow(
+      /scopes require sanitation/,
+    );
+    expect(
+      await db
+        .prepare(`SELECT id FROM audit_events WHERE id = ?`)
+        .bind(updateAuditId)
+        .first<{ id: string }>(),
+    ).toBeNull();
+    expect(
+      await db
+        .prepare(
+          `SELECT scopes, capabilities_v2, capability_mode
+             FROM agent_tokens WHERE id = ?`,
+        )
+        .bind(safeTokenId)
+        .first<Pick<StoredToken, "scopes" | "capabilities_v2" | "capability_mode">>(),
+    ).toEqual({
+      scopes: '["annotations:read","work:claim"]',
+      capabilities_v2: '["comments:read","suggestions:read","work:claim"]',
+      capability_mode: "legacy",
+    });
+    expect(
+      await db
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM audit_events
+            WHERE target_id = ?
+              AND correlation_id LIKE 'phase11-3b-capability-guard:%'`,
+        )
+        .bind(safeTokenId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+
+    db.close();
+  });
+
+  it("normalizes historical redacted mint replays without touching unrelated bodies", async () => {
+    const { db, migrationsDir } = await preBackfillDatabase();
+    await seedIdentity(db);
+
+    const unsafeTokenId = tokenId(6100);
+    const originalScopes = [
+      "chapters:read",
+      "tokens:manage",
+      "annotations:read",
+      "members:manage",
+    ];
+    await oldWorkerInsert(db, unsafeTokenId, originalScopes).run();
+
+    const normalizedId = tokenId(6101);
+    const unrelatedId = tokenId(6102);
+    const invalidId = tokenId(6103);
+    const plaintextId = tokenId(6104);
+    const historicalBody = {
+      id: unsafeTokenId,
+      projectId: PROJECT_ID,
+      actorId: ACTOR_ID,
+      createdBy: ACTOR_ID,
+      name: "historical-agent",
+      scopes: originalScopes,
+      capabilityMode: "legacy",
+      grantedCapabilities: expectedCapabilities(originalScopes),
+      sentinel: { preserved: true },
+      tokenRedacted: true,
+    };
+    const unrelatedBody = {
+      ...historicalBody,
+      projectId: "01900000-0000-7000-8000-00000000ffff",
+    };
+    const plaintextBody = {
+      ...historicalBody,
+      token: "must-never-be-rewritten-or-logged",
+    };
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO idempotency_keys
+             (id, project_id, actor_id, key, request_hash, response_status,
+              response_body, created_at)
+           VALUES (?, ?, ?, ?, 'hash', 201, ?, ?)`,
+        )
+        .bind(
+          normalizedId,
+          PROJECT_ID,
+          ACTOR_ID,
+          "historical-mint",
+          JSON.stringify(historicalBody),
+          CREATED_AT,
+        ),
+      db
+        .prepare(
+          `INSERT INTO idempotency_keys
+             (id, project_id, actor_id, key, request_hash, response_status,
+              response_body, created_at)
+           VALUES (?, ?, ?, ?, 'hash', 201, ?, ?)`,
+        )
+        .bind(
+          unrelatedId,
+          PROJECT_ID,
+          ACTOR_ID,
+          "unrelated-response",
+          JSON.stringify(unrelatedBody),
+          CREATED_AT,
+        ),
+      db
+        .prepare(
+          `INSERT INTO idempotency_keys
+             (id, project_id, actor_id, key, request_hash, response_status,
+              response_body, created_at)
+           VALUES (?, ?, ?, ?, 'hash', 201, ?, ?)`,
+        )
+        .bind(invalidId, PROJECT_ID, ACTOR_ID, "invalid-response", "{not-json", CREATED_AT),
+      db
+        .prepare(
+          `INSERT INTO idempotency_keys
+             (id, project_id, actor_id, key, request_hash, response_status,
+              response_body, created_at)
+           VALUES (?, ?, ?, ?, 'hash', 201, ?, ?)`,
+        )
+        .bind(
+          plaintextId,
+          PROJECT_ID,
+          ACTOR_ID,
+          "plaintext-response",
+          JSON.stringify(plaintextBody),
+          CREATED_AT,
+        ),
+    ]);
+
+    await applyBackfill(db, migrationsDir);
+
+    const replayRows = await db
+      .prepare(
+        `SELECT id, response_body FROM idempotency_keys
+          WHERE id IN (?, ?, ?, ?) ORDER BY id`,
+      )
+      .bind(normalizedId, unrelatedId, invalidId, plaintextId)
+      .all<{ id: string; response_body: string }>();
+    const replayById = new Map(replayRows.map((row) => [row.id, row.response_body]));
+    expect(JSON.parse(replayById.get(normalizedId) ?? "null")).toEqual({
+      ...historicalBody,
+      scopes: ["chapters:read", "annotations:read"],
+    });
+    expect(replayById.get(unrelatedId)).toBe(JSON.stringify(unrelatedBody));
+    expect(replayById.get(invalidId)).toBe("{not-json");
+    expect(replayById.get(plaintextId)).toBe(JSON.stringify(plaintextBody));
+
+    const afterFirstRun = new Map(replayById);
+    await db.exec(await readFile(join(MIGRATIONS_DIR, BACKFILL_MIGRATION), "utf8"));
+    const afterRerun = await db
+      .prepare(
+        `SELECT id, response_body FROM idempotency_keys
+          WHERE id IN (?, ?, ?, ?) ORDER BY id`,
+      )
+      .bind(normalizedId, unrelatedId, invalidId, plaintextId)
+      .all<{ id: string; response_body: string }>();
+    expect(new Map(afterRerun.map((row) => [row.id, row.response_body]))).toEqual(
+      afterFirstRun,
+    );
+
+    db.close();
+  });
+
+  it("aligns SQL audit UUID timestamps with created_at and preserves time order", async () => {
+    const { db, migrationsDir } = await preBackfillDatabase();
+    await seedIdentity(db);
+    await applyBackfill(db, migrationsDir);
+    await db.exec("PRAGMA recursive_triggers = ON");
+
+    let generated: TimestampedAudit | null = null;
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const id = tokenId(6200 + attempt);
+      await v0134WorkerInsert(db, id, ["chapters:read"]).run();
+      const audit = await db
+        .prepare(
+          `SELECT id, actor_id, action, target_type, target_id, correlation_id,
+                  metadata, created_at
+             FROM audit_events
+            WHERE target_id = ?
+              AND action = 'agent_token.legacy_capabilities.projected'`,
+        )
+        .bind(id)
+        .first<TimestampedAudit>();
+      if (audit !== null && Date.parse(audit.created_at) % 1000 > 1) {
+        generated = audit;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+
+    expect(generated).not.toBeNull();
+    if (generated === null) {
+      throw new Error("could not observe a non-boundary SQL audit timestamp");
+    }
+    const generatedMillis = Date.parse(generated.created_at);
+    expect(uuidV7TimestampMillis(generated.id)).toBe(generatedMillis);
+    expect(generated.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+
+    const earlierMillis = generatedMillis - 1;
+    const earlierId = uuidV7At(earlierMillis, "00000000f001");
+    await db
+      .prepare(
+        `INSERT INTO audit_events
+           (id, project_id, actor_id, action, target_type, target_id,
+            correlation_id, metadata, created_at)
+         VALUES (?, ?, NULL, 'test.earlier', 'agent_token', ?,
+                 'uuid-order-regression', '{}', ?)`,
+      )
+      .bind(
+        earlierId,
+        PROJECT_ID,
+        generated.target_id,
+        new Date(earlierMillis).toISOString(),
+      )
+      .run();
+    const orderedIds = await db
+      .prepare(`SELECT id FROM audit_events WHERE id IN (?, ?) ORDER BY id`)
+      .bind(earlierId, generated.id)
+      .all<{ id: string }>();
+    expect(orderedIds.map((row) => row.id)).toEqual([earlierId, generated.id]);
+
+    db.close();
+  });
+
+  it("projects every safe old-writer combination and rejects every unsafe one", async () => {
     const { db, migrationsDir } = await preBackfillDatabase();
     await seedIdentity(db);
     await applyBackfill(db, migrationsDir);
     await db.exec("PRAGMA recursive_triggers = ON");
 
     const combinations = 1 << LEGACY_AGENT_SCOPES.length;
-    const insertions = [];
+    const safeInsertions = [];
     for (let mask = 0; mask < combinations; mask += 1) {
       const scopes = LEGACY_AGENT_SCOPES.filter(
         (_, index) => (mask & (1 << index)) !== 0,
       );
-      insertions.push(oldWorkerInsert(db, tokenId(4000 + mask), scopes));
+      const insertion = oldWorkerInsert(db, tokenId(4000 + mask), scopes);
+      if (scopes.some((scope) => !LEGACY_SAFE.has(scope))) {
+        await expect(insertion.run(), `unsafe mask ${mask}`).rejects.toThrow(
+          /scopes require sanitation/,
+        );
+      } else {
+        safeInsertions.push(insertion);
+      }
     }
-    await db.batch(insertions);
+    await db.batch(safeInsertions);
 
     const stored = await db
       .prepare(
@@ -690,10 +1042,12 @@ describe("Phase 11 slice 3B capability backfill", () => {
         (_, index) => (mask & (1 << index)) !== 0,
       );
       const row = byId.get(tokenId(4000 + mask));
+      if (original.some((scope) => !LEGACY_SAFE.has(scope))) {
+        expect(row, `unsafe combination survived mask ${mask}`).toBeUndefined();
+        continue;
+      }
       expect(row, `missing guarded combination mask ${mask}`).toBeDefined();
-      expect(JSON.parse(row?.scopes ?? "null"), `scopes mask ${mask}`).toEqual(
-        original.filter((scope) => LEGACY_SAFE.has(scope)),
-      );
+      expect(JSON.parse(row?.scopes ?? "null"), `scopes mask ${mask}`).toEqual(original);
       expect(
         JSON.parse(row?.capabilities_v2 ?? "null"),
         `capabilities mask ${mask}`,
@@ -784,15 +1138,17 @@ describe("Phase 11 slice 3B capability backfill", () => {
     ).toEqual({ count: 1 });
 
     // v0.1.35 can still carry deprecated control-plane scope names while
-    // supplying the exact translated capability projection. Scopes alone must
-    // trip the mismatch guard, and sanitation must not invent a projection
-    // audit when the supplied projection was already correct.
+    // supplying the exact translated capability projection. The database
+    // cannot rewrite the response that old Worker already constructed, so the
+    // entire statement fails instead of persisting a contradictory row.
     const unsafeDualWriteId = tokenId(5001);
-    await v0135WorkerInsert(
-      db,
-      unsafeDualWriteId,
-      ["tokens:manage", "annotations:read"],
-    ).run();
+    await expect(
+      v0135WorkerInsert(
+        db,
+        unsafeDualWriteId,
+        ["tokens:manage", "annotations:read"],
+      ).run(),
+    ).rejects.toThrow(/scopes require sanitation/);
     expect(
       await db
         .prepare(
@@ -801,11 +1157,7 @@ describe("Phase 11 slice 3B capability backfill", () => {
         )
         .bind(unsafeDualWriteId)
         .first<Pick<StoredToken, "scopes" | "capabilities_v2" | "capability_mode">>(),
-    ).toEqual({
-      scopes: '["annotations:read"]',
-      capabilities_v2: '["comments:read","suggestions:read"]',
-      capability_mode: "legacy",
-    });
+    ).toBeNull();
     const unsafeAudits = await db
       .prepare(
         `SELECT action, metadata
@@ -816,17 +1168,10 @@ describe("Phase 11 slice 3B capability backfill", () => {
       )
       .bind(unsafeDualWriteId)
       .all<Pick<StoredAudit, "action" | "metadata">>();
-    expect(unsafeAudits.map((audit) => audit.action)).toEqual([
-      "agent_token.legacy_scopes.sanitized",
-    ]);
-    expect(JSON.parse(unsafeAudits[0]?.metadata ?? "null")).toMatchObject({
-      reason: "control-plane-or-unknown-scope",
-      removedScopes: ["tokens:manage"],
-      retainedScopes: ["annotations:read"],
-    });
+    expect(unsafeAudits).toEqual([]);
 
-    // SQL sanitation must match parseLegacyScopes exactly, including stable
-    // canonical ordering and de-duplication of safe legacy names.
+    // Authority-equivalent ordering and duplicates remain byte-for-byte
+    // truthful to the old response. Only the derived projection is repaired.
     const canonicalizedLegacyId = tokenId(5004);
     await oldWorkerInsert(db, canonicalizedLegacyId, [
       "work:claim",
@@ -842,15 +1187,17 @@ describe("Phase 11 slice 3B capability backfill", () => {
         .bind(canonicalizedLegacyId)
         .first<Pick<StoredToken, "scopes" | "capabilities_v2" | "capability_mode">>(),
     ).toEqual({
-      scopes: '["annotations:read","work:claim"]',
+      scopes: '["work:claim","annotations:read","work:claim"]',
       capabilities_v2: '["comments:read","suggestions:read","work:claim"]',
       capability_mode: "legacy",
     });
 
-    // A malformed post-migration v0.1.34-shaped insert fails closed, receives
-    // one sanitation audit, and receives one missing-projection audit.
+    // A malformed post-migration v0.1.34-shaped insert fails closed before any
+    // row or audit survives.
     const malformedId = tokenId(5002);
-    await v0134WorkerInsert(db, malformedId, "{not-json").run();
+    await expect(
+      v0134WorkerInsert(db, malformedId, "{not-json").run(),
+    ).rejects.toThrow(/scopes require sanitation/);
     expect(
       await db
         .prepare(
@@ -859,11 +1206,7 @@ describe("Phase 11 slice 3B capability backfill", () => {
         )
         .bind(malformedId)
         .first<Pick<StoredToken, "scopes" | "capabilities_v2" | "capability_mode">>(),
-    ).toEqual({
-      scopes: "[]",
-      capabilities_v2: "[]",
-      capability_mode: "legacy",
-    });
+    ).toBeNull();
     const malformedAudits = await db
       .prepare(
         `SELECT action, metadata
@@ -874,19 +1217,7 @@ describe("Phase 11 slice 3B capability backfill", () => {
       )
       .bind(malformedId)
       .all<Pick<StoredAudit, "action" | "metadata">>();
-    expect(malformedAudits.map((audit) => audit.action)).toEqual([
-      "agent_token.legacy_capabilities.projected",
-      "agent_token.legacy_scopes.sanitized",
-    ]);
-    expect(JSON.parse(malformedAudits[0]?.metadata ?? "null")).toMatchObject({
-      reason: "missing-projection",
-      capabilities: [],
-    });
-    expect(JSON.parse(malformedAudits[1]?.metadata ?? "null")).toMatchObject({
-      reason: "invalid-legacy-scope-set",
-      removedScopes: [],
-      retainedScopes: [],
-    });
+    expect(malformedAudits).toEqual([]);
 
     // The guard owns legacy compatibility only. A maintainer's canonical
     // conversion, and later canonical capability edits, must pass through

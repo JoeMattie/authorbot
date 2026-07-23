@@ -25,9 +25,12 @@ retire order in the Phase 11 contract. Do not combine these steps.
    cover every legacy scope combination plus canonical, revoked, expired,
    unknown, and malformed rows. It remains idempotent, preserves legacy mode,
    and leaves ordinary legacy scopes available to the deployed dual-reader.
-   A persistent database guard applies the same projection to old-Worker
-   inserts and authority-field updates, closing the direct-skip and rollback
-   race until Phase 3C retires legacy mode.
+   A persistent database guard projects safe old-Worker inserts and
+   authority-field updates. A legacy write that would need scope sanitation is
+   aborted so an old Worker cannot persist a misleading response or audit.
+   Historical redacted mint replays are corrected during the backfill. Together
+   those rules close the direct-skip and rollback race until Phase 3C retires
+   legacy mode.
 4. **Wait on Phase 3C legacy retirement.** Do not retire the legacy read path or
    remove its storage during the releases above. Phase 3C starts only after
    the documented compatibility window, supported token rows have been

@@ -233,30 +233,64 @@ FROM normalized;
 
 -- Shield direct upgrades from pre-v0.1.35 Workers. An AFTER trigger is atomic
 -- with the statement that fired it, so the legacy writer never exposes an
--- unprojected row after its INSERT returns. The UPDATE trigger also covers a
--- rollback or any older writer that edits scopes. Its WHEN clause makes the
--- trigger convergent even when recursive_triggers is enabled.
+-- unprojected row after its INSERT returns. An old Worker cannot truthfully
+-- return a scope set after a trigger removes malformed, control-plane, or
+-- unknown authority, so such a write aborts instead. Its enclosing D1 batch
+-- rolls back, and the caller can retry unchanged after the new Worker deploys.
+-- Safe legacy writes keep their exact scope bytes, including harmless ordering
+-- or duplication, while still receiving a missing or stale canonical
+-- projection. The UPDATE trigger covers rollback writers that edit authority
+-- fields, and both WHEN clauses converge even when recursive_triggers is
+-- enabled.
 CREATE TRIGGER IF NOT EXISTS agent_tokens_phase11_legacy_insert
 AFTER INSERT ON agent_tokens
 WHEN NEW.capability_mode = 'legacy'
  AND EXISTS (
    SELECT 1
-     FROM _phase11_legacy_token_projection AS projected
+    FROM _phase11_legacy_token_projection AS projected
     WHERE projected.token_id = NEW.id
       AND (
-        NEW.scopes IS NOT projected.sanitized_scopes
+        projected.malformed_scope_set = 1
+        OR projected.removed_scopes <> '[]'
         OR NEW.capabilities_v2 IS NOT projected.translated_caps
       )
  )
 BEGIN
+  SELECT RAISE(
+    ABORT,
+    'legacy agent-token scopes require sanitation by the current Worker'
+  )
+  FROM _phase11_legacy_token_projection AS projected
+  WHERE projected.token_id = NEW.id
+    AND (
+      projected.malformed_scope_set = 1
+      OR projected.removed_scopes <> '[]'
+    );
+
   INSERT INTO audit_events
     (id, project_id, actor_id, action, target_type, target_id, correlation_id,
      metadata, created_at)
   SELECT
     lower(
-      substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 1, 8)
+      substr(
+        printf(
+          '%012x',
+          CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+        ),
+        1,
+        8
+      )
       || '-'
-      || substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 9, 4)
+      || substr(
+        printf(
+          '%012x',
+          CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+        ),
+        9,
+        4
+      )
       || '-7' || substr(hex(randomblob(2)), 2, 3)
       || '-8' || substr(hex(randomblob(2)), 2, 3)
       || '-' || hex(randomblob(6))
@@ -281,50 +315,8 @@ BEGIN
   WHERE projected.token_id = NEW.id
     AND NEW.capabilities_v2 IS NOT projected.translated_caps;
 
-
-  INSERT INTO audit_events
-    (id, project_id, actor_id, action, target_type, target_id, correlation_id,
-     metadata, created_at)
-  SELECT
-    lower(
-      substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 1, 8)
-      || '-'
-      || substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 9, 4)
-      || '-7' || substr(hex(randomblob(2)), 2, 3)
-      || '-8' || substr(hex(randomblob(2)), 2, 3)
-      || '-' || hex(randomblob(6))
-    ),
-    NEW.project_id,
-    NULL,
-    'agent_token.legacy_scopes.sanitized',
-    'agent_token',
-    NEW.id,
-    'phase11-3b-capability-guard:' || NEW.id || ':' || lower(hex(randomblob(4))),
-    json_object(
-      'migration', '0013_phase11_capabilities_backfill.sql',
-      'capabilityMode', 'legacy',
-      'reason', CASE
-        WHEN projected.malformed_scope_set = 1 THEN 'invalid-legacy-scope-set'
-        ELSE 'control-plane-or-unknown-scope'
-      END,
-      'removedScopes', json(projected.removed_scopes),
-      'retainedScopes', json(projected.sanitized_scopes)
-    ),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-  FROM _phase11_legacy_token_projection AS projected
-  WHERE projected.token_id = NEW.id
-    AND (
-      projected.malformed_scope_set = 1
-      OR projected.removed_scopes <> '[]'
-    );
-
   UPDATE agent_tokens
-     SET scopes = (
-           SELECT sanitized_scopes
-             FROM _phase11_legacy_token_projection
-            WHERE token_id = NEW.id
-         ),
-         capabilities_v2 = (
+     SET capabilities_v2 = (
            SELECT translated_caps
              FROM _phase11_legacy_token_projection
             WHERE token_id = NEW.id
@@ -338,22 +330,50 @@ AFTER UPDATE OF scopes, capabilities_v2, capability_mode ON agent_tokens
 WHEN NEW.capability_mode = 'legacy'
  AND EXISTS (
    SELECT 1
-     FROM _phase11_legacy_token_projection AS projected
+    FROM _phase11_legacy_token_projection AS projected
     WHERE projected.token_id = NEW.id
       AND (
-        NEW.scopes IS NOT projected.sanitized_scopes
+        projected.malformed_scope_set = 1
+        OR projected.removed_scopes <> '[]'
         OR NEW.capabilities_v2 IS NOT projected.translated_caps
       )
  )
 BEGIN
+  SELECT RAISE(
+    ABORT,
+    'legacy agent-token scopes require sanitation by the current Worker'
+  )
+  FROM _phase11_legacy_token_projection AS projected
+  WHERE projected.token_id = NEW.id
+    AND (
+      projected.malformed_scope_set = 1
+      OR projected.removed_scopes <> '[]'
+    );
+
   INSERT INTO audit_events
     (id, project_id, actor_id, action, target_type, target_id, correlation_id,
      metadata, created_at)
   SELECT
     lower(
-      substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 1, 8)
+      substr(
+        printf(
+          '%012x',
+          CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+        ),
+        1,
+        8
+      )
       || '-'
-      || substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 9, 4)
+      || substr(
+        printf(
+          '%012x',
+          CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+        ),
+        9,
+        4
+      )
       || '-7' || substr(hex(randomblob(2)), 2, 3)
       || '-8' || substr(hex(randomblob(2)), 2, 3)
       || '-' || hex(randomblob(6))
@@ -378,50 +398,8 @@ BEGIN
   WHERE projected.token_id = NEW.id
     AND NEW.capabilities_v2 IS NOT projected.translated_caps;
 
-
-  INSERT INTO audit_events
-    (id, project_id, actor_id, action, target_type, target_id, correlation_id,
-     metadata, created_at)
-  SELECT
-    lower(
-      substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 1, 8)
-      || '-'
-      || substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 9, 4)
-      || '-7' || substr(hex(randomblob(2)), 2, 3)
-      || '-8' || substr(hex(randomblob(2)), 2, 3)
-      || '-' || hex(randomblob(6))
-    ),
-    NEW.project_id,
-    NULL,
-    'agent_token.legacy_scopes.sanitized',
-    'agent_token',
-    NEW.id,
-    'phase11-3b-capability-guard:' || NEW.id || ':' || lower(hex(randomblob(4))),
-    json_object(
-      'migration', '0013_phase11_capabilities_backfill.sql',
-      'capabilityMode', 'legacy',
-      'reason', CASE
-        WHEN projected.malformed_scope_set = 1 THEN 'invalid-legacy-scope-set'
-        ELSE 'control-plane-or-unknown-scope'
-      END,
-      'removedScopes', json(projected.removed_scopes),
-      'retainedScopes', json(projected.sanitized_scopes)
-    ),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-  FROM _phase11_legacy_token_projection AS projected
-  WHERE projected.token_id = NEW.id
-    AND (
-      projected.malformed_scope_set = 1
-      OR projected.removed_scopes <> '[]'
-    );
-
   UPDATE agent_tokens
-     SET scopes = (
-           SELECT sanitized_scopes
-             FROM _phase11_legacy_token_projection
-            WHERE token_id = NEW.id
-         ),
-         capabilities_v2 = (
+     SET capabilities_v2 = (
            SELECT translated_caps
              FROM _phase11_legacy_token_projection
             WHERE token_id = NEW.id
@@ -441,6 +419,108 @@ SELECT
   malformed_scope_set
 FROM _phase11_legacy_token_projection;
 
+-- Mint idempotency responses are retained indefinitely so a same-key retry can
+-- never reveal the plaintext token again. A response written before this
+-- migration can still name a legacy control scope which the backfill removes.
+-- Normalize only redacted top-level token-mint bodies whose project, token,
+-- token actor, owning actor, and compatibility mode all match an actual staged
+-- legacy row. Invalid, unrelated, and plaintext-bearing response bodies are
+-- left byte-for-byte unchanged.
+WITH normalized_replays AS (
+  SELECT
+    replay.id AS replay_id,
+    json_set(
+      replay.response_body,
+      '$.scopes',
+      json(staged.sanitized_scopes)
+    ) AS normalized_body
+  FROM idempotency_keys AS replay
+  JOIN agent_tokens AS token
+    ON token.id = json_extract(
+         CASE
+           WHEN json_valid(replay.response_body) THEN replay.response_body
+           ELSE '{}'
+         END,
+         '$.id'
+       )
+   AND token.project_id = replay.project_id
+   AND token.created_by = replay.actor_id
+  JOIN _phase11_capabilities_backfill AS staged
+    ON staged.token_id = token.id
+  WHERE token.capability_mode = 'legacy'
+    AND replay.response_status = 201
+    AND json_valid(replay.response_body)
+    AND json_type(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END
+        ) = 'object'
+    AND json_type(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.tokenRedacted'
+        ) = 'true'
+    AND json_type(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.token'
+        ) IS NULL
+    AND json_type(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.scopes'
+        ) = 'array'
+    AND json_extract(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.projectId'
+        ) = token.project_id
+    AND json_extract(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.actorId'
+        ) = token.actor_id
+    AND json_extract(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.createdBy'
+        ) = token.created_by
+    AND json_extract(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.capabilityMode'
+        ) = 'legacy'
+    AND json_extract(
+          CASE
+            WHEN json_valid(replay.response_body) THEN replay.response_body
+            ELSE '{}'
+          END,
+          '$.scopes'
+        ) IS NOT staged.sanitized_scopes
+)
+UPDATE idempotency_keys
+   SET response_body = (
+         SELECT normalized_body
+           FROM normalized_replays
+          WHERE replay_id = idempotency_keys.id
+       )
+ WHERE id IN (SELECT replay_id FROM normalized_replays);
+
 -- Stripping a control-plane or unknown name is an intentional reduction of
 -- stored authority. Surface one system-authored audit event per affected token
 -- before updating the row. Structurally invalid sets are also reset fail-closed
@@ -451,9 +531,25 @@ INSERT INTO audit_events
    metadata, created_at)
 SELECT
   lower(
-    substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 1, 8)
+    substr(
+      printf(
+        '%012x',
+        CAST(strftime('%s', 'now') AS INTEGER) * 1000
+          + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+      ),
+      1,
+      8
+    )
     || '-'
-    || substr(printf('%012x', CAST(strftime('%s', 'now') AS INTEGER) * 1000), 9, 4)
+    || substr(
+      printf(
+        '%012x',
+        CAST(strftime('%s', 'now') AS INTEGER) * 1000
+          + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+      ),
+      9,
+      4
+    )
     || '-7' || substr(hex(randomblob(2)), 2, 3)
     || '-8' || substr(hex(randomblob(2)), 2, 3)
     || '-' || hex(randomblob(6))
