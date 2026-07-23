@@ -498,13 +498,25 @@ WITH normalized_replays AS (
           END,
           '$.createdBy'
         ) = token.created_by
-    AND json_extract(
-          CASE
-            WHEN json_valid(replay.response_body) THEN replay.response_body
-            ELSE '{}'
-          END,
-          '$.capabilityMode'
-        ) = 'legacy'
+    AND (
+      -- v0.1.33 and older mint bodies predate capabilityMode. Explicit mode
+      -- values are eligible only when they say legacy: JSON null, canonical,
+      -- and every unknown value remain untouched.
+      json_type(
+        CASE
+          WHEN json_valid(replay.response_body) THEN replay.response_body
+          ELSE '{}'
+        END,
+        '$.capabilityMode'
+      ) IS NULL
+      OR json_extract(
+           CASE
+             WHEN json_valid(replay.response_body) THEN replay.response_body
+             ELSE '{}'
+           END,
+           '$.capabilityMode'
+         ) = 'legacy'
+    )
     AND json_extract(
           CASE
             WHEN json_valid(replay.response_body) THEN replay.response_body

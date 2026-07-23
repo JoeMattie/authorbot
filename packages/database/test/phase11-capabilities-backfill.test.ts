@@ -834,6 +834,8 @@ describe("Phase 11 slice 3B capability backfill", () => {
     const unrelatedId = tokenId(6102);
     const invalidId = tokenId(6103);
     const plaintextId = tokenId(6104);
+    const preCapabilityId = tokenId(6105);
+    const canonicalLookalikeId = tokenId(6106);
     const historicalBody = {
       id: unsafeTokenId,
       projectId: PROJECT_ID,
@@ -853,6 +855,23 @@ describe("Phase 11 slice 3B capability backfill", () => {
     const plaintextBody = {
       ...historicalBody,
       token: "must-never-be-rewritten-or-logged",
+    };
+    const preCapabilityBody = {
+      id: unsafeTokenId,
+      projectId: PROJECT_ID,
+      actorId: ACTOR_ID,
+      name: "historical-agent",
+      scopes: originalScopes,
+      createdBy: ACTOR_ID,
+      createdAt: CREATED_AT,
+      expiresAt: ACTIVE_EXPIRY,
+      revokedAt: null,
+      lastUsedAt: null,
+      tokenRedacted: true,
+    };
+    const canonicalLookalikeBody = {
+      ...historicalBody,
+      capabilityMode: "canonical",
     };
     await db.batch([
       db
@@ -908,6 +927,36 @@ describe("Phase 11 slice 3B capability backfill", () => {
           JSON.stringify(plaintextBody),
           CREATED_AT,
         ),
+      db
+        .prepare(
+          `INSERT INTO idempotency_keys
+             (id, project_id, actor_id, key, request_hash, response_status,
+              response_body, created_at)
+           VALUES (?, ?, ?, ?, 'hash', 201, ?, ?)`,
+        )
+        .bind(
+          preCapabilityId,
+          PROJECT_ID,
+          ACTOR_ID,
+          "pre-capability-response",
+          JSON.stringify(preCapabilityBody),
+          CREATED_AT,
+        ),
+      db
+        .prepare(
+          `INSERT INTO idempotency_keys
+             (id, project_id, actor_id, key, request_hash, response_status,
+              response_body, created_at)
+           VALUES (?, ?, ?, ?, 'hash', 201, ?, ?)`,
+        )
+        .bind(
+          canonicalLookalikeId,
+          PROJECT_ID,
+          ACTOR_ID,
+          "canonical-lookalike-response",
+          JSON.stringify(canonicalLookalikeBody),
+          CREATED_AT,
+        ),
     ]);
 
     await applyBackfill(db, migrationsDir);
@@ -915,9 +964,16 @@ describe("Phase 11 slice 3B capability backfill", () => {
     const replayRows = await db
       .prepare(
         `SELECT id, response_body FROM idempotency_keys
-          WHERE id IN (?, ?, ?, ?) ORDER BY id`,
+          WHERE id IN (?, ?, ?, ?, ?, ?) ORDER BY id`,
       )
-      .bind(normalizedId, unrelatedId, invalidId, plaintextId)
+      .bind(
+        normalizedId,
+        unrelatedId,
+        invalidId,
+        plaintextId,
+        preCapabilityId,
+        canonicalLookalikeId,
+      )
       .all<{ id: string; response_body: string }>();
     const replayById = new Map(replayRows.map((row) => [row.id, row.response_body]));
     expect(JSON.parse(replayById.get(normalizedId) ?? "null")).toEqual({
@@ -927,15 +983,29 @@ describe("Phase 11 slice 3B capability backfill", () => {
     expect(replayById.get(unrelatedId)).toBe(JSON.stringify(unrelatedBody));
     expect(replayById.get(invalidId)).toBe("{not-json");
     expect(replayById.get(plaintextId)).toBe(JSON.stringify(plaintextBody));
+    expect(JSON.parse(replayById.get(preCapabilityId) ?? "null")).toEqual({
+      ...preCapabilityBody,
+      scopes: ["chapters:read", "annotations:read"],
+    });
+    expect(replayById.get(canonicalLookalikeId)).toBe(
+      JSON.stringify(canonicalLookalikeBody),
+    );
 
     const afterFirstRun = new Map(replayById);
     await db.exec(await readFile(join(MIGRATIONS_DIR, BACKFILL_MIGRATION), "utf8"));
     const afterRerun = await db
       .prepare(
         `SELECT id, response_body FROM idempotency_keys
-          WHERE id IN (?, ?, ?, ?) ORDER BY id`,
+          WHERE id IN (?, ?, ?, ?, ?, ?) ORDER BY id`,
       )
-      .bind(normalizedId, unrelatedId, invalidId, plaintextId)
+      .bind(
+        normalizedId,
+        unrelatedId,
+        invalidId,
+        plaintextId,
+        preCapabilityId,
+        canonicalLookalikeId,
+      )
       .all<{ id: string; response_body: string }>();
     expect(new Map(afterRerun.map((row) => [row.id, row.response_body]))).toEqual(
       afterFirstRun,
