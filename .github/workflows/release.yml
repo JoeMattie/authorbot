@@ -123,6 +123,12 @@ jobs:
       - name: Pack every publishable package
         run: node scripts/pack-release.mjs --out "$RUNNER_TEMP/release"
 
+      # Installs the API and its declared closure from the exact tarballs just
+      # packed, imports Wrangler's real filesystem entry, and verifies the D1
+      # migration boundary before any package reaches npm.
+      - name: Smoke the installed API tarball
+        run: pnpm check:api-tarball --release-dir "$RUNNER_TEMP/release"
+
       # Published in dependency order so a consumer installing the moment the
       # workflow finishes never resolves a package whose dependency is not on
       # the registry yet.

@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { PUBLISHABLE } from "./publishable.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const PNPM = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
 const args = process.argv.slice(2);
 const listOnly = args.includes("--list");
@@ -48,7 +49,7 @@ for (const dir of PUBLISHABLE) {
   if (listOnly) {
     await access(tarball); // fail loudly rather than print a path that is not there
   } else {
-    execFileSync("pnpm", ["--filter", pkg.name, "pack", "--pack-destination", outDir], {
+    execFileSync(PNPM, ["--filter", pkg.name, "pack", "--pack-destination", outDir], {
       cwd: ROOT,
       stdio: ["ignore", "ignore", "inherit"],
     });
