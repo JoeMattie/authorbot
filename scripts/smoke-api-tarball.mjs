@@ -217,23 +217,16 @@ try {
       throw new Error(`installed @authorbot/api is missing migration ${name}`);
     }
   }
-  const forbidden = migrations.find((name) => /^0013(?:[_.-]|$)/.test(name));
-  if (forbidden !== undefined) {
-    throw new Error(
-      `installed @authorbot/api unexpectedly contains ${forbidden}; ` +
-        "the capability backfill belongs to the release after the dual-read Worker",
-    );
-  }
   const beyondBoundary = migrations.find((name) => Number.parseInt(name.slice(0, 4), 10) > 12);
   if (beyondBoundary !== undefined) {
     throw new Error(
       `installed @authorbot/api unexpectedly contains ${beyondBoundary}; ` +
-        "v0.1.34 ends at migration 0012",
+        "v0.1.35 ends at migration 0012",
     );
   }
 
   console.log(`Migrations present: ${required.join(", ")}`);
-  console.log("Migration 0013 absent.");
+  console.log("Migration boundary: 0012.");
   console.log("\nAPI tarball smoke passed. Nothing was published.");
 } finally {
   if (keep) {

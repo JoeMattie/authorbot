@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
+import { LEGACY_AGENT_SCOPES, translateLegacyScopes } from "@authorbot/domain";
 import { createApi } from "../src/app.js";
 import type { AppDeps, AppEnv } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
@@ -133,6 +134,20 @@ describe("Phase 11 agent-token capabilities", () => {
     ]);
   });
 
+  it("dual-writes the canonical projection for every legacy mint scope", async () => {
+    const scopes = [...LEGACY_AGENT_SCOPES];
+    const { tokenId } = await mintToken(h, maintainer, scopes);
+    const stored = await h.repos.agentTokens.getById(tokenId);
+
+    expect(stored).toMatchObject({
+      capabilityMode: "legacy",
+      scopes,
+      capabilitiesV2: translateLegacyScopes(scopes),
+    });
+    expect(stored?.capabilitiesV2).not.toContain("members:manage");
+    expect(stored?.capabilitiesV2).not.toContain("tokens:manage");
+  });
+
   it("dual-reads legacy rows and identifies preserved actions by source", async () => {
     const { token, tokenId } = await mintToken(h, maintainer, [
       "annotations:write",
@@ -145,11 +160,20 @@ describe("Phase 11 agent-token capabilities", () => {
       .bind(record.actorId)
       .run();
 
+    // Model a token created before the dual-write gate. Legacy scopes remain
+    // authoritative until 3C, so the deployed reader must behave identically
+    // before and after the later 3B backfill populates this projection.
+    await h.db
+      .prepare(`UPDATE agent_tokens SET capabilities_v2 = NULL WHERE id = ?`)
+      .bind(tokenId)
+      .run();
+
     const me = await h.app.request("/v1/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(me.status).toBe(200);
-    expect(await me.json()).toMatchObject({
+    const beforeBackfill = (await me.json()) as Record<string, unknown>;
+    expect(beforeBackfill).toMatchObject({
       capabilityMode: "legacy",
       grantedCapabilities: [
         "comments:write",
@@ -176,6 +200,28 @@ describe("Phase 11 agent-token capabilities", () => {
         },
       ],
     });
+
+    // Slice 3B will populate this projection but deliberately leave
+    // mode=legacy. The deployed dual-reader must keep legacy scopes
+    // authoritative before, during, and after that later migration.
+    await h.db
+      .prepare(`UPDATE agent_tokens SET capabilities_v2 = ? WHERE id = ?`)
+      .bind(
+        JSON.stringify([
+          "comments:write",
+          "suggestions:write",
+          "replies:write",
+          "feedback:withdraw-own",
+          "work:claim",
+        ]),
+        tokenId,
+      )
+      .run();
+    const afterBackfill = await h.app.request("/v1/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(afterBackfill.status).toBe(200);
+    expect(await afterBackfill.json()).toEqual(beforeBackfill);
   });
 
   it("fails closed for unknown and malformed canonical grant sets", async () => {

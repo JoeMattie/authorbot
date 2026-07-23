@@ -33,7 +33,10 @@ export interface UpgradePlan {
    * dead-ended minor is not left thinking they are current.
    */
   readonly newerMajor?: SemVer;
-  /** Every published stable release, newest first. */
+  /**
+   * Releases discovered for implicit selection, newest first. Empty when the
+   * caller supplied an exact `--to` target and no metadata lookup was needed.
+   */
   readonly available: SemVer[];
 }
 
@@ -50,21 +53,36 @@ export async function resolvePlan(
   const pinLocation = await readPin(deps.fs, options.repoPath);
   const current = pinLocation.pin.version;
 
-  let published: string[];
-  try {
-    published = await deps.releases.listVersions(CLI_PACKAGE);
-  } catch (error) {
-    throw new UpgradeRepoError(
-      `could not list published releases of ${CLI_PACKAGE}: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
+  let available: SemVer[] = [];
+  let target: SemVer;
+  if (options.to !== undefined) {
+    const requested = parseVersion(options.to);
+    if (requested === undefined) {
+      throw new UpgradeRepoError(
+        `--to expects a version like 1.5.0, got "${options.to}"`,
+      );
+    }
+    // An explicit exact target is resolved by npm when the bootstrap acquires
+    // it. Looking up registry metadata first would make an already-installed
+    // target unusable offline and would bypass the caller's npm registry,
+    // cache, userconfig, and authentication settings.
+    target = requested;
+  } else {
+    let published: string[];
+    try {
+      published = await deps.releases.listVersions(CLI_PACKAGE, options.repoPath);
+    } catch (error) {
+      throw new UpgradeRepoError(
+        `could not list published releases of ${CLI_PACKAGE}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    available = published
+      .map((raw) => parseVersion(raw))
+      .filter((version): version is SemVer => version !== undefined)
+      .sort((a, b) => compareVersions(b, a));
+    target = resolveImplicitTarget(pinLocation, current, available);
   }
-  const available = published
-    .map((raw) => parseVersion(raw))
-    .filter((version): version is SemVer => version !== undefined)
-    .sort((a, b) => compareVersions(b, a));
-
-  const target = resolveTarget(pinLocation, current, available, options.to);
   const upgradeAvailable = compareVersions(target, current) > 0;
   const migrations = upgradeAvailable ? selectMigrations(deps.migrations, current, target) : [];
 
@@ -85,27 +103,11 @@ export async function resolvePlan(
   return plan;
 }
 
-function resolveTarget(
+function resolveImplicitTarget(
   pinLocation: PinLocation,
   current: SemVer,
   available: readonly SemVer[],
-  requested: string | undefined,
 ): SemVer {
-  if (requested !== undefined) {
-    const wanted = parseVersion(requested);
-    if (wanted === undefined) {
-      throw new UpgradeRepoError(`--to expects a version like 1.5.0, got "${requested}"`);
-    }
-    const match = available.find((version) => compareVersions(version, wanted) === 0);
-    if (match === undefined) {
-      throw new UpgradeRepoError(
-        `${CLI_PACKAGE}@${wanted.raw} is not published; ` +
-          `latest is ${available[0]?.raw ?? "unknown"}`,
-      );
-    }
-    return match;
-  }
-
   // No explicit target: stay inside the compatibility promise. A caret pin
   // tracks the major, a tilde pin tracks the minor, and an exact pin is
   // treated as a caret for the purpose of *finding* an upgrade (the pin

@@ -62,7 +62,8 @@ remains the default and the recommendation for a book that matters.
 One command, and it must be safe to run on a book that matters:
 
 ```
-  1. resolve current pin → target release; show what changed
+  1. resolve current pin → target release; hand off to that exact CLI release
+     before changing anything, then show what changed
   2. run the target's book-repo migrations against a working copy
   3. validate BEFORE and AFTER; abort on any new error
   4. open a PULL REQUEST - never push to main
@@ -75,9 +76,106 @@ prose and configuration before accepting it, and `git revert` is the undo
 button. Book-repo migrations are committed separately from content so they
 can be reverted independently.
 
-`--dry-run` prints the plan and changes nothing. `--check` reports whether an
-upgrade is available and whether it would require a format migration, for use
-in a scheduled job.
+`--dry-run` runs every pre-branch gate in throwaway copies, including
+validation, migration idempotency, npm relocking, and exact lock verification,
+then prints the plan and changes nothing. `--check` reports whether a version
+upgrade or interrupted-state repair is required and whether it would require a
+format migration, for use in a scheduled job.
+
+The handoff in step 1 is a safety boundary, not an optimization. Plain
+`npx authorbot` prefers the local executable, and `node_modules` can lag behind
+the exact pin in `package.json` after an interrupted or script-blocked install.
+That stale executable does not know migrations or package-alignment rules
+which shipped later. The helper therefore selects the exact release which must
+own the operation, uses an exact matching book-local install when one exists,
+or acquires that release with npm in a throwaway directory. The book is not an
+installation target.
+
+A bootstrap child carries the exact version its parent requested. If npm or
+PATH starts anything else, or a second handoff would be needed, the command
+fails before repository mutation instead of recursing. This also makes the
+offline behavior explicit: an exact local install works without downloading;
+a populated npm cache may satisfy acquisition; and an unavailable release
+stops the operation before book source, `package.json`, `package-lock.json`, or
+`node_modules` changes.
+
+That unchanged guarantee ends when the target helper starts. A signal or
+process failure after that point reports that repository work may have begun
+and tells the author to inspect `git status`. Failure to remove the temporary
+package after the child exits is only a warning: it must not replace a
+successful child exit status or misreport the child's upgrade result.
+
+The nested npm call preserves the author's intentional offline, cache,
+registry, userconfig, and authentication settings. It removes only npm
+configuration known to be invalid when inherited from the outer `npx`
+process, currently `allow_scripts`, and outer workspace selectors which do not
+describe the isolated acquisition manifest. Explicit local, project-location,
+and no-workspace flags prevent inherited global or workspace invocation modes
+from redirecting the install outside its private prefix. The helper copies the
+book's `.npmrc`
+byte-for-byte into the private throwaway install prefix for acquisition, then
+removes it with that prefix. npm still runs with the book as its working
+directory, so relative cache, certificate, and other path settings retain the
+same meaning they had during selection. Book source, `package.json`,
+`package-lock.json`, and `node_modules` are not acquisition targets. Caller
+userconfig and environment settings still participate in npm's normal
+precedence, and credential-bearing contents are never inspected or logged.
+npm-managed cache and log paths follow that configuration, so an intentionally
+project-relative cache or log directory may be read or updated by npm just as
+it was during selection. The command's clean-tree gates prevent an unignored
+artifact from being swept into the upgrade pull request.
+
+An explicit `--to <version>` never performs a release-metadata lookup. The
+exact local helper can therefore run fully offline, and npm acquisition itself
+is the fail-closed proof that a nonlocal target is available. Implicit target
+selection runs `npm view` from the book repository instead of fetching the
+public registry directly. That keeps npm's project and user configuration,
+offline cache, custom registry, and authentication authoritative for both
+selection and acquisition. The selected target is then carried into check,
+dry-run, or repository preparation; the operation does not query mutable
+release metadata a second time. A handed-off child still resolves once to
+prove the parent's exact request remains the selected target, and refuses
+rather than handing off again if registry state advanced.
+
+On Windows, npm and npx are command scripts which cannot be launched by
+`execFile` without a shell. The helper does not enable one. It validates npm's
+absolute JavaScript launcher path, or an existing launcher in npm's standard
+location beside `node.exe`, and runs that file with `process.execPath` while
+preserving argv as an array. Environment-provided Node executable paths are
+never trusted.
+
+An interrupted run may leave `package.json` on the target release while its
+API pin or lockfile is still older. Equal manifest and target versions are
+therefore not automatically a no-op. The target helper repairs that state
+through the same clean-tree, validation, migration, verified-relock, and pull
+request path as a forward upgrade. The only evidence allowed to lower the
+book-format migration baseline is an internally coherent committed CLI lock
+tuple: a parseable root `@authorbot/cli` spec and an exact resolved version
+which satisfies it and is not newer than the target. API pins, the running
+helper, and `node_modules` are alignment inputs, not format evidence. Missing,
+malformed, contradictory, or newer lock evidence blocks unchanged rather than
+guessing which migrations already ran.
+
+For a mutating run, a clean-tree preflight runs before bootstrap selection can
+read the manifest or lock. The selected helper then records both the current
+branch and exact HEAD, rechecks cleanliness before reading repository state,
+and rechecks HEAD, branch, and cleanliness immediately before creating its
+branch. Rollback also reasserts that the current checkout still requires the
+running helper. These gates catch dirty-start races, same-branch commits, and
+ordinary uncommitted edits made while migration or relocking was in progress.
+Branch creation names the recorded HEAD as its explicit start point, so even a
+commit in the final gap cannot become the pull request's unnoticed base.
+
+No release can change an executable which was already published before this
+bootstrap existed. A book whose installed helper predates this behavior needs
+one explicit launch of a new package:
+
+```
+npx --yes @authorbot/cli@<target> upgrade --to <target>
+```
+
+After that pull request is merged and installed, ordinary
+`npx authorbot upgrade` owns every later handoff automatically.
 
 ### 4. CI applies database migrations
 

@@ -23,6 +23,7 @@ import type {
   LockfilePort,
   PullRequestRequest,
   ReleasesPort,
+  UpgradeBootstrapPort,
   UpgradeDeps,
   WranglerPort,
 } from "../src/upgrade/ports.js";
@@ -60,6 +61,12 @@ export async function makeBookRepo(options: MakeRepoOptions = {}): Promise<strin
   const repo = path.join(dir, "book");
   await cp(exampleRepo, repo, { recursive: true });
   if (options.withoutPackageJson !== true) {
+    const cliPin = options.pin ?? "1.0.0";
+    const devDependencies = {
+      ...(options.apiPin === undefined ? {} : { "@authorbot/api": options.apiPin }),
+      "@authorbot/cli": cliPin,
+      wrangler: "^4.0.0",
+    };
     await writeFile(
       path.join(repo, "package.json"),
       `${JSON.stringify(
@@ -68,11 +75,35 @@ export async function makeBookRepo(options: MakeRepoOptions = {}): Promise<strin
           version: "0.0.0",
           private: true,
           scripts: { validate: "authorbot validate .", upgrade: "authorbot upgrade" },
-          devDependencies: {
-            ...(options.apiPin === undefined ? {} : { "@authorbot/api": options.apiPin }),
-            "@authorbot/cli": options.pin ?? "1.0.0",
-            wrangler: "^4.0.0",
-          },
+          devDependencies,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const packages: Record<string, unknown> = {
+      "": {
+        name: "my-book",
+        version: "0.0.0",
+        devDependencies,
+      },
+      "node_modules/@authorbot/cli": { version: cliPin.replace(/^[~^]/, "") },
+    };
+    if (options.apiPin !== undefined) {
+      packages["node_modules/@authorbot/api"] = {
+        version: options.apiPin.replace(/^[~^]/, ""),
+      };
+    }
+    await writeFile(
+      path.join(repo, "package-lock.json"),
+      `${JSON.stringify(
+        {
+          name: "my-book",
+          version: "0.0.0",
+          lockfileVersion: 3,
+          requires: true,
+          packages,
         },
         null,
         2,
@@ -129,6 +160,7 @@ export interface FakeGit extends GitPort {
   readonly calls: string[];
   readonly commits: { message: string; paths: readonly string[] }[];
   readonly branches: string[];
+  readonly branchStarts: { name: string; startPoint?: string }[];
   pullRequest?: PullRequestRequest;
   clean: boolean;
   failAt?: GitStep;
@@ -138,10 +170,12 @@ export function fakeGit(overrides: Partial<Pick<FakeGit, "clean" | "failAt">> = 
   const calls: string[] = [];
   const commits: { message: string; paths: readonly string[] }[] = [];
   const branches: string[] = [];
+  const branchStarts: { name: string; startPoint?: string }[] = [];
   const git: FakeGit = {
     calls,
     commits,
     branches,
+    branchStarts,
     clean: overrides.clean ?? true,
     ...(overrides.failAt === undefined ? {} : { failAt: overrides.failAt }),
     async isClean() {
@@ -152,10 +186,18 @@ export function fakeGit(overrides: Partial<Pick<FakeGit, "clean" | "failAt">> = 
       calls.push("currentBranch");
       return "main";
     },
-    async createBranch(_repo: string, name: string) {
+    async head() {
+      calls.push("head");
+      return "sha-base";
+    },
+    async createBranch(_repo: string, name: string, startPoint?: string) {
       calls.push(`createBranch ${name}`);
       maybeFail(git, "createBranch");
       branches.push(name);
+      branchStarts.push({
+        name,
+        ...(startPoint === undefined ? {} : { startPoint }),
+      });
     },
     async checkout(_repo: string, name: string) {
       calls.push(`checkout ${name}`);
@@ -265,6 +307,7 @@ export interface DepsOverrides {
   health?: HealthPort;
   migrations?: readonly BookRepoMigration[];
   validate?: (repoPath: string) => Promise<ValidationReport>;
+  bootstrap?: UpgradeBootstrapPort;
 }
 
 export function makeDeps(overrides: DepsOverrides = {}): UpgradeDeps {
@@ -327,6 +370,7 @@ export function makeDeps(overrides: DepsOverrides = {}): UpgradeDeps {
     validate: overrides.validate ?? validateBookRepo,
     migrations: overrides.migrations ?? [],
     now: () => new Date("2026-07-20T09:30:00.000Z"),
+    ...(overrides.bootstrap === undefined ? {} : { bootstrap: overrides.bootstrap }),
   };
 }
 

@@ -9,6 +9,33 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.35
+
+- **Legacy agent-token requests now maintain the canonical projection.** The
+  compatibility `{scopes}` request remains legacy-authoritative, but every new
+  token also records the exact safe capability translation. Control-plane
+  scopes never enter that projection. This dual-write Worker must be deployed
+  and verified before the one-shot legacy-row backfill ships in v0.1.36.
+- **The upgrade helper now repairs a stale local toolchain before changing a
+  book.** Forward upgrades hand off to the exact target CLI in a throwaway
+  install when `node_modules` does not match the repository pin. That target
+  aligns the CLI and API packages, regenerates the lockfile, and preserves the
+  child exit code and JSON output. Interrupted same-version installs are
+  repaired through a normal reviewable pull request, with migration baselines
+  accepted only from coherent committed CLI lock evidence. Dry runs regenerate
+  and verify the lockfile in a throwaway copy. Windows launches npm, npx, and
+  Wrangler through validated JavaScript entry points under the current Node
+  executable, without enabling a command shell. Exact `--to` targets require
+  no registry metadata lookup; implicit discovery uses npm's configured
+  offline cache, registry, userconfig, and authentication. Existing helpers
+  from before 0.1.35 still need one explicit
+  `npx --yes @authorbot/cli@0.1.35 upgrade --to 0.1.35` launch; ordinary
+  `npx authorbot upgrade` self-bootstraps after that.
+- This is a focused capability-writer-gate and upgrade-safety release. It adds
+  no D1 or book-format migration. The Phase 3B backfill is reserved for
+  v0.1.36 after this Worker is verified; Phase 3C legacy retirement remains a
+  deliberately separate later release.
+
 ## 0.1.34
 
 - **The full editorial workflow is now available from the site.** Editors can

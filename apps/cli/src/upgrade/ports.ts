@@ -47,8 +47,14 @@ export interface GitPort {
   /** True when the working tree and index have no changes. */
   isClean(repo: string): Promise<boolean>;
   currentBranch(repo: string): Promise<string>;
-  /** Create `name` from the current HEAD and switch to it. */
-  createBranch(repo: string, name: string): Promise<void>;
+  /** Exact commit currently checked out. Used to detect same-branch races. */
+  head(repo: string): Promise<string>;
+  /**
+   * Create `name` and switch to it. When `startPoint` is provided, the branch
+   * must be anchored to that exact commit rather than whatever HEAD happens to
+   * contain when the subprocess starts.
+   */
+  createBranch(repo: string, name: string, startPoint?: string): Promise<void>;
   checkout(repo: string, name: string): Promise<void>;
   deleteBranch(repo: string, name: string): Promise<void>;
   /** Stage the given paths and commit them. Returns the new commit sha. */
@@ -61,7 +67,7 @@ export interface GitPort {
 /** Published releases of a package. */
 export interface ReleasesPort {
   /** Every published version of `packageName`, unordered. */
-  listVersions(packageName: string): Promise<string[]>;
+  listVersions(packageName: string, repoPath: string): Promise<string[]>;
 }
 
 export interface D1MigrationResult {
@@ -121,6 +127,53 @@ export interface LockfilePort {
   relock(repoPath: string): Promise<void>;
 }
 
+export interface UpgradeBootstrapRequest {
+  /** Exact selected CLI release which must own the upgrade. */
+  readonly targetVersion: string;
+  /** Book repository used to look for an already-installed exact match. */
+  readonly repoPath: string;
+  /** Original process cwd. Relative argv paths must keep the same meaning. */
+  readonly cwd: string;
+  /** Original arguments after `authorbot upgrade`. */
+  readonly args: readonly string[];
+}
+
+export interface UpgradeBootstrapResult {
+  /** Target helper exit status, or 1 when a signal supplied no numeric status. */
+  readonly exitCode: number;
+  /**
+   * Non-fatal problem after child execution began, such as a signal or
+   * temporary-directory cleanup failure. The exit status above remains the
+   * target helper's result when it supplied one.
+   */
+  readonly warning?: string;
+}
+
+/**
+ * Start the release which is about to be installed before the current helper
+ * can mutate the book.
+ *
+ * A book's package.json and node_modules can disagree after an interrupted
+ * install. The executable npm selects for plain `npx authorbot` is then the
+ * stale one. Upgrades cannot safely continue with that executable because it
+ * may not know the target release's migrations or package alignment rules.
+ */
+export interface UpgradeBootstrapPort {
+  /** Version of the CLI package which owns this running process. */
+  readonly runningVersion: string;
+  /**
+   * Version requested by the parent handoff, when this process is a child.
+   * Its presence prevents an npm or PATH resolution error from recursing.
+   */
+  readonly requestedVersion?: string;
+  /**
+   * Run an exact installed copy, or acquire it in a throwaway directory and
+   * run that. A thrown error means child execution never began, so callers may
+   * truthfully report that the book was not changed by the target helper.
+   */
+  handoff(request: UpgradeBootstrapRequest): Promise<UpgradeBootstrapResult>;
+}
+
 export interface UpgradeDeps {
   readonly fs: UpgradeFs;
   readonly git: GitPort;
@@ -132,4 +185,9 @@ export interface UpgradeDeps {
   readonly migrations: readonly BookRepoMigration[];
   /** Injected so branch names are deterministic under test. */
   readonly now: () => Date;
+  /**
+   * Present in the real CLI and injectable in bootstrap tests. Ordinary
+   * upgrade tests omit it so every other effect remains fully fake.
+   */
+  readonly bootstrap?: UpgradeBootstrapPort;
 }

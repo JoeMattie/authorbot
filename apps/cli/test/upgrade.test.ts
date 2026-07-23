@@ -33,6 +33,41 @@ async function readPinSpec(repoPath: string): Promise<string> {
   return (parsed as { devDependencies: Record<string, string> }).devDependencies["@authorbot/cli"] ?? "";
 }
 
+async function writeToolchainLock(
+  repoPath: string,
+  state: {
+    cliSpec: string;
+    cliVersion: string;
+    apiSpec?: string;
+    apiVersion?: string;
+  },
+): Promise<void> {
+  await nodeFs.writeFile(
+    path.join(repoPath, "package-lock.json"),
+    `${JSON.stringify(
+      {
+        name: "my-book",
+        version: "0.0.0",
+        lockfileVersion: 3,
+        packages: {
+          "": {
+            devDependencies: {
+              ...(state.apiSpec === undefined ? {} : { "@authorbot/api": state.apiSpec }),
+              "@authorbot/cli": state.cliSpec,
+            },
+          },
+          "node_modules/@authorbot/cli": { version: state.cliVersion },
+          ...(state.apiVersion === undefined
+            ? {}
+            : { "node_modules/@authorbot/api": { version: state.apiVersion } }),
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 describe("authorbot upgrade - usage", () => {
   it("prints help and rejects nonsense combinations with exit 2", async () => {
     const io = captureIo();
@@ -45,8 +80,10 @@ describe("authorbot upgrade - usage", () => {
     expect(await runUpgrade(["--to"], bad.io, makeDeps())).toBe(2);
     expect(await runUpgrade(["a", "b"], bad.io, makeDeps())).toBe(2);
     expect(await runUpgrade(["--check", "--dry-run"], bad.io, makeDeps())).toBe(2);
+    expect(await runUpgrade(["--json"], bad.io, makeDeps())).toBe(2);
     expect(await runUpgrade(["--finish", "--check"], bad.io, makeDeps())).toBe(2);
     expect(await runUpgrade(["--rollback", "1.0.0", "--check"], bad.io, makeDeps())).toBe(2);
+    expect(bad.stderr()).toContain("--json is only supported with --check or --dry-run");
   });
 
   it("reports a directory that is not a book repository with exit 2", async () => {
@@ -113,6 +150,12 @@ describe("authorbot upgrade --check", () => {
       current: "1.0.0",
       target: "1.1.0",
       upgradeAvailable: true,
+      actionRequired: true,
+      repairRequired: false,
+      repairBlocked: false,
+      repairIssues: [],
+      migrationBaseline: "1.0.0",
+      repairBlockReason: null,
       formatMigrationRequired: true,
       migrations: [
         {
@@ -157,12 +200,130 @@ describe("authorbot upgrade --check", () => {
     expect(await runUpgrade([repoPath, "--check"], io.io, deps)).toBe(CHECK_EXIT_NONE);
   });
 
-  it("rejects a --to that is not published", async () => {
+  it("does not consult release metadata for an explicit exact --to target", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const io = captureIo();
-    expect(await runUpgrade([repoPath, "--check", "--to", "9.9.9"], io.io, makeDeps())).toBe(2);
-    expect(io.stderr()).toContain("is not published");
+    expect(
+      await runUpgrade(
+        [repoPath, "--check", "--to", "9.9.9"],
+        io.io,
+        makeDeps({
+          releases: failingReleases("release metadata must not be requested"),
+        }),
+      ),
+    ).toBe(CHECK_EXIT_AVAILABLE);
+    expect(io.stdout()).toContain("upgrade available: 1.0.0 -> 9.9.9");
+    expect(io.stderr()).toBe("");
   });
+
+  it("reports equal-version repair separately and selects migrations only from coherent CLI lock evidence", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0", apiPin: "1.0.0" });
+    await writeToolchainLock(repoPath, {
+      cliSpec: "1.0.0",
+      cliVersion: "1.0.0",
+      apiSpec: "1.0.0",
+      apiVersion: "1.0.0",
+    });
+    const io = captureIo();
+    const deps = makeDeps({
+      migrations: [markerMigration("0001-a", "1.0.0", "1.1.0")],
+    });
+
+    expect(await runUpgrade([repoPath, "--check", "--json"], io.io, deps)).toBe(
+      CHECK_EXIT_MIGRATION,
+    );
+    expect(JSON.parse(io.stdout())).toMatchObject({
+      current: "1.1.0",
+      target: "1.1.0",
+      upgradeAvailable: false,
+      actionRequired: true,
+      repairRequired: true,
+      repairBlocked: false,
+      migrationBaseline: "1.0.0",
+      formatMigrationRequired: true,
+    });
+  });
+
+  it("never lowers the book-format baseline from a stale API pin", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0", apiPin: "0.5.0" });
+    await writeToolchainLock(repoPath, {
+      cliSpec: "1.1.0",
+      cliVersion: "1.1.0",
+      apiSpec: "0.5.0",
+      apiVersion: "0.5.0",
+    });
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--check", "--json"],
+        io.io,
+        makeDeps({
+          migrations: [markerMigration("0001-a", "1.0.0", "1.1.0")],
+        }),
+      ),
+    ).toBe(CHECK_EXIT_AVAILABLE);
+
+    expect(JSON.parse(io.stdout())).toMatchObject({
+      upgradeAvailable: false,
+      actionRequired: true,
+      repairRequired: true,
+      migrationBaseline: "1.1.0",
+      formatMigrationRequired: false,
+      migrations: [],
+    });
+  });
+
+  it.each([
+    {
+      name: "missing",
+      corrupt: async (repoPath: string) =>
+        nodeFs.removeFile(path.join(repoPath, "package-lock.json")),
+    },
+    {
+      name: "malformed",
+      corrupt: async (repoPath: string) =>
+        nodeFs.writeFile(path.join(repoPath, "package-lock.json"), "{not json"),
+    },
+    {
+      name: "incoherent",
+      corrupt: async (repoPath: string) =>
+        writeToolchainLock(repoPath, {
+          cliSpec: "1.0.0",
+          cliVersion: "0.9.0",
+          apiSpec: "1.0.0",
+          apiVersion: "1.0.0",
+        }),
+    },
+  ])(
+    "blocks an equal-version repair on $name CLI lock evidence without touching the repo",
+    async ({ corrupt }) => {
+      const repoPath = await makeBookRepo({ pin: "1.1.0", apiPin: "1.0.0" });
+      await corrupt(repoPath);
+      const before = await snapshot(repoPath);
+      const git = fakeGit();
+      const io = captureIo();
+
+      expect(await runUpgrade([repoPath, "--check", "--json"], io.io, makeDeps({ git }))).toBe(2);
+
+      const report = JSON.parse(io.stdout()) as {
+        repairRequired: boolean;
+        repairBlocked: boolean;
+        migrationBaseline: string | null;
+        formatMigrationRequired: boolean | null;
+        migrations: unknown[] | null;
+      };
+      expect(report).toMatchObject({
+        repairRequired: true,
+        repairBlocked: true,
+        migrationBaseline: null,
+        formatMigrationRequired: null,
+        migrations: null,
+      });
+      expect(git.calls).toEqual([]);
+      expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+    },
+  );
 });
 
 describe("authorbot upgrade - no upgrade available", () => {
@@ -173,7 +334,7 @@ describe("authorbot upgrade - no upgrade available", () => {
     const io = captureIo();
     expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(0);
     expect(io.stdout()).toContain("already on 1.1.0");
-    expect(git.calls).toEqual([]);
+    expect(git.calls).toEqual(["isClean", "currentBranch", "head", "isClean"]);
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
   });
 });
@@ -222,6 +383,52 @@ describe("authorbot upgrade --dry-run", () => {
     const deps = makeDeps({ migrations: [breakingMigration()] });
     expect(await runUpgrade([repoPath, "--dry-run"], io.io, deps)).toBe(1);
     expect(io.stderr()).toContain("WOULD BE REFUSED");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("fully validates and relocks an equal-version repair without changing the repository", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0", apiPin: "1.0.0" });
+    await writeToolchainLock(repoPath, {
+      cliSpec: "1.0.0",
+      cliVersion: "1.0.0",
+      apiSpec: "1.0.0",
+      apiVersion: "1.0.0",
+    });
+    const before = await snapshot(repoPath);
+    let relocks = 0;
+    const baseDeps = makeDeps({
+      migrations: [markerMigration("0001-a", "1.0.0", "1.1.0")],
+    });
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--dry-run", "--json"],
+        io.io,
+        {
+          ...baseDeps,
+          lockfile: {
+            async relock(workingCopy) {
+              relocks += 1;
+              await baseDeps.lockfile.relock(workingCopy);
+            },
+          },
+        },
+      ),
+    ).toBe(0);
+
+    expect(relocks).toBe(1);
+    expect(JSON.parse(io.stdout())).toMatchObject({
+      dryRun: true,
+      current: "1.1.0",
+      target: "1.1.0",
+      upgradeAvailable: false,
+      actionRequired: true,
+      repairRequired: true,
+      migrationBaseline: "1.0.0",
+      toolchainRelockVerified: true,
+      changedFiles: ["README.md"],
+    });
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
   });
 });
@@ -489,6 +696,30 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     expect(staticManifest.devDependencies["@authorbot/api"]).toBeUndefined();
   });
 
+  it("repairs a stale lock-only API pin after the manifest pin was removed", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    await writeToolchainLock(repoPath, {
+      cliSpec: "1.1.0",
+      cliVersion: "1.1.0",
+      apiSpec: "1.0.0",
+      apiVersion: "1.0.0",
+    });
+    const git = fakeGit();
+
+    expect(await runUpgrade([repoPath], captureIo().io, makeDeps({ git }))).toBe(0);
+
+    expect(git.pullRequest?.title).toBe("Repair Authorbot 1.1.0 toolchain");
+    const lock = JSON.parse(
+      await nodeFs.readFile(path.join(repoPath, "package-lock.json")),
+    ) as { packages: Record<string, unknown> };
+    expect(
+      (lock.packages[""] as { devDependencies: Record<string, string> }).devDependencies[
+        "@authorbot/api"
+      ],
+    ).toBeUndefined();
+    expect(lock.packages["node_modules/@authorbot/api"]).toBeUndefined();
+  });
+
   it("makes a single commit when only the pin moves", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const git = fakeGit();
@@ -552,6 +783,185 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(2);
     expect(io.stderr()).toContain("uncommitted changes");
     expect(git.branches).toEqual([]);
+  });
+
+  it("does not read or prepare a dirty manifest even if it is restored during the first gate", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const manifestPath = path.join(repoPath, "package.json");
+    const committedManifest = await nodeFs.readFile(manifestPath);
+    await nodeFs.writeFile(
+      manifestPath,
+      committedManifest.replace(
+        '"name": "my-book"',
+        '"name": "unrelated-dirty-work"',
+      ),
+    );
+    const git = fakeGit();
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      await nodeFs.writeFile(manifestPath, committedManifest);
+      return false;
+    };
+    let releaseLookups = 0;
+    let relocks = 0;
+    let handoffs = 0;
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: {
+            runningVersion: "1.0.0",
+            async handoff() {
+              handoffs += 1;
+              return { exitCode: 0 };
+            },
+          },
+          releases: {
+            async listVersions() {
+              releaseLookups += 1;
+              return ["1.0.0", "1.1.0"];
+            },
+          },
+          lockfile: {
+            async relock() {
+              relocks += 1;
+            },
+          },
+        }),
+      ),
+    ).toBe(2);
+
+    expect(releaseLookups).toBe(0);
+    expect(relocks).toBe(0);
+    expect(handoffs).toBe(0);
+    expect(git.branches).toEqual([]);
+    expect(git.commits).toEqual([]);
+    expect(io.stderr()).toContain("uncommitted changes");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("rechecks cleanliness after migration and relocking before creating a branch", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let cleanChecks = 0;
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      cleanChecks += 1;
+      return cleanChecks < 3;
+    };
+    const io = captureIo();
+
+    expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(2);
+
+    expect(cleanChecks).toBe(3);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("working tree changed while the operation was being prepared");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("rechecks the current branch after migration and relocking before creating one", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let branchChecks = 0;
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      return branchChecks === 1 ? "main" : "other-work";
+    };
+    const io = captureIo();
+
+    expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(2);
+
+    expect(branchChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("current branch changed from main to other-work");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("rechecks HEAD after migration and relocking to catch same-branch commits", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let headChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      headChecks += 1;
+      return headChecks === 1 ? "sha-base" : "sha-new-commit";
+    };
+    const io = captureIo();
+
+    expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(2);
+
+    expect(headChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("HEAD changed from sha-base to sha-new-commit");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("anchors branch creation to the reviewed HEAD if a commit lands in the final gap", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const git = fakeGit();
+    let liveHead = "sha-reviewed";
+    let branchChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      return liveHead;
+    };
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      if (branchChecks === 2) {
+        // Models another process committing after the final HEAD check but
+        // immediately before createBranch starts.
+        liveHead = "sha-unreviewed-race";
+      }
+      return "main";
+    };
+
+    expect(await runUpgrade([repoPath], captureIo().io, makeDeps({ git }))).toBe(0);
+
+    expect(git.branchStarts).toHaveLength(1);
+    expect(git.branchStarts[0]?.startPoint).toBe("sha-reviewed");
+    expect(git.branchStarts[0]?.startPoint).not.toBe(liveHead);
+  });
+
+  it("describes already-satisfied repair migrations without claiming only a pin changed", async () => {
+    const marker = "<!-- migrated by 0001-a -->";
+    const repoPath = await makeBookRepo({
+      pin: "1.1.0",
+      apiPin: "1.0.0",
+      extraFiles: { "README.md": `# Existing book\n\n${marker}\n` },
+    });
+    await writeToolchainLock(repoPath, {
+      cliSpec: "1.0.0",
+      cliVersion: "1.0.0",
+      apiSpec: "1.0.0",
+      apiVersion: "1.0.0",
+    });
+    const git = fakeGit();
+
+    expect(
+      await runUpgrade(
+        [repoPath],
+        captureIo().io,
+        makeDeps({
+          git,
+          migrations: [markerMigration("0001-a", "1.0.0", "1.1.0")],
+        }),
+      ),
+    ).toBe(0);
+
+    expect(git.commits).toHaveLength(1);
+    expect(git.pullRequest?.body).toContain("were evaluated idempotently");
+    expect(git.pullRequest?.body).toContain("already satisfied");
+    expect(git.pullRequest?.body).not.toContain("only the pin changed");
   });
 });
 
@@ -712,6 +1122,167 @@ describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
     expect(io.stderr()).toContain("npm rollback relock failed while offline");
     expect(io.stderr()).toContain("before creating a branch");
+  });
+
+  it("does not prepare rollback from a dirty manifest restored during the first gate", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const manifestPath = path.join(repoPath, "package.json");
+    const committedManifest = await nodeFs.readFile(manifestPath);
+    await nodeFs.writeFile(
+      manifestPath,
+      committedManifest.replace(
+        '"name": "my-book"',
+        '"name": "unrelated-dirty-rollback-work"',
+      ),
+    );
+    const git = fakeGit();
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      await nodeFs.writeFile(manifestPath, committedManifest);
+      return false;
+    };
+    let relocks = 0;
+    let handoffs = 0;
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: {
+            runningVersion: "1.1.0",
+            async handoff() {
+              handoffs += 1;
+              return { exitCode: 0 };
+            },
+          },
+          lockfile: {
+            async relock() {
+              relocks += 1;
+            },
+          },
+        }),
+      ),
+    ).toBe(2);
+
+    expect(relocks).toBe(0);
+    expect(handoffs).toBe(0);
+    expect(git.branches).toEqual([]);
+    expect(git.commits).toEqual([]);
+    expect(io.stderr()).toContain("uncommitted changes");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("stops when the worktree becomes dirty while rollback relocking runs", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let cleanChecks = 0;
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      cleanChecks += 1;
+      return cleanChecks < 3;
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({ git }),
+      ),
+    ).toBe(2);
+
+    expect(cleanChecks).toBe(3);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("working tree changed while the rollback was being prepared");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("stops when a same-branch commit lands during rollback relocking", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let headChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      headChecks += 1;
+      return headChecks === 1 ? "sha-rollback-base" : "sha-new-commit";
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({ git }),
+      ),
+    ).toBe(2);
+
+    expect(headChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("HEAD changed from sha-rollback-base to sha-new-commit");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("stops when the current branch changes during rollback relocking", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const git = fakeGit();
+    let branchChecks = 0;
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      return branchChecks === 1 ? "main" : "other-work";
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({ git }),
+      ),
+    ).toBe(2);
+
+    expect(branchChecks).toBe(2);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain("current branch changed from main to other-work");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
+  it("anchors rollback to the reviewed HEAD if a commit lands in the final gap", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const git = fakeGit();
+    let liveHead = "sha-reviewed-rollback";
+    let branchChecks = 0;
+    git.head = async () => {
+      git.calls.push("head");
+      return liveHead;
+    };
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      branchChecks += 1;
+      if (branchChecks === 2) {
+        liveHead = "sha-unreviewed-rollback-race";
+      }
+      return "main";
+    };
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        captureIo().io,
+        makeDeps({ git }),
+      ),
+    ).toBe(0);
+
+    expect(git.branchStarts).toHaveLength(1);
+    expect(git.branchStarts[0]?.startPoint).toBe("sha-reviewed-rollback");
+    expect(git.branchStarts[0]?.startPoint).not.toBe(liveHead);
   });
 
   it("reports a book left invalid by the rollback and exits 1", async () => {
