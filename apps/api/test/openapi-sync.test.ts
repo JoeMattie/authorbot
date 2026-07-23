@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { EDITORIAL_CAPABILITIES } from "@authorbot/domain";
 import { beforeAll, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { createApi } from "../src/app.js";
@@ -28,13 +29,39 @@ const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 interface Operation {
   operationId?: string;
   "x-implementation-status"?: string;
+  responses?: Record<
+    string,
+    { content?: Record<string, { schema?: SchemaNode }> }
+  >;
+}
+interface SchemaNode {
+  $ref?: string;
+  type?: string;
+  const?: unknown;
+  enum?: string[];
+  maxItems?: number;
+  required?: string[];
+  oneOf?: SchemaNode[];
+  items?: SchemaNode;
+  properties?: Record<string, SchemaNode>;
+  discriminator?: { propertyName?: string; mapping?: Record<string, string> };
 }
 interface Spec {
   paths: Record<string, Record<string, Operation | undefined>>;
-  components: { schemas: Record<string, { enum?: string[] }> };
+  components: { schemas: Record<string, SchemaNode> };
 }
 
 const spec = YAML.parse(readFileSync(SPEC_PATH, "utf8")) as Spec;
+
+function responseSchema(path: string, method: string, status = "200"): SchemaNode | undefined {
+  return spec.paths[path]?.[method]?.responses?.[status]?.content?.["application/json"]?.schema;
+}
+
+function schemaAdmitsNull(schema: SchemaNode | undefined): boolean {
+  if (schema === undefined) return false;
+  if (schema.type === "null") return true;
+  return (schema.oneOf ?? []).some((member) => member.type === "null");
+}
 
 /** OpenAPI `{param}` templating → Hono `:param`. */
 const toHonoPath = (path: string): string => path.replace(/\{(\w+)\}/g, ":$1");
@@ -183,6 +210,128 @@ describe("openapi.yaml is synced with the router", () => {
       "range_replacement",
       "block_replacement",
       "chapter_replacement",
+    ]);
+  });
+
+  it("documents the exact canonical editorial capability vocabulary", () => {
+    expect(spec.components.schemas["EditorialCapability"]?.enum).toEqual([
+      ...EDITORIAL_CAPABILITIES,
+    ]);
+  });
+
+  it("documents the completed-work history without retained submission prose", () => {
+    const page = responseSchema(
+      "/v1/projects/{projectId}/work-items/completed",
+      "get",
+    );
+    expect(page?.properties?.["items"]?.items?.$ref).toBe(
+      "#/components/schemas/CompletedWorkItem",
+    );
+
+    const completed = spec.components.schemas["CompletedWorkItem"];
+    expect(completed?.required).toEqual(
+      expect.arrayContaining([
+        "source",
+        "chapter",
+        "completedBy",
+        "completedAt",
+        "resultingRevision",
+        "commitSha",
+        "revisionProposalId",
+        "approvedBy",
+      ]),
+    );
+    expect(completed?.properties?.["content"]).toBeUndefined();
+    expect(completed?.properties?.["proposedContent"]).toBeUndefined();
+  });
+
+  it("documents bounded chapter history, detail comparison, and restore proposal shapes", () => {
+    expect(
+      responseSchema("/v1/projects/{projectId}/chapters/{chapterId}/history", "get")
+        ?.$ref,
+    ).toBe("#/components/schemas/ChapterHistoryPage");
+    expect(
+      responseSchema(
+        "/v1/projects/{projectId}/chapters/{chapterId}/history/{revision}",
+        "get",
+      )?.$ref,
+    ).toBe("#/components/schemas/ChapterHistoryDetail");
+    expect(
+      responseSchema(
+        "/v1/projects/{projectId}/chapters/{chapterId}/history/{revision}/restore",
+        "post",
+        "201",
+      )?.$ref,
+    ).toBe("#/components/schemas/ChapterHistoryRestoreResult");
+
+    expect(spec.components.schemas["ChapterHistoryPage"]?.properties?.["items"]?.maxItems)
+      .toBe(50);
+    expect(spec.components.schemas["ChapterHistoryDetail"]?.required).toEqual([
+      "chapterId",
+      "compare",
+      "selected",
+      "comparison",
+      "current",
+      "diff",
+    ]);
+    expect(
+      spec.components.schemas["ChapterHistoryRestoreResult"]?.properties?.["status"]?.const,
+    ).toBe("pending_review");
+  });
+
+  it("documents repository-document source and proposal variants", () => {
+    expect(
+      responseSchema("/v1/projects/{projectId}/repository-documents/source", "get")?.$ref,
+    ).toBe("#/components/schemas/RepositoryDocumentSource");
+    expect(
+      spec.components.schemas["RepositoryDocumentSource"]?.properties?.["target"]?.$ref,
+    ).toBe("#/components/schemas/RepositoryDocumentTarget");
+    expect(spec.components.schemas["RevisionProposalType"]?.enum).toEqual([
+      "chapter_replacement",
+      "chapter_summary",
+      "repository_document",
+    ]);
+    expect(spec.components.schemas["RevisionProposalOrigin"]?.enum).toEqual([
+      "work_submission",
+      "direct_edit",
+      "summary_proposal",
+      "history_restore",
+      "document_edit",
+    ]);
+    expect(spec.components.schemas["RevisionProposalTargetKind"]?.enum).toEqual([
+      "chapter",
+      "outline",
+      "timeline",
+      "character",
+    ]);
+
+    const proposal = spec.components.schemas["RevisionProposal"];
+    expect(schemaAdmitsNull(proposal?.properties?.["chapterId"])).toBe(true);
+    expect(schemaAdmitsNull(proposal?.properties?.["baseRevision"])).toBe(true);
+    expect(proposal?.required).toEqual(
+      expect.arrayContaining(["targetKind", "targetId", "targetPath"]),
+    );
+
+    const create = spec.components.schemas["CreateRevisionProposal"];
+    expect(create?.oneOf?.map((member) => member.$ref)).toEqual([
+      "#/components/schemas/CreateChapterReplacementProposal",
+      "#/components/schemas/CreateChapterSummaryProposal",
+      "#/components/schemas/CreateRepositoryDocumentProposal",
+    ]);
+    expect(create?.discriminator).toEqual({
+      propertyName: "proposalType",
+      mapping: {
+        chapter_replacement: "#/components/schemas/CreateChapterReplacementProposal",
+        chapter_summary: "#/components/schemas/CreateChapterSummaryProposal",
+        repository_document: "#/components/schemas/CreateRepositoryDocumentProposal",
+      },
+    });
+    expect(spec.components.schemas["CreateRepositoryDocumentProposal"]?.required).toEqual([
+      "proposalType",
+      "targetKind",
+      "targetPath",
+      "baseContentHash",
+      "proposedContent",
     ]);
   });
 
