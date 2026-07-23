@@ -272,7 +272,7 @@ describe("authorization matrix", () => {
         contributor: 200,
         maintainer: 200,
         agentFull: 200,
-        agentReadOnly: 200,
+        agentReadOnly: 403,
         revokedToken: 401,
         expiredToken: 401,
       },

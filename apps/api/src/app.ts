@@ -28,6 +28,7 @@ import {
   toTimestamp,
   withdrawReplyCommandSchema,
   AGENT_TOKEN_PREFIX,
+  type EditorialCapability,
   WORK_ITEM_STATUSES,
 } from "@authorbot/domain";
 import {
@@ -315,6 +316,171 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     kind: "comment" | "suggestion",
   ): "comments:read" | "suggestions:read" =>
     kind === "comment" ? "comments:read" : "suggestions:read";
+
+  const objectString = (value: unknown, key: string): string | null => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+    const candidate = (value as Record<string, unknown>)[key];
+    return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
+  };
+
+  /**
+   * Resolve the exact read capability for one canonical-token operation.
+   *
+   * `git_operations` deliberately contains only execution state. Its single
+   * durable domain link is the outbox row inserted in the same batch. The
+   * schema does not make that link unique, so read at most two rows and accept
+   * exactly one. Every payload id is then resolved back to its project-owned
+   * record before it can authorize a read. Unknown, malformed, dangling, and
+   * control-plane kinds return null and therefore fail closed.
+   *
+   * This costs one bounded outbox query plus at most two primary-key lookups
+   * (decision -> source annotation, or submission -> work item). It never
+   * fans out with project size.
+   */
+  const operationReadCapability = async (
+    projectId: string,
+    operationId: string,
+  ): Promise<EditorialCapability | null> => {
+    const links = await deps.db
+      .prepare(
+        `SELECT kind, payload FROM outbox
+          WHERE project_id = ? AND git_operation_id = ?
+          ORDER BY id LIMIT 2`,
+      )
+      .bind(projectId, operationId)
+      .all<{ kind: string; payload: string }>();
+    if (links.length !== 1) return null;
+
+    const link = links[0];
+    if (link === undefined) return null;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(String(link.payload)) as unknown;
+    } catch {
+      return null;
+    }
+
+    switch (String(link.kind)) {
+      case "annotation.create":
+      case "annotation.withdraw": {
+        const annotationId = objectString(payload, "annotationId");
+        if (annotationId === null) return null;
+        const annotation = await repos.annotations.getById(annotationId);
+        if (annotation === null || annotation.projectId !== projectId) return null;
+        return feedbackReadCapability(annotation.kind);
+      }
+      case "reply.create":
+      case "reply.withdraw": {
+        const replyId = objectString(payload, "replyId");
+        const annotationId = objectString(payload, "annotationId");
+        if (replyId === null || annotationId === null) return null;
+        const reply = await repos.replies.getById(replyId);
+        if (
+          reply === null ||
+          reply.projectId !== projectId ||
+          reply.annotationId !== annotationId
+        ) {
+          return null;
+        }
+        const annotation = await repos.annotations.getById(reply.annotationId);
+        if (annotation === null || annotation.projectId !== projectId) return null;
+        return feedbackReadCapability(annotation.kind);
+      }
+      case "decision.create":
+      case "decision.update": {
+        const decisionId = objectString(payload, "decisionId");
+        if (decisionId === null) return null;
+        const decision = await repos.decisions.getById(decisionId);
+        if (decision === null || decision.projectId !== projectId) return null;
+        const annotation = await repos.annotations.getById(decision.sourceAnnotationId);
+        if (annotation === null || annotation.projectId !== projectId) return null;
+        return feedbackReadCapability(annotation.kind);
+      }
+      case "submission.apply": {
+        const submissionId = objectString(payload, "submissionId");
+        const workItemId = objectString(payload, "workItemId");
+        if (submissionId === null || workItemId === null) return null;
+        const [submission, workItem] = await Promise.all([
+          repos.submissions.getById(submissionId),
+          repos.workItems.getById(workItemId),
+        ]);
+        if (
+          submission === null ||
+          workItem === null ||
+          submission.projectId !== projectId ||
+          workItem.projectId !== projectId ||
+          submission.workItemId !== workItem.id
+        ) {
+          return null;
+        }
+        return "work:read";
+      }
+      case "chapter.write": {
+        const chapterId = objectString(payload, "chapterId");
+        if (chapterId === null) return null;
+        const hasProposalId =
+          payload !== null &&
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          Object.prototype.hasOwnProperty.call(payload, "revisionProposalId");
+        if (!hasProposalId) return "chapters:read";
+
+        const proposalId = objectString(payload, "revisionProposalId");
+        if (proposalId === null) return null;
+        const proposal = await repos.revisionProposals.getById(proposalId);
+        if (
+          proposal === null ||
+          proposal.projectId !== projectId ||
+          proposal.targetKind !== "chapter" ||
+          proposal.chapterId !== chapterId ||
+          proposal.proposalType === "repository_document"
+        ) {
+          return null;
+        }
+        return "revisions:read";
+      }
+      case "repository_document.write": {
+        const proposalId = objectString(payload, "revisionProposalId");
+        if (proposalId === null) return null;
+        const proposal = await repos.revisionProposals.getById(proposalId);
+        if (
+          proposal === null ||
+          proposal.projectId !== projectId ||
+          proposal.proposalType !== "repository_document"
+        ) {
+          return null;
+        }
+        return "revisions:read";
+      }
+      default:
+        return null;
+    }
+  };
+
+  /**
+   * Actor ownership is linked by the correlation id shared by the operation
+   * and its atomic audit row. Client-supplied correlation ids can be reused,
+   * so the bypass applies only when there is exactly one distinct non-null
+   * actor for that project/correlation pair. LIMIT 2 makes ambiguity bounded
+   * and fail-closed without loading the audit trail.
+   */
+  const operationOwnedByActor = async (input: {
+    projectId: string;
+    correlationId: string;
+    actorId: string;
+  }): Promise<boolean> => {
+    const actors = await deps.db
+      .prepare(
+        `SELECT DISTINCT actor_id FROM audit_events
+          WHERE project_id = ? AND correlation_id = ? AND actor_id IS NOT NULL
+          ORDER BY actor_id LIMIT 2`,
+      )
+      .bind(input.projectId, input.correlationId)
+      .all<{ actor_id: string }>();
+    return actors.length === 1 && String(actors[0]?.actor_id) === input.actorId;
+  };
 
   /** Exact kind read, after `requireReadOrPublic` has admitted the request. */
   const canReadFeedbackKind = (
@@ -1854,15 +2020,51 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   // ---- operations ------------------------------------------------------------
 
   app.get("/v1/projects/:projectId/operations/:operationId", auth, async (c) => {
-    const guard = await requireProjectScope(c, services, "chapters:read", {
-      editorial: { capabilities: ["chapters:read"] },
-    });
+    // Human members keep the Phase 2 behavior (all project operations are
+    // readable). Token reads are narrowed below after the operation's durable
+    // domain and owner have been resolved.
+    const guard = await requireProjectScope(c, services, null);
     if ("response" in guard) {
       return guard.response;
     }
     const operation = await repos.gitOperations.getById(c.req.param("operationId"));
     if (operation === null || operation.projectId !== guard.project.id) {
       return problem(c, "not-found", { detail: "unknown operation" });
+    }
+
+    const requestAuth = authOf(c);
+    if (requestAuth.kind === "token") {
+      const requiredCapability = await operationReadCapability(
+        guard.project.id,
+        operation.id,
+      );
+      // A missing/ambiguous domain link and control-plane operations have no
+      // delegable editorial read capability. Do not let actor attribution
+      // turn either case into token authority.
+      if (requiredCapability === null) {
+        return problem(c, "forbidden", {
+          detail: "actor is not authorized to read this operation",
+        });
+      }
+      const ownsOperation = await operationOwnedByActor({
+        projectId: guard.project.id,
+        correlationId: operation.correlationId,
+        actorId: requestAuth.actor.id,
+      });
+      // Legacy rows use their conservative, role-intersected capability
+      // translation. Calling hasEditorialAuthority here would reapply the old
+      // umbrella scope and reopen the cross-domain read this route is closing.
+      const hasDomainRead =
+        requestAuth.capabilityMode === "legacy"
+          ? requestAuth.effectiveCapabilities.includes(requiredCapability)
+          : hasEditorialAuthority(requestAuth, null, {
+              capabilities: [requiredCapability],
+            });
+      if (!ownsOperation && !hasDomainRead) {
+        return problem(c, "forbidden", {
+          detail: "actor is not authorized to read this operation",
+        });
+      }
     }
     return c.json(operationJson(operation));
   });
