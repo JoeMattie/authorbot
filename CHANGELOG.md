@@ -11,12 +11,12 @@ always the same commit.
 
 ## 0.1.35
 
-- **Legacy agent-token capabilities now have their canonical projection.**
-  After the v0.1.34 dual-read Worker was deployed and verified healthy, this
-  release adds the idempotent
-  `0013_phase11_capabilities_backfill.sql` migration. It fills missing
-  canonical capability data while retaining legacy mode and the ordinary
-  legacy scopes that the deployed Worker still reads.
+- **Legacy agent-token requests now maintain the canonical projection.** The
+  compatibility `{scopes}` request remains legacy-authoritative, but every new
+  token also records the exact safe capability translation. Control-plane
+  scopes never enter that projection. This dual-write Worker must be deployed
+  and verified before the one-shot legacy-row backfill ships in a later
+  release.
 - **The upgrade helper now repairs a stale local toolchain before changing a
   book.** Forward upgrades hand off to the exact target CLI in a throwaway
   install when `node_modules` does not match the repository pin. That target
@@ -30,8 +30,9 @@ always the same commit.
   0.1.35 still need one explicit
   `npx --yes @authorbot/cli@0.1.35 upgrade --to 0.1.35` launch; ordinary
   `npx authorbot upgrade` self-bootstraps after that.
-- This is a focused capability-backfill and upgrade-safety release. It adds no
-  book-format migration, and it does not begin Phase 3C legacy retirement.
+- This is a focused capability-writer-gate and upgrade-safety release. It adds
+  no D1 or book-format migration. The Phase 3B backfill and Phase 3C legacy
+  retirement remain deliberately separate later releases.
 
 ## 0.1.34
 

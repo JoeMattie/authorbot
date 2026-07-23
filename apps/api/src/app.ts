@@ -26,6 +26,7 @@ import {
   roleSchema,
   roleScopes,
   toTimestamp,
+  translateLegacyScopes,
   withdrawReplyCommandSchema,
   AGENT_TOKEN_PREFIX,
   type EditorialCapability,
@@ -950,7 +951,13 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const plaintext = `${AGENT_TOKEN_PREFIX}${randomBase64Url(32)}`;
     const tokenHash = await sha256Hex(plaintext);
     const canonical = command.authorizationMode === "canonical";
-    const capabilities = canonical ? command.capabilities : null;
+    // The legacy request alias remains legacy-authoritative until the 3C
+    // retirement window, but it must still maintain the canonical projection.
+    // A later one-shot backfill is safe only after every supported writer does
+    // this dual write.
+    const capabilities = canonical
+      ? command.capabilities
+      : translateLegacyScopes(command.scopes);
     const tokenScopes = canonical
       ? legacyScopeShadow(command.capabilities)
       : command.scopes;
@@ -962,7 +969,7 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       name: command.name,
       tokenHash,
       scopes: [...tokenScopes],
-      capabilitiesV2: capabilities === null ? null : [...capabilities],
+      capabilitiesV2: [...capabilities],
       capabilityMode: canonical ? "canonical" : "legacy",
       createdBy: a.actor.id,
       createdAt: timestamp,

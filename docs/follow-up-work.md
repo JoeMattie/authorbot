@@ -11,18 +11,22 @@ or branch cleanup has completed.
 The capability migration must continue to follow the expand, backfill, and
 retire order in the Phase 11 contract. Do not combine these steps.
 
-1. **Expand gate completed.** v0.1.34 shipped the dual-read Worker and was
-   deployed through the normal Authorbot upgrade path. Its expand migration,
-   Worker, publisher, and editorial flows were verified healthy before the
-   backfill release was prepared.
-2. **Ship the capability backfill after expand.** v0.1.35 carries the prepared
-   `0013_phase11_capabilities_backfill.sql` migration alongside an unrelated
-   upgrade-helper safety fix, but no other capability-migration phase. Validate
-   the backfill against legacy, canonical, revoked, and expired token rows. It
+1. **Expand reader deployed.** v0.1.34 shipped the additive columns and
+   dual-read Worker through the normal Authorbot upgrade path. Its Worker,
+   publisher, and editorial flows were verified healthy. Its deprecated
+   legacy mint request still writes a null canonical projection, so this alone
+   does not open the one-shot backfill gate.
+2. **Deploy the dual-write gate.** v0.1.35 makes every legacy mint populate the
+   exact safe canonical projection while leaving legacy mode authoritative. It
+   also carries the upgrade-helper safety fixes, but no D1 migration. Deploy
+   and verify this Worker before preparing the backfill release.
+3. **Ship the capability backfill after the writer gate.** A later release can
+   add `0013_phase11_capabilities_backfill.sql` only after v0.1.35 is live.
+   Validate it against legacy, canonical, revoked, and expired token rows. It
    must remain idempotent, preserve legacy mode, and leave ordinary legacy
-   scopes available to the deployed dual-read Worker.
-3. **Wait on Phase 3C legacy retirement.** Do not retire the legacy read path or
-   remove its storage during either release above. Phase 3C starts only after
+   scopes available to the deployed dual-reader.
+4. **Wait on Phase 3C legacy retirement.** Do not retire the legacy read path or
+   remove its storage during the releases above. Phase 3C starts only after
    the documented compatibility window, supported token rows have been
    converted, and the rollback conditions in the Phase 11 contract are met.
    Legacy shadow writes continue for the additional required release before a

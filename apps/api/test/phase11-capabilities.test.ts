@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
+import { LEGACY_AGENT_SCOPES, translateLegacyScopes } from "@authorbot/domain";
 import { createApi } from "../src/app.js";
 import type { AppDeps, AppEnv } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";
@@ -133,6 +134,20 @@ describe("Phase 11 agent-token capabilities", () => {
     ]);
   });
 
+  it("dual-writes the canonical projection for every legacy mint scope", async () => {
+    const scopes = [...LEGACY_AGENT_SCOPES];
+    const { tokenId } = await mintToken(h, maintainer, scopes);
+    const stored = await h.repos.agentTokens.getById(tokenId);
+
+    expect(stored).toMatchObject({
+      capabilityMode: "legacy",
+      scopes,
+      capabilitiesV2: translateLegacyScopes(scopes),
+    });
+    expect(stored?.capabilitiesV2).not.toContain("members:manage");
+    expect(stored?.capabilitiesV2).not.toContain("tokens:manage");
+  });
+
   it("dual-reads legacy rows and identifies preserved actions by source", async () => {
     const { token, tokenId } = await mintToken(h, maintainer, [
       "annotations:write",
@@ -143,6 +158,14 @@ describe("Phase 11 agent-token capabilities", () => {
     await h.db
       .prepare(`UPDATE project_memberships SET role = 'maintainer' WHERE actor_id = ?`)
       .bind(record.actorId)
+      .run();
+
+    // Model a token created before the dual-write gate. Legacy scopes remain
+    // authoritative until 3C, so the deployed reader must behave identically
+    // before and after the later 3B backfill populates this projection.
+    await h.db
+      .prepare(`UPDATE agent_tokens SET capabilities_v2 = NULL WHERE id = ?`)
+      .bind(tokenId)
       .run();
 
     const me = await h.app.request("/v1/me", {
@@ -178,9 +201,9 @@ describe("Phase 11 agent-token capabilities", () => {
       ],
     });
 
-    // Slice 3B populates this projection but deliberately leaves mode=legacy.
-    // The already-deployed 3A dual-reader must keep the legacy scopes
-    // authoritative before, during, and after that migration.
+    // Slice 3B will populate this projection but deliberately leave
+    // mode=legacy. The deployed dual-reader must keep legacy scopes
+    // authoritative before, during, and after that later migration.
     await h.db
       .prepare(`UPDATE agent_tokens SET capabilities_v2 = ? WHERE id = ?`)
       .bind(

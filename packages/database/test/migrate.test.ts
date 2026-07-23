@@ -32,7 +32,6 @@ describe("migration runner", () => {
     expect(files).toContain("0001_phase2.sql");
     expect(files).toContain("0011_phase11_revision_proposals.sql");
     expect(files).toContain("0012_chapter_summaries.sql");
-    expect(files).toContain("0013_phase11_capabilities_backfill.sql");
     expect(files).toEqual([...files].sort());
   });
 
