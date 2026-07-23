@@ -132,6 +132,17 @@ export interface UpgradeBootstrapRequest {
   readonly args: readonly string[];
 }
 
+export interface UpgradeBootstrapResult {
+  /** Target helper exit status, or 1 when a signal supplied no numeric status. */
+  readonly exitCode: number;
+  /**
+   * Non-fatal problem after child execution began, such as a signal or
+   * temporary-directory cleanup failure. The exit status above remains the
+   * target helper's result when it supplied one.
+   */
+  readonly warning?: string;
+}
+
 /**
  * Start the release which is about to be installed before the current helper
  * can mutate the book.
@@ -151,9 +162,10 @@ export interface UpgradeBootstrapPort {
   readonly requestedVersion?: string;
   /**
    * Run an exact installed copy, or acquire it in a throwaway directory and
-   * run that. Returns the child CLI's exit code.
+   * run that. A thrown error means child execution never began, so callers may
+   * truthfully report that the book was not changed by the target helper.
    */
-  handoff(request: UpgradeBootstrapRequest): Promise<number>;
+  handoff(request: UpgradeBootstrapRequest): Promise<UpgradeBootstrapResult>;
 }
 
 export interface UpgradeDeps {

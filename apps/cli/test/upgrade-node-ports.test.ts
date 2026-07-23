@@ -70,6 +70,14 @@ if [ -n "$npm_config_allow_scripts" ] || [ -n "$NPM_CONFIG_ALLOW_SCRIPTS" ]; the
   printf '%s\n' 'npm config leaked' >&2
   exit 24
 fi
+if [ "$npm_config_offline" != "true" ] ||
+   [ "$npm_config_cache" != "/intentional/npm-cache" ] ||
+   [ "$npm_config_registry" != "https://registry.example.test/" ] ||
+   [ "$npm_config_userconfig" != "/intentional/npmrc" ] ||
+   [ "$npm_config__authToken" != "intentional-auth" ]; then
+  printf '%s\n' 'intentional npm config was stripped' >&2
+  exit 27
+fi
 case " $* " in
   *" --package-lock=true "*) ;;
   *) printf '%s\n' 'package-lock was not forced on' >&2; exit 25 ;;
@@ -87,9 +95,20 @@ exit 23
       const previousPath = process.env["PATH"];
       const previousSentinel = process.env["AUTHORBOT_NODE_PORTS_SENTINEL"];
       const previousPoison = process.env["npm_config_allow_scripts"];
+      const intentionalConfig = {
+        npm_config_offline: "true",
+        npm_config_cache: "/intentional/npm-cache",
+        npm_config_registry: "https://registry.example.test/",
+        npm_config_userconfig: "/intentional/npmrc",
+        npm_config__authToken: "intentional-auth",
+      };
+      const previousIntentional = new Map(
+        Object.keys(intentionalConfig).map((key) => [key, process.env[key]]),
+      );
       process.env["PATH"] = `${bin}${path.delimiter}${previousPath ?? ""}`;
       process.env["AUTHORBOT_NODE_PORTS_SENTINEL"] = "ordinary env survives";
       process.env["npm_config_allow_scripts"] = "poison-from-outer-npx";
+      Object.assign(process.env, intentionalConfig);
 
       let caught: unknown;
       try {
@@ -100,6 +119,9 @@ exit 23
         restoreEnvironment("PATH", previousPath);
         restoreEnvironment("AUTHORBOT_NODE_PORTS_SENTINEL", previousSentinel);
         restoreEnvironment("npm_config_allow_scripts", previousPoison);
+        for (const [key, value] of previousIntentional) {
+          restoreEnvironment(key, value);
+        }
       }
 
       expect(caught).toBeInstanceOf(CommandError);
@@ -157,12 +179,14 @@ process.exitCode = 11;
     });
 
     expect(
-      await bootstrap.handoff({
-        targetVersion: "9.8.7",
-        repoPath: repo,
-        cwd: repo,
-        args: [".", "--check", "--json"],
-      }),
+      (
+        await bootstrap.handoff({
+          targetVersion: "9.8.7",
+          repoPath: repo,
+          cwd: repo,
+          args: [".", "--check", "--json"],
+        })
+      ).exitCode,
     ).toBe(11);
 
     const child = JSON.parse(await readFile(marker, "utf8")) as {
@@ -178,7 +202,42 @@ process.exitCode = 11;
   });
 
   it.runIf(process.platform !== "win32")(
-    "acquires an exact target in a throwaway directory when the local install is stale",
+    "reports signal exits as post-start uncertainty instead of a clean-repository claim",
+    async () => {
+      const repo = await tempDirectory();
+      const packageRoot = path.join(repo, "node_modules", "@authorbot", "cli");
+      const dist = path.join(packageRoot, "dist");
+      await mkdir(dist, { recursive: true });
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: "@authorbot/cli",
+          version: "9.8.7",
+          type: "module",
+          bin: { authorbot: "./dist/bin.mjs" },
+        }),
+      );
+      await writeFile(
+        path.join(dist, "bin.mjs"),
+        'process.kill(process.pid, "SIGTERM");\n',
+      );
+      const bootstrap = await createNodeUpgradeBootstrap(process.env);
+
+      const result = await bootstrap.handoff({
+        targetVersion: "9.8.7",
+        repoPath: repo,
+        cwd: repo,
+        args: [".", "--to", "9.8.7"],
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.warning).toContain("after execution began");
+      expect(result.warning).toContain("may have changed the repository");
+      expect(result.warning).not.toContain("repository was not changed");
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "acquires an exact target and preserves its exit status when cleanup fails",
     async () => {
       const repo = await tempDirectory();
       const fakeBin = path.join(repo, "fake-bin");
@@ -195,7 +254,12 @@ const version = manifest.dependencies["@authorbot/cli"];
 fs.writeFileSync(process.env.AUTHORBOT_BOOTSTRAP_NPM_MARKER, JSON.stringify({
   args: process.argv.slice(2),
   cwd: process.cwd(),
-  poison: process.env.npm_config_allow_scripts
+  poison: process.env.npm_config_allow_scripts,
+  offline: process.env.npm_config_offline,
+  cache: process.env.npm_config_cache,
+  registry: process.env.npm_config_registry,
+  userconfig: process.env.npm_config_userconfig,
+  auth: process.env.npm_config__authToken
 }));
 const root = path.join(process.cwd(), "node_modules", "@authorbot", "cli");
 fs.mkdirSync(path.join(root, "dist"), { recursive: true });
@@ -212,7 +276,7 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
   '  cwd: process.cwd(),',
   '  requested: process.env.AUTHORBOT_UPGRADE_BOOTSTRAP_VERSION',
   '}));',
-  'process.exitCode = 12;'
+  'process.exitCode = 0;'
 ].join("\\n"));
 `,
       );
@@ -230,27 +294,45 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
       );
       await writeFile(path.join(staleRoot, "dist", "bin.js"), "process.exitCode = 99;\n");
 
-      const bootstrap = await createNodeUpgradeBootstrap({
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`,
-        npm_config_allow_scripts: "poison-from-outer-npx",
-        AUTHORBOT_BOOTSTRAP_NPM_MARKER: npmMarker,
-        AUTHORBOT_BOOTSTRAP_CHILD_MARKER: childMarker,
+      const bootstrap = await createNodeUpgradeBootstrap(
+        {
+          ...process.env,
+          PATH: `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`,
+          npm_config_allow_scripts: "poison-from-outer-npx",
+          npm_config_offline: "true",
+          npm_config_cache: "/intentional/bootstrap-cache",
+          npm_config_registry: "https://registry.example.test/",
+          npm_config_userconfig: "/intentional/bootstrap-npmrc",
+          npm_config__authToken: "bootstrap-auth",
+          AUTHORBOT_BOOTSTRAP_NPM_MARKER: npmMarker,
+          AUTHORBOT_BOOTSTRAP_CHILD_MARKER: childMarker,
+        },
+        async () => {
+          throw new Error("simulated cleanup denial");
+        },
+      );
+      const result = await bootstrap.handoff({
+        targetVersion: "0.1.34",
+        repoPath: repo,
+        cwd: repo,
+        args: [".", "--to", "0.1.34"],
       });
-      expect(
-        await bootstrap.handoff({
-          targetVersion: "0.1.34",
-          repoPath: repo,
-          cwd: repo,
-          args: [".", "--to", "0.1.34"],
-        }),
-      ).toBe(12);
+      expect(result.exitCode).toBe(0);
+      expect(result.warning).toContain("temporary bootstrap cleanup failed");
+      expect(result.warning).toContain("simulated cleanup denial");
+      expect(result.warning).toContain("exit status is preserved");
 
       const npm = JSON.parse(await readFile(npmMarker, "utf8")) as {
         args: string[];
         cwd: string;
         poison?: string;
+        offline?: string;
+        cache?: string;
+        registry?: string;
+        userconfig?: string;
+        auth?: string;
       };
+      tempDirs.push(npm.cwd);
       expect(npm.args).toEqual([
         "install",
         "--package-lock=false",
@@ -261,6 +343,13 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
       ]);
       expect(npm.cwd).toContain("authorbot-cli-bootstrap-");
       expect(npm.poison).toBeUndefined();
+      expect(npm).toMatchObject({
+        offline: "true",
+        cache: "/intentional/bootstrap-cache",
+        registry: "https://registry.example.test/",
+        userconfig: "/intentional/bootstrap-npmrc",
+        auth: "bootstrap-auth",
+      });
 
       const child = JSON.parse(await readFile(childMarker, "utf8")) as {
         args: string[];

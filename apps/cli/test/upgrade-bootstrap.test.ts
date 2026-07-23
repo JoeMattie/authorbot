@@ -27,6 +27,7 @@ function fakeBootstrap(options: {
   running: string;
   requested?: string;
   result?: number;
+  warning?: string;
   error?: Error;
 }): FakeBootstrap {
   const requests: UpgradeBootstrapRequest[] = [];
@@ -39,7 +40,10 @@ function fakeBootstrap(options: {
       if (options.error !== undefined) {
         throw options.error;
       }
-      return options.result ?? 0;
+      return {
+        exitCode: options.result ?? 0,
+        ...(options.warning === undefined ? {} : { warning: options.warning }),
+      };
     },
   };
 }
@@ -193,8 +197,36 @@ describe("authorbot upgrade self-bootstrap", () => {
     expect(git.calls).toEqual([]);
     expect(await snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
     expect(io.stderr()).toContain("could not start @authorbot/cli@1.1.0");
+    expect(io.stderr()).toContain("target-helper execution never began");
     expect(io.stderr()).toContain("repository was not changed");
-    expect(io.stderr()).toContain("npm install --save-dev --save-exact @authorbot/cli@1.1.0");
+    expect(io.stderr()).toContain(
+      `npx --yes @authorbot/cli@1.1.0 upgrade ${repoPath} --to 1.1.0`,
+    );
+    expect(io.stderr()).not.toContain("npm install --save-dev");
+  });
+
+  it("preserves a successful child exit while reporting post-start cleanup uncertainty", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const bootstrap = fakeBootstrap({
+      running: "0.9.0",
+      result: 0,
+      warning:
+        "the target helper exited with status 0, but temporary cleanup failed. " +
+        "The helper's exit status is preserved.",
+    });
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--to", "1.1.0"],
+        io.io,
+        makeDeps({ bootstrap }),
+      ),
+    ).toBe(0);
+
+    expect(io.stderr()).toContain("bootstrap warning");
+    expect(io.stderr()).toContain("exit status is preserved");
+    expect(io.stderr()).not.toContain("repository was not changed");
   });
 
   it("uses the locked current helper for finish and rollback, not the rollback target", async () => {

@@ -130,6 +130,13 @@ async function desiredBootstrapVersion(
   return compareVersions(plan.target, plan.current) > 0 ? plan.target : current;
 }
 
+function shellArgument(value: string): string {
+  if (/^[A-Za-z0-9_./:@=+-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+}
+
 /**
  * Return `undefined` when this process is the suitable helper and may
  * continue. Otherwise return the delegated child exit code (or a fail-closed
@@ -180,21 +187,34 @@ export async function ensureUpgradeBootstrap(
   }
 
   try {
-    return await bootstrap.handoff({
+    const result = await bootstrap.handoff({
       targetVersion: desired.raw,
       repoPath: options.repoPath,
       cwd: process.cwd(),
       args: originalArgs,
     });
+    if (result.warning !== undefined) {
+      io.err(`authorbot: bootstrap warning: ${result.warning}`);
+    }
+    return result.exitCode;
   } catch (error) {
     io.err(
       `authorbot: could not start @authorbot/cli@${desired.raw}: ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );
     io.err(
-      "authorbot: the repository was not changed. Connect to npm or install the selected " +
-        `release locally, then rerun: npm install --save-dev --save-exact ` +
+      "authorbot: target-helper execution never began, so the repository was not changed. " +
+        "Connect to npm or make the release available in your npm cache, then launch it " +
+        "transiently:",
+    );
+    io.err(
+      [
+        "  npx",
+        "--yes",
         `@authorbot/cli@${desired.raw}`,
+        "upgrade",
+        ...originalArgs.map(shellArgument),
+      ].join(" "),
     );
     return 1;
   }

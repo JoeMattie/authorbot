@@ -134,8 +134,10 @@ a throwaway directory, never inside the book. That release aligns the direct
 `@authorbot/cli` and existing `@authorbot/api` pins, regenerates
 `package-lock.json`, and verifies all resolved versions before it branches. If
 the release is unavailable while offline, the command stops with the
-repository unchanged. Install the version named in the error and rerun the
-same command.
+repository unchanged. Do not install or save the target into this book's
+`package.json`. Reconnect to npm or populate its cache, then use the exact
+transient command printed by the error:
+`npx --yes @authorbot/cli@<target> upgrade ...`.
 
 If the installed helper is from before self-bootstrap support existed, give
 npm the package explicitly once:

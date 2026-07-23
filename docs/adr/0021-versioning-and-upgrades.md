@@ -96,6 +96,17 @@ offline behavior explicit: an exact local install works without downloading;
 a populated npm cache may satisfy acquisition; and an unavailable release
 stops the operation with the repository unchanged.
 
+That unchanged guarantee ends when the target helper starts. A signal or
+process failure after that point reports that repository work may have begun
+and tells the author to inspect `git status`. Failure to remove the temporary
+package after the child exits is only a warning: it must not replace a
+successful child exit status or misreport the child's upgrade result.
+
+The nested npm call preserves the author's intentional offline, cache,
+registry, userconfig, and authentication settings. It removes only npm
+configuration known to be invalid when inherited from the outer `npx`
+process, currently `allow_scripts`.
+
 No release can change an executable which was already published before this
 bootstrap existed. A book whose installed helper predates this behavior needs
 one explicit launch of a new package:

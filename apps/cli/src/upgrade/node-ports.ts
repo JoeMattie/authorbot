@@ -24,6 +24,7 @@ import type {
   ReleasesPort,
   UpgradeBootstrapPort,
   UpgradeBootstrapRequest,
+  UpgradeBootstrapResult,
   UpgradeFs,
   WranglerPort,
 } from "./ports.js";
@@ -35,18 +36,18 @@ const BOOTSTRAP_REQUEST_ENV = "AUTHORBOT_UPGRADE_BOOTSTRAP_VERSION";
 const EXCLUDED_DIRS = new Set([".git", "node_modules"]);
 
 /**
- * Preserve the caller's environment, except for npm configuration inherited
- * from an outer npm/npx invocation when the child is itself npm or npx.
+ * Preserve the caller's environment, except for known-invalid configuration
+ * inherited from an outer npm/npx invocation when the child is npm or npx.
  *
  * `npx authorbot upgrade` runs the CLI beneath npm. npm exports its active
- * configuration as `npm_config_*` environment variables, but those settings
- * belong to the outer invocation. Passing them into the nested lockfile npm
- * can make an otherwise valid book fail before it reads package.json. In
- * particular, npm rejects an inherited `npm_config_allow_scripts` during a
- * project-scoped install.
+ * configuration as `npm_config_*` environment variables. Most of it is
+ * intentional and necessary: offline mode, cache and registry locations,
+ * userconfig, and authentication must survive. The outer npm's
+ * `allow_scripts` value is different: npm rejects it when inherited by a
+ * nested project-scoped install, before reading package.json.
  *
- * Other commands keep the environment byte-for-byte: this is an npm nesting
- * boundary, not a general environment scrubber.
+ * Other commands and all other npm settings remain byte-for-byte. Additions to
+ * this denylist need a concrete nested-npm failure and a regression test.
  */
 function childEnvironment(env: NodeJS.ProcessEnv, command: string): NodeJS.ProcessEnv {
   const base = path.basename(command).replace(/\.(cmd|exe)$/i, "");
@@ -56,7 +57,7 @@ function childEnvironment(env: NodeJS.ProcessEnv, command: string): NodeJS.Proce
 
   const cleaned: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
-    if (/^npm_config_/i.test(key) || /^NPM_CONFIG_/.test(key)) {
+    if (/^npm_config_allow_scripts$/i.test(key)) {
       continue;
     }
     cleaned[key] = value;
@@ -258,20 +259,49 @@ async function runInherited(
   args: readonly string[],
   cwd: string,
   env: NodeJS.ProcessEnv,
-): Promise<number> {
+): Promise<UpgradeBootstrapResult> {
   return new Promise((resolve, reject) => {
+    let started = false;
+    let settled = false;
     const child = spawn(file, [...args], {
       cwd,
       env,
       stdio: "inherit",
     });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code !== null) {
-        resolve(code);
+    child.once("spawn", () => {
+      started = true;
+    });
+    child.once("error", (error) => {
+      if (settled) {
         return;
       }
-      reject(new Error(`child process exited from signal ${signal ?? "unknown"}`));
+      settled = true;
+      if (!started) {
+        reject(error);
+        return;
+      }
+      resolve({
+        exitCode: 1,
+        warning:
+          `the target helper started, then its process failed: ${error.message}. ` +
+          "It may have changed the repository; inspect `git status` before retrying.",
+      });
+    });
+    child.once("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (code !== null) {
+        resolve({ exitCode: code });
+        return;
+      }
+      resolve({
+        exitCode: 1,
+        warning:
+          `the target helper exited from signal ${signal ?? "unknown"} after execution began. ` +
+          "It may have changed the repository; inspect `git status` before retrying.",
+      });
     });
   });
 }
@@ -318,7 +348,15 @@ async function installBootstrapCli(
     }
     return { root, bin };
   } catch (error) {
-    await rm(root, { recursive: true, force: true });
+    try {
+      await rm(root, { recursive: true, force: true });
+    } catch (cleanupError) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; ` +
+          `temporary bootstrap cleanup also failed for ${root}: ` +
+          `${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+      );
+    }
     throw error;
   }
 }
@@ -333,6 +371,8 @@ async function installBootstrapCli(
  */
 export async function createNodeUpgradeBootstrap(
   env: NodeJS.ProcessEnv = process.env,
+  removeTemporary: (target: string) => Promise<void> = async (target) =>
+    rm(target, { recursive: true, force: true }),
 ): Promise<UpgradeBootstrapPort> {
   const ownPackage = parseCliPackage(
     await readFile(new URL("../../package.json", import.meta.url), "utf8"),
@@ -360,8 +400,9 @@ export async function createNodeUpgradeBootstrap(
         temporaryRoot = installed.root;
         bin = installed.bin;
       }
+      let result: UpgradeBootstrapResult;
       try {
-        return await runInherited(
+        result = await runInherited(
           process.execPath,
           [bin, "upgrade", ...request.args],
           request.cwd,
@@ -370,10 +411,39 @@ export async function createNodeUpgradeBootstrap(
             [BOOTSTRAP_REQUEST_ENV]: request.targetVersion,
           },
         );
-      } finally {
+      } catch (error) {
         if (temporaryRoot !== undefined) {
-          await rm(temporaryRoot, { recursive: true, force: true });
+          try {
+            await removeTemporary(temporaryRoot);
+          } catch (cleanupError) {
+            throw new Error(
+              `${error instanceof Error ? error.message : String(error)}; ` +
+                `temporary bootstrap cleanup also failed for ${temporaryRoot}: ` +
+                `${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+            );
+          }
         }
+        throw error;
+      }
+      if (temporaryRoot === undefined) {
+        return result;
+      }
+      try {
+        await removeTemporary(temporaryRoot);
+        return result;
+      } catch (cleanupError) {
+        const cleanupWarning =
+          `the target helper exited with status ${result.exitCode}, but temporary bootstrap ` +
+          `cleanup failed for ${temporaryRoot}: ` +
+          `${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}. ` +
+          "The helper's exit status is preserved.";
+        return {
+          exitCode: result.exitCode,
+          warning:
+            result.warning === undefined
+              ? cleanupWarning
+              : `${result.warning} ${cleanupWarning}`,
+        };
       }
     },
   };
