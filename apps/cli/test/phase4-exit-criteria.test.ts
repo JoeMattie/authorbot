@@ -17,7 +17,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { validateBookRepo } from "@authorbot/cli";
+import { validateBookRepo } from "../src/validate/index.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CHAPTER_1,
@@ -28,7 +28,7 @@ import {
   makeIntegrationApp,
   type BookRepoClone,
   type IntegrationApp,
-} from "./helpers.js";
+} from "../../api/test/integration/helpers.js";
 
 const CHAPTER_PATH = "chapters/001-baseline.md";
 

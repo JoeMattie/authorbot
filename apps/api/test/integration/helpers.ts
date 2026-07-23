@@ -16,7 +16,7 @@ import {
   openSqliteDatabase,
   type Repositories,
   type SqliteAdapter,
-} from "@authorbot/database";
+} from "@authorbot/database/testing";
 import type { Hono } from "hono";
 import { createApi, type AuthorbotApi } from "../../src/app.js";
 import type { AppConfig, AppDeps, AppEnv } from "../../src/deps.js";

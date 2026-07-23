@@ -32,7 +32,7 @@ const account = site.collab && !settingsConsole ? site.collab : undefined;
 const accountScriptHref =
   account && !collabStylesHref ? `${site.basePath}_astro/authorbot-account.js` : undefined;
 const effectiveCsp =
-  csp ??
+  site.localDev ? undefined : csp ??
   (accountScriptHref
     ? SITE_CSP
     : undefined);
@@ -98,6 +98,75 @@ const safeDescription =
         </p>
       </footer>
     )}
+    {site.localDev && (
+      <aside class="authorbot-local-toolbar" data-authorbot-local-toolbar>
+        <strong>Authorbot local</strong>
+        <span data-local-branch>loading…</span>
+        <span data-local-state></span>
+        <span data-local-source></span>
+        <span data-local-reload hidden>reload waiting</span>
+        <button type="button" data-local-reload-now hidden>Reload now</button>
+        <a href={site.localDev.bootstrapPath}>Sign in</a>
+        <span>Agent setup: <code>authorbot dev agent-env</code></span>
+      </aside>
+    )}
     {accountScriptHref && <script is:inline type="module" src={accountScriptHref}></script>}
+    {site.localDev && (
+      <script is:inline>
+        const toolbar = document.querySelector("[data-authorbot-local-toolbar]");
+        const update = async () => {
+          try {
+            const response = await fetch("/__authorbot/status", { cache: "no-store" });
+            if (!response.ok) return;
+            const status = await response.json();
+            toolbar.querySelector("[data-local-branch]").textContent =
+              status.branch + (status.dirty ? " · dirty" : "");
+            toolbar.querySelector("[data-local-state]").textContent =
+              status.buildError ? "build error" : status.projection;
+            const dirtySource = status.source.endsWith("+dirty");
+            toolbar.querySelector("[data-local-source]").textContent =
+              status.source.startsWith("git:")
+                ? status.source.slice(4, 12) + (dirtySource ? "+dirty" : "")
+                : status.source;
+          } catch {}
+        };
+        update();
+        setInterval(update, 1500);
+        let unsaved = false;
+        const editable = (target) =>
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement ||
+          target?.isContentEditable;
+        document.addEventListener("input", (event) => {
+          if (editable(event.target)) unsaved = true;
+        });
+        document.addEventListener("change", (event) => {
+          if (editable(event.target)) unsaved = true;
+        });
+        document.addEventListener("submit", () => { unsaved = false; });
+        window.addEventListener("beforeunload", (event) => {
+          if (!unsaved) return;
+          event.preventDefault();
+          event.returnValue = "";
+        });
+        import("/@vite/client").then(({ createHotContext }) => {
+          const hot = createHotContext("/__authorbot/local-toolbar");
+          hot.on("vite:beforeFullReload", async () => {
+            if (!unsaved) return;
+            const label = toolbar.querySelector("[data-local-reload]");
+            const button = toolbar.querySelector("[data-local-reload-now]");
+            label.hidden = false;
+            button.hidden = false;
+            await new Promise((resolve) => {
+              button.addEventListener("click", () => {
+                unsaved = false;
+                resolve();
+              }, { once: true });
+            });
+          });
+        });
+      </script>
+    )}
   </body>
 </html>

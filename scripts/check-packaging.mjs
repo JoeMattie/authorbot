@@ -52,11 +52,15 @@ function packFiles(dir) {
     maxBuffer: 32 * 1024 * 1024,
   });
   // `prepack` output (licence copy, migration staging) shares this stream, and
-  // npm's own notices can trail the payload - slicing from the first `[` to the
-  // end of the stream therefore breaks whenever anything is printed AFTER the
-  // JSON, which is exactly what a newer npm did in CI while this machine's npm
-  // did not. Extract the first balanced array instead of assuming it is last.
-  return JSON.parse(firstJsonArray(raw, dir))[0];
+  // npm's own notices can trail the payload. npm 11 returns an array while npm
+  // 12 returns an object keyed by package name, so normalize both supported
+  // shapes after extracting the first complete JSON value.
+  const payload = JSON.parse(firstJsonValue(raw, dir));
+  if (Array.isArray(payload)) return payload[0];
+  if (Array.isArray(payload?.files)) return payload;
+  const packages = Object.values(payload ?? {}).filter((value) => Array.isArray(value?.files));
+  if (packages.length === 1) return packages[0];
+  return payload;
 }
 
 const failures = [];
@@ -161,12 +165,18 @@ if (failures.length) {
 console.log(`\n${report.length} package(s) ready to publish. Nothing was published.`);
 
 /**
- * The first balanced `[...]` in a stream that may carry other output before or
- * after it. String-aware, so a bracket inside a filename cannot unbalance it.
+ * The first balanced JSON object or array in a stream that may carry other
+ * output before or after it. String-aware, so punctuation inside a filename
+ * cannot unbalance it.
  */
-function firstJsonArray(raw, dir) {
-  const start = raw.indexOf("[");
+function firstJsonValue(raw, dir) {
+  const objectStart = raw.indexOf("{");
+  const arrayStart = raw.indexOf("[");
+  const starts = [objectStart, arrayStart].filter((index) => index >= 0);
+  const start = starts.length === 0 ? -1 : Math.min(...starts);
   if (start < 0) throw new Error(`npm pack produced no JSON for ${dir}:\n${raw}`);
+  const open = raw[start];
+  const close = open === "{" ? "}" : "]";
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -182,11 +192,11 @@ function firstJsonArray(raw, dir) {
       continue;
     }
     if (ch === '"') inString = true;
-    else if (ch === "[") depth += 1;
-    else if (ch === "]") {
+    else if (ch === open) depth += 1;
+    else if (ch === close) {
       depth -= 1;
       if (depth === 0) return raw.slice(start, i + 1);
     }
   }
-  throw new Error(`npm pack produced no complete JSON array for ${dir}:\n${raw}`);
+  throw new Error(`npm pack produced no complete JSON value for ${dir}:\n${raw}`);
 }

@@ -5,11 +5,12 @@
   "description": "An Authorbot book. This file exists only to pin the toolchain; the book itself is the Markdown and YAML around it.",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "validate": "authorbot validate .",
     "build": "authorbot build . --out _site",
+    "dev": "authorbot dev .",
     "upgrade": "authorbot upgrade"
   },
   "devDependencies": {

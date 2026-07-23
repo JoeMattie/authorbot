@@ -14,7 +14,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, relative } from "node:path";
-import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { applyMigrations, openSqliteDatabase } from "@authorbot/database/testing";
 import { GitHubBookRepoReader, GitHubBookRepoWriter } from "@authorbot/git-github";
 import { createFakeGitHub, type FakeGitHub } from "@authorbot/git-github/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

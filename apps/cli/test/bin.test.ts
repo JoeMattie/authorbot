@@ -94,4 +94,16 @@ describe("authorbot bin (built dist)", () => {
     expect(notABook.status).toBe(2);
     expect(notABook.stderr).toContain("does not depend on @authorbot/cli");
   });
+
+  it("exposes the managed local-authoring command family", () => {
+    const top = runBin(["--help"]);
+    expect(top.status).toBe(0);
+    expect(top.stdout).toContain("dev [path]");
+
+    const help = runBin(["dev", "--help"]);
+    expect(help.status).toBe(0);
+    expect(help.stdout).toContain("authorbot dev status");
+    expect(help.stdout).toContain("--authorbot-source");
+    expect(help.stdout).toContain("--promote-book");
+  });
 });

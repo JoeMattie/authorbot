@@ -100,6 +100,10 @@ export interface AppConfig {
   projectRepo: string;
   /** Initial maintainer actor ref, e.g. `github:JoeMattie`. */
   initialMaintainer: string;
+  /** Local Node mode may use portable `local:` actor refs instead of GitHub refs. */
+  devActorNamespace?: "github" | "local";
+  /** Display label for the seeded local maintainer (normally git user.name). */
+  initialMaintainerDisplayName?: string;
   defaultBranch?: string;
   github?: GitHubOAuthConfig;
   mirrorMode?: MirrorMode;

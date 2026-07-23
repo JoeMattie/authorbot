@@ -51,6 +51,13 @@ The token is minted by a maintainer from the book's own settings page (under
 **Agent tokens**), or over the API by a signed-in maintainer. You cannot mint
 your own.
 
+For a local book, the operator can start the full API and UI with
+`authorbot dev`, then load the private starter token with
+`eval "$(authorbot dev agent-env)"`. Local mode stores that token in
+Authorbot's mode-`0600` OS state directory, outside both Git repositories.
+This is the one supported exception to the no-token-file rule above. Never
+copy that file into the book checkout, a prompt, or an API payload.
+
 **Before doing anything, call `GET {AUTHORBOT_API}/v1/me`** and report the
 actor, role, `capabilityMode`, `grantedCapabilities`,
 `roleCapabilityCeiling`, and `effectiveCapabilities`. Only

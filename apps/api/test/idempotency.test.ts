@@ -7,7 +7,7 @@ import {
   type SqlRunResult,
   type SqlStatement,
   type SqliteAdapter,
-} from "@authorbot/database";
+} from "@authorbot/database/testing";
 import { createApi } from "../src/app.js";
 import type { AppDeps } from "../src/deps.js";
 import { createDevIdentityProvider } from "../src/identity/provider.js";

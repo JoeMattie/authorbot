@@ -1749,3 +1749,65 @@ a.story-outline-title:hover {
     font: 600 11px/1.2 var(--font-display);
   }
 }
+/* Local-only status strip. The element is never present in production output. */
+.authorbot-local-toolbar {
+  position: fixed;
+  z-index: 1000;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.55rem 0.75rem;
+  overflow: auto;
+  color: #f4f0e8;
+  background: #1d2522;
+  border: 1px solid #65756f;
+  border-radius: 0.45rem;
+  box-shadow: 0 0.4rem 1.5rem rgb(0 0 0 / 25%);
+  font: 0.75rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.authorbot-local-toolbar > * {
+  flex: 0 0 auto;
+}
+
+.authorbot-local-toolbar a {
+  color: #bce7d8;
+}
+
+.authorbot-local-toolbar button {
+  padding: 0.2rem 0.4rem;
+  color: #10201a;
+  background: #bce7d8;
+  border: 0;
+  border-radius: 0.25rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .authorbot-local-toolbar {
+    right: 0.4rem;
+    bottom: 0.4rem;
+    left: 0.4rem;
+    flex-wrap: nowrap;
+    gap: 0.35rem 0.6rem;
+    max-width: none;
+    padding: 0.45rem 0.6rem;
+    overflow-x: auto;
+    font-size: 0.65rem;
+  }
+
+  .authorbot-local-toolbar [data-local-branch] {
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .authorbot-local-toolbar > span:last-child {
+    display: none;
+  }
+}

@@ -3,7 +3,7 @@
  * `gitIntegration: "configured"` is allowed to mean.
  */
 import { describe, expect, it } from "vitest";
-import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { applyMigrations, openSqliteDatabase } from "@authorbot/database/testing";
 import { gitIntegrationStatus } from "../src/coordinator.js";
 import { runScheduledMaintenance } from "../src/worker.js";
 import type { WorkerBindings } from "../src/worker.js";

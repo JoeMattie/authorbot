@@ -1,8 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import type { ClientRequest } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BuildManifest } from "@authorbot/schemas";
-import { build } from "astro";
+import { build, dev } from "astro";
+import type { Plugin, ProxyOptions, ViteDevServer } from "vite";
 import { loadSiteModel, PublisherError } from "./load.js";
 import { createManifest, detectGitCommit } from "./manifest.js";
 import type { SiteModel } from "./model.js";
@@ -64,6 +66,182 @@ function siteDataPlugin(model: SiteModel): {
       }
       // The model is data, never code: it is embedded as a JSON literal.
       return `export const site = ${JSON.stringify(model)};`;
+    },
+  };
+}
+
+interface DevServerHandle {
+  address: { address: string; port: number };
+  stop(): Promise<void>;
+}
+
+export interface StartDevSiteOptions {
+  repoPath: string;
+  port?: number;
+  apiTarget: string;
+  bootstrapPath: string;
+  status?: () => Promise<Record<string, unknown>>;
+  onWarning?: (message: string) => void;
+  onBuildState?: (error: string | null) => void;
+}
+
+export interface DevSite {
+  url: string;
+  stop(): Promise<void>;
+}
+
+const DEV_ASSET_ENTRIES: Readonly<Record<string, string>> = Object.freeze({
+  "authorbot-collab.js": "index.ts",
+  "authorbot-account.js": "account-entry.ts",
+  "authorbot-planning.js": "planning-entry.ts",
+  "authorbot-settings.js": "settings.ts",
+  "authorbot-access.js": "access.ts",
+  "authorbot-collab.css": "collab.css",
+  "authorbot-planning.css": "planning-editor.css",
+  "authorbot-access.css": "access.css",
+  "authorbot-settings.css": "settings.css",
+  "authorbot-work.css": "work.css",
+  "authorbot-revisions.css": "revision-review.css",
+  "authorbot-history.css": "chapter-history.css",
+});
+
+/**
+ * Start the book UI on Astro/Vite's loopback server. The browser has one
+ * origin; `/v1` is proxied to the private Node API and the stable production
+ * island URLs are mapped onto their source modules for HMR.
+ */
+export async function startDevSite(options: StartDevSiteOptions): Promise<DevSite> {
+  const siteRoot = fileURLToPath(new URL("../site/", import.meta.url));
+  const islandsRoot = path.join(siteRoot, "src", "islands");
+  let current = await loadSiteModel({
+    repoPath: options.repoPath,
+    includeDrafts: true,
+    apiUrl: "/",
+    devLogin: false,
+  });
+  for (const warning of current.warnings) options.onWarning?.(warning);
+  current.model.localDev = { bootstrapPath: options.bootstrapPath };
+  let viteServer: ViteDevServer | null = null;
+  const proxyRequests = new Set<ClientRequest>();
+  const trackedProxy = (): ProxyOptions => ({
+    target: options.apiTarget,
+    changeOrigin: false,
+    configure(proxy) {
+      proxy.on("proxyReq", (request) => {
+        proxyRequests.add(request);
+        request.once("close", () => proxyRequests.delete(request));
+      });
+    },
+  });
+
+  const dynamicDataPlugin: Plugin = {
+    name: "authorbot-local-site-data",
+    resolveId(id: string) {
+      return id === VIRTUAL_MODULE_ID ? RESOLVED_VIRTUAL_MODULE_ID : undefined;
+    },
+    load(id: string) {
+      return id === RESOLVED_VIRTUAL_MODULE_ID
+        ? `export const site = ${JSON.stringify(current.model)};`
+        : undefined;
+    },
+    configureServer(server) {
+      viteServer = server;
+      server.watcher.add(options.repoPath);
+      let pending: ReturnType<typeof setTimeout> | null = null;
+      server.watcher.on("all", (_event, changedPath) => {
+        if (!path.resolve(changedPath).startsWith(path.resolve(options.repoPath) + path.sep)) return;
+        if (pending !== null) clearTimeout(pending);
+        pending = setTimeout(() => {
+          void loadSiteModel({
+            repoPath: options.repoPath,
+            includeDrafts: true,
+            apiUrl: "/",
+            devLogin: false,
+          }).then((loaded) => {
+            loaded.model.localDev = { bootstrapPath: options.bootstrapPath };
+            current = loaded;
+            options.onBuildState?.(null);
+            const module = server.moduleGraph.getModuleById(RESOLVED_VIRTUAL_MODULE_ID);
+            if (module !== undefined) server.moduleGraph.invalidateModule(module);
+            server.ws.send({ type: "full-reload", path: "*" });
+          }).catch((error: unknown) => {
+            const message = `book reload failed; serving the last good view: ${
+              error instanceof Error ? error.message : String(error)
+            }`;
+            options.onBuildState?.(message);
+            options.onWarning?.(message);
+          });
+        }, 100);
+      });
+      server.middlewares.use((req, res, next) => {
+        const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+        const asset = pathname.match(/\/_astro\/([^/]+)$/u)?.[1];
+        const source = asset === undefined ? undefined : DEV_ASSET_ENTRIES[asset];
+        if (source !== undefined) {
+          req.url = `/@fs/${path.join(islandsRoot, source)}`;
+          next();
+          return;
+        }
+        if (pathname === "/__authorbot/status" && options.status !== undefined) {
+          void options.status().then((status) => {
+            res.statusCode = 200;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.end(JSON.stringify(status));
+          }).catch((error: unknown) => {
+            res.statusCode = 500;
+            res.end(error instanceof Error ? error.message : String(error));
+          });
+          return;
+        }
+        next();
+      });
+    },
+  };
+
+  const server = await dev({
+    root: siteRoot,
+    output: "static",
+    base: "/",
+    integrations: [],
+    devToolbar: { enabled: false },
+    logLevel: "warn",
+    server: {
+      host: "127.0.0.1",
+      port: options.port ?? 4321,
+      open: false,
+    },
+    vite: {
+      plugins: [dynamicDataPlugin],
+      server: {
+        strictPort: true,
+        watch: {
+          usePolling: true,
+          interval: 250,
+          ignored: ["**/.git/**", "**/node_modules/**"],
+        },
+        proxy: {
+          "/v1": trackedProxy(),
+          "/__authorbot/bootstrap": trackedProxy(),
+        },
+      },
+    },
+  }) as DevServerHandle;
+  return {
+    url: `http://localhost:${String(server.address.port)}`,
+    stop: async () => {
+      // Vite waits for every pending request before closing. A proxied SSE
+      // stream is intentionally pending forever, so disconnect browser and
+      // WebSocket clients first and let the proxy cancel its upstream request.
+      for (const request of proxyRequests) request.destroy();
+      proxyRequests.clear();
+      if (viteServer !== null) {
+        await viteServer.ws.close();
+        const httpServer = viteServer.httpServer;
+        if (httpServer !== null && "closeAllConnections" in httpServer) {
+          httpServer.closeAllConnections();
+        }
+      }
+      await server.stop();
     },
   };
 }

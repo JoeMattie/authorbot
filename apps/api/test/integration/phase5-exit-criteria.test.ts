@@ -22,7 +22,7 @@ import {
   AUTHORBOT_GIT_NAME,
   GitHubBookRepoReader,
 } from "@authorbot/git-github";
-import { applyMigrations, openSqliteDatabase } from "@authorbot/database";
+import { applyMigrations, openSqliteDatabase } from "@authorbot/database/testing";
 import { createApi } from "../../src/app.js";
 import { createDevIdentityProvider } from "../../src/identity/provider.js";
 import {
