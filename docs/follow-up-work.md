@@ -20,8 +20,8 @@ retire order in the Phase 11 contract. Do not combine these steps.
    exact safe canonical projection while leaving legacy mode authoritative. It
    also carries the upgrade-helper safety fixes, but no D1 migration. Deploy
    and verify this Worker before preparing the backfill release.
-3. **Ship the capability backfill after the writer gate.** A later release can
-   add `0013_phase11_capabilities_backfill.sql` only after v0.1.35 is live.
+3. **Ship the capability backfill after the writer gate.** v0.1.36 can add
+   `0013_phase11_capabilities_backfill.sql` only after v0.1.35 is live.
    Validate it against legacy, canonical, revoked, and expired token rows. It
    must remain idempotent, preserve legacy mode, and leave ordinary legacy
    scopes available to the deployed dual-reader.

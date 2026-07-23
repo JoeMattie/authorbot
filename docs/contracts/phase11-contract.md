@@ -326,8 +326,8 @@ deprecated `{scopes}` mint request still wrote a null canonical projection.
 That is not sufficient for a one-shot backfill because author CI applies the
 migration before deploying its matching Worker. v0.1.35 therefore adds the
 missing legacy-request dual write and deliberately does not package
-`0013_phase11_capabilities_backfill.sql`. Slice 3B can ship only after this
-writer is deployed and verified healthy.
+`0013_phase11_capabilities_backfill.sql`. Slice 3B is reserved for v0.1.36 and
+can ship only after this writer is deployed and verified healthy.
 
 1. **Expand and dual-write gate releases.** Add a nullable `capabilities_v2`
    column and a `capability_mode` column defaulting to `legacy` on
@@ -343,11 +343,12 @@ writer is deployed and verified healthy.
    legacy shadow containing only grants whose old meaning cannot exceed the
    canonical set. A prior Worker during deployment or rollback may deny a
    newly-granular action, but it must never grant a broader one.
-2. **Backfill release.** Only after the dual-read, legacy dual-write Worker is
-   deployed, an idempotent migration fills null `capabilities_v2` values from
-   legacy scopes but leaves those rows in legacy mode and leaves their ordinary
-   legacy scopes intact. The deployed expand Worker can serve before, during,
-   and after this migration. The migration removes control-plane and unknown
+2. **Backfill release (v0.1.36).** Only after the dual-read, legacy dual-write
+   Worker is deployed, an idempotent migration fills null `capabilities_v2`
+   values from legacy scopes but leaves those rows in legacy mode and leaves
+   their ordinary legacy scopes intact. The deployed expand Worker can serve
+   before, during, and after this migration. The migration removes
+   control-plane and unknown
    names from the legacy column as an intentional security reduction and
    records an audit event. Revoked and expired tokens remain revoked or
    expired.
