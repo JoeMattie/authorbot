@@ -185,6 +185,16 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.append(controls);
   }
 
+  /** Let the read-only Notes surface take over without losing an edit draft. */
+  async prepareForExternalMode(): Promise<boolean> {
+    if (this.busy) return false;
+    if (this.session === null && this.recoveryPanel === null) return true;
+    this.persistDraft();
+    await this.destroySession(false);
+    this.setLauncherStatus("Chapter edit saved in this tab.");
+    return true;
+  }
+
   private async openEditor(): Promise<void> {
     if (
       this.session !== null || this.recoveryPanel !== null || this.editButton === null ||
@@ -194,6 +204,19 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.busy = true;
     this.editButton.disabled = true;
     this.setLauncherStatus("Loading chapter editor…");
+    const collab = [...document.querySelectorAll<HTMLElement>("authorbot-collab")]
+      .find((candidate) => candidate.dataset.chapterId === this.cfg.chapterId) as
+        | (HTMLElement & { prepareForExternalMode?: () => Promise<boolean> })
+        | undefined;
+    if (collab?.prepareForExternalMode !== undefined) {
+      const ready = await collab.prepareForExternalMode();
+      if (!ready || !this.current(generation)) {
+        this.busy = false;
+        this.editButton.disabled = false;
+        this.setLauncherStatus(ready ? "" : "The Notes view is still switching modes.", !ready);
+        return;
+      }
+    }
     const read = await this.store.getState().readChapterSource(this.cfg.chapterId);
     if (!this.current(generation)) return;
     if (!read.ok) {

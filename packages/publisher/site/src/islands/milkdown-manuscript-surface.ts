@@ -34,6 +34,7 @@ import {
 import "@milkdown/kit/prose/view/style/prosemirror.css";
 import { $prose } from "@milkdown/kit/utils";
 import type {
+  ChapterNoteHighlight,
   ChapterNotesTargetAdapter,
   TargetVisibilityListener,
 } from "./chapter-notes-presentation.js";
@@ -56,13 +57,6 @@ interface BlockRange {
   contentTo: number;
 }
 
-export interface MilkdownNoteHighlight {
-  blockId: string;
-  start: number;
-  end: number;
-  kind: "comment" | "suggestion";
-}
-
 interface InlineWidget {
   key: string;
   blockId: string | null;
@@ -71,7 +65,7 @@ interface InlineWidget {
 
 interface NotesModel {
   previews: Set<string>;
-  highlights: MilkdownNoteHighlight[];
+  highlights: ChapterNoteHighlight[];
   widgets: InlineWidget[];
 }
 
@@ -160,8 +154,12 @@ class DecorationsBridge {
       const to = Math.max(from, Math.min(range.contentTo, range.contentFrom + highlight.end));
       if (from === to) continue;
       decorations.push(Decoration.inline(from, to, {
-        class: `ab-inline-highlight ab-${highlight.kind}`,
+        class: `ab-inline-highlight ab-highlight-${highlight.kind}` +
+          (highlight.active ? " ab-highlight-active" : ""),
         "data-authorbot-note-target": highlight.blockId,
+        "data-authorbot-annotation-id": highlight.annotationId,
+        role: "button",
+        tabindex: "0",
       }));
     }
     for (const widget of this.model.widgets) {
@@ -284,7 +282,7 @@ class BlockNoteHandleView implements PluginView {
     this.button.addEventListener("blur", () => this.preview(false));
     this.button.addEventListener("click", () => {
       const id = this.activeBlockId();
-      if (id !== null) this.options.onBlockNote?.(id);
+      if (id !== null) this.options.onBlockNote?.(id, this.button);
     });
     this.provider = new BlockProvider({
       ctx,
@@ -404,7 +402,7 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
     this.bridge.refresh(this.view);
   }
 
-  setHighlights(highlights: readonly MilkdownNoteHighlight[]): void {
+  setHighlights(highlights: readonly ChapterNoteHighlight[]): void {
     this.bridge.model.highlights = [...highlights];
     this.bridge.refresh(this.view);
   }
@@ -509,6 +507,35 @@ export async function createManuscriptSurface(
     view.dom.setAttribute("aria-readonly", "true");
   }
   options.root.dataset.manuscriptMode = options.activation;
+  const activateNote = (event: Event): void => {
+    const origin = event.target;
+    if (!(origin instanceof Element)) return;
+    const target = origin.closest<HTMLElement>("[data-authorbot-annotation-id]");
+    const annotationId = target?.dataset.authorbotAnnotationId;
+    if (annotationId === undefined) return;
+    if (
+      event instanceof KeyboardEvent &&
+      event.key !== "Enter" &&
+      event.key !== " "
+    ) return;
+    if (event instanceof KeyboardEvent) event.preventDefault();
+    options.onNoteActivate?.(annotationId);
+  };
+  const projectBlockHover = (event: Event, active: boolean): void => {
+    const origin = event.target;
+    if (!(origin instanceof Element)) return;
+    const blockId = origin.closest<HTMLElement>("[data-authorbot-block-id]")
+      ?.dataset.authorbotBlockId;
+    if (blockId !== undefined) options.onBlockHover?.(blockId, active);
+  };
+  const blockEnter = (event: Event): void => projectBlockHover(event, true);
+  const blockLeave = (event: Event): void => projectBlockHover(event, false);
+  view.dom.addEventListener("click", activateNote);
+  view.dom.addEventListener("keydown", activateNote);
+  view.dom.addEventListener("pointerover", blockEnter);
+  view.dom.addEventListener("pointerout", blockLeave);
+  view.dom.addEventListener("focusin", blockEnter);
+  view.dom.addEventListener("focusout", blockLeave);
   const notes = new ProseMirrorChapterNotesAdapter(view, bridge, tooltip);
   const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (!dirty) return;
@@ -549,6 +576,12 @@ export async function createManuscriptSurface(
     },
     destroy: async () => {
       window.removeEventListener("beforeunload", warnBeforeUnload);
+      view.dom.removeEventListener("click", activateNote);
+      view.dom.removeEventListener("keydown", activateNote);
+      view.dom.removeEventListener("pointerover", blockEnter);
+      view.dom.removeEventListener("pointerout", blockLeave);
+      view.dom.removeEventListener("focusin", blockEnter);
+      view.dom.removeEventListener("focusout", blockLeave);
       notes.destroy();
       await crepe.destroy();
       options.root.replaceChildren();

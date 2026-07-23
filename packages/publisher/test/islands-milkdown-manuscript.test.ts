@@ -63,6 +63,7 @@ describe("Milkdown manuscript surface", () => {
   it("exposes accessible block and tooltip foundations without serializing their UI", async () => {
     const root = document.createElement("div");
     document.body.append(root);
+    let activated: string | null = null;
     const session = await createManuscriptSurface({
       root,
       markdown: SOURCE,
@@ -70,6 +71,9 @@ describe("Milkdown manuscript surface", () => {
       activation: "notes",
       accessibleName: "Notes for Loose Ends",
       allowBlockNotes: true,
+      onNoteActivate: (annotationId) => {
+        activated = annotationId;
+      },
     });
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -78,6 +82,20 @@ describe("Milkdown manuscript surface", () => {
     const tooltip = document.getElementById(handle?.getAttribute("aria-describedby") ?? "");
     expect(tooltip?.getAttribute("role")).toBe("tooltip");
     expect(root.querySelector('[role="region"]')?.getAttribute("aria-readonly")).toBe("true");
+    session.notes.setHighlights?.([{
+      annotationId: "annotation-1",
+      blockId: BLOCKS[0]!,
+      start: 2,
+      end: 7,
+      kind: "comment",
+      active: true,
+    }]);
+    const highlight = root.querySelector<HTMLElement>("[data-authorbot-annotation-id]");
+    expect(highlight?.classList.contains("ab-highlight-active")).toBe(true);
+    expect(highlight?.getAttribute("role")).toBe("button");
+    highlight?.click();
+    expect(activated).toBe("annotation-1");
+    expect(session.getMarkdown()).not.toContain("annotation-1");
     await session.destroy();
   });
 

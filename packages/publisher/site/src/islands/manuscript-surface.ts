@@ -24,7 +24,9 @@ export interface ManuscriptSurfaceOptions {
   activation: ManuscriptActivation;
   accessibleName: string;
   allowBlockNotes?: boolean;
-  onBlockNote?: (blockId: string) => void;
+  onBlockNote?: (blockId: string, returnFocus: HTMLElement) => void;
+  onNoteActivate?: (annotationId: string) => void;
+  onBlockHover?: (blockId: string, active: boolean) => void;
   onMarkdownChange?: (markdown: string) => void;
   /** Slice 4 supplies this. The editor never guesses an API route. */
   onSubmit?: (request: ManuscriptSubmitRequest) => Promise<ManuscriptSubmitResult>;

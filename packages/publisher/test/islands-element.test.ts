@@ -6,6 +6,16 @@ import {
   resetProjectStoresForTests,
   type ProjectStore,
 } from "../site/src/islands/project-store.js";
+import {
+  resetManuscriptSurfaceModuleLoaderForTests,
+  setManuscriptSurfaceModuleLoaderForTests,
+} from "../site/src/islands/manuscript-surface-loader.js";
+import type {
+  ManuscriptSurfaceModule,
+  ManuscriptSurfaceOptions,
+  ManuscriptSurfaceSession,
+} from "../site/src/islands/manuscript-surface.js";
+import type { ChapterNotesTargetAdapter } from "../site/src/islands/chapter-notes-presentation.js";
 
 /**
  * Smoke tests for the `<authorbot-collab>` element wiring (Phase 2b contract
@@ -68,6 +78,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetManuscriptSurfaceModuleLoaderForTests();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
@@ -272,6 +283,112 @@ describe("authorbot-collab element", () => {
       inline: "nearest",
       behavior: "smooth",
     });
+  });
+
+  it("activates the lazy Milkdown Notes surface only after an authenticated reader asks", async () => {
+    const highlights = vi.fn();
+    const destroy = vi.fn(async () => {});
+    const adapter: ChapterNotesTargetAdapter = {
+      elementFor: () => null,
+      observeVisibility: () => () => {},
+      setPreview: vi.fn(),
+      reveal: vi.fn(),
+      clearInlineNotes: vi.fn(),
+      mountInlineNote: vi.fn(),
+      setHighlights: highlights,
+    };
+    const create = vi.fn(async (options: ManuscriptSurfaceOptions) => {
+      options.root.append(document.createElement("div"));
+      return {
+        activation: "notes",
+        notes: adapter,
+        dirty: false,
+        getMarkdown: () => options.markdown,
+        focus: vi.fn(),
+        submit: vi.fn(),
+        destroy,
+      } as unknown as ManuscriptSurfaceSession;
+    });
+    setManuscriptSurfaceModuleLoaderForTests(async () => ({
+      createManuscriptSurface: create,
+    } satisfies ManuscriptSurfaceModule));
+    stubFetch({
+      [`${API}/v1/me`]: {
+        status: 200,
+        body: {
+          actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+          scopes: [],
+          capabilityMode: "canonical",
+          effectiveCapabilities: ["chapters:read", "comments:read"],
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/members`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: {
+          items: [{
+            id: "ann-rich",
+            chapterId: CHAPTER_ID,
+            kind: "comment",
+            scope: "range",
+            chapterRevision: 3,
+            target: {
+              blockId: BLOCK_ID,
+              textPosition: { start: 4, end: 9 },
+              textQuote: { exact: "drift" },
+            },
+            authorActorId: "actor-1",
+            body: "Keep this anchored in rich Notes mode.",
+            status: "open",
+            gitOperationId: null,
+            createdAt: "2026-07-19T00:00:00Z",
+          }],
+          nextCursor: null,
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/ann-rich/replies`]: {
+        status: 200,
+        body: { items: [], nextCursor: null },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/source`]: {
+        status: 200,
+        body: {
+          chapterId: CHAPTER_ID,
+          title: "Loose Ends",
+          summary: null,
+          revision: 3,
+          contentHash: `sha256:${"a".repeat(64)}`,
+          status: "published",
+          body: "The drift appeared on a Tuesday.",
+        },
+      },
+    });
+    mount();
+    await expect.poll(() => document.querySelector<HTMLButtonElement>(".ab-notes-mode-toggle"))
+      .toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+    const toggle = document.querySelector<HTMLButtonElement>(".ab-notes-mode-toggle")!;
+    toggle.click();
+    await expect.poll(() => create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      activation: "notes",
+      markdown: "The drift appeared on a Tuesday.",
+      blockIds: [BLOCK_ID],
+      allowBlockNotes: false,
+    });
+    expect((document.querySelector(".prose") as HTMLElement).hidden).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(highlights).toHaveBeenCalledWith([
+      expect.objectContaining({ annotationId: "ann-rich", blockId: BLOCK_ID }),
+    ]);
+
+    toggle.click();
+    await expect.poll(() => destroy).toHaveBeenCalledTimes(1);
+    expect((document.querySelector(".prose") as HTMLElement).hidden).toBe(false);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("mounts and activates a source-note fragment after annotations hydrate", async () => {

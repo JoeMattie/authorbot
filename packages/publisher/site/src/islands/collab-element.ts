@@ -44,6 +44,8 @@ import {
 import { captureRange, type CapturedSelection } from "./selection.js";
 import { clearRangeHighlights, rangeForSelector } from "./range-highlight.js";
 import { VoteControl } from "./vote-control.js";
+import { createLazyManuscriptSurface } from "./manuscript-surface-loader.js";
+import type { ManuscriptSurfaceSession } from "./manuscript-surface.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 import {
@@ -221,6 +223,8 @@ export class AuthorbotCollab extends HTMLElement {
   private railCount!: HTMLElement;
   private previousNoteBtn!: HTMLButtonElement;
   private nextNoteBtn!: HTMLButtonElement;
+  private notesModeBtn!: HTMLButtonElement;
+  private notesModeStatus!: HTMLElement;
   private authbar!: HTMLElement;
   private cardsHost!: HTMLElement;
   private discussion!: HTMLElement;
@@ -253,7 +257,12 @@ export class AuthorbotCollab extends HTMLElement {
   /** The last deep link applied, so background refreshes never steal scroll. */
   private activatedNoteFragment: string | null = null;
   private targetAdapter!: ChapterNotesTargetAdapter;
+  private staticTargetAdapter!: StaticChapterNotesTargetAdapter;
   private stopTargetVisibility: (() => void) | null = null;
+  private notesSurface: ManuscriptSurfaceSession | null = null;
+  private notesSurfaceRoot: HTMLElement | null = null;
+  private notesModeBusy = false;
+  private notesActivation = 0;
 
   private mql!: MediaQueryList;
   private started = false;
@@ -324,6 +333,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.releaseConnection = null;
     this.stopTargetVisibility?.();
     this.stopTargetVisibility = null;
+    void this.destroyNotesSurface(false);
     if (this.refetchTimer !== undefined) {
       window.clearTimeout(this.refetchTimer);
       this.refetchTimer = undefined;
@@ -365,6 +375,15 @@ export class AuthorbotCollab extends HTMLElement {
 
     this.railHeader = el("header", "ab-rail-head");
     this.railHeader.append(el("span", "ab-rail-eyebrow", "Notes on this chapter"));
+    this.notesModeBtn = el("button", "ab-notes-mode-toggle", "Read with notes");
+    this.notesModeBtn.type = "button";
+    this.notesModeBtn.hidden = !this.canReadChapter();
+    this.notesModeBtn.setAttribute("aria-pressed", "false");
+    this.notesModeBtn.addEventListener("click", () => void this.toggleNotesSurface());
+    this.notesModeStatus = el("span", "ab-sr");
+    this.notesModeStatus.setAttribute("role", "status");
+    this.notesModeStatus.setAttribute("aria-live", "polite");
+    this.railHeader.append(this.notesModeBtn, this.notesModeStatus);
     const noteNav = el("nav", "ab-note-nav");
     noteNav.setAttribute("aria-label", "Navigate chapter notes");
     this.previousNoteBtn = el("button", "ab-note-nav-btn", "‹");
@@ -522,7 +541,7 @@ export class AuthorbotCollab extends HTMLElement {
 
       // §2.1 "and vice-versa": hovering/focusing the anchor block highlights
       // its cards (the card→block direction lives in buildCard).
-      const highlight = (on: boolean): void => this.setBlockHighlight(block, on);
+      const highlight = (on: boolean): void => this.setBlockHighlight(block.id.slice(2), on);
       block.addEventListener("mouseenter", () => highlight(true));
       block.addEventListener("mouseleave", () => highlight(false));
       block.addEventListener("focusin", () => highlight(true));
@@ -533,11 +552,21 @@ export class AuthorbotCollab extends HTMLElement {
       });
     }
 
-    this.targetAdapter = new StaticChapterNotesTargetAdapter(
+    this.staticTargetAdapter = new StaticChapterNotesTargetAdapter(
       this.proseEl,
       this.blocks,
       this.blockUis,
     );
+    this.targetAdapter = this.staticTargetAdapter;
+    this.observeTargetVisibility();
+
+    this.mql = window.matchMedia(DESKTOP_QUERY);
+    this.placeContainers();
+    this.connectGlobalListeners();
+  }
+
+  private observeTargetVisibility(): void {
+    this.stopTargetVisibility?.();
     this.stopTargetVisibility = this.targetAdapter.observeVisibility((blockId, visible) => {
       if (visible) {
         this.visibleBlockIds.add(blockId);
@@ -552,10 +581,6 @@ export class AuthorbotCollab extends HTMLElement {
       this.refreshCardExpansion();
       this.layout();
     });
-
-    this.mql = window.matchMedia(DESKTOP_QUERY);
-    this.placeContainers();
-    this.connectGlobalListeners();
   }
 
   private connectGlobalListeners(): void {
@@ -576,6 +601,154 @@ export class AuthorbotCollab extends HTMLElement {
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("load", this.onWindowLoad);
     window.removeEventListener("hashchange", this.onHashChange);
+  }
+
+  /** Called by the chapter editor before it takes ownership of the manuscript. */
+  async prepareForExternalMode(): Promise<boolean> {
+    if (this.notesSurface === null && this.notesSurfaceRoot === null) return true;
+    await this.destroyNotesSurface(true);
+    return true;
+  }
+
+  private async toggleNotesSurface(): Promise<void> {
+    if (this.notesModeBusy) return;
+    if (this.notesSurface !== null || this.notesSurfaceRoot !== null) {
+      await this.destroyNotesSurface(true);
+      return;
+    }
+    if (!this.canReadChapter()) return;
+    const generation = this.mountGeneration;
+    const activation = ++this.notesActivation;
+    this.notesModeBusy = true;
+    this.notesModeBtn.disabled = true;
+    this.notesModeStatus.textContent = "Loading the rich Notes view…";
+
+    const editor = [...document.querySelectorAll<HTMLElement>("authorbot-manuscript-editor")]
+      .find((candidate) => candidate.dataset.chapterId === this.cfg?.chapterId) as
+        | (HTMLElement & { prepareForExternalMode?: () => Promise<boolean> })
+        | undefined;
+    if (editor?.prepareForExternalMode !== undefined) {
+      const ready = await editor.prepareForExternalMode();
+      if (!ready || !this.isCurrentMount(generation) || activation !== this.notesActivation) {
+        this.notesModeBusy = false;
+        this.notesModeBtn.disabled = false;
+        this.notesModeStatus.textContent = ready ? "" : "The chapter edit is still open.";
+        return;
+      }
+    }
+
+    const read = await this.store.getState().readChapterSource((this.cfg as Config).chapterId);
+    if (!this.isCurrentMount(generation) || activation !== this.notesActivation) return;
+    if (!read.ok || read.value.chapterId !== this.cfg?.chapterId) {
+      this.notesModeBusy = false;
+      this.notesModeBtn.disabled = false;
+      this.notesModeStatus.textContent = `The rich Notes view could not open: ${
+        read.ok ? "the source response did not match this chapter" : read.message
+      }.`;
+      return;
+    }
+
+    const root = el("div", "ab-manuscript-notes-root");
+    this.notesSurfaceRoot = root;
+    this.proseEl.insertAdjacentElement("afterend", root);
+    try {
+      const session = await createLazyManuscriptSurface({
+        root,
+        markdown: read.value.body,
+        blockIds: this.blocks.map((block) => block.id.slice(2)),
+        activation: "notes",
+        accessibleName: `Notes for ${read.value.title}`,
+        allowBlockNotes: this.canWrite(),
+        onBlockNote: (blockId, returnFocus) => {
+          if (!this.canWrite()) {
+            this.promptSignIn();
+            return;
+          }
+          this.openComposer(
+            {
+              kind: this.canComment() ? "comment" : "suggestion",
+              scope: "block",
+              blockId,
+              selector: null,
+              body: "",
+            },
+            returnFocus,
+          );
+        },
+        onNoteActivate: (annotationId) => this.activateAnnotation(annotationId, true),
+        onBlockHover: (blockId, active) => this.setBlockHighlight(blockId, active),
+      });
+      if (
+        !this.isCurrentMount(generation) ||
+        activation !== this.notesActivation ||
+        this.notesSurfaceRoot !== root
+      ) {
+        await session.destroy();
+        root.remove();
+        return;
+      }
+      clearRangeHighlights(this.proseEl);
+      this.notesSurface = session;
+      this.proseEl.hidden = true;
+      this.targetAdapter = session.notes;
+      this.visibleBlockIds.clear();
+      this.observeTargetVisibility();
+      this.notesModeBtn.textContent = "Static reading view";
+      this.notesModeBtn.setAttribute("aria-pressed", "true");
+      this.notesModeStatus.textContent = "Rich Notes view opened.";
+      this.renderAll();
+      session.focus();
+    } catch (caught) {
+      if (this.notesSurfaceRoot === root) this.notesSurfaceRoot = null;
+      root.remove();
+      this.notesModeStatus.textContent = `The rich Notes view could not open: ${
+        caught instanceof Error ? caught.message : String(caught)
+      }`;
+    } finally {
+      if (this.isCurrentMount(generation)) {
+        this.notesModeBusy = false;
+        this.notesModeBtn.disabled = false;
+      }
+    }
+  }
+
+  private async destroyNotesSurface(announce: boolean): Promise<void> {
+    this.notesActivation += 1;
+    this.notesModeBusy = true;
+    if (this.composer.phase !== "closed") this.closeComposer();
+    this.stopTargetVisibility?.();
+    this.stopTargetVisibility = null;
+    const session = this.notesSurface;
+    const root = this.notesSurfaceRoot;
+    this.notesSurface = null;
+    this.notesSurfaceRoot = null;
+    if (session !== null) {
+      try {
+        await session.destroy();
+      } catch {
+        // Mode switching must restore the static manuscript even if a lazy
+        // editor chunk fails while tearing down its presentation-only state.
+      }
+    }
+    root?.remove();
+    this.proseEl.hidden = false;
+    if (this.staticTargetAdapter !== undefined) {
+      this.targetAdapter = this.staticTargetAdapter;
+      this.visibleBlockIds.clear();
+      if (this.started && this.isConnected) {
+        this.observeTargetVisibility();
+        if (this.scaffolded) this.renderAll();
+      }
+    }
+    if (this.notesModeBtn !== undefined) {
+      this.notesModeBtn.textContent = "Read with notes";
+      this.notesModeBtn.setAttribute("aria-pressed", "false");
+      this.notesModeBtn.disabled = false;
+    }
+    if (announce && this.notesModeStatus !== undefined) {
+      this.notesModeStatus.textContent = "Static reading view restored.";
+    }
+    this.notesModeBusy = false;
   }
 
   private readonly onWindowLoad = (): void => this.layout();
@@ -832,6 +1005,9 @@ export class AuthorbotCollab extends HTMLElement {
     if (projectionUnchanged) return;
     this.me = state.session;
     if (sessionChanged) this.memberNames = new Map();
+    if (this.notesSurface !== null && (sessionChanged || !this.canReadChapter())) {
+      void this.destroyNotesSurface(false);
+    }
     const nextAnnotations = ids.flatMap((id) => state.annotationsById[id] ?? []);
     const onlyVoteDataChanged =
       nextAnnotations.length === this.annotations.length &&
@@ -967,6 +1143,10 @@ export class AuthorbotCollab extends HTMLElement {
     return this.canComment() || this.canSuggest();
   }
 
+  private canReadChapter(): boolean {
+    return hasEffectiveCapability(this.me, "chapters:read", "chapters:read");
+  }
+
   private canComment(): boolean {
     return hasEffectiveCapability(this.me, "chapters:read", "chapters:read") &&
       hasEffectiveCapability(this.me, "comments:write", "annotations:write");
@@ -1037,9 +1217,8 @@ export class AuthorbotCollab extends HTMLElement {
     target.focus();
   }
 
-  /** §2.1: highlight every card anchored to `block` (and the block itself). */
-  private setBlockHighlight(block: HTMLElement, on: boolean): void {
-    const blockId = block.id.slice(2);
+  /** §2.1: highlight every card anchored to a manuscript block. */
+  private setBlockHighlight(blockId: string, on: boolean): void {
     for (const annotation of this.visibleNotes()) {
       if (annotation.target?.blockId !== blockId) {
         continue;
@@ -1072,6 +1251,7 @@ export class AuthorbotCollab extends HTMLElement {
     for (const mark of this.proseEl.querySelectorAll<HTMLElement>(".ab-inline-highlight")) {
       mark.classList.toggle("ab-highlight-active", mark.dataset.annotationId === annotationId);
     }
+    if (this.targetAdapter.setHighlights !== undefined) this.renderRangeHighlights();
     const card = this.cardEls.get(annotationId);
     card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     if (moveFocus) {
@@ -1146,7 +1326,6 @@ export class AuthorbotCollab extends HTMLElement {
   }
 
   private renderRangeHighlights(): void {
-    clearRangeHighlights(this.proseEl);
     const annotations = this.visibleNotes()
       .filter(
         (annotation) =>
@@ -1158,6 +1337,24 @@ export class AuthorbotCollab extends HTMLElement {
         (a, b) =>
           (b.target?.textPosition?.start ?? 0) - (a.target?.textPosition?.start ?? 0),
       );
+    if (this.targetAdapter.setHighlights !== undefined) {
+      this.targetAdapter.setHighlights(annotations.flatMap((annotation) => {
+        const position = annotation.target?.textPosition;
+        const blockId = annotation.target?.blockId;
+        return position === undefined || blockId === undefined
+          ? []
+          : [{
+              annotationId: annotation.id,
+              blockId,
+              start: position.start,
+              end: position.end,
+              kind: annotation.kind,
+              active: annotation.id === this.activeAnnotationId,
+            }];
+      }));
+      return;
+    }
+    clearRangeHighlights(this.proseEl);
     for (const annotation of annotations) {
       const block = this.blockFor(annotation);
       const target = annotation.target;
@@ -1378,6 +1575,7 @@ export class AuthorbotCollab extends HTMLElement {
   private closeComposer(): void {
     const blockId = this.composer.draft?.blockId ?? null;
     this.dispatchComposer({ type: "cancel" });
+    this.targetAdapter.closeComposer?.();
     if (blockId !== null) this.targetAdapter.setPreview(blockId, false);
     this.layout();
     // The recorded return-focus element may be gone or hidden (the selection
@@ -1396,6 +1594,11 @@ export class AuthorbotCollab extends HTMLElement {
   private blockAffordance(blockId: string | null): HTMLElement | null {
     if (blockId === null) {
       return null;
+    }
+    if (this.notesSurface !== null) {
+      const block = this.targetAdapter.elementFor(blockId);
+      if (block !== null) block.tabIndex = -1;
+      return block;
     }
     const block = this.blocks.find((candidate) => candidate.id === `b-${blockId}`);
     const ui = block === undefined ? undefined : this.blockUis.get(block);
@@ -1423,6 +1626,7 @@ export class AuthorbotCollab extends HTMLElement {
     // captured draft below, so immediate feedback never costs the user's text.
     this.composer = CLOSED;
     this.composerReturnFocus = null;
+    this.targetAdapter.closeComposer?.();
     if (draft.blockId !== null) this.targetAdapter.setPreview(draft.blockId, false);
     this.renderComposer();
     if (draft.scope === "chapter") {
@@ -1604,6 +1808,17 @@ export class AuthorbotCollab extends HTMLElement {
     this.composerEl = form;
     if (draft.scope === "chapter") {
       this.discussionComposerHost.replaceChildren(form);
+    } else if (
+      draft.scope === "range" &&
+      draft.selector !== null &&
+      this.targetAdapter.mountComposer?.(
+        draft.blockId as string,
+        draft.selector.textPosition.start,
+        draft.selector.textPosition.end,
+        form,
+      ) === true
+    ) {
+      // The Milkdown tooltip owns placement beside the selected passage.
     } else if (this.isDesktop) {
       this.cardsHost.prepend(form);
     } else {
@@ -1626,6 +1841,9 @@ export class AuthorbotCollab extends HTMLElement {
     ) {
       this.renderAuthbar();
       this.renderedAuthSession = this.me;
+    }
+    if (this.notesModeBtn !== undefined) {
+      this.notesModeBtn.hidden = !this.canReadChapter();
     }
     this.cardEls.clear();
     this.voteControls.clear();

@@ -415,6 +415,26 @@ authorbot-manuscript-editor:empty {
   box-shadow: var(--shadow-md, 0 10px 28px rgba(0, 0, 0, 0.16));
 }
 
+.ab-manuscript-notes-root {
+  width: 100%;
+  max-width: 64ch;
+  color: var(--text-body, var(--fg));
+  font: 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
+  text-wrap: pretty;
+}
+
+.ab-manuscript-notes-root .milkdown,
+.ab-manuscript-notes-root .ProseMirror {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+}
+
+.ab-manuscript-notes-root .ProseMirror {
+  padding: 0;
+  outline: 0;
+}
+
 .ab-manuscript-editor-root .milkdown,
 .ab-manuscript-editor-root .ProseMirror {
   box-sizing: border-box;
@@ -1668,10 +1688,34 @@ authorbot-manuscript-editor:empty {
 
 .ab-rail-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 12px;
+}
+
+.ab-notes-mode-toggle {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 7px;
+  background: var(--surface-card, var(--bg));
+  color: var(--text-body, var(--fg));
+  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.ab-notes-mode-toggle:hover:not(:disabled),
+.ab-notes-mode-toggle:focus-visible,
+.ab-notes-mode-toggle[aria-pressed="true"] {
+  border-color: var(--blue-500, var(--link));
+  background: var(--surface-selected, var(--surface));
+  outline: 0;
+}
+
+.ab-notes-mode-toggle[hidden] {
+  display: none;
 }
 
 .ab-note-nav {

@@ -58,6 +58,16 @@ export function noteIsExpanded(
 
 export type TargetVisibilityListener = (blockId: string, visible: boolean) => void;
 
+/** Presentation-only range decoration projected from durable annotation data. */
+export interface ChapterNoteHighlight {
+  annotationId: string;
+  blockId: string;
+  start: number;
+  end: number;
+  kind: "comment" | "suggestion";
+  active: boolean;
+}
+
 /**
  * The view capabilities notes need from a manuscript renderer.
  *
@@ -72,6 +82,16 @@ export interface ChapterNotesTargetAdapter {
   reveal(blockId: string, behavior?: ScrollBehavior): void;
   clearInlineNotes(): void;
   mountInlineNote(blockId: string | null, note: HTMLElement): void;
+  /** Rich manuscript surfaces render highlights as document decorations. */
+  setHighlights?(highlights: readonly ChapterNoteHighlight[]): void;
+  /** Rich manuscript surfaces can keep a range composer beside its selection. */
+  mountComposer?(
+    blockId: string,
+    start: number,
+    end: number,
+    composer: HTMLElement,
+  ): boolean;
+  closeComposer?(): void;
 }
 
 export class StaticChapterNotesTargetAdapter implements ChapterNotesTargetAdapter {
