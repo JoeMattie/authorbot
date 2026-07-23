@@ -186,6 +186,15 @@ be compatible with the code already running. Destructive changes (dropping a
 column, tightening a constraint) require two releases - expand in one,
 contract in the next.
 
+Releases are skippable. A one-shot backfill cannot assume that every book
+deployed the immediately preceding writer release, even when that is the
+documented path. If an older Worker could create or mutate rows after a
+backfill passes them, the migration must install a compatible database guard
+before the backfill or the upgrade path must enforce and verify the
+intermediate deployment. A database guard remains through rollback and is
+removed only by the later contract release that no longer supports the old
+writer.
+
 ### 5. Rollback
 
 Rolling back the toolchain is setting the pin to the previous tag and

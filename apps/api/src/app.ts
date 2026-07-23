@@ -21,12 +21,12 @@ import {
   createReplyCommandSchema,
   isWorkItemTerminal,
   legacyScopeShadow,
+  parseLegacyScopes,
   resolveSessionExpiry,
   resolveTokenExpiry,
   roleSchema,
   roleScopes,
   toTimestamp,
-  translateLegacyScopes,
   withdrawReplyCommandSchema,
   AGENT_TOKEN_PREFIX,
   type EditorialCapability,
@@ -951,16 +951,28 @@ export function createApi(deps: AppDeps): AuthorbotApi {
     const plaintext = `${AGENT_TOKEN_PREFIX}${randomBase64Url(32)}`;
     const tokenHash = await sha256Hex(plaintext);
     const canonical = command.authorizationMode === "canonical";
+    let capabilities: EditorialCapability[];
+    let tokenScopes: string[];
+    let removedLegacyScopes: string[];
+
     // The legacy request alias remains legacy-authoritative until the 3C
     // retirement window, but it must still maintain the canonical projection.
-    // A later one-shot backfill is safe only after every supported writer does
-    // this dual write.
-    const capabilities = canonical
-      ? command.capabilities
-      : translateLegacyScopes(command.scopes);
-    const tokenScopes = canonical
-      ? legacyScopeShadow(command.capabilities)
-      : command.scopes;
+    // Sanitize it before constructing any externally visible or durable
+    // representation so the response, idempotency replay, mint audit, and
+    // stored row all describe the same safe grant.
+    if (command.authorizationMode === "canonical") {
+      capabilities = [...command.capabilities];
+      tokenScopes = legacyScopeShadow(command.capabilities);
+      removedLegacyScopes = [];
+    } else {
+      const legacy = parseLegacyScopes(command.scopes);
+      if (!legacy.ok) {
+        return problem(c, "validation-failed", { detail: legacy.reason });
+      }
+      capabilities = [...legacy.capabilities];
+      tokenScopes = [...legacy.scopes];
+      removedLegacyScopes = [...legacy.removedScopes];
+    }
 
     const tokenRecord: AgentTokenRecord = {
       id: tokenId,
@@ -1007,6 +1019,30 @@ export function createApi(deps: AppDeps): AuthorbotApi {
         revokedAt: null,
       }),
       repos.agentTokens.insertStatement(tokenRecord),
+      ...(removedLegacyScopes.length === 0
+        ? []
+        : [
+            // The row is already converged before it reaches the 0013
+            // compatibility trigger, so this request-authored event is the
+            // single authoritative record of names removed at the API edge.
+            repos.auditEvents.insertStatement({
+              id: uuidv7(clock.now()),
+              projectId: guard.project.id,
+              actorId: a.actor.id,
+              action: "agent_token.legacy_scopes.sanitized",
+              targetType: "agent_token",
+              targetId: tokenId,
+              correlationId: c.get("correlationId"),
+              metadata: {
+                source: "legacy-mint",
+                capabilityMode: "legacy",
+                reason: "control-plane-or-unknown-scope",
+                removedScopes: removedLegacyScopes,
+                retainedScopes: tokenRecord.scopes,
+              },
+              createdAt: timestamp,
+            }),
+          ]),
       // Phase 7 contract "Seeing": collaborators are listed with "who added
       // them". Minting is the one place a membership is granted BY someone
       // rather than self-served, so it is the one place that fact exists to be

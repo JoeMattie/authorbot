@@ -25,12 +25,20 @@ retire order in the Phase 11 contract. Do not combine these steps.
    cover every legacy scope combination plus canonical, revoked, expired,
    unknown, and malformed rows. It remains idempotent, preserves legacy mode,
    and leaves ordinary legacy scopes available to the deployed dual-reader.
+   A persistent database guard applies the same projection to old-Worker
+   inserts and authority-field updates, closing the direct-skip and rollback
+   race until Phase 3C retires legacy mode.
 4. **Wait on Phase 3C legacy retirement.** Do not retire the legacy read path or
    remove its storage during the releases above. Phase 3C starts only after
    the documented compatibility window, supported token rows have been
    converted, and the rollback conditions in the Phase 11 contract are met.
    Legacy shadow writes continue for the additional required release before a
-   later contract migration can remove them.
+   later contract migration can remove them. That migration must drop
+   `agent_tokens_phase11_legacy_insert`, then
+   `agent_tokens_phase11_legacy_update`, then
+   `_phase11_legacy_token_projection` before rebuilding or removing legacy
+   columns. Do not remove this shield while rollback to an old writer remains
+   supported.
 
 ## Repository hygiene
 

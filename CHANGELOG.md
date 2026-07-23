@@ -13,15 +13,26 @@ always the same commit.
 
 - **Legacy agent-token rows now have a canonical capability projection.** D1
   migration `0013_phase11_capabilities_backfill.sql` translates every
-  legacy-mode token after the v0.1.35 dual-writer gate. It leaves
+  legacy-mode token after the v0.1.35 dual-writer release gate. Individual
+  books may safely skip straight from an older supported Worker. It leaves
   `capability_mode` as `legacy`, keeps ordinary legacy scopes authoritative,
   and does not change expiry or revocation state. Unknown and control-plane
   scope names are removed as an intentional authority reduction and recorded
-  in the audit trail; malformed legacy scope sets fail closed.
+  in the audit trail; malformed legacy scope sets fail closed. A persistent
+  database guard applies the same translation to legacy inserts and authority
+  updates, so a direct version skip or Worker rollback cannot reopen a
+  post-backfill gap. Deprecated legacy mint responses and audits now report
+  the same sanitized scopes that are actually stored.
 - This is the Phase 3B backfill only. It includes no book-format migration and
-  does not retire the legacy reader, change legacy endpoint behavior, or remove
-  legacy storage. Phase 3C remains separately gated by its compatibility and
+  does not retire legacy authorization semantics, remove the legacy
+  compatibility endpoint, or remove legacy storage. The compatibility guard
+  remains until Phase 3C, which is separately gated by its compatibility and
   rollback window.
+- Books already on 0.1.35 can run the ordinary `npx authorbot upgrade`. A book
+  on 0.1.34 or earlier needs one explicit
+  `npx --yes @authorbot/cli@0.1.36 upgrade --to 0.1.36`. After the resulting PR
+  is merged and the checkout is installed, ordinary `npx authorbot upgrade`
+  owns later handoffs automatically.
 
 ## 0.1.35
 

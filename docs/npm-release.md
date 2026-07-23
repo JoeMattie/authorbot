@@ -70,6 +70,21 @@ code keeps serving in between. Dropping a column or tightening a constraint
 therefore takes two releases: expand in one, contract in the next. There is no
 way to shortcut this without giving some author a broken deploy window.
 
+Release tags are skippable too. A one-shot backfill must be safe when a book
+upgrades from an older supported Worker straight to the new tag. If that old
+Worker can write rows the backfill would miss, install a compatible database
+guard before transforming existing rows and retain it through the rollback
+window. Documentation that merely asks every author to deploy an intermediate
+tag is not a sufficient release gate.
+
+**Pre-1 release train.** While Authorbot remains on the `0.1.x` line, the
+patch component is the next ordered release, and may contain backward-compatible
+features or expand-phase migrations. The compatibility classes below still
+govern what may ship and how it rolls out, but they map to SemVer components
+only after the 1.0 contract is declared. This records the existing pre-1
+practice explicitly instead of making a `0.1.x` migration look like an
+accidental exception.
+
 **Choosing a number**, in the terms above:
 
 - **patch** - bug fixes; no new validation errors, no schema change.
@@ -272,10 +287,12 @@ toolchain reading files a newer one rewrote (ADR-0021 §5).
   touching prose. `--rollback` does **not** do this for you - it names the
   migrations that ran between the two versions and leaves the revert to you,
   because reverting prose is a decision, not a side effect of a pin change.
-- **Database:** there is no automatic down-migration. Expand/contract is what
-  makes this survivable - the previous Worker can run against the expanded
-  schema, so rolling the Worker back is enough and the extra column is
-  harmless.
+- **Database:** there is no automatic down-migration. Applied D1 migrations
+  remain in place when the toolchain pin moves backward. Expand/contract makes
+  this survivable: the previous Worker can run against the expanded schema.
+  For v0.1.36, the persistent capability-projection triggers also remain and
+  intentionally normalize legacy writes made by that old Worker. They are the
+  rollback guard, not state that the rollback removes.
 
 Re-validate after any rollback. `authorbot upgrade` does this for you in both
 directions.
