@@ -99,7 +99,9 @@ export type Annotation = z.infer<typeof annotationSchema>;
  * Reply frontmatter `.authorbot/annotations/<id>/replies/<reply-id>.md` -
  * `authorbot.reply/v1`. The contract pins only the schema ID; fields follow
  * the Reply entity of design section 9.1 (ID, annotation ID, optional parent
- * reply, author, timestamps). The reply body is the Markdown content itself.
+ * reply, author, timestamps). `status` is optional for compatibility with
+ * artifacts written before reply withdrawal shipped; absence means `open`.
+ * The reply body is the Markdown content itself.
  */
 export const replySchema = z.strictObject({
   schema: z.literal("authorbot.reply/v1"),
@@ -107,6 +109,7 @@ export const replySchema = z.strictObject({
   annotation_id: uuidv7Schema,
   parent_reply_id: uuidv7Schema.optional(),
   author: actorRefSchema,
+  status: z.enum(["open", "withdrawn"]).optional(),
   created_at: timestampSchema,
   updated_at: timestampSchema.optional(),
 });

@@ -102,6 +102,7 @@ export {
   orderedRangeTargetSchema,
   utf8ByteLength,
   withdrawAnnotationCommandSchema,
+  withdrawReplyCommandSchema,
 } from "./commands.js";
 export type {
   CreateAnnotationCommand,
@@ -109,6 +110,7 @@ export type {
   MintAgentTokenCommand,
   MintAgentTokenCommandInput,
   WithdrawAnnotationCommand,
+  WithdrawReplyCommand,
 } from "./commands.js";
 
 export {

@@ -481,6 +481,37 @@ export class RepliesRepository {
     return result.changes > 0;
   }
 
+  setGitOperationStatement(id: string, gitOperationId: string, updatedAt: string): SqlStatement {
+    return this.db
+      .prepare(`UPDATE replies SET git_operation_id = ?, updated_at = ? WHERE id = ?`)
+      .bind(gitOperationId, updatedAt, id);
+  }
+
+  /**
+   * Attach a withdrawal operation only while the same open projection row is
+   * still current. The NOT NULL status constraint aborts the surrounding
+   * batch if another Worker invocation won the race after the caller's read.
+   */
+  setWithdrawalOperationStatement(
+    id: string,
+    expectedGitOperationId: string | null,
+    gitOperationId: string,
+    updatedAt: string,
+  ): SqlStatement {
+    return this.db
+      .prepare(
+        `UPDATE replies
+            SET status = CASE
+                  WHEN status = 'open' AND git_operation_id IS ? THEN 'open'
+                  ELSE NULL
+                END,
+                git_operation_id = ?,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(expectedGitOperationId, gitOperationId, updatedAt, id);
+  }
+
   /** Insert-or-update by id (see AnnotationsRepository.upsertStatement). */
   upsertStatement(record: ReplyRecord): SqlStatement {
     return this.db

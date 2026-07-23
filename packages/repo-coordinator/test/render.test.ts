@@ -178,6 +178,7 @@ describe("renderReplyArtifact", () => {
         `id: ${REPLY_ID}\n` +
         `annotation_id: ${ANNOTATION_ID}\n` +
         "author: github:avery-cole\n" +
+        "status: open\n" +
         "created_at: 2026-07-06T09:10:00Z\n" +
         "---\n" +
         "\n" +
@@ -196,6 +197,16 @@ describe("renderReplyArtifact", () => {
     const withParent = renderReplyArtifact({ ...replyInput(), parentReplyId: parentId });
     const parsed = replySchema.parse(parseChapterMarkdown(withParent.content).frontmatter);
     expect(parsed.parent_reply_id).toBe(parentId);
+  });
+
+  it("rewrites only the status line when a reply is withdrawn", () => {
+    const open = renderReplyArtifact(replyInput());
+    const withdrawn = renderReplyArtifact({ ...replyInput(), status: "withdrawn" });
+    expect(withdrawn.path).toBe(open.path);
+    expect(withdrawn.content).toBe(open.content.replace("status: open\n", "status: withdrawn\n"));
+    expect(
+      replySchema.parse(parseChapterMarkdown(withdrawn.content).frontmatter).status,
+    ).toBe("withdrawn");
   });
 });
 

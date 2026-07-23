@@ -248,6 +248,7 @@ export class AuthorbotCollab extends HTMLElement {
   private openReplyFor: string | null = null;
   private replyParent: string | null = null;
   private confirmWithdraw: string | null = null;
+  private confirmWithdrawReply: string | null = null;
   private lastCapture: CapturedSelection | null = null;
   private activeAnnotationId: string | null = null;
   private discussionVisibleLimit = DISCUSSION_PAGE_SIZE;
@@ -1015,7 +1016,7 @@ export class AuthorbotCollab extends HTMLElement {
 
   // ---- votes (Phase 3 contract §2/§6) --------------------------------------
 
-  /** Cast (`value`) or clear (`null`) the viewer's vote on a suggestion. */
+  /** Cast (`value`) or clear (`null`) the viewer's vote on feedback. */
   private async castVoteOn(annotationId: string, value: VoteValue | null): Promise<void> {
     const annotation = this.annotations.find((a) => a.id === annotationId);
     const control = this.voteControls.get(annotationId);
@@ -1124,6 +1125,16 @@ export class AuthorbotCollab extends HTMLElement {
   private canWithdraw(annotation: Annotation): boolean {
     if (this.me === null) return false;
     if (this.me.actor.id === annotation.authorActorId) {
+      return hasEffectiveCapability(this.me, "feedback:withdraw-own", "annotations:write");
+    }
+    return isMaintainer(this.me) &&
+      (hasEffectiveCapability(this.me, "feedback:moderate") ||
+        hasLegacyEffectiveAction(this.me, "feedback:moderate", "annotations:write"));
+  }
+
+  private canWithdrawReply(reply: Reply): boolean {
+    if (this.me === null) return false;
+    if (this.me.actor.id === reply.authorActorId) {
       return hasEffectiveCapability(this.me, "feedback:withdraw-own", "annotations:write");
     }
     return isMaintainer(this.me) &&
@@ -2180,20 +2191,15 @@ export class AuthorbotCollab extends HTMLElement {
       return card;
     }
 
-    // Suggested-edit voting keeps its existing UI. Comment voting is exposed
-    // by the granular-permissions slice, independently of this Discussion UI.
-    if (annotation.kind === "suggestion") {
-      const control = new VoteControl({
-        canVote: this.canVoteOn(annotation),
-        signedIn: this.me !== null,
-        onVote: (value) => void this.castVoteOn(annotation.id, value),
-        onSignIn: () => this.promptSignIn(),
-      });
-      control.update(annotation);
-      this.voteControls.set(annotation.id, control);
-      card.append(control.root);
-
-    }
+    const control = new VoteControl({
+      canVote: this.canVoteOn(annotation),
+      signedIn: this.me !== null,
+      onVote: (value) => void this.castVoteOn(annotation.id, value),
+      onSignIn: () => this.promptSignIn(),
+    });
+    control.update(annotation);
+    this.voteControls.set(annotation.id, control);
+    card.append(control.root);
 
     // Phase 11: a maintainer can promote either an open comment or suggestion
     // in one click. Suggestion rejection remains a separate scoped action.
@@ -2284,6 +2290,8 @@ export class AuthorbotCollab extends HTMLElement {
     const list = el("ul", "ab-replies");
     for (const reply of replies.filter((entry) => entry.parentReplyId === parentId)) {
       const item = el("li", "ab-reply");
+      item.dataset.replyId = reply.id;
+      item.tabIndex = -1;
       const head = el("div", "ab-reply-head");
       head.append(
         el("span", "ab-author", this.authorName(reply.authorActorId)),
@@ -2295,11 +2303,17 @@ export class AuthorbotCollab extends HTMLElement {
           el("span", "ab-chip ab-status-syncing", sync?.phase === "failed" ? "failed" : "syncing"),
         );
       }
-      item.append(head, el("p", "ab-body", reply.body));
+      item.append(
+        head,
+        reply.status === "withdrawn"
+          ? el("p", "ab-hint ab-reply-withdrawn", "Reply withdrawn.")
+          : el("p", "ab-body", reply.body),
+      );
       if (sync?.message !== undefined) {
         item.append(el("p", "ab-hint", sync.message));
       }
-      if (this.canReplyTo(annotation)) {
+      const actions = el("div", "ab-actions ab-reply-actions");
+      if (reply.status !== "withdrawn" && this.canReplyTo(annotation)) {
         const replyBtn = el("button", "ab-btn ab-btn-small", "Reply");
         replyBtn.type = "button";
         replyBtn.addEventListener("click", () => {
@@ -2310,7 +2324,54 @@ export class AuthorbotCollab extends HTMLElement {
           this.renderAll();
           this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
         });
-        item.append(replyBtn);
+        actions.append(replyBtn);
+      }
+      if (
+        reply.status === "open" &&
+        (sync === undefined || sync.phase === "failed") &&
+        this.canWithdrawReply(reply)
+      ) {
+        const confirming = this.confirmWithdrawReply === reply.id;
+        const withdraw = el(
+          "button",
+          "ab-btn ab-btn-small ab-danger",
+          confirming ? "Confirm withdraw reply" : "Withdraw reply",
+        );
+        withdraw.type = "button";
+        withdraw.dataset.replyWithdraw = reply.id;
+        withdraw.addEventListener("click", () => {
+          if (!confirming) {
+            this.confirmWithdrawReply = reply.id;
+            this.renderAll();
+            this.cardEls
+              .get(annotation.id)
+              ?.querySelector<HTMLButtonElement>(`[data-reply-withdraw="${reply.id}"]`)
+              ?.focus();
+            return;
+          }
+          // Close the confirmation before awaiting the network. The store
+          // removes the body optimistically and restores it on rejection.
+          this.confirmWithdrawReply = null;
+          this.replySync.delete(reply.id);
+          this.renderAll();
+          void this.withdrawReply(annotation, reply);
+        });
+        actions.append(withdraw);
+        if (confirming) {
+          const keep = el("button", "ab-btn ab-btn-small", "Keep reply");
+          keep.type = "button";
+          keep.addEventListener("click", () => {
+            this.confirmWithdrawReply = null;
+            this.renderAll();
+            this.cardEls.get(annotation.id)?.querySelector<HTMLElement>(
+              `[data-reply-id="${reply.id}"]`,
+            )?.focus();
+          });
+          actions.append(keep);
+        }
+      }
+      if (actions.childElementCount > 0) {
+        item.append(actions);
       }
       const children = this.buildReplyTree(annotation, replies, reply.id);
       if (children.childElementCount > 0) {
@@ -2419,6 +2480,37 @@ export class AuthorbotCollab extends HTMLElement {
       }
       this.annotationSync.set(
         annotation.id,
+        outcome === "exhausted"
+          ? { phase: "stale", message: REFRESH_HINT }
+          : { phase: "failed", message: message ?? "withdraw failed" },
+      );
+      this.renderAll();
+    });
+    this.renderAll();
+  }
+
+  private async withdrawReply(annotation: Annotation, reply: Reply): Promise<void> {
+    const result = await this.store.getState().withdrawReply(annotation.id, reply.id);
+    if (!result.ok) {
+      this.replySync.set(reply.id, {
+        phase: "failed",
+        message: this.friendlyWriteError(result.status, result.message),
+      });
+      this.announce("Reply withdrawal failed. The reply was restored.");
+      this.renderAll();
+      return;
+    }
+    this.replySync.set(reply.id, { phase: "syncing" });
+    this.announce("Withdrawing reply.");
+    this.pollOperation(result.value.operationId, (outcome, message) => {
+      if (outcome === "committed") {
+        this.replySync.delete(reply.id);
+        this.announce("Reply withdrawn.");
+        void this.refetch();
+        return;
+      }
+      this.replySync.set(
+        reply.id,
         outcome === "exhausted"
           ? { phase: "stale", message: REFRESH_HINT }
           : { phase: "failed", message: message ?? "withdraw failed" },

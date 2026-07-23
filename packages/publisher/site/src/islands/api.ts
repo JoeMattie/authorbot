@@ -311,6 +311,12 @@ export interface WithdrawAccepted extends Accepted {
   annotationId: string;
 }
 
+/** A reply withdrawal accepted into the Git-backed stream. */
+export interface ReplyWithdrawAccepted extends Accepted {
+  annotationId: string;
+  replyId: string;
+}
+
 /** The 200 body of a vote cast/clear (Phase 3 contract §2). */
 export interface VoteResult {
   annotationId: string;
@@ -1143,6 +1149,20 @@ export class CollabApi {
     );
   }
 
+  async withdrawReply(
+    annotationId: string,
+    replyId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ReplyWithdrawAccepted>> {
+    return this.accept<ReplyWithdrawAccepted>(
+      this.projectUrl(
+        `/annotations/${encodeURIComponent(annotationId)}/replies/${encodeURIComponent(replyId)}/withdraw`,
+      ),
+      {},
+      options,
+    );
+  }
+
   async operation(operationId: string): Promise<Operation | null> {
     const result = await this.operationResult(operationId);
     return result.ok ? result.value : null;
@@ -1170,7 +1190,7 @@ export class CollabApi {
   // ---- votes (Phase 3 contract §2) -----------------------------------------
 
   /**
-   * Cast (or change) the viewer's vote on a suggestion. The 200 response
+   * Cast (or change) the viewer's vote on a comment or suggestion. The 200 response
    * carries the fresh aggregate tally and the current `create_work_item`
    * decision (if any), so the caller updates the control in place without a
    * refetch.

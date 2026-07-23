@@ -354,6 +354,101 @@ describe("project-scoped editorial store", () => {
     expect(store.getState().repliesById[replyId]).toBeUndefined();
   });
 
+  it("withdraws a reply optimistically, keeps it hidden through acceptance, and settles from Git", async () => {
+    const replyId = reply().id;
+    const operationId = "019cadfd-8900-7140-98fb-ceff64cada83";
+    let authoritativeReplies: Reply[] = [reply()];
+    let resolve!: (
+      result: Awaited<ReturnType<NonNullable<ProjectStoreApi["withdrawReply"]>>>,
+    ) => void;
+    const response = new Promise<
+      Awaited<ReturnType<NonNullable<ProjectStoreApi["withdrawReply"]>>>
+    >((done) => {
+      resolve = done;
+    });
+    const committed: Operation = {
+      id: operationId,
+      projectId: PROJECT,
+      correlationId: "reply-withdraw-correlation",
+      state: "committed",
+      attempts: 1,
+      error: null,
+      commitSha: "c".repeat(40),
+      createdAt: "2026-07-22T00:00:00Z",
+      updatedAt: "2026-07-22T00:00:01Z",
+    };
+    const store = await readyStore(
+      baseApi({
+        async chapters() {
+          return {
+            ok: true,
+            value: [{ ...chapter(), activity: { ...chapter().activity, openReplies: 1 } }],
+          };
+        },
+        async replies() {
+          return { ok: true, value: authoritativeReplies };
+        },
+        withdrawReply: async () => response,
+        async operation() {
+          return committed;
+        },
+      }),
+    );
+    await store.getState().ensureReplies(ANNOTATION);
+
+    const action = store.getState().withdrawReply(ANNOTATION, replyId);
+    expect(store.getState().repliesById[replyId]?.status).toBe("withdrawn");
+    expect(store.getState().chaptersById[CHAPTER]?.activity?.openReplies).toBe(0);
+
+    resolve({
+      ok: true,
+      value: {
+        operationId,
+        annotationId: ANNOTATION,
+        replyId,
+        correlationId: committed.correlationId,
+        status: "queued",
+      },
+    });
+    await expect(action).resolves.toMatchObject({ ok: true });
+    // An accepted Git-backed command does not immediately refetch the still
+    // open server row and flash the withdrawn body back into the page.
+    expect(store.getState().repliesById[replyId]?.status).toBe("withdrawn");
+
+    authoritativeReplies = [{ ...reply(), status: "withdrawn", gitOperationId: operationId }];
+    await store.getState().refreshOperation(operationId);
+    expect(store.getState().repliesById[replyId]?.status).toBe("withdrawn");
+    expect(store.getState().pendingMutations).toEqual({});
+  });
+
+  it("restores a reply and its activity count when withdrawal is rejected", async () => {
+    const authoritative = reply();
+    const store = await readyStore(
+      baseApi({
+        async chapters() {
+          return {
+            ok: true,
+            value: [{ ...chapter(), activity: { ...chapter().activity, openReplies: 1 } }],
+          };
+        },
+        async replies() {
+          return { ok: true, value: [authoritative] };
+        },
+        async withdrawReply() {
+          return { ok: false, status: 403, message: "withdraw permission changed" };
+        },
+      }),
+    );
+    await store.getState().ensureReplies(ANNOTATION);
+
+    const result = await store.getState().withdrawReply(ANNOTATION, authoritative.id);
+
+    expect(result).toMatchObject({ ok: false, kind: "rejected", status: 403 });
+    expect(store.getState().repliesById[authoritative.id]).toEqual(authoritative);
+    expect(store.getState().chaptersById[CHAPTER]?.activity?.openReplies).toBe(1);
+    expect(store.getState().pendingMutations).toEqual({});
+  });
+
   it("increments activity immediately, then normalizes the accepted annotation", async () => {
     const acceptedId = "019cadfd-8900-7140-98fb-ceff64cada99";
     let authoritativeAnnotations = [annotation()];

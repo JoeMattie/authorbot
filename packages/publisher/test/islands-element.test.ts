@@ -728,6 +728,130 @@ describe("authorbot-collab element", () => {
     expect(document.querySelector(".ab-reply .ab-status-syncing")).toBeNull();
   });
 
+  it("closes reply-withdraw confirmation optimistically and restores a rejected reply", async () => {
+    let finishWithdraw: ((response: Response) => void) | undefined;
+    const pendingWithdraw = new Promise<Response>((resolve) => {
+      finishWithdraw = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+              scopes: [],
+              memberships: [{ projectId: "project-1", role: "contributor" }],
+              capabilityMode: "canonical",
+              effectiveCapabilities: [
+                "comments:read",
+                "replies:write",
+                "feedback:withdraw-own",
+              ],
+            }),
+          } as Response;
+        }
+        if (
+          init?.method === "POST" &&
+          url.endsWith("/annotations/ann-reply-withdraw/replies/reply-own/withdraw")
+        ) {
+          return pendingWithdraw;
+        }
+        if (url.includes(`/chapters/${CHAPTER_ID}/annotations`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: [{
+                id: "ann-reply-withdraw",
+                chapterId: CHAPTER_ID,
+                kind: "comment",
+                scope: "block",
+                chapterRevision: 3,
+                target: { blockId: BLOCK_ID },
+                authorActorId: "actor-2",
+                body: "Thread owner",
+                status: "open",
+                gitOperationId: null,
+                createdAt: "2026-07-19T00:00:00Z",
+              }],
+              nextCursor: null,
+            }),
+          } as Response;
+        }
+        if (url.includes("/annotations/ann-reply-withdraw/replies")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: [{
+                id: "reply-own",
+                projectId: "project-1",
+                annotationId: "ann-reply-withdraw",
+                parentReplyId: null,
+                authorActorId: "actor-1",
+                body: "Keep this visible if the command is rejected.",
+                status: "open",
+                gitOperationId: null,
+                createdAt: "2026-07-19T00:01:00Z",
+                updatedAt: "2026-07-19T00:01:00Z",
+              }],
+              nextCursor: null,
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [], nextCursor: null }),
+        } as Response;
+      }),
+    );
+
+    mount();
+    await expect.poll(() => document.querySelector(".ab-reply .ab-body")?.textContent).toBe(
+      "Keep this visible if the command is rejected.",
+    );
+    const withdraw = [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].find(
+      (button) => button.textContent === "Withdraw reply",
+    ) as HTMLButtonElement;
+    withdraw.click();
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].find(
+      (button) => button.textContent === "Confirm withdraw reply",
+    ) as HTMLButtonElement;
+    expect(confirm).toBeTruthy();
+    expect(document.querySelector(".ab-reply button")?.textContent).not.toBe("Withdraw reply");
+
+    confirm.click();
+    // The confirmation closes and the reply body disappears before the
+    // deliberately unresolved HTTP request returns.
+    expect(document.querySelector(".ab-reply-withdrawn")?.textContent).toBe("Reply withdrawn.");
+    expect(document.querySelector(".ab-reply .ab-body")).toBeNull();
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].some(
+        (button) => button.textContent === "Confirm withdraw reply",
+      ),
+    ).toBe(false);
+
+    finishWithdraw?.({
+      ok: false,
+      status: 403,
+      json: async () => ({ detail: "reply withdrawal is forbidden" }),
+    } as Response);
+    await expect.poll(() => document.querySelector(".ab-reply .ab-body")?.textContent).toBe(
+      "Keep this visible if the command is rejected.",
+    );
+    expect(document.querySelector(".ab-reply")?.textContent).toContain("Your role is read-only here.");
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>(".ab-reply button")].some(
+        (button) => button.textContent === "Withdraw reply",
+      ),
+    ).toBe(true);
+  });
+
   it("clears and closes the note composer before its POST finishes", async () => {
     let finishPost: ((response: Response) => void) | undefined;
     const pendingPost = new Promise<Response>((resolve) => {

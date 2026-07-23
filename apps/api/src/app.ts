@@ -26,6 +26,7 @@ import {
   roleSchema,
   roleScopes,
   toTimestamp,
+  withdrawReplyCommandSchema,
   AGENT_TOKEN_PREFIX,
   WORK_ITEM_STATUSES,
 } from "@authorbot/domain";
@@ -1613,6 +1614,127 @@ export function createApi(deps: AppDeps): AuthorbotApi {
 
     return c.json(responseBody, 202);
   });
+
+  app.post(
+    "/v1/projects/:projectId/annotations/:annotationId/replies/:replyId/withdraw",
+    auth,
+    idem,
+    async (c) => {
+      const parsed = withdrawReplyCommandSchema.safeParse({
+        annotationId: c.req.param("annotationId"),
+        replyId: c.req.param("replyId"),
+      });
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+      const command = parsed.data;
+      const reply = await repos.replies.getById(command.replyId);
+      if (reply === null || reply.annotationId !== command.annotationId) {
+        return problem(c, "not-found", { detail: "unknown reply" });
+      }
+      const annotation = await repos.annotations.getById(command.annotationId);
+      if (annotation === null) {
+        return problem(c, "not-found", { detail: "unknown reply" });
+      }
+
+      const a = authOf(c);
+      const withdrawingOwn = reply.authorActorId === a.actor.id;
+      const requirements = withdrawingOwn
+        ? { capabilities: ["feedback:withdraw-own"] as const }
+        : {
+            capabilities: ["feedback:moderate"] as const,
+            legacyAction: "feedback:moderate" as const,
+          };
+      if (!hasEditorialAuthority(a, "annotations:write", requirements)) {
+        return problem(c, "forbidden", {
+          detail: `actor lacks required editorial capability "${requirements.capabilities[0]}"`,
+        });
+      }
+      const guard = await requireProjectScope(c, services, "annotations:write", {
+        requireMembership: true,
+        editorial: requirements,
+      });
+      if ("response" in guard) {
+        return guard.response;
+      }
+      if (reply.projectId !== guard.project.id || annotation.projectId !== guard.project.id) {
+        return problem(c, "not-found", { detail: "unknown reply" });
+      }
+      if (reply.status === "pending_git") {
+        return problem(c, "state-conflict", {
+          detail: "reply is still being committed; retry once its operation completes",
+        });
+      }
+      if (reply.status !== "open") {
+        return problem(c, "state-conflict", {
+          detail: `reply with status "${reply.status}" cannot be withdrawn`,
+        });
+      }
+      if (reply.gitOperationId !== null) {
+        const inFlight = await repos.gitOperations.getById(reply.gitOperationId);
+        if (
+          inFlight !== null &&
+          (inFlight.state === "queued" ||
+            inFlight.state === "preparing" ||
+            inFlight.state === "committing" ||
+            inFlight.state === "conflict")
+        ) {
+          return problem(c, "state-conflict", {
+            detail: "a git operation for this reply is still in flight; retry once it completes",
+          });
+        }
+      }
+
+      const correlationId = c.get("correlationId");
+      const timestamp = now();
+      const command202 = commandStatements({
+        project: guard.project,
+        correlationId,
+        actorId: a.actor.id,
+        action: "reply.withdraw",
+        targetType: "reply",
+        targetId: reply.id,
+        outboxKind: "reply.withdraw",
+        outboxPayload: {
+          type: "reply.withdraw",
+          replyId: reply.id,
+          annotationId: annotation.id,
+          actorId: a.actor.id,
+          actorRef: a.actorRef,
+        },
+        metadata: { annotationId: annotation.id },
+      });
+      const responseBody = {
+        operationId: command202.operationId,
+        annotationId: annotation.id,
+        replyId: reply.id,
+        correlationId,
+        status: "queued",
+      };
+      try {
+        await deps.db.batch([
+          command202.statements[0] as SqlStatement,
+          repos.replies.setWithdrawalOperationStatement(
+            reply.id,
+            reply.gitOperationId,
+            command202.operationId,
+            timestamp,
+          ),
+          ...command202.statements.slice(1),
+          ...claimStatements(c, 202, responseBody),
+        ]);
+      } catch (error) {
+        if (isConstraintError(error)) {
+          return problem(c, "state-conflict", {
+            detail: "the reply changed while its withdrawal was being queued; refresh and retry",
+          });
+        }
+        throw error;
+      }
+      await notifyMutation(guard.project.id);
+      return c.json(responseBody, 202);
+    },
+  );
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/withdraw", auth, idem, async (c) => {
     const annotation = await repos.annotations.getById(c.req.param("annotationId"));

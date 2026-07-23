@@ -204,11 +204,16 @@ describe("promotion surface", () => {
     expect(document.querySelector<HTMLElement>(".ab-override-form")?.hidden).toBe(true);
   });
 
-  it("offers a comment only Promote to work, with no vote or rejection UI", async () => {
+  it("offers comment promotion alongside its kind-specific vote tally", async () => {
     await mountAs("maintainer", [comment()]);
     expect(promoteBtn()?.textContent).toBe("Promote to work");
     expect(rejectBtn()?.hidden).toBe(true);
-    expect(document.querySelector(".ab-votes")).toBeNull();
+    expect(document.querySelector(".ab-votes")).not.toBeNull();
+    expect(
+      [...document.querySelectorAll<HTMLButtonElement>(".ab-vote-btn")].every(
+        (button) => button.disabled,
+      ),
+    ).toBe(true);
     expect(document.querySelector<HTMLElement>(".ab-override-roles")?.hidden).toBe(true);
     expect(document.querySelector(".ab-override-tally")?.textContent).toBe(
       "Turn this note into tracked work.",

@@ -7,6 +7,7 @@ import {
   normalizeBody,
   utf8ByteLength,
   withdrawAnnotationCommandSchema,
+  withdrawReplyCommandSchema,
 } from "../src/index.js";
 
 const CHAPTER_ID = "0190f27d-8ea5-7e43-a6f2-64d6939ff3b4";
@@ -317,6 +318,34 @@ describe("withdrawAnnotationCommandSchema", () => {
     expect(
       withdrawAnnotationCommandSchema.safeParse({ annotationId: ANNOTATION_ID, force: true })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("withdrawReplyCommandSchema", () => {
+  it("accepts the annotation and reply UUIDv7 route parameters", () => {
+    expect(
+      withdrawReplyCommandSchema.safeParse({
+        annotationId: ANNOTATION_ID,
+        replyId: "0190f302-1111-7abc-8def-000000000001",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects missing, malformed, or extra fields", () => {
+    expect(withdrawReplyCommandSchema.safeParse({ annotationId: ANNOTATION_ID }).success).toBe(
+      false,
+    );
+    expect(
+      withdrawReplyCommandSchema.safeParse({ annotationId: ANNOTATION_ID, replyId: UUID_V4 })
+        .success,
+    ).toBe(false);
+    expect(
+      withdrawReplyCommandSchema.safeParse({
+        annotationId: ANNOTATION_ID,
+        replyId: "0190f302-1111-7abc-8def-000000000001",
+        force: true,
+      }).success,
     ).toBe(false);
   });
 });

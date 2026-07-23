@@ -119,6 +119,7 @@ export {
   type OutboxKind,
   type Processor,
   type ReplyCreatePayload,
+  type ReplyWithdrawPayload,
   type RepositoryDocumentWritePayload,
   type SubmissionApplier,
   type SubmissionApplyContext,

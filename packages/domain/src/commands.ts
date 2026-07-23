@@ -132,3 +132,14 @@ export const withdrawAnnotationCommandSchema = z.strictObject({
   annotationId: uuidv7Schema,
 });
 export type WithdrawAnnotationCommand = z.infer<typeof withdrawAnnotationCommandSchema>;
+
+/**
+ * `POST .../annotations/{annotationId}/replies/{replyId}/withdraw`. The HTTP
+ * body is empty; both route parameters are part of the logical command so an
+ * id cannot be moved across annotation threads by changing only the URL.
+ */
+export const withdrawReplyCommandSchema = z.strictObject({
+  annotationId: uuidv7Schema,
+  replyId: uuidv7Schema,
+});
+export type WithdrawReplyCommand = z.infer<typeof withdrawReplyCommandSchema>;

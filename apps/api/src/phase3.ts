@@ -265,6 +265,7 @@ const PUBLIC_READER_WORK_ITEM_TYPES: ReadonlySet<string> = new Set([
 const PUBLIC_READER_OPERATION_KINDS: ReadonlySet<string> = new Set([
   "annotation.create",
   "reply.create",
+  "reply.withdraw",
   "annotation.withdraw",
 ]);
 

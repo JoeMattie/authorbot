@@ -30,6 +30,30 @@ describe("annotation, reply, and withdraw commands", () => {
     return (await res.json()) as { annotationId: string; operationId: string };
   }
 
+  async function createReply(annotationId: string, actorCookie = cookie): Promise<{
+    replyId: string;
+    operationId: string;
+  }> {
+    const response = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${annotationId}/replies`,
+      jsonRequest("POST", { body: "good point" }, { Cookie: actorCookie }),
+    );
+    expect(response.status).toBe(202);
+    return (await response.json()) as { replyId: string; operationId: string };
+  }
+
+  async function commitReply(replyId: string): Promise<void> {
+    const reply = await h.repos.replies.getById(replyId);
+    if (reply?.gitOperationId != null) {
+      await h.repos.gitOperations.updateState(reply.gitOperationId, {
+        state: "committed",
+        updatedAt: "2026-07-22T18:30:00Z",
+        commitSha: "b".repeat(40),
+      });
+    }
+    await h.repos.replies.updateStatus(replyId, "open", "2026-07-22T18:30:00Z");
+  }
+
   it("202: writes record + git operation + outbox + audit in one batch", async () => {
     const { annotationId, operationId } = await createAnnotation();
 
@@ -253,6 +277,119 @@ describe("annotation, reply, and withdraw commands", () => {
         { headers: { Cookie: readerCookie } },
       );
       expect(list.status).toBe(200);
+    });
+
+    it("withdraws an owned reply through an audited Git operation and flips status only post-commit", async () => {
+      const { annotationId } = await createAnnotation();
+      const { replyId, operationId: createOperationId } = await createReply(annotationId);
+
+      const pending = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${replyId}/withdraw`,
+        jsonRequest("POST", undefined, { Cookie: cookie }),
+      );
+      expect(pending.status).toBe(409);
+
+      await commitReply(replyId);
+      const response = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${replyId}/withdraw`,
+        jsonRequest("POST", undefined, { Cookie: cookie }),
+      );
+      expect(response.status).toBe(202);
+      const accepted = (await response.json()) as {
+        operationId: string;
+        annotationId: string;
+        replyId: string;
+      };
+      expect(accepted).toMatchObject({ annotationId, replyId });
+      expect(accepted.operationId).not.toBe(createOperationId);
+
+      const projected = await h.repos.replies.getById(replyId);
+      expect(projected?.status).toBe("open");
+      expect(projected?.gitOperationId).toBe(accepted.operationId);
+      expect((await h.repos.gitOperations.getById(accepted.operationId))?.state).toBe("queued");
+      expect((await h.repos.outbox.listPending(h.projectId)).at(-1)?.kind).toBe("reply.withdraw");
+      const audit = (await h.repos.auditEvents.listByProject(h.projectId)).find(
+        (event) => event.action === "reply.withdraw" && event.targetId === replyId,
+      );
+      expect(audit).toMatchObject({ targetType: "reply", metadata: { annotationId } });
+    });
+
+    it("requires ownership or maintainer moderation to withdraw a reply", async () => {
+      const { annotationId } = await createAnnotation();
+      const { replyId } = await createReply(annotationId);
+      await commitReply(replyId);
+
+      const stranger = await devLogin(h, "reply-stranger", "contributor");
+      const denied = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${replyId}/withdraw`,
+        jsonRequest("POST", undefined, { Cookie: stranger }),
+      );
+      expect(denied.status).toBe(403);
+
+      const maintainer = await devLogin(h, "reply-moderator", "maintainer");
+      const allowed = await h.app.request(
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${replyId}/withdraw`,
+        jsonRequest("POST", undefined, { Cookie: maintainer }),
+      );
+      expect(allowed.status).toBe(202);
+    });
+
+    it("is idempotent per key and rejects a second in-flight withdrawal", async () => {
+      const { annotationId } = await createAnnotation();
+      const { replyId } = await createReply(annotationId);
+      await commitReply(replyId);
+      const route =
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${replyId}/withdraw`;
+      const key = "reply-withdraw-same-command";
+      const first = await h.app.request(
+        route,
+        jsonRequest("POST", undefined, { Cookie: cookie, "Idempotency-Key": key }),
+      );
+      expect(first.status).toBe(202);
+      const replay = await h.app.request(
+        route,
+        jsonRequest("POST", undefined, { Cookie: cookie, "Idempotency-Key": key }),
+      );
+      expect(replay.status).toBe(202);
+      expect(await replay.json()).toEqual(await first.json());
+
+      const second = await h.app.request(
+        route,
+        jsonRequest("POST", undefined, { Cookie: cookie }),
+      );
+      expect(second.status).toBe(409);
+    });
+
+    it("atomically admits only one of two concurrent withdrawal commands", async () => {
+      const { annotationId } = await createAnnotation();
+      const { replyId } = await createReply(annotationId);
+      await commitReply(replyId);
+      const route =
+        `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${replyId}/withdraw`;
+
+      const responses = await Promise.all([
+        h.app.request(
+          route,
+          jsonRequest("POST", undefined, {
+            Cookie: cookie,
+            "Idempotency-Key": "reply-withdraw-racer-a",
+          }),
+        ),
+        h.app.request(
+          route,
+          jsonRequest("POST", undefined, {
+            Cookie: cookie,
+            "Idempotency-Key": "reply-withdraw-racer-b",
+          }),
+        ),
+      ]);
+
+      expect(responses.map(({ status }) => status).sort()).toEqual([202, 409]);
+      expect(
+        (await h.repos.outbox.listPending(h.projectId)).filter(
+          ({ kind }) => kind === "reply.withdraw",
+        ),
+      ).toHaveLength(1);
     });
   });
 

@@ -8,7 +8,7 @@
  * - Every string reaches the DOM via `textContent` (never `innerHTML`).
  * - Each segment is a real `<button>` with `aria-pressed` reflecting the
  *   viewer's current vote; the group is labelled and the tally is announced.
- * - Controls are enabled only when the viewer holds `votes:write`.
+ * - Controls are enabled only when the viewer holds the exact kind capability.
  */
 import type { Annotation, VoteValue } from "./api.js";
 import { el, srOnly } from "./dom.js";
@@ -23,7 +23,7 @@ import {
 } from "./vote-view.js";
 
 export interface VoteControlDeps {
-  /** The viewer holds `votes:write` (enables the segments). */
+  /** The viewer holds the feedback kind's exact vote capability. */
   canVote: boolean;
   /** The viewer is authenticated (drives the disabled-state hint copy). */
   signedIn: boolean;
@@ -35,6 +35,7 @@ export interface VoteControlDeps {
 
 export class VoteControl {
   readonly root: HTMLElement;
+  private readonly group: HTMLElement;
   private readonly buttons = new Map<VoteValue, HTMLButtonElement>();
   private readonly countEls = new Map<VoteValue, HTMLElement>();
   private readonly tallyLine: HTMLElement;
@@ -46,9 +47,8 @@ export class VoteControl {
   constructor(private readonly deps: VoteControlDeps) {
     this.root = el("div", "ab-votes");
 
-    const group = el("div", "ab-vote-seg");
-    group.setAttribute("role", "group");
-    group.setAttribute("aria-label", "Vote on this suggestion");
+    this.group = el("div", "ab-vote-seg");
+    this.group.setAttribute("role", "group");
     for (const value of VOTE_VALUES) {
       const button = el("button", "ab-vote-btn");
       button.type = "button";
@@ -64,9 +64,9 @@ export class VoteControl {
       button.addEventListener("click", () => this.onClick(value));
       this.buttons.set(value, button);
       this.countEls.set(value, count);
-      group.append(button);
+      this.group.append(button);
     }
-    this.root.append(group);
+    this.root.append(this.group);
 
     this.tallyLine = el("p", "ab-vote-tally");
     this.hint = el("p", "ab-hint ab-vote-hint");
@@ -90,6 +90,10 @@ export class VoteControl {
   /** Re-render the tally, current-vote highlighting, and badge in place. */
   update(annotation: Annotation): void {
     this.annotation = annotation;
+    this.group.setAttribute(
+      "aria-label",
+      annotation.kind === "comment" ? "Vote on this comment" : "Vote on this suggestion",
+    );
     const tally = tallyOrEmpty(annotation.votes);
     for (const value of VOTE_VALUES) {
       const count = countFor(tally, value);

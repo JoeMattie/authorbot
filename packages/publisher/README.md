@@ -151,7 +151,8 @@ keyboard-accessible per-block "Annotate" button; range selectors
 `{ blockId, textPosition, textQuote(exact, prefix≤32, suffix≤32) }` computed
 against normalized block text (DOM mirror of `@authorbot/markdown`
 normalization, parity-tested on that package's fixtures); threaded replies;
-author-only two-step withdraw; `pending_git` shown as "syncing" with bounded
+author-only two-step withdraw for feedback and replies; kind-specific comment
+and suggestion voting; `pending_git` shown as "syncing" with bounded
 operation polling (max 5, backoff) then a refresh hint. Accessibility per
 contract §4: full keyboard path, labeled card regions, outline+background
 highlights, reduced-motion, ≥44 px coarse-pointer targets, reading column

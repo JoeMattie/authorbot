@@ -17,6 +17,7 @@ import {
   enqueueAnnotationCreate,
   enqueueAnnotationWithdraw,
   enqueueReplyCreate,
+  enqueueReplyWithdraw,
   git,
   initGitRepo,
   nowIso,
@@ -121,15 +122,19 @@ describe("processor happy path", () => {
     expect(opSecond?.commitSha).toBe(await git(repo.dir, "rev-parse", "HEAD"));
   });
 
-  it("commits replies and withdrawals as separate logical mutations", async () => {
+  it("commits reply and annotation withdrawals as separate logical mutations", async () => {
     const created = await enqueueAnnotationCreate(seed);
     await processor.drain(seed.projectId);
 
     const reply = await enqueueReplyCreate(seed, created.annotationId);
+    const replyCreate = await processor.drain(seed.projectId);
+    expect(replyCreate.outcomes.map((o) => o.result)).toEqual(["committed"]);
+
+    const replyWithdraw = await enqueueReplyWithdraw(seed, reply.replyId);
     const withdraw = await enqueueAnnotationWithdraw(seed, created.annotationId);
     const { outcomes } = await processor.drain(seed.projectId);
     expect(outcomes.map((o) => o.result)).toEqual(["committed", "committed"]);
-    expect(await commitCount()).toBe(4); // initial + create + reply + withdraw
+    expect(await commitCount()).toBe(5); // initial + annotation + reply + two withdrawals
 
     // reply artifact
     const replyContent = await readFile(
@@ -139,8 +144,12 @@ describe("processor happy path", () => {
     const parsedReply = replySchema.parse(parseChapterMarkdown(replyContent).frontmatter);
     expect(parsedReply.id).toBe(reply.replyId);
     expect(parsedReply.annotation_id).toBe(created.annotationId);
+    expect(parsedReply.status).toBe("withdrawn");
     const replyRecord = await seed.repos.replies.getById(reply.replyId);
-    expect(replyRecord?.status).toBe("open");
+    expect(replyRecord?.status).toBe("withdrawn");
+    expect((await seed.repos.gitOperations.getById(replyWithdraw.operationId))?.state).toBe(
+      "committed",
+    );
 
     // withdraw = frontmatter status update on the same annotation file
     const annotationContent = await readFile(

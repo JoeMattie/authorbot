@@ -277,6 +277,50 @@ describe("Phase 11 exact editorial endpoint authorization", () => {
     expect(moderated.status).toBe(202);
   });
 
+  it("applies the same exact own-withdrawal and moderation split to replies", async () => {
+    const annotationId = "01900000-0000-7000-8000-000000000233";
+    const ownReplyId = "01900000-0000-7000-8000-000000000234";
+    const otherReplyId = "01900000-0000-7000-8000-000000000235";
+    await insertAnnotation({ id: annotationId, kind: "comment" });
+    const owner = await mintCanonical(["feedback:withdraw-own"]);
+    for (const [id, authorActorId] of [
+      [ownReplyId, owner.actorId],
+      [otherReplyId, maintainerActorId],
+    ] as const) {
+      await h.repos.replies.insert({
+        id,
+        projectId: h.projectId,
+        annotationId,
+        parentReplyId: null,
+        authorActorId,
+        body: `reply ${id}`,
+        status: "open",
+        gitOperationId: null,
+        createdAt: AT,
+        updatedAt: AT,
+      });
+    }
+
+    const own = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${ownReplyId}/withdraw`,
+      jsonRequest("POST", undefined, { Authorization: `Bearer ${owner.token}` }),
+    );
+    expect(own.status).toBe(202);
+    const cannotModerate = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${otherReplyId}/withdraw`,
+      jsonRequest("POST", undefined, { Authorization: `Bearer ${owner.token}` }),
+    );
+    expect(cannotModerate.status).toBe(403);
+
+    const moderator = await mintCanonical(["feedback:moderate"]);
+    await promoteAgent(moderator.actorId);
+    const moderated = await h.app.request(
+      `/v1/projects/${h.projectId}/annotations/${annotationId}/replies/${otherReplyId}/withdraw`,
+      jsonRequest("POST", undefined, { Authorization: `Bearer ${moderator.token}` }),
+    );
+    expect(moderated.status).toBe(202);
+  });
+
   it("admits exact and legacy-source moderation, but not adjacent grants", async () => {
     const pendingId = "01900000-0000-7000-8000-000000000241";
     await h.repos.pendingAnnotations.insert({

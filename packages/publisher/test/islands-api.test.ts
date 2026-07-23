@@ -120,6 +120,39 @@ describe("CollabApi mutation transport", () => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 
+  it("withdraws a reply through its nested route with the caller's command key", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      json(
+        {
+          operationId: "operation-reply-withdraw",
+          annotationId: ANNOTATION,
+          replyId: "reply-1",
+          correlationId: "correlation-reply-withdraw",
+          status: "queued",
+        },
+        202,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await api().withdrawReply(ANNOTATION, "reply-1", {
+      idempotencyKey: "reply-withdraw-command-1",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        annotationId: ANNOTATION,
+        replyId: "reply-1",
+        operationId: "operation-reply-withdraw",
+      },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `${API}/v1/projects/${PROJECT}/annotations/${ANNOTATION}/replies/reply-1/withdraw`,
+    );
+    expect(keyFrom(fetchMock.mock.calls[0] ?? [])).toBe("reply-withdraw-command-1");
+  });
+
   it("parses an approval-gated annotation as pending review without an operation", async () => {
     vi.stubGlobal(
       "fetch",

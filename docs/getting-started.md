@@ -408,6 +408,7 @@ what is effective versus selected but inactive:
   suggestions:read / suggestions:write    read or propose suggested edits
   replies:write                            reply to readable feedback
   comments:vote / suggestions:vote        vote on that exact feedback kind
+  feedback:withdraw-own                   withdraw the token actor's feedback or reply
   work:read / work:claim / work:submit    complete assigned Work
   summaries:write                          update chapter summaries
   chapters:write / chapters:publish       draft or publish chapters

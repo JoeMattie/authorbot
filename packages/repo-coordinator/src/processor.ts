@@ -59,6 +59,7 @@ import {
 export const OUTBOX_KINDS = [
   "annotation.create",
   "reply.create",
+  "reply.withdraw",
   "annotation.withdraw",
   "decision.create",
   "decision.update",
@@ -118,6 +119,15 @@ export interface AnnotationCreatePayload {
 /** Payload for `reply.create` outbox rows. */
 export interface ReplyCreatePayload {
   replyId: string;
+}
+
+/**
+ * Payload for `reply.withdraw`. The acting actor may differ from the reply
+ * author only for maintainer moderation and is credited in the commit trailer.
+ */
+export interface ReplyWithdrawPayload {
+  replyId: string;
+  actorId: string;
 }
 
 /**
@@ -1125,25 +1135,30 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       };
     }
 
-    // reply.create
+    // reply.create / reply.withdraw
     const payload = parseReplyPayload(row);
     const reply = await repos.replies.getById(payload.replyId);
     if (!reply) throw new Error(`reply ${payload.replyId} not found`);
     const authorRef2 = await actorRef(reply.authorActorId);
+    const isWithdraw = kind === "reply.withdraw";
+    const actingRef = isWithdraw
+      ? await actorRef((payload as ReplyWithdrawPayload).actorId)
+      : authorRef2;
     const file = renderReplyArtifact({
       id: reply.id,
       annotationId: reply.annotationId,
       parentReplyId: reply.parentReplyId,
       author: authorRef2,
+      status: isWithdraw ? "withdrawn" : "open",
       createdAt: reply.createdAt,
       body: reply.body,
     });
     return {
       branch,
       files: [file],
-      message: `Create reply ${reply.id}`,
+      message: isWithdraw ? `Withdraw reply ${reply.id}` : `Create reply ${reply.id}`,
       trailers: {
-        [ACTOR_TRAILER]: authorRef2,
+        [ACTOR_TRAILER]: actingRef,
         [ANNOTATION_TRAILER]: reply.annotationId,
         [OPERATION_TRAILER]: op.id,
       },
@@ -1865,6 +1880,10 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       const payload = parseReplyPayload(row);
       return [repos.replies.updateStatusStatement(payload.replyId, "open", ts)];
     }
+    if (kind === "reply.withdraw") {
+      const payload = parseReplyPayload(row);
+      return [repos.replies.updateStatusStatement(payload.replyId, "withdrawn", ts)];
+    }
     if (kind === "book_config.update") {
       // Guarded on this operation's id, so a settings write that superseded
       // this one while it was in flight keeps its own `pending_git` status
@@ -2012,12 +2031,17 @@ function parseAnnotationPayload(row: OutboxRecord): AnnotationWithdrawPayload {
   return payload as AnnotationWithdrawPayload;
 }
 
-function parseReplyPayload(row: OutboxRecord): ReplyCreatePayload {
-  const payload = row.payload as Partial<ReplyCreatePayload> | null;
-  if (payload === null || typeof payload !== "object" || typeof payload.replyId !== "string") {
+function parseReplyPayload(row: OutboxRecord): ReplyCreatePayload | ReplyWithdrawPayload {
+  const payload = row.payload as Partial<ReplyWithdrawPayload> | null;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    typeof payload.replyId !== "string" ||
+    (row.kind === "reply.withdraw" && typeof payload.actorId !== "string")
+  ) {
     throw new Error(`outbox row ${row.id}: malformed ${row.kind} payload`);
   }
-  return payload as ReplyCreatePayload;
+  return payload as ReplyCreatePayload | ReplyWithdrawPayload;
 }
 
 function parseBookConfigPayload(row: OutboxRecord): BookConfigUpdatePayload {

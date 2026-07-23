@@ -35,6 +35,7 @@ import {
   type OverrideResult,
   type Reply,
   type ReplyAccepted,
+  type ReplyWithdrawAccepted,
   type RepositoryDocumentKind,
   type RepositoryDocumentProposalCommand,
   type RepositoryDocumentSource,
@@ -94,6 +95,7 @@ export interface ProjectStoreApi {
   createAnnotation?: CollabApi["createAnnotation"];
   createReply?: CollabApi["createReply"];
   withdraw?: CollabApi["withdraw"];
+  withdrawReply?: CollabApi["withdrawReply"];
   castVote?: CollabApi["castVote"];
   clearVote?: CollabApi["clearVote"];
   promoteToWork?: CollabApi["promoteToWork"];
@@ -264,6 +266,10 @@ export interface ProjectStoreState {
     parentReplyId?: string,
   ): Promise<StoreActionResult<ReplyAccepted>>;
   withdrawAnnotation(annotationId: string): Promise<StoreActionResult<WithdrawAccepted>>;
+  withdrawReply(
+    annotationId: string,
+    replyId: string,
+  ): Promise<StoreActionResult<ReplyWithdrawAccepted>>;
   setVote(annotationId: string, value: VoteValue | null): Promise<StoreActionResult<VoteResult>>;
   promoteAnnotation(annotationId: string): Promise<StoreActionResult<OverrideResult>>;
   rejectAnnotation(annotationId: string, reason: string): Promise<StoreActionResult<OverrideResult>>;
@@ -2675,6 +2681,83 @@ export function createProjectStore(
     return { ok: true, value: result.value };
   };
 
+  const withdrawReply = async (
+    annotationId: string,
+    replyId: string,
+  ): Promise<StoreActionResult<ReplyWithdrawAccepted>> => {
+    const write = api.withdrawReply;
+    const before = store.getState().repliesById[replyId];
+    if (write === undefined) return unsupported("reply withdrawal");
+    if (before === undefined || before.annotationId !== annotationId) {
+      return unsupported("reply");
+    }
+    const generation = authorizationGeneration;
+    const annotation = store.getState().annotationsById[annotationId];
+    const chapterId = annotation?.chapterId ?? null;
+    const id = mutationId();
+    const fingerprint = commandFingerprint("reply.withdraw", annotationId, replyId);
+    const key = retainedKeyFor(fingerprint);
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: { ...before, status: "withdrawn" },
+      },
+    });
+    addPendingMutation({
+      id,
+      kind: "reply.withdraw",
+      phase: "optimistic",
+      idempotencyKey: key,
+      fingerprint,
+      chapterId,
+      annotationId,
+      workItemId: null,
+      activityDelta: { openReplies: -1 },
+    });
+    const result = await replayOnce(() =>
+      write.call(api, annotationId, replyId, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      return failOptimistic({
+        result,
+        mutationId: id,
+        fingerprint,
+        chapterId,
+        annotationId,
+        rollback: () => {
+          store.setState({
+            repliesById: {
+              ...store.getState().repliesById,
+              [replyId]: before,
+            },
+          });
+        },
+      });
+    }
+    const current = store.getState().repliesById[replyId] ?? before;
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: {
+          ...current,
+          status: "withdrawn",
+          gitOperationId: result.value.operationId,
+        },
+      },
+    });
+    updatePendingMutation(id, "accepted");
+    await registerOperationContext(result.value.operationId, {
+      kind: "reply.withdraw",
+      chapterId,
+      workItemId: null,
+      replyAnnotationId: annotationId,
+      mutationId: id,
+      fingerprint,
+    });
+    return { ok: true, value: result.value };
+  };
+
   const setVote = async (
     annotationId: string,
     value: VoteValue | null,
@@ -3578,6 +3661,7 @@ export function createProjectStore(
     createAnnotation,
     createReply,
     withdrawAnnotation,
+    withdrawReply,
     setVote,
     promoteAnnotation: (annotationId) => overrideAnnotation(annotationId, "promote"),
     rejectAnnotation: (annotationId, reason) =>

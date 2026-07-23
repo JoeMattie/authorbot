@@ -1422,6 +1422,52 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
 
+  /v1/projects/{projectId}/annotations/{annotationId}/replies/{replyId}/withdraw:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+      - $ref: "#/components/parameters/ReplyId"
+    post:
+      operationId: withdrawAnnotationReply
+      tags: [annotations]
+      summary: Withdraw a reply (author or maintainer; queued for Git mirroring).
+      description: |
+        An author needs `feedback:withdraw-own`; withdrawing another actor's
+        reply needs maintainer-only `feedback:moderate`. The command rewrites
+        the reply artifact with `status: withdrawn`, and the projection flips
+        only after the Git operation commits. A pending or already withdrawn
+        reply returns 409. Legacy `annotations:write` preserves own-withdrawal
+        only for a credential that remains explicitly in compatibility mode;
+        legacy moderation additionally requires its source-tagged
+        `feedback:moderate` action.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Accepted; the reply remains open until the Git operation commits.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AcceptedCommand"
+                  - type: object
+                    required: [annotationId, replyId]
+                    properties:
+                      annotationId:
+                        $ref: "#/components/schemas/Uuid"
+                      replyId:
+                        $ref: "#/components/schemas/Uuid"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /v1/projects/{projectId}/annotations/{annotationId}/vote:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -1431,13 +1477,13 @@ paths:
       tags: [annotations]
       summary: Create or replace the caller's current vote (one per actor).
       description: |
-        Requires `votes:write` (the contributor role bundle and above; agents
-        vote only when their membership grants it). Votes are accepted on
-        suggestions only - a comment returns 422. Recording the vote runs the
-        declarative rule engine in the same serialized command: a threshold
-        crossing creates a sticky decision and a `ready` work item, both
-        surfaced in `decision`. Tallies are aggregate-only; per-voter identity
-        is never returned (design §26.1).
+        A comment requires `comments:vote`; a suggested edit requires
+        `suggestions:vote`. Recording a suggestion vote runs the declarative
+        rule engine in the same serialized command, so a threshold crossing
+        creates a sticky decision and a `ready` work item. Comment votes use
+        the same current-vote and aggregate machinery but never enter that
+        suggestion-to-Work rule. Tallies are aggregate-only; per-voter
+        identity is never returned (design §26.1).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1477,9 +1523,11 @@ paths:
       summary: Clear the caller's current vote.
       description: |
         Removes the caller's current vote (idempotent - clearing a non-existent
-        vote still returns 200) and re-evaluates the rule. Dropping below a
-        satisfied rule marks the existing decision `support_changed`; the
-        decision and its work item are never deleted (design §11.3).
+        vote still returns 200). It requires the same exact kind capability as
+        PUT. A suggestion re-evaluates its rule: dropping below a satisfied
+        rule marks the existing decision `support_changed`, while the decision
+        and its work item are never deleted. Clearing a comment vote only
+        updates that comment's tally (design §11.3).
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       responses:
@@ -3599,6 +3647,12 @@ components:
       required: true
       schema:
         $ref: "#/components/schemas/Uuid"
+    ReplyId:
+      name: replyId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Uuid"
     WorkItemId:
       name: workItemId
       in: path
@@ -5270,8 +5324,7 @@ components:
           type: string
         status:
           type: string
-          # Mirrors the replies.status DB CHECK constraint; `withdrawn` is not
-          # produced by any implemented endpoint yet but is a legal state.
+          # Mirrors the replies.status DB CHECK constraint.
           enum: [pending_git, open, withdrawn]
         gitOperationId:
           oneOf:
@@ -5392,7 +5445,7 @@ components:
           $ref: "#/components/schemas/VoteSummary"
         ruleSatisfied:
           type: boolean
-          description: Whether the rule is currently satisfied for this suggestion.
+          description: Whether the suggestion rule is currently satisfied; always false for a comment.
         decision:
           description: The sticky decision, if one exists for this suggestion.
           oneOf:
