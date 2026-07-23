@@ -9,6 +9,7 @@ import {
   devLogin,
   jsonRequest,
   makeHarness,
+  mintCanonicalToken,
   type TestHarness,
 } from "./helpers.js";
 
@@ -141,6 +142,86 @@ describe("work-queue reads", () => {
     expect(body.items[0]).not.toHaveProperty("content");
     expect(body.nextCursor).toBe(workItemId);
   });
+
+  it.each([
+    {
+      label: "work-only",
+      capabilities: ["work:read"],
+      commentVisible: false,
+      suggestionVisible: false,
+    },
+    {
+      label: "comments-only",
+      capabilities: ["work:read", "comments:read"],
+      commentVisible: true,
+      suggestionVisible: false,
+    },
+    {
+      label: "suggestions-only",
+      capabilities: ["work:read", "suggestions:read"],
+      commentVisible: false,
+      suggestionVisible: true,
+    },
+  ])(
+    "projects completed source feedback by exact kind for a $label token",
+    async ({ label, capabilities, commentVisible, suggestionVisible }) => {
+      const commentBody = `private completed comment for ${label}`;
+      const suggestionBody = `private completed suggestion for ${label}`;
+      const commentId = await createOpenSuggestion(h, maintainer, {
+        kind: "comment",
+        body: commentBody,
+      });
+      const suggestionId = await createOpenSuggestion(h, maintainer, {
+        body: suggestionBody,
+      });
+      const commentWorkItemId = await forceItem(commentId);
+      const suggestionWorkItemId = await forceItem(suggestionId);
+      await h.repos.workItems.updateStatus(
+        commentWorkItemId,
+        "completed",
+        "2026-07-22T20:01:00.000Z",
+      );
+      await h.repos.workItems.updateStatus(
+        suggestionWorkItemId,
+        "completed",
+        "2026-07-22T20:02:00.000Z",
+      );
+
+      const agent = await mintCanonicalToken(h, maintainer, capabilities, label);
+      const response = await h.app.request(
+        `/v1/projects/${h.projectId}/work-items/completed`,
+        { headers: { Authorization: `Bearer ${agent.token}` } },
+      );
+      expect(response.status).toBe(200);
+      const responseText = await response.text();
+      const body = JSON.parse(responseText) as {
+        items: Array<{
+          id: string;
+          sourceAnnotationId: string;
+          source: { kind: string; body: string } | null;
+          status: string;
+        }>;
+      };
+      const byId = new Map(body.items.map((item) => [item.id, item]));
+      const comment = byId.get(commentWorkItemId);
+      const suggestion = byId.get(suggestionWorkItemId);
+
+      expect(comment).toMatchObject({
+        sourceAnnotationId: commentId,
+        status: "completed",
+        source: commentVisible ? { kind: "comment", body: commentBody } : null,
+      });
+      expect(suggestion).toMatchObject({
+        sourceAnnotationId: suggestionId,
+        status: "completed",
+        source: suggestionVisible
+          ? { kind: "suggestion", body: suggestionBody }
+          : null,
+      });
+      expect(responseText.includes(commentBody)).toBe(commentVisible);
+      expect(responseText.includes(suggestionBody)).toBe(suggestionVisible);
+    },
+  );
 
   it("requires work:read (contributor is 403, unknown id 404)", async () => {
     const contributor = await devLogin(h, "cass", "contributor");

@@ -39,6 +39,7 @@ import {
   reopenSuggestionCommandSchema,
   resolveSupportChange,
   type AnnotationStatus,
+  type EditorialCapability,
   type VoteValue,
 } from "@authorbot/domain";
 import { evaluate, workTypeForScope } from "@authorbot/rule-engine";
@@ -160,11 +161,32 @@ export function workItemJson(w: WorkItemRecord): Record<string, unknown> {
   };
 }
 
-/** Compact Work-history response. Retained submission prose is never exposed. */
-export function completedWorkItemJson(row: CompletedWorkItemSummary): Record<string, unknown> {
+function completedWorkSourceCapability(kind: string): EditorialCapability | null {
+  if (kind === "comment") return "comments:read";
+  if (kind === "suggestion") return "suggestions:read";
+  return null;
+}
+
+/**
+ * Compact Work-history response. Retained submission prose is never exposed,
+ * and source feedback is projected only when the caller may read that exact
+ * feedback kind. The Work row itself remains useful to a `work:read` caller.
+ */
+export function completedWorkItemJson(
+  row: CompletedWorkItemSummary,
+  effectiveCapabilities: readonly EditorialCapability[],
+): Record<string, unknown> {
+  const sourceCapability =
+    row.source === null ? null : completedWorkSourceCapability(row.source.kind);
+  const source =
+    row.source !== null &&
+    sourceCapability !== null &&
+    effectiveCapabilities.includes(sourceCapability)
+      ? row.source
+      : null;
   return {
     ...workItemJson(row.workItem),
-    source: row.source,
+    source,
     chapter:
       row.chapter === null
         ? null
@@ -1347,8 +1369,9 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       limit,
       ...(cursor === undefined ? {} : { beforeId: cursor }),
     });
+    const effectiveCapabilities = authOf(c).effectiveCapabilities;
     return c.json({
-      items: items.map(completedWorkItemJson),
+      items: items.map((item) => completedWorkItemJson(item, effectiveCapabilities)),
       nextCursor: items.length === limit ? (items[items.length - 1]?.workItem.id ?? null) : null,
     });
   });
