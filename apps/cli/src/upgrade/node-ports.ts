@@ -398,6 +398,7 @@ async function runInherited(
 
 async function installBootstrapCli(
   targetVersion: string,
+  repoPath: string,
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
 ): Promise<{
@@ -419,15 +420,53 @@ async function installBootstrapCli(
       )}\n`,
       "utf8",
     );
+    // npm loads project configuration from the install prefix, so acquisition
+    // needs the book's `.npmrc` in this private throwaway project. Keep npm's
+    // cwd at the book and select only the throwaway install prefix below:
+    // relative settings such as cache=.npm-cache and cafile=./ca.pem then keep
+    // the same meaning they had during target selection. Copy the bytes
+    // unchanged, retain caller userconfig/environment precedence, and never
+    // inspect or render the credential-bearing contents.
+    try {
+      const projectNpmrc = await readFile(path.join(repoPath, ".npmrc"));
+      await writeFile(path.join(root, ".npmrc"), projectNpmrc, { mode: 0o600 });
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      ) {
+        throw error;
+      }
+    }
     const commonArgs = [
       "install",
+      "--prefix",
+      root,
+      "--global=false",
+      "--location=project",
+      "--workspaces=false",
       "--package-lock=false",
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
       "--prefer-offline",
     ];
-    await run("npm", commonArgs, root, env, platform);
+    // Outer `npm --workspace ... exec` selectors describe the author's
+    // project, not this isolated manifest. npm rejects a workspace selector
+    // together with --workspaces=false, so remove only that invocation
+    // context. CLI flags likewise prevent an inherited global/location mode
+    // from redirecting installation outside the private prefix.
+    const acquisitionEnv = Object.fromEntries(
+      Object.entries(env).filter(
+        ([key]) =>
+          !/^npm_config_(?:workspace|workspaces|include_workspace_root)$/i.test(
+            key,
+          ),
+      ),
+    );
+    await run("npm", commonArgs, repoPath, acquisitionEnv, platform);
     const bin = await exactInstalledCliBin(
       path.join(root, "node_modules", "@authorbot", "cli"),
       targetVersion,
@@ -457,8 +496,9 @@ async function installBootstrapCli(
  *
  * It never installs into the book. An exact local target is used directly;
  * otherwise npm resolves it into a throwaway directory with lifecycle scripts
- * disabled. If npm is offline and has no usable cache, the acquisition fails
- * before the target CLI starts and the book stays byte-identical.
+ * disabled. Source, package.json, package-lock.json, and node_modules stay
+ * untouched before the target CLI starts. npm-managed cache and log paths
+ * still follow the caller's configuration and may be read or updated.
  */
 export async function createNodeUpgradeBootstrap(
   env: NodeJS.ProcessEnv = process.env,
@@ -490,6 +530,7 @@ export async function createNodeUpgradeBootstrap(
       if (bin === undefined) {
         const installed = await installBootstrapCli(
           request.targetVersion,
+          request.repoPath,
           env,
           platform,
         );

@@ -125,9 +125,75 @@ describe("authorbot upgrade self-bootstrap", () => {
         args: [repoPath, "--to", "1.1.0"],
       },
     ]);
-    expect(git.calls).toEqual([]);
+    expect(git.calls).toEqual(["isClean"]);
     expect(await snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
     expect(io.stdout()).toContain("handing off to @authorbot/cli@1.1.0 before changing anything");
+  });
+
+  it("pins one implicit release selection across bootstrap and repository preparation", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const bootstrap = fakeBootstrap({ running: "1.1.0" });
+    let lookups = 0;
+    const releases = {
+      async listVersions() {
+        lookups += 1;
+        return lookups === 1
+          ? ["1.0.0", "1.1.0"]
+          : ["1.0.0", "1.1.0", "1.2.0"];
+      },
+    };
+
+    expect(
+      await runUpgrade(
+        [repoPath],
+        captureIo().io,
+        makeDeps({ bootstrap, releases }),
+      ),
+    ).toBe(0);
+
+    expect(lookups).toBe(1);
+    expect(bootstrap.requests).toEqual([]);
+    const manifest = JSON.parse(
+      await nodeFs.readFile(path.join(repoPath, "package.json")),
+    ) as { devDependencies: Record<string, string> };
+    expect(manifest.devDependencies["@authorbot/cli"]).toBe("1.1.0");
+  });
+
+  it("refuses a forward plan when the repository pin changes after selection", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const git = fakeGit();
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      const manifestPath = path.join(repoPath, "package.json");
+      const manifest = await nodeFs.readFile(manifestPath);
+      await nodeFs.writeFile(
+        manifestPath,
+        manifest.replace(
+          '"@authorbot/cli": "1.0.0"',
+          '"@authorbot/cli": "2.0.0"',
+        ),
+      );
+      await writeLockedVersion(repoPath, "2.0.0", "2.0.0");
+      return "main";
+    };
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: fakeBootstrap({ running: "1.1.0" }),
+          releases: fakeReleases(["1.0.0", "1.1.0"]),
+        }),
+      ),
+    ).toBe(2);
+
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain(
+      "package.json changed while the upgrade target was being selected",
+    );
   });
 
   it("uses the target helper's migration and package-alignment behavior once bootstrapped", async () => {
@@ -176,7 +242,7 @@ describe("authorbot upgrade self-bootstrap", () => {
     ).toBe(2);
 
     expect(bootstrap.requests).toEqual([]);
-    expect(git.calls).toEqual([]);
+    expect(git.calls).toEqual(["isClean"]);
     expect(await snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
     expect(io.stderr()).toContain("bootstrap requested @authorbot/cli@1.1.0");
     expect(io.stderr()).toContain("Refusing to recurse or change the repository");
@@ -200,11 +266,11 @@ describe("authorbot upgrade self-bootstrap", () => {
     ).toBe(2);
 
     expect(bootstrap.requests).toEqual([]);
-    expect(git.calls).toEqual([]);
+    expect(git.calls).toEqual(["isClean"]);
     expect(io.stderr()).toContain("Refusing a second handoff");
   });
 
-  it("leaves the book untouched when the selected helper is unavailable offline", async () => {
+  it("leaves book content untouched when the selected helper is unavailable offline", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const before = await snapshot(repoPath);
     const git = fakeGit();
@@ -222,11 +288,13 @@ describe("authorbot upgrade self-bootstrap", () => {
       ),
     ).toBe(1);
 
-    expect(git.calls).toEqual([]);
+    expect(git.calls).toEqual(["isClean"]);
     expect(await snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
     expect(io.stderr()).toContain("could not start @authorbot/cli@1.1.0");
     expect(io.stderr()).toContain("target-helper execution never began");
-    expect(io.stderr()).toContain("repository was not changed");
+    expect(io.stderr()).toContain(
+      "did not change book source, package.json, package-lock.json, or node_modules",
+    );
     expect(io.stderr()).toContain(
       `npx --yes @authorbot/cli@1.1.0 upgrade ${repoPath} --to 1.1.0`,
     );
@@ -254,7 +322,7 @@ describe("authorbot upgrade self-bootstrap", () => {
 
     expect(io.stderr()).toContain("bootstrap warning");
     expect(io.stderr()).toContain("exit status is preserved");
-    expect(io.stderr()).not.toContain("repository was not changed");
+    expect(io.stderr()).not.toContain("did not change book source");
   });
 
   it("uses the locked current helper for finish and rollback, not the rollback target", async () => {
@@ -283,6 +351,49 @@ describe("authorbot upgrade self-bootstrap", () => {
       ),
     ).toBe(21);
     expect(rollbackBootstrap.requests[0]?.targetVersion).toBe("1.0.7");
+  });
+
+  it("rechecks the current helper after rollback captures a changed checkout", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const git = fakeGit();
+    git.currentBranch = async () => {
+      git.calls.push("currentBranch");
+      const manifestPath = path.join(repoPath, "package.json");
+      const manifest = await nodeFs.readFile(manifestPath);
+      await nodeFs.writeFile(
+        manifestPath,
+        manifest.replace(
+          '"@authorbot/cli": "1.1.0"',
+          '"@authorbot/cli": "1.2.0"',
+        ),
+      );
+      await writeLockedVersion(repoPath, "1.2.0", "1.2.0");
+      return "main";
+    };
+    let relocks = 0;
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: fakeBootstrap({ running: "1.1.0" }),
+          lockfile: {
+            async relock() {
+              relocks += 1;
+            },
+          },
+        }),
+      ),
+    ).toBe(2);
+
+    expect(relocks).toBe(0);
+    expect(git.branches).toEqual([]);
+    expect(io.stderr()).toContain(
+      "checkout now requires @authorbot/cli@1.2.0, but the running helper is 1.1.0",
+    );
   });
 
   it("keeps JSON stdout machine-readable and forwards --check's child exit code", async () => {

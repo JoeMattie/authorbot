@@ -13,7 +13,7 @@
 
 import path from "node:path";
 import type { CliIo } from "../cli.js";
-import { resolvePlan } from "./plan.js";
+import { resolvePlan, type UpgradePlan } from "./plan.js";
 import type { UpgradeDeps } from "./ports.js";
 import { CLI_PACKAGE, readPin, type PinLocation } from "./repo.js";
 import { compareVersions, parseVersion, type Pin, type SemVer } from "./semver.js";
@@ -103,18 +103,26 @@ async function currentToolchainVersion(
   }
 }
 
+/** Exact helper required by the manifest and coherent committed lock evidence. */
+export async function currentUpgradeToolchainVersion(
+  deps: Pick<UpgradeDeps, "fs">,
+  repoPath: string,
+): Promise<SemVer> {
+  const location = await readPin(deps.fs, repoPath);
+  return currentToolchainVersion(deps, repoPath, location);
+}
+
 async function desiredBootstrapVersion(
   options: BootstrapOptions,
   deps: UpgradeDeps,
-): Promise<SemVer> {
-  const location = await readPin(deps.fs, options.repoPath);
-  const current = await currentToolchainVersion(deps, options.repoPath, location);
-
+): Promise<{ readonly desired: SemVer; readonly selection?: UpgradePlan }> {
   // Rollback decisions and post-merge deploys belong to the toolchain already
   // pinned by this checkout. Starting the older rollback target would discard
   // the newer helper's migration and validation knowledge.
   if (options.finish || options.rollback !== undefined) {
-    return current;
+    return {
+      desired: await currentUpgradeToolchainVersion(deps, options.repoPath),
+    };
   }
 
   // Target selection does not require this running release's migration
@@ -127,7 +135,15 @@ async function desiredBootstrapVersion(
       ...(options.to === undefined ? {} : { to: options.to }),
     },
   );
-  return compareVersions(plan.target, plan.current) > 0 ? plan.target : current;
+  const current = await currentToolchainVersion(
+    deps,
+    options.repoPath,
+    plan.pinLocation,
+  );
+  return {
+    desired: compareVersions(plan.target, plan.current) > 0 ? plan.target : current,
+    selection: plan,
+  };
 }
 
 function shellArgument(value: string): string {
@@ -161,8 +177,9 @@ export function renderTransientBootstrapCommand(
 }
 
 /**
- * Return `undefined` when this process is the suitable helper and may
- * continue. Otherwise return the delegated child exit code (or a fail-closed
+ * Return the pinned release selection when this process is the suitable
+ * helper and target metadata was consulted, or `undefined` when no selection
+ * is needed. Otherwise return the delegated child exit code (or a fail-closed
  * local error code).
  */
 export async function ensureUpgradeBootstrap(
@@ -170,12 +187,12 @@ export async function ensureUpgradeBootstrap(
   originalArgs: readonly string[],
   io: CliIo,
   deps: UpgradeDeps,
-): Promise<number | undefined> {
+): Promise<number | UpgradePlan | undefined> {
   const bootstrap = deps.bootstrap;
   if (bootstrap === undefined) {
     return undefined;
   }
-  const desired = await desiredBootstrapVersion(options, deps);
+  const { desired, selection } = await desiredBootstrapVersion(options, deps);
 
   if (
     bootstrap.requestedVersion !== undefined &&
@@ -189,7 +206,7 @@ export async function ensureUpgradeBootstrap(
   }
 
   if (bootstrap.runningVersion === desired.raw) {
-    return undefined;
+    return selection;
   }
 
   if (bootstrap.requestedVersion !== undefined) {
@@ -226,9 +243,9 @@ export async function ensureUpgradeBootstrap(
         `${error instanceof Error ? error.message : String(error)}`,
     );
     io.err(
-      "authorbot: target-helper execution never began, so the repository was not changed. " +
-        "Connect to npm or make the release available in your npm cache, then launch it " +
-        "transiently:",
+      "authorbot: target-helper execution never began, so bootstrap acquisition did not " +
+        "change book source, package.json, package-lock.json, or node_modules. Connect to npm " +
+        "or make the release available in your npm cache, then launch it transiently:",
     );
     io.err(
       `  ${renderTransientBootstrapCommand(desired.raw, originalArgs)}`,

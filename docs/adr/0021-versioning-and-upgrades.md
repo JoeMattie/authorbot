@@ -96,7 +96,8 @@ PATH starts anything else, or a second handoff would be needed, the command
 fails before repository mutation instead of recursing. This also makes the
 offline behavior explicit: an exact local install works without downloading;
 a populated npm cache may satisfy acquisition; and an unavailable release
-stops the operation with the repository unchanged.
+stops the operation before book source, `package.json`, `package-lock.json`, or
+`node_modules` changes.
 
 That unchanged guarantee ends when the target helper starts. A signal or
 process failure after that point reports that repository work may have begun
@@ -107,7 +108,22 @@ successful child exit status or misreport the child's upgrade result.
 The nested npm call preserves the author's intentional offline, cache,
 registry, userconfig, and authentication settings. It removes only npm
 configuration known to be invalid when inherited from the outer `npx`
-process, currently `allow_scripts`.
+process, currently `allow_scripts`, and outer workspace selectors which do not
+describe the isolated acquisition manifest. Explicit local, project-location,
+and no-workspace flags prevent inherited global or workspace invocation modes
+from redirecting the install outside its private prefix. The helper copies the
+book's `.npmrc`
+byte-for-byte into the private throwaway install prefix for acquisition, then
+removes it with that prefix. npm still runs with the book as its working
+directory, so relative cache, certificate, and other path settings retain the
+same meaning they had during selection. Book source, `package.json`,
+`package-lock.json`, and `node_modules` are not acquisition targets. Caller
+userconfig and environment settings still participate in npm's normal
+precedence, and credential-bearing contents are never inspected or logged.
+npm-managed cache and log paths follow that configuration, so an intentionally
+project-relative cache or log directory may be read or updated by npm just as
+it was during selection. The command's clean-tree gates prevent an unignored
+artifact from being swept into the upgrade pull request.
 
 An explicit `--to <version>` never performs a release-metadata lookup. The
 exact local helper can therefore run fully offline, and npm acquisition itself
@@ -115,7 +131,11 @@ is the fail-closed proof that a nonlocal target is available. Implicit target
 selection runs `npm view` from the book repository instead of fetching the
 public registry directly. That keeps npm's project and user configuration,
 offline cache, custom registry, and authentication authoritative for both
-selection and acquisition.
+selection and acquisition. The selected target is then carried into check,
+dry-run, or repository preparation; the operation does not query mutable
+release metadata a second time. A handed-off child still resolves once to
+prove the parent's exact request remains the selected target, and refuses
+rather than handing off again if registry state advanced.
 
 On Windows, npm and npx are command scripts which cannot be launched by
 `execFile` without a shell. The helper does not enable one. It validates npm's
@@ -136,13 +156,15 @@ helper, and `node_modules` are alignment inputs, not format evidence. Missing,
 malformed, contradictory, or newer lock evidence blocks unchanged rather than
 guessing which migrations already ran.
 
-For a mutating run, the helper records both the current branch and exact HEAD
-before reading repository state, then rechecks HEAD, branch, and cleanliness
-immediately before creating its branch. This catches same-branch commits as
-well as ordinary uncommitted edits made while migration or relocking was in
-progress. Branch creation names that recorded HEAD as its explicit start point,
-so even a commit in the final gap cannot become the pull request's unnoticed
-base.
+For a mutating run, a clean-tree preflight runs before bootstrap selection can
+read the manifest or lock. The selected helper then records both the current
+branch and exact HEAD, rechecks cleanliness before reading repository state,
+and rechecks HEAD, branch, and cleanliness immediately before creating its
+branch. Rollback also reasserts that the current checkout still requires the
+running helper. These gates catch dirty-start races, same-branch commits, and
+ordinary uncommitted edits made while migration or relocking was in progress.
+Branch creation names the recorded HEAD as its explicit start point, so even a
+commit in the final gap cannot become the pull request's unnoticed base.
 
 No release can change an executable which was already published before this
 bootstrap existed. A book whose installed helper predates this behavior needs

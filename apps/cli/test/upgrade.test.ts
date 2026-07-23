@@ -334,7 +334,7 @@ describe("authorbot upgrade - no upgrade available", () => {
     const io = captureIo();
     expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(0);
     expect(io.stdout()).toContain("already on 1.1.0");
-    expect(git.calls).toEqual(["currentBranch", "head"]);
+    expect(git.calls).toEqual(["isClean", "currentBranch", "head", "isClean"]);
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
   });
 });
@@ -785,6 +785,66 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     expect(git.branches).toEqual([]);
   });
 
+  it("does not read or prepare a dirty manifest even if it is restored during the first gate", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.0.0" });
+    const before = await snapshot(repoPath);
+    const manifestPath = path.join(repoPath, "package.json");
+    const committedManifest = await nodeFs.readFile(manifestPath);
+    await nodeFs.writeFile(
+      manifestPath,
+      committedManifest.replace(
+        '"name": "my-book"',
+        '"name": "unrelated-dirty-work"',
+      ),
+    );
+    const git = fakeGit();
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      await nodeFs.writeFile(manifestPath, committedManifest);
+      return false;
+    };
+    let releaseLookups = 0;
+    let relocks = 0;
+    let handoffs = 0;
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: {
+            runningVersion: "1.0.0",
+            async handoff() {
+              handoffs += 1;
+              return { exitCode: 0 };
+            },
+          },
+          releases: {
+            async listVersions() {
+              releaseLookups += 1;
+              return ["1.0.0", "1.1.0"];
+            },
+          },
+          lockfile: {
+            async relock() {
+              relocks += 1;
+            },
+          },
+        }),
+      ),
+    ).toBe(2);
+
+    expect(releaseLookups).toBe(0);
+    expect(relocks).toBe(0);
+    expect(handoffs).toBe(0);
+    expect(git.branches).toEqual([]);
+    expect(git.commits).toEqual([]);
+    expect(io.stderr()).toContain("uncommitted changes");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
   it("rechecks cleanliness after migration and relocking before creating a branch", async () => {
     const repoPath = await makeBookRepo({ pin: "1.0.0" });
     const before = await snapshot(repoPath);
@@ -793,13 +853,13 @@ describe("authorbot upgrade - the pull request (ADR-0021 §3 step 4)", () => {
     git.isClean = async () => {
       git.calls.push("isClean");
       cleanChecks += 1;
-      return cleanChecks === 1;
+      return cleanChecks < 3;
     };
     const io = captureIo();
 
     expect(await runUpgrade([repoPath], io.io, makeDeps({ git }))).toBe(2);
 
-    expect(cleanChecks).toBe(2);
+    expect(cleanChecks).toBe(3);
     expect(git.branches).toEqual([]);
     expect(io.stderr()).toContain("working tree changed while the operation was being prepared");
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
@@ -1064,6 +1124,58 @@ describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
     expect(io.stderr()).toContain("before creating a branch");
   });
 
+  it("does not prepare rollback from a dirty manifest restored during the first gate", async () => {
+    const repoPath = await makeBookRepo({ pin: "1.1.0" });
+    const before = await snapshot(repoPath);
+    const manifestPath = path.join(repoPath, "package.json");
+    const committedManifest = await nodeFs.readFile(manifestPath);
+    await nodeFs.writeFile(
+      manifestPath,
+      committedManifest.replace(
+        '"name": "my-book"',
+        '"name": "unrelated-dirty-rollback-work"',
+      ),
+    );
+    const git = fakeGit();
+    git.isClean = async () => {
+      git.calls.push("isClean");
+      await nodeFs.writeFile(manifestPath, committedManifest);
+      return false;
+    };
+    let relocks = 0;
+    let handoffs = 0;
+    const io = captureIo();
+
+    expect(
+      await runUpgrade(
+        [repoPath, "--rollback", "1.0.0"],
+        io.io,
+        makeDeps({
+          git,
+          bootstrap: {
+            runningVersion: "1.1.0",
+            async handoff() {
+              handoffs += 1;
+              return { exitCode: 0 };
+            },
+          },
+          lockfile: {
+            async relock() {
+              relocks += 1;
+            },
+          },
+        }),
+      ),
+    ).toBe(2);
+
+    expect(relocks).toBe(0);
+    expect(handoffs).toBe(0);
+    expect(git.branches).toEqual([]);
+    expect(git.commits).toEqual([]);
+    expect(io.stderr()).toContain("uncommitted changes");
+    expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);
+  });
+
   it("stops when the worktree becomes dirty while rollback relocking runs", async () => {
     const repoPath = await makeBookRepo({ pin: "1.1.0" });
     const before = await snapshot(repoPath);
@@ -1072,7 +1184,7 @@ describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
     git.isClean = async () => {
       git.calls.push("isClean");
       cleanChecks += 1;
-      return cleanChecks === 1;
+      return cleanChecks < 3;
     };
     const io = captureIo();
 
@@ -1084,7 +1196,7 @@ describe("authorbot upgrade --rollback (ADR-0021 §5)", () => {
       ),
     ).toBe(2);
 
-    expect(cleanChecks).toBe(2);
+    expect(cleanChecks).toBe(3);
     expect(git.branches).toEqual([]);
     expect(io.stderr()).toContain("working tree changed while the rollback was being prepared");
     expect(snapshotsEqual(before, await snapshot(repoPath))).toBe(true);

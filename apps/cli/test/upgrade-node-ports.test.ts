@@ -414,7 +414,7 @@ process.exitCode = 11;
     });
   });
 
-  it("rejects a real pre-spawn failure so the caller can make the unchanged guarantee", async () => {
+  it("rejects a real pre-spawn failure before any target helper can run", async () => {
     const repo = await tempDirectory();
     const packageRoot = path.join(repo, "node_modules", "@authorbot", "cli");
     const dist = path.join(packageRoot, "dist");
@@ -472,7 +472,7 @@ process.exitCode = 11;
       expect(result.exitCode).toBe(1);
       expect(result.warning).toContain("after execution began");
       expect(result.warning).toContain("may have changed the repository");
-      expect(result.warning).not.toContain("repository was not changed");
+      expect(result.warning).not.toContain("did not change book source");
     },
   );
 
@@ -489,19 +489,26 @@ process.exitCode = 11;
         npmCli,
         `const fs = require("node:fs");
 const path = require("node:path");
-const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+const prefixIndex = process.argv.indexOf("--prefix");
+const prefix = process.argv[prefixIndex + 1];
+const manifest = JSON.parse(fs.readFileSync(path.join(prefix, "package.json"), "utf8"));
 const version = manifest.dependencies["@authorbot/cli"];
 fs.writeFileSync(process.env.AUTHORBOT_BOOTSTRAP_NPM_MARKER, JSON.stringify({
   args: process.argv.slice(2),
   cwd: process.cwd(),
+  prefix,
   poison: process.env.npm_config_allow_scripts,
+  global: process.env.npm_config_global,
+  location: process.env.npm_config_location,
+  workspace: process.env.npm_config_workspace,
+  workspaces: process.env.npm_config_workspaces,
   offline: process.env.npm_config_offline,
   cache: process.env.npm_config_cache,
   registry: process.env.npm_config_registry,
   userconfig: process.env.npm_config_userconfig,
   auth: process.env.npm_config__authToken
 }));
-const root = path.join(process.cwd(), "node_modules", "@authorbot", "cli");
+const root = path.join(prefix, "node_modules", "@authorbot", "cli");
 fs.mkdirSync(path.join(root, "dist"), { recursive: true });
 fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
   name: "@authorbot/cli",
@@ -539,6 +546,10 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
           npm_node_execpath: process.execPath,
           npm_execpath: npmCli,
           npm_config_allow_scripts: "poison-from-outer-npx",
+          npm_config_global: "true",
+          npm_config_location: "global",
+          npm_config_workspace: "book",
+          npm_config_workspaces: "true",
           npm_config_offline: "true",
           npm_config_cache: "/intentional/bootstrap-cache",
           npm_config_registry: "https://registry.example.test/",
@@ -566,24 +577,39 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
       const npm = JSON.parse(await readFile(npmMarker, "utf8")) as {
         args: string[];
         cwd: string;
+        prefix: string;
         poison?: string;
+        global?: string;
+        location?: string;
+        workspace?: string;
+        workspaces?: string;
         offline?: string;
         cache?: string;
         registry?: string;
         userconfig?: string;
         auth?: string;
       };
-      tempDirs.push(npm.cwd);
+      tempDirs.push(npm.prefix);
       expect(npm.args).toEqual([
         "install",
+        "--prefix",
+        npm.prefix,
+        "--global=false",
+        "--location=project",
+        "--workspaces=false",
         "--package-lock=false",
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
         "--prefer-offline",
       ]);
-      expect(npm.cwd).toContain("authorbot-cli-bootstrap-");
+      expect(npm.cwd).toBe(repo);
+      expect(npm.prefix).toContain("authorbot-cli-bootstrap-");
       expect(npm.poison).toBeUndefined();
+      expect(npm.global).toBe("true");
+      expect(npm.location).toBe("global");
+      expect(npm.workspace).toBeUndefined();
+      expect(npm.workspaces).toBeUndefined();
       expect(npm).toMatchObject({
         offline: "true",
         cache: "/intentional/bootstrap-cache",
@@ -608,6 +634,138 @@ fs.writeFileSync(path.join(root, "dist", "bin.mjs"), [
       expect(stale.version).toBe("0.1.29");
     },
   );
+
+  it(
+    "copies project-scoped npm registry auth into only the private acquisition root",
+    async () => {
+      const repo = await tempDirectory();
+      const fakeBin = path.join(repo, "fake-bin");
+      await mkdir(fakeBin);
+      const npmCli = path.join(fakeBin, "npm-cli.cjs");
+      const npmMarker = path.join(repo, "npm-project-config.json");
+      const projectNpmrc = Buffer.from(
+        [
+          "# byte-for-byte project config",
+          "@authorbot:registry=https://authorbot.registry.example/",
+          "//authorbot.registry.example/:_authToken=project-scoped-secret",
+          "cache=.npm-cache",
+          "cafile=./authorbot-ca.pem",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(path.join(repo, ".npmrc"), projectNpmrc);
+      await writeFile(
+        npmCli,
+        `const fs = require("node:fs");
+const path = require("node:path");
+const prefixIndex = process.argv.indexOf("--prefix");
+const prefix = process.argv[prefixIndex + 1];
+const manifest = JSON.parse(fs.readFileSync(path.join(prefix, "package.json"), "utf8"));
+const version = manifest.dependencies["@authorbot/cli"];
+const npmrc = fs.readFileSync(path.join(prefix, ".npmrc"));
+const cacheSetting = npmrc.toString("utf8").match(/^cache=(.+)$/m)[1];
+const cafileSetting = npmrc.toString("utf8").match(/^cafile=(.+)$/m)[1];
+fs.writeFileSync(process.env.AUTHORBOT_BOOTSTRAP_NPM_MARKER, JSON.stringify({
+  cwd: process.cwd(),
+  prefix,
+  npmrcBase64: npmrc.toString("base64"),
+  resolvedCache: path.resolve(process.cwd(), cacheSetting),
+  resolvedCafile: path.resolve(process.cwd(), cafileSetting),
+  rootMode: fs.statSync(prefix).mode & 0o777,
+  npmrcMode: fs.statSync(path.join(prefix, ".npmrc")).mode & 0o777,
+  userconfig: process.env.npm_config_userconfig,
+  scopedRegistryEnv: process.env["npm_config_@authorbot:registry"],
+  scopedAuthEnv: process.env["npm_config_//authorbot.registry.example/:_authToken"]
+}));
+const root = path.join(prefix, "node_modules", "@authorbot", "cli");
+fs.mkdirSync(path.join(root, "dist"), { recursive: true });
+fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+  name: "@authorbot/cli",
+  version,
+  type: "module",
+  bin: { authorbot: "./dist/bin.mjs" }
+}));
+fs.writeFileSync(
+  path.join(root, "dist", "bin.mjs"),
+  "process.exitCode = 0;\\n"
+);
+`,
+      );
+
+      const bootstrapEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        npm_node_execpath: process.execPath,
+        npm_execpath: npmCli,
+        npm_config_userconfig: "/intentional/caller-userconfig",
+        AUTHORBOT_BOOTSTRAP_NPM_MARKER: npmMarker,
+      };
+      delete bootstrapEnv["npm_config_@authorbot:registry"];
+      delete bootstrapEnv[
+        "npm_config_//authorbot.registry.example/:_authToken"
+      ];
+      const bootstrap = await createNodeUpgradeBootstrap(
+        bootstrapEnv,
+        undefined,
+        "win32",
+      );
+      await expect(
+        bootstrap.handoff({
+          targetVersion: "0.1.35",
+          repoPath: repo,
+          cwd: repo,
+          args: [".", "--to", "0.1.35"],
+        }),
+      ).resolves.toEqual({ exitCode: 0 });
+
+      const marker = JSON.parse(await readFile(npmMarker, "utf8")) as {
+        cwd: string;
+        prefix: string;
+        npmrcBase64: string;
+        resolvedCache: string;
+        resolvedCafile: string;
+        rootMode: number;
+        npmrcMode: number;
+        userconfig: string;
+        scopedRegistryEnv?: string;
+        scopedAuthEnv?: string;
+      };
+      expect(marker.cwd).toBe(repo);
+      expect(path.dirname(marker.prefix)).toBe(os.tmpdir());
+      expect(Buffer.from(marker.npmrcBase64, "base64")).toEqual(projectNpmrc);
+      expect(marker.resolvedCache).toBe(path.join(repo, ".npm-cache"));
+      expect(marker.resolvedCafile).toBe(path.join(repo, "authorbot-ca.pem"));
+      expect(marker.rootMode).toBe(0o700);
+      expect(marker.npmrcMode).toBe(0o600);
+      expect(marker.userconfig).toBe("/intentional/caller-userconfig");
+      expect(marker.scopedRegistryEnv).toBeUndefined();
+      expect(marker.scopedAuthEnv).toBeUndefined();
+      await expect(readFile(path.join(marker.prefix, ".npmrc"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(path.join(marker.prefix, "package.json"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(path.join(repo, ".npmrc"))).resolves.toEqual(projectNpmrc);
+    },
+  );
+
+  it("fails before invoking npm when the project .npmrc cannot be read", async () => {
+    const repo = await tempDirectory();
+    await mkdir(path.join(repo, ".npmrc"));
+    const bootstrap = await createNodeUpgradeBootstrap({
+      ...process.env,
+      PATH: "",
+    });
+
+    await expect(
+      bootstrap.handoff({
+        targetVersion: "0.1.35",
+        repoPath: repo,
+        cwd: repo,
+        args: [".", "--to", "0.1.35"],
+      }),
+    ).rejects.toMatchObject({ code: "EISDIR" });
+  });
 });
 
 describe("Windows npx Wrangler execution", () => {

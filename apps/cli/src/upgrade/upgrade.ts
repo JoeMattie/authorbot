@@ -28,7 +28,10 @@ import path from "node:path";
 import type { CliIo } from "../cli.js";
 import type { Finding, ValidationReport } from "../validate/findings.js";
 import { RepoAccessError, validateBookRepo } from "../validate/index.js";
-import { ensureUpgradeBootstrap } from "./bootstrap.js";
+import {
+  currentUpgradeToolchainVersion,
+  ensureUpgradeBootstrap,
+} from "./bootstrap.js";
 import {
   applyMigrations,
   BOOK_REPO_MIGRATIONS,
@@ -147,9 +150,25 @@ export async function runUpgrade(
   const deps = injected ?? (await defaultDeps());
 
   try {
-    const delegated = await ensureUpgradeBootstrap(parsed, args, io, deps);
-    if (delegated !== undefined) {
-      return delegated;
+    const mutatingPreparation =
+      !parsed.check &&
+      !parsed.dryRun &&
+      !parsed.finish &&
+      (parsed.to === undefined || parseVersion(parsed.to) !== undefined) &&
+      (parsed.rollback === undefined || parseVersion(parsed.rollback) !== undefined);
+    if (mutatingPreparation && !(await deps.git.isClean(parsed.repoPath))) {
+      io.err(
+        parsed.rollback === undefined
+          ? "authorbot: the working tree has uncommitted changes. " +
+              "Commit or stash them first: the upgrade needs a clean branch point so that " +
+              "the pull request contains only the upgrade."
+          : "authorbot: the working tree has uncommitted changes; commit or stash them first.",
+      );
+      return 2;
+    }
+    const bootstrapResult = await ensureUpgradeBootstrap(parsed, args, io, deps);
+    if (typeof bootstrapResult === "number") {
+      return bootstrapResult;
     }
     if (parsed.finish) {
       return await runFinish(parsed, io, deps);
@@ -158,9 +177,9 @@ export async function runUpgrade(
       return await runRollback(parsed, parsed.rollback, io, deps);
     }
     if (parsed.check) {
-      return await runCheck(parsed, io, deps);
+      return await runCheck(parsed, io, deps, bootstrapResult);
     }
-    return await runUpgradeFlow(parsed, io, deps);
+    return await runUpgradeFlow(parsed, io, deps, bootstrapResult);
   } catch (error) {
     if (error instanceof UpgradeRepoError || error instanceof MigrationRegistryError) {
       io.err(`authorbot: ${error.message}`);
@@ -272,11 +291,76 @@ function parseArgs(args: string[], io: CliIo): UpgradeOptions | number {
 // --check
 // --------------------------------------------------------------------------
 
-async function runCheck(options: UpgradeOptions, io: CliIo, deps: UpgradeDeps): Promise<number> {
+/**
+ * Re-read repository state with the release target selected by the bootstrap,
+ * but never query mutable release metadata a second time.
+ *
+ * The bootstrap deliberately resolves with an empty migration registry because
+ * an older helper cannot know the target release's migrations. Once it proves
+ * this running helper owns the selected target, rebuild the plan with this
+ * helper's registry while pinning the earlier selection. If package.json
+ * changed across that boundary, fail closed instead of applying a target
+ * chosen for a different pin.
+ */
+async function resolveSelectedPlan(
+  options: UpgradeOptions,
+  deps: UpgradeDeps,
+  selection?: UpgradePlan,
+): Promise<UpgradePlan> {
+  if (selection === undefined) {
+    return resolvePlan(deps, {
+      repoPath: options.repoPath,
+      ...(options.to === undefined ? {} : { to: options.to }),
+    });
+  }
+  if (selection.repoPath !== options.repoPath) {
+    throw new UpgradeRepoError(
+      "the repository path changed while the upgrade target was being selected; run the command again",
+    );
+  }
   const plan = await resolvePlan(deps, {
     repoPath: options.repoPath,
-    ...(options.to === undefined ? {} : { to: options.to }),
+    to: selection.target.raw,
   });
+  if (plan.pinLocation.packageJsonText !== selection.pinLocation.packageJsonText) {
+    throw new UpgradeRepoError(
+      "package.json changed while the upgrade target was being selected; " +
+        "no repository change was made, so inspect the new pin and run the command again",
+    );
+  }
+  return {
+    ...plan,
+    available: [...selection.available],
+    ...(selection.newerMajor === undefined
+      ? {}
+      : { newerMajor: selection.newerMajor }),
+  };
+}
+
+async function requireCurrentCheckoutHelper(
+  repoPath: string,
+  deps: UpgradeDeps,
+): Promise<void> {
+  if (deps.bootstrap === undefined) {
+    return;
+  }
+  const required = await currentUpgradeToolchainVersion(deps, repoPath);
+  if (required.raw !== deps.bootstrap.runningVersion) {
+    throw new UpgradeRepoError(
+      `the checkout now requires @authorbot/cli@${required.raw}, but the running helper is ` +
+        `${deps.bootstrap.runningVersion}. No repository change was made; run the command again ` +
+        "so the correct helper can own it.",
+    );
+  }
+}
+
+async function runCheck(
+  options: UpgradeOptions,
+  io: CliIo,
+  deps: UpgradeDeps,
+  selection?: UpgradePlan,
+): Promise<number> {
+  const plan = await resolveSelectedPlan(options, deps, selection);
   const targetSpec = upgradeTargetSpec(plan, options.to !== undefined);
   const audit = await auditToolchain(plan, deps, targetSpec);
   const effectivePlan = planFromAudit(plan, audit, deps);
@@ -805,6 +889,7 @@ async function runUpgradeFlow(
   options: UpgradeOptions,
   io: CliIo,
   deps: UpgradeDeps,
+  selection?: UpgradePlan,
 ): Promise<number> {
   // Capture repository identity before reading the manifest or lock. A
   // same-branch commit during registry lookup, migration, or relocking leaves
@@ -816,10 +901,15 @@ async function runUpgradeFlow(
         branch: await deps.git.currentBranch(options.repoPath),
         head: await deps.git.head(options.repoPath),
       };
-  const plan = await resolvePlan(deps, {
-    repoPath: options.repoPath,
-    ...(options.to === undefined ? {} : { to: options.to }),
-  });
+  if (!options.dryRun && !(await deps.git.isClean(options.repoPath))) {
+    io.err(
+      "authorbot: the working tree has uncommitted changes. " +
+        "Commit or stash them first: the upgrade needs a clean branch point so that " +
+        "the pull request contains only the upgrade.",
+    );
+    return 2;
+  }
+  const plan = await resolveSelectedPlan(options, deps, selection);
   const targetSpec = upgradeTargetSpec(plan, options.to !== undefined);
   const audit = await auditToolchain(plan, deps, targetSpec);
   const effectivePlan = planFromAudit(plan, audit, deps);
@@ -897,16 +987,6 @@ async function runUpgradeFlow(
     return runDryRun(effectivePlan, plan, audit, targetSpec, options, io, deps);
   }
 
-  // Step 3 gate, plus the requirement that we have a clean tree to branch
-  // from - an upgrade must never sweep up unrelated work in progress.
-  if (!(await deps.git.isClean(plan.repoPath))) {
-    io.err(
-      "authorbot: the working tree has uncommitted changes. " +
-        "Commit or stash them first: the upgrade needs a clean branch point so that " +
-        "the pull request contains only the upgrade.",
-    );
-    return 2;
-  }
   const originalBranch =
     preparationIdentity?.branch ?? (await deps.git.currentBranch(plan.repoPath));
   const originalHead = preparationIdentity?.head ?? (await deps.git.head(plan.repoPath));
@@ -1342,6 +1422,7 @@ async function runFinish(
   io: CliIo,
   deps: UpgradeDeps,
 ): Promise<number> {
+  await requireCurrentCheckoutHelper(options.repoPath, deps);
   io.out("authorbot: running steps 5-6 (D1 migrations, redeploy, health) against this checkout.");
   return runDeploySteps(options, options.repoPath, io, deps);
 }
@@ -1451,6 +1532,13 @@ async function runRollback(
         branch: await deps.git.currentBranch(options.repoPath),
         head: await deps.git.head(options.repoPath),
       };
+  if (!options.dryRun && !(await deps.git.isClean(options.repoPath))) {
+    io.err("authorbot: the working tree has uncommitted changes; commit or stash them first.");
+    return 2;
+  }
+  if (!options.dryRun) {
+    await requireCurrentCheckoutHelper(options.repoPath, deps);
+  }
   const plan = await resolvePlan(deps, { repoPath: options.repoPath, to: requested });
   const current = plan.current;
   if (compareVersions(plan.target, current) >= 0) {
@@ -1487,10 +1575,6 @@ async function runRollback(
     return 0;
   }
 
-  if (!(await deps.git.isClean(plan.repoPath))) {
-    io.err("authorbot: the working tree has uncommitted changes; commit or stash them first.");
-    return 2;
-  }
   let toolchainFiles: PreparedToolchainFiles;
   try {
     toolchainFiles = await prepareToolchainFiles(plan, deps, targetSpec);
