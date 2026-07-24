@@ -15,6 +15,10 @@ authorbot-manuscript-editor:empty {
   margin: -0.35rem 0 1.1rem;
 }
 
+.chapter-author-actions .ab-manuscript-launcher {
+  margin: 0;
+}
+
 .ab-manuscript-launcher-status {
   flex: 1 1 100%;
   margin: 0;
@@ -23,15 +27,70 @@ authorbot-manuscript-editor:empty {
 
 .ab-manuscript-editor-shell {
   width: 100%;
-  margin: 0 0 2rem;
+  margin: 0;
+}
+
+.chapter-manuscript-surface.ab-manuscript-source-loading {
+  position: relative;
+}
+
+.ab-manuscript-source-loading-prose {
+  filter: blur(3px);
+  opacity: 0.48;
+  pointer-events: none;
+  transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.ab-manuscript-editor-shell.ab-manuscript-editor-preparing {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ab-manuscript-source-loading-overlay {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(28vh, 240px);
+  color: var(--text-strong, var(--fg));
+  font: 600 12px/1.4 var(--font-display, system-ui, sans-serif);
+}
+
+.ab-manuscript-loading-spinner {
+  display: block;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 2px solid color-mix(in srgb, var(--green-300, #7edfa1) 28%, transparent);
+  border-top-color: var(--green-300, #7edfa1);
+  border-radius: 50%;
+  animation: ab-manuscript-spin 700ms linear infinite;
+}
+
+@keyframes ab-manuscript-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 .ab-manuscript-recovery {
-  margin: 0 0 2rem;
+  margin: 0;
   padding: 1rem;
   border: 1px solid var(--warning-border, #b7791f);
   border-radius: 12px;
   background: var(--warning-surface, color-mix(in srgb, #f6ad55 12%, var(--surface)));
+}
+
+.chapter-reading-layout.ab-reading-layout[data-reader-width="full"]
+  .ab-manuscript-editor-root {
+  width: 100%;
+  max-width: none;
 }
 
 .ab-manuscript-recovery-title,
@@ -101,6 +160,10 @@ authorbot-manuscript-editor:empty {
   .ab-manuscript-edit {
     width: 100%;
     min-height: 44px;
+  }
+
+  .chapter-author-actions .ab-manuscript-edit {
+    width: auto;
   }
 
   .ab-manuscript-review-fields {

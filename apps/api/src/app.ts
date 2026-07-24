@@ -1753,7 +1753,17 @@ export function createApi(deps: AppDeps): AuthorbotApi {
       limit,
       ...(cursor !== undefined ? { afterId: cursor } : {}),
     });
-    return c.json(page(replies, limit, replyJson));
+    const serialized = await Promise.all(
+      replies.map(async (reply) => {
+        const promotion = await repos.decisions.getReplyWorkItemCreation(reply.id);
+        return {
+          ...replyJson(reply),
+          id: reply.id,
+          workItemId: promotion?.workItemId ?? null,
+        };
+      }),
+    );
+    return c.json(page(serialized, limit, (reply) => reply));
   });
 
   app.post("/v1/projects/:projectId/annotations/:annotationId/replies", auth, idem, async (c) => {

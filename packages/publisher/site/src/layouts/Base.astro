@@ -70,7 +70,7 @@ const safeDescription =
             <li><a href={`${base}story/timeline/`} aria-current={currentNav === "timeline" ? "page" : undefined}>Timeline</a></li>
             <li><a href={`${base}story/characters/`} aria-current={currentNav === "characters" ? "page" : undefined}>Characters</a></li>
             {site.collab && (
-              <li data-collab-nav="work">
+              <li data-collab-nav="work" hidden>
                 <a href={`${base}work/`} aria-current={currentNav === "work" ? "page" : undefined}>
                   Work <span class="site-nav-count" data-work-count hidden>0</span>
                 </a>

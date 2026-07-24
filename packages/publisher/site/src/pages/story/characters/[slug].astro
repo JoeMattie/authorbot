@@ -39,30 +39,34 @@ const monogram = character.name
       <Icon name="chevron-left" size={16} />
       All characters
     </a>
-    <PlanningEditor
-      kind="character"
-      targetId={character.id}
-      path={character.sourcePath}
-      label={character.name}
-      readingId={characterReadingId}
-    />
-    <div id={characterReadingId}>
-      <header class="character-detail-header">
-        <span class="character-avatar character-avatar-large" aria-hidden="true">{monogram}</span>
-        <div>
-          <h1>{character.name}</h1>
-          <p class="character-detail-meta">
-            {character.status && (
-              <span class={`story-status-pill story-status-${character.status}`}>{character.status}</span>
-            )}
-            {character.aliases.length > 0 && (
-              <span>also known as {character.aliases.join(", ")}</span>
-            )}
-          </p>
-        </div>
-      </header>
-      {character.summary && <p class="character-detail-summary">{character.summary}</p>}
-      <div class="prose character-prose" set:html={character.html} />
+    <div class="story-planning-actions">
+      <PlanningEditor
+        kind="character"
+        targetId={character.id}
+        path={character.sourcePath}
+        label={character.name}
+        readingId={characterReadingId}
+      />
+    </div>
+    <div class="story-planning-surface" data-story-planning-surface>
+      <div id={characterReadingId}>
+        <header class="character-detail-header">
+          <span class="character-avatar character-avatar-large" aria-hidden="true">{monogram}</span>
+          <div>
+            <h1>{character.name}</h1>
+            <p class="character-detail-meta">
+              {character.status && (
+                <span class={`story-status-pill story-status-${character.status}`}>{character.status}</span>
+              )}
+              {character.aliases.length > 0 && (
+                <span>also known as {character.aliases.join(", ")}</span>
+              )}
+            </p>
+          </div>
+        </header>
+        {character.summary && <p class="character-detail-summary">{character.summary}</p>}
+        <div class="prose character-prose" set:html={character.html} />
+      </div>
     </div>
     {
       character.chapters.length > 0 && (

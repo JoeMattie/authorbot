@@ -17,9 +17,9 @@
  * limit bounds what one identity can do however many credentials it holds; the
  * TOKEN limit bounds one credential, so a single leaked or looping token cannot
  * consume its owner's entire allowance and starve their other agents. A request
- * must pass both. Human sessions have only the actor limit - a person holds one
- * session per browser and the session id is not a durable identity worth
- * counting separately.
+ * must pass both. Human sessions have a separate, more generous ceiling: fast
+ * browser interaction is not the runaway-agent threat these limits exist to
+ * contain.
  *
  * ## Reads are never counted
  *
@@ -57,14 +57,17 @@ import { problem } from "./problems.js";
  * so an agent author can read the ceilings they are writing against rather than
  * discovering them through 429s.
  *
- * `perActor` and `perToken` are requests per `windowSeconds`. `perToken` is
- * deliberately at or below `perActor`: one token may not outrun its owner.
+ * All ceilings are requests per `windowSeconds`. `perToken` is deliberately at
+ * or below `perActor`: one token may not outrun its owner. `perSession` applies
+ * to a signed-in human browser session and is deliberately higher.
  */
 export interface RateLimitCeiling {
   /** Requests per window from one actor, across all of their credentials. */
   perActor: number;
   /** Requests per window from one agent token. Ignored for session auth. */
   perToken: number;
+  /** Requests per window from one signed-in human. */
+  perSession: number;
   windowSeconds: number;
   /** Plain-language description, served by the rate-limits endpoint. */
   description: string;
@@ -90,6 +93,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   vote: {
     perActor: 60,
     perToken: 30,
+    perSession: 300,
     windowSeconds: 60,
     description:
       "Casting or clearing a vote. Each vote re-evaluates the book's governance rules, so this is the tightest per-token ceiling.",
@@ -103,6 +107,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   claim: {
     perActor: 60,
     perToken: 30,
+    perSession: 300,
     windowSeconds: 60,
     description:
       "Claiming, renewing, or releasing a lease. Sized to leave room for honest contention between agents racing for the same work item.",
@@ -116,6 +121,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   submission: {
     perActor: 30,
     perToken: 20,
+    perSession: 120,
     windowSeconds: 60,
     description:
       "Submitting work against a lease, or a direct chapter submission. Each one queues a patch and a commit, so this is the lowest ceiling.",
@@ -130,6 +136,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   annotation: {
     perActor: 60,
     perToken: 30,
+    perSession: 300,
     windowSeconds: 60,
     description:
       "Creating an annotation or a reply, or withdrawing one. Applies to every mode including `open`, where it is the first line of spam control.",
@@ -143,6 +150,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   control: {
     perActor: 120,
     perToken: 60,
+    perSession: 300,
     windowSeconds: 60,
     description:
       "Maintainer controls: settings, freeze, pause agents, role changes, revocations, and moderation decisions.",
@@ -151,6 +159,7 @@ export const RATE_LIMITS: Readonly<Record<RateLimitClass, RateLimitCeiling>> = O
   mutation: {
     perActor: 120,
     perToken: 60,
+    perSession: 300,
     windowSeconds: 60,
     description: "Any other mutating request.",
   },
@@ -219,6 +228,7 @@ export async function consumeRateLimit(
   className: RateLimitClass,
 ): Promise<RateLimitOutcome> {
   const ceiling = RATE_LIMITS[className];
+  const actorLimit = auth.kind === "session" ? ceiling.perSession : ceiling.perActor;
   const now = deps.clock.now();
   const windowStart = windowStartOf(now, ceiling.windowSeconds);
   const expiresAt = new Date(
@@ -279,11 +289,11 @@ export async function consumeRateLimit(
       className,
     };
   }
-  if (actorCount > ceiling.perActor || (ownerCount !== null && ownerCount > ceiling.perActor)) {
+  if (actorCount > actorLimit || (ownerCount !== null && ownerCount > ceiling.perActor)) {
     return {
       allowed: false,
       scope: "actor",
-      limit: ceiling.perActor,
+      limit: actorCount > actorLimit ? actorLimit : ceiling.perActor,
       remaining: 0,
       retryAfter,
       className,
@@ -292,8 +302,11 @@ export async function consumeRateLimit(
   return {
     allowed: true,
     scope: null,
-    limit: ceiling.perActor,
-    remaining: Math.max(0, ceiling.perActor - Math.max(actorCount, ownerCount ?? 0)),
+    limit: actorLimit,
+    remaining: Math.max(
+      0,
+      Math.min(actorLimit - actorCount, ceiling.perActor - (ownerCount ?? 0)),
+    ),
     retryAfter,
     className,
   };
@@ -336,6 +349,7 @@ export function rateLimitsJson(): Record<string, unknown> {
         {
           perActor: RATE_LIMITS[name].perActor,
           perToken: RATE_LIMITS[name].perToken,
+          perSession: RATE_LIMITS[name].perSession,
           windowSeconds: RATE_LIMITS[name].windowSeconds,
           description: RATE_LIMITS[name].description,
         },
@@ -343,6 +357,7 @@ export function rateLimitsJson(): Record<string, unknown> {
     ),
     notes: [
       "Limits apply to mutations only; reads are never counted and never refused by a limit.",
+      "Signed-in human sessions have a higher interactive ceiling than agent actors and tokens.",
       "Every mutation is counted against its actor; a request authenticated by an agent token is counted against the token, against the agent's own actor, and against the human who minted it, and must satisfy every ceiling. Minting more tokens therefore does not buy more throughput.",
       "Exceeding a ceiling returns 429 with a Retry-After header giving the seconds until the current window closes.",
     ],

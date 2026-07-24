@@ -9,6 +9,8 @@ const chapterSummaries = site.chapters.filter(
 );
 const outlineReadingId = "story-outline-document";
 const publishedSummariesId = "story-published-chapter-summaries";
+const outlinePanelId = "story-outline-panel";
+const summariesPanelId = "story-chapter-summaries-panel";
 const planningStyles = site.collab
   ? [`${site.basePath}_astro/authorbot-planning.css`]
   : [];
@@ -30,52 +32,108 @@ const planningStyles = site.collab
         that resists it, and the outcome it leaves behind.
       </p>
     </header>
-    <PlanningEditor
-      kind="outline"
-      targetId="outline"
-      path={site.planningDocuments.outlinePath}
-      label="Outline"
-      readingId={outlineReadingId}
-    />
-    <div id={outlineReadingId}>
-      {
-        site.outline === null || site.outline.length === 0 ? (
-          <p class="story-empty">This book has no outline yet.</p>
-        ) : (
-          <Outline nodes={site.outline} />
-        )
-      }
-    </div>
-    {
-      chapterSummaries.length > 0 && (
-        <section
-          id={publishedSummariesId}
-          class="story-chapter-summaries"
-          aria-labelledby="chapter-summaries-title"
+    <authorbot-story-view-tabs
+      class="story-view-tabs"
+      data-interactive={site.collab ? "true" : undefined}
+    >
+      <div class="story-view-tablist" role="tablist" aria-label="Outline views">
+        <button
+          id="story-outline-tab"
+          class="story-view-tab"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls={outlinePanelId}
         >
-          <header>
-            <p class="story-eyebrow">Generated from current chapter metadata</p>
-            <h2 id="chapter-summaries-title">Chapter summaries</h2>
-          </header>
-          <ol>
-            {chapterSummaries.map((chapter) => (
-              <li data-chapter-summary-id={chapter.id}>
-                <a href={chapter.href}>{chapter.title}</a>
-                <p>{chapter.summary}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )
-    }
-    {
-      site.collab && (
-        <authorbot-outline-summaries
-          data-api-base={site.collab.apiBase}
-          data-project={site.collab.projectSlug}
-          data-static-id={publishedSummariesId}
-        ></authorbot-outline-summaries>
-      )
-    }
+          Outline
+        </button>
+        <button
+          id="story-chapter-summaries-tab"
+          class="story-view-tab"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls={summariesPanelId}
+          tabindex="-1"
+        >
+          Chapter summaries
+        </button>
+      </div>
+      <section
+        id={outlinePanelId}
+        class="story-view-panel"
+        role="tabpanel"
+        aria-labelledby="story-outline-tab"
+      >
+        <div class="story-planning-actions">
+          <PlanningEditor
+            kind="outline"
+            targetId="outline"
+            path={site.planningDocuments.outlinePath}
+            label="Outline"
+            readingId={outlineReadingId}
+          />
+        </div>
+        <div class="story-planning-surface" data-story-planning-surface>
+          <div id={outlineReadingId}>
+            {
+              site.outline === null || site.outline.length === 0 ? (
+                <p class="story-empty">This book has no outline yet.</p>
+              ) : (
+                <Outline nodes={site.outline} />
+              )
+            }
+          </div>
+        </div>
+      </section>
+      <section
+        id={summariesPanelId}
+        class="story-view-panel story-summaries-panel"
+        role="tabpanel"
+        aria-labelledby="story-chapter-summaries-tab"
+        hidden={site.collab ? true : undefined}
+      >
+        {
+          chapterSummaries.length > 0 ? (
+            <section
+              id={publishedSummariesId}
+              class="story-chapter-summaries"
+              aria-labelledby="chapter-summaries-title"
+            >
+              <header>
+                <p class="story-eyebrow">Generated from current chapter metadata</p>
+                <h2 id="chapter-summaries-title">Chapter summaries</h2>
+              </header>
+              <ol>
+                {chapterSummaries.map((chapter) => (
+                  <li data-chapter-summary-id={chapter.id}>
+                    <a href={chapter.href}>{chapter.title}</a>
+                    <p>{chapter.summary}</p>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : (
+            <section
+              id={publishedSummariesId}
+              class="story-chapter-summaries"
+              aria-labelledby="chapter-summaries-title"
+            >
+              <h2 id="chapter-summaries-title">Chapter summaries</h2>
+              <p class="story-empty">This book has no chapter summaries yet.</p>
+            </section>
+          )
+        }
+        {
+          site.collab && (
+            <authorbot-outline-summaries
+              data-api-base={site.collab.apiBase}
+              data-project={site.collab.projectSlug}
+              data-static-id={publishedSummariesId}
+            ></authorbot-outline-summaries>
+          )
+        }
+      </section>
+    </authorbot-story-view-tabs>
   </div>
 </Base>

@@ -21,7 +21,7 @@ import {
   saveChapterDraft,
   type StoredChapterDraft,
 } from "./chapter-composer-state.js";
-import { el } from "./dom.js";
+import { el, labeledButton, setLabeledButton } from "./dom.js";
 import {
   chapterEditorRevisionTarget,
   editorRevisionMessage,
@@ -122,6 +122,7 @@ function canonicalBody(markdown: string): string {
 export class AuthorbotManuscriptEditor extends HTMLElement {
   private cfg!: Config;
   private store!: ProjectStore;
+  private manuscriptSurface: HTMLElement | null = null;
   private prose: HTMLElement | null = null;
   private editButton: HTMLButtonElement | null = null;
   private editorShell: HTMLElement | null = null;
@@ -144,6 +145,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
   private releaseConnection: (() => void) | null = null;
   private closingAcceptedEditor = false;
   private editModeAnnounced = false;
+  private loadingOverlay: HTMLElement | null = null;
   /** Exact island told to suppress entry, retained even if its subtree detaches. */
   private editModeCollab: ChapterCollabElement | null = null;
   private readonly beforeUnload = (event: BeforeUnloadEvent): void => {
@@ -190,11 +192,22 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.store = store;
     const state = store.getState();
     if (state.sessionStatus !== "ready" || !mayProposeRevision(state.session)) return;
-    this.prose = this.parentElement === null
-      ? null
-      : [...this.parentElement.children]
-          .find((node): node is HTMLElement =>
-            node instanceof HTMLElement && node.classList.contains("prose")) ?? null;
+    const chapter = this.closest<HTMLElement>("article.chapter") ?? this.closest("article");
+    this.manuscriptSurface =
+      chapter === null
+        ? null
+        : Array.from(chapter.children).find(
+            (child): child is HTMLElement =>
+              child instanceof HTMLElement &&
+              child.hasAttribute("data-chapter-manuscript-surface"),
+          ) ?? null;
+    this.prose =
+      this.manuscriptSurface === null
+        ? null
+        : Array.from(this.manuscriptSurface.children).find(
+            (child): child is HTMLElement =>
+              child instanceof HTMLElement && child.classList.contains("prose"),
+          ) ?? null;
     if (this.prose === null) return;
     this.target = chapterEditorRevisionTarget(this.cfg.chapterId);
     this.renderLauncher();
@@ -227,13 +240,25 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.textContent = "";
     const controls = el("div", "ab-manuscript-launcher");
     controls.setAttribute("aria-label", "Chapter editing");
-    const edit = el("button", "ab-btn ab-manuscript-edit", "Edit chapter");
-    edit.type = "button";
+    const edit = labeledButton("ab-btn ab-manuscript-edit", "Edit chapter", "pencil");
     edit.setAttribute("aria-expanded", "false");
-    edit.addEventListener("click", () => void this.openEditor());
+    edit.addEventListener("click", () => void this.toggleEditor());
     this.editButton = edit;
     controls.append(edit);
     this.append(controls);
+  }
+
+  private async toggleEditor(): Promise<void> {
+    if (this.busy) return;
+    if (
+      this.session !== null ||
+      this.editorShell !== null ||
+      this.recoveryPanel !== null
+    ) {
+      await this.cancelEditor();
+      return;
+    }
+    await this.openEditor();
   }
 
   /** Let the read-only Notes surface take over without losing an edit draft. */
@@ -254,7 +279,9 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     const generation = this.generation;
     this.busy = true;
     this.editButton.disabled = true;
-    this.setLauncherStatus("Loading chapter editor…");
+    this.editButton.setAttribute("aria-busy", "true");
+    this.setLauncherStatus("");
+    this.beginEditorLoading();
     // Suppress collaboration entry for the entire handoff, including closing
     // the rich Notes surface and loading source. Any suspended composer remains
     // in the collaboration element's state and is restored if launch aborts.
@@ -342,8 +369,13 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
 
   private abortEditorLaunch(message: string, error = false): void {
     this.setEditModeAnnounced(false);
+    this.clearEditorLoading();
     this.busy = false;
-    if (this.editButton !== null) this.editButton.disabled = false;
+    if (this.editButton !== null) {
+      this.editButton.disabled = false;
+      this.editButton.removeAttribute("aria-busy");
+      setLabeledButton(this.editButton, "Edit chapter", "pencil");
+    }
     this.setLauncherStatus(message, error);
   }
 
@@ -354,8 +386,10 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     generation: number,
   ): void {
     if (this.editButton === null) return;
+    this.clearEditorLoading();
     this.busy = false;
     this.editButton.disabled = true;
+    this.editButton.removeAttribute("aria-busy");
     this.editButton.setAttribute("aria-expanded", "true");
     this.setLauncherStatus("");
 
@@ -444,7 +478,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     actions.append(discard, keep);
     panel.append(actions);
     this.recoveryPanel = panel;
-    this.append(panel);
+    this.mountInManuscriptSurface(panel);
     window.addEventListener("beforeunload", this.beforeUnload);
   }
 
@@ -462,11 +496,16 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     }
     this.busy = true;
     this.editButton.disabled = true;
+    this.editButton.setAttribute("aria-busy", "true");
+    this.beginEditorLoading();
     this.source = source;
     this.baseRevision = baseRevision;
     this.baseContentHash = baseContentHash;
     const markdown = stored?.body ?? source.body;
-    const shell = el("section", "ab-manuscript-editor-shell");
+    const shell = el(
+      "section",
+      "ab-manuscript-editor-shell ab-manuscript-editor-preparing",
+    );
     shell.setAttribute("aria-label", `Editing ${source.title || this.cfg.chapterTitle}`);
     if (staleBase) {
       shell.append(el(
@@ -528,9 +567,7 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     this.notesInput = notes;
     this.errorLine = error;
     this.statusLine = status;
-    this.append(shell);
-    this.prose.hidden = true;
-    this.editButton.setAttribute("aria-expanded", "true");
+    this.mountInManuscriptSurface(shell);
     this.setEditModeAnnounced(true);
 
     try {
@@ -567,7 +604,12 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       return;
     }
     this.busy = false;
+    this.finishEditorLoading(shell);
+    this.editButton.setAttribute("aria-expanded", "true");
+    this.editButton.removeAttribute("aria-busy");
+    this.setLauncherStatus("");
     this.editButton.disabled = false;
+    setLabeledButton(this.editButton, "Stop editing", "x");
     this.renderLifecycle(this.currentLifecycle());
     window.addEventListener("beforeunload", this.beforeUnload);
     this.session.focus();
@@ -734,9 +776,13 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       this.baseContentHash = null;
       this.recoveryPanel?.remove();
       this.recoveryPanel = null;
+      this.clearEditorLoading();
       if (this.prose !== null) this.prose.hidden = false;
       if (this.editButton !== null) {
         this.editButton.setAttribute("aria-expanded", "false");
+        this.editButton.disabled = false;
+        this.editButton.removeAttribute("aria-busy");
+        setLabeledButton(this.editButton, "Edit chapter", "pencil");
       }
       this.busy = false;
       // Re-enable annotation/suggestion entry only after the editor shell is
@@ -848,10 +894,15 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     if (state === undefined) {
       delete this.dataset["editorRevisionPhase"];
       delete this.dataset["editorProposalId"];
-      if (this.editorShell === null) this.setLauncherStatus("");
+      this.setLauncherStatus("");
       if (this.editButton !== null) {
+        const editing = this.editorShell !== null;
         this.editButton.disabled = this.busy;
-        this.editButton.textContent = "Edit chapter";
+        setLabeledButton(
+          this.editButton,
+          editing ? "Stop editing" : "Edit chapter",
+          editing ? "x" : "pencil",
+        );
       }
       this.syncNavigationWarning();
       return;
@@ -901,10 +952,17 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
         state.phase === "applying" || state.phase === "integrated" ||
         state.phase === "publishing" || state.phase === "deployment_failed";
       this.editButton.disabled = locked;
-      this.editButton.textContent = state.phase === "rejected" || state.phase === "apply_failed" ||
-          state.phase === "save_failed"
-        ? "Edit submitted draft"
-        : "Edit chapter";
+      setLabeledButton(
+        this.editButton,
+        state.phase === "rejected" || state.phase === "apply_failed" ||
+            state.phase === "save_failed"
+          ? "Edit submitted draft"
+          : "Edit chapter",
+        "pencil",
+      );
+    } else if (this.editButton !== null && this.editorShell !== null) {
+      this.editButton.disabled = this.busy;
+      setLabeledButton(this.editButton, "Stop editing", "x");
     }
     this.syncNavigationWarning();
   }
@@ -983,6 +1041,10 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     }
     if (this.summaryInput !== null) this.summaryInput.disabled = busy;
     if (this.notesInput !== null) this.notesInput.disabled = busy;
+    if (this.editButton !== null && this.editorShell !== null) {
+      this.editButton.disabled = busy;
+      setLabeledButton(this.editButton, "Stop editing", "x");
+    }
   }
 
   private showEditorError(message: string): void {
@@ -1006,5 +1068,45 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
     line.classList.toggle("ab-error", error);
     line.setAttribute("role", error ? "alert" : "status");
     line.textContent = message;
+  }
+
+  private mountInManuscriptSurface(node: HTMLElement): void {
+    const surface = this.manuscriptSurface;
+    const prose = this.prose;
+    if (surface !== null && prose !== null && prose.parentElement === surface) {
+      prose.before(node);
+      return;
+    }
+    this.append(node);
+  }
+
+  private beginEditorLoading(): void {
+    const surface = this.manuscriptSurface;
+    const prose = this.prose;
+    if (surface === null || prose === null || this.loadingOverlay !== null) return;
+    surface.classList.add("ab-manuscript-source-loading");
+    prose.classList.add("ab-manuscript-source-loading-prose");
+    const overlay = el("div", "ab-manuscript-source-loading-overlay");
+    overlay.setAttribute("role", "status");
+    overlay.append(
+      el("span", "ab-manuscript-loading-spinner"),
+      el("span", undefined, "Loading chapter editor…"),
+    );
+    surface.append(overlay);
+    this.loadingOverlay = overlay;
+  }
+
+  private finishEditorLoading(shell: HTMLElement): void {
+    if (this.prose !== null) this.prose.hidden = true;
+    shell.classList.remove("ab-manuscript-editor-preparing");
+    this.clearEditorLoading();
+  }
+
+  private clearEditorLoading(): void {
+    this.manuscriptSurface?.classList.remove("ab-manuscript-source-loading");
+    this.prose?.classList.remove("ab-manuscript-source-loading-prose");
+    this.editorShell?.classList.remove("ab-manuscript-editor-preparing");
+    this.loadingOverlay?.remove();
+    this.loadingOverlay = null;
   }
 }

@@ -28,12 +28,14 @@ import {
   DECISION_SUPPORT_CHANGED_EVENT,
   FORCE_CREATE_RULE_VERSION,
   authorizeCancelWorkItem,
+  authorizeForceCreateReplyWorkItem,
   authorizeForceCreateWorkItem,
   authorizeRejectSuggestion,
   authorizeReopenSuggestion,
   cancelWorkItemCommandSchema,
   castVoteCommandSchema,
   clearVoteCommandSchema,
+  forceCreateReplyWorkItemCommandSchema,
   forceCreateWorkItemCommandSchema,
   rejectSuggestionCommandSchema,
   reopenSuggestionCommandSchema,
@@ -133,6 +135,7 @@ export function decisionSummaryJson(
   return {
     id: d.id,
     sourceAnnotationId: d.sourceAnnotationId,
+    sourceReplyId: d.sourceReplyId ?? null,
     actionType: d.actionType,
     rule: d.rule,
     ruleVersion: d.ruleVersion,
@@ -153,6 +156,7 @@ export function workItemJson(w: WorkItemRecord): Record<string, unknown> {
     type: w.type,
     status: w.status,
     sourceAnnotationId: w.sourceAnnotationId,
+    sourceReplyId: w.sourceReplyId ?? null,
     chapterId: w.chapterId,
     baseRevision: w.baseRevision,
     target: w.target,
@@ -214,12 +218,23 @@ export async function annotationCollabJson(
 ): Promise<Record<string, unknown>> {
   const tally = await repos.votes.tally(annotation.id);
   const decisions = await repos.decisions.listByAnnotation(annotation.id);
-  const decision = decisions.find((d) => d.actionType === "create_work_item") ?? null;
+  const author = await repos.actors.getById(annotation.authorActorId);
+  const decision =
+    decisions.find(
+      (d) => d.actionType === "create_work_item" && d.sourceReplyId == null,
+    ) ?? null;
   // Anonymous readers and authenticated non-members never see member-only
   // decision prose or a per-voter projection.
   const isMember = memberActorId !== null;
   const base: Record<string, unknown> = {
     ...annotationJson(annotation),
+    author: author === null
+      ? null
+      : {
+          id: author.id,
+          displayName: author.displayName,
+          type: author.type,
+        },
     votes: tallyJson(tally),
     decision: decision === null ? null : decisionSummaryJson(decision, isMember),
   };
@@ -459,6 +474,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     c: Context<AppEnv>;
     project: ProjectRecord;
     annotation: AnnotationRecord;
+    sourceReplyId?: string;
     actorId: string;
     ruleName: string;
     ruleVersion: number;
@@ -505,6 +521,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         id: decisionId,
         projectId: project.id,
         sourceAnnotationId: annotation.id,
+        sourceReplyId: input.sourceReplyId ?? null,
         actionType: input.actionType,
         rule: input.ruleName,
         ruleVersion: input.ruleVersion,
@@ -522,6 +539,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         type: workItemType,
         status: "ready",
         sourceAnnotationId: annotation.id,
+        sourceReplyId: input.sourceReplyId ?? null,
         chapterId: annotation.chapterId,
         baseRevision,
         // Target snapshot of the annotation selector incl. quote (contract §4).
@@ -534,11 +552,21 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       // optimistic compare-and-swap: if a concurrent writer already moved the
       // annotation off `open` (e.g. a maintainer reject), this aborts the batch
       // so the loser never clobbers that transition (Findings 1/2).
-      repos.annotations.casStatusStatement(annotation.id, "open", "work_item_created", timestamp),
+      ...(input.sourceReplyId === undefined
+        ? [
+            repos.annotations.casStatusStatement(
+              annotation.id,
+              "open",
+              "work_item_created",
+              timestamp,
+            ),
+          ]
+        : []),
       ...decisionCommand.statements,
       appendEventStatement(project.id, "decision_created", {
         decisionId,
         annotationId: annotation.id,
+        ...(input.sourceReplyId === undefined ? {} : { replyId: input.sourceReplyId }),
         annotationKind: annotation.kind,
         decisionActionType: input.actionType,
         result: "create_work_item",
@@ -549,6 +577,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       appendEventStatement(project.id, "work_item_created", {
         workItemId,
         annotationId: annotation.id,
+        ...(input.sourceReplyId === undefined ? {} : { replyId: input.sourceReplyId }),
         annotationKind: annotation.kind,
         chapterId: annotation.chapterId,
         type: workItemType,
@@ -1209,6 +1238,126 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
             if (fresh !== null && fresh.status !== "open") {
               return problem(c, "state-conflict", {
                 detail: `the annotation is no longer open (status "${fresh.status}")`,
+              });
+            }
+          }
+          throw error;
+        }
+        await ctx.notifyMutation(guard.project.id);
+        return c.json(responseBody, 201);
+      });
+    },
+  );
+
+  app.post(
+    "/v1/projects/:projectId/annotations/:annotationId/replies/:replyId/force-create-work-item",
+    auth,
+    idem,
+    async (c) => {
+      const guard = await requireProjectScope(c, services, "work:claim", {
+        editorial: {
+          capabilities: ["work:promote"],
+          legacyAction: "work:promote",
+        },
+      });
+      if ("response" in guard) return guard.response;
+
+      const body = await ctx.readJson(c);
+      if (body instanceof Response) return body;
+      const parsed = forceCreateReplyWorkItemCommandSchema.safeParse(
+        typeof body === "object" && body !== null
+          ? {
+              ...body,
+              annotationId: c.req.param("annotationId"),
+              replyId: c.req.param("replyId"),
+            }
+          : body,
+      );
+      if (!parsed.success) {
+        return problem(c, "validation-failed", { issues: issueList(parsed.error) });
+      }
+      const reason = parsed.data.reason ?? null;
+
+      return serialize(guard.project.id, async () => {
+        const annotation = await findAnnotation(c, guard.project);
+        if (annotation instanceof Response) return annotation;
+        const reply = await repos.replies.getById(parsed.data.replyId);
+        if (
+          reply === null ||
+          reply.projectId !== guard.project.id ||
+          reply.annotationId !== annotation.id
+        ) {
+          return problem(c, "not-found", { detail: "unknown reply" });
+        }
+        const a = authOf(c);
+        const authorized = authorizeForceCreateReplyWorkItem({
+          actorRole: a.role ?? "reader",
+          replyStatus: reply.status,
+        });
+        if (!authorized.allowed) return overrideDenied(c, authorized);
+
+        const existing = await repos.decisions.getReplyWorkItemCreation(reply.id);
+        if (existing !== null) {
+          return problem(c, "state-conflict", {
+            detail: "a work item already exists for this reply",
+          });
+        }
+
+        const creation = await buildCreationStatements({
+          c,
+          project: guard.project,
+          annotation,
+          sourceReplyId: reply.id,
+          actorId: a.actor.id,
+          ruleName: OVERRIDE_RULE_NAME,
+          ruleVersion: FORCE_CREATE_RULE_VERSION,
+          actionType: "create_work_item",
+          metrics: {},
+          overrideReason: reason,
+          actingActorId: a.actor.id,
+          createdByActorId: a.actor.id,
+        });
+        const correlationId = c.get("correlationId");
+        const responseBody = {
+          annotationId: annotation.id,
+          replyId: reply.id,
+          status: "work_item_created",
+          decisionId: creation.decisionId,
+          workItemId: creation.workItemId,
+          operationIds: creation.operationIds,
+          correlationId,
+        };
+        try {
+          await deps.db.batch([
+            ...creation.statements,
+            auditStatement({
+              projectId: guard.project.id,
+              actorId: a.actor.id,
+              action: "work_item.force_create",
+              targetType: "reply",
+              targetId: reply.id,
+              correlationId,
+              metadata: {
+                annotationId: annotation.id,
+                ...(reason === null ? {} : { reason }),
+                decisionId: creation.decisionId,
+                workItemId: creation.workItemId,
+              },
+            }),
+            ...ctx.claimStatements(c, 201, responseBody),
+          ]);
+        } catch (error) {
+          if (isConstraintError(error)) {
+            const raced = await repos.decisions.getReplyWorkItemCreation(reply.id);
+            if (raced !== null) {
+              return problem(c, "state-conflict", {
+                detail: "a work item already exists for this reply",
+              });
+            }
+            const fresh = await repos.replies.getById(reply.id);
+            if (fresh !== null && fresh.status !== "open") {
+              return problem(c, "state-conflict", {
+                detail: `the reply is no longer open (status "${fresh.status}")`,
               });
             }
           }

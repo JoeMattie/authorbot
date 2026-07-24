@@ -332,6 +332,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
       }
       const contentHash = `sha256:${await sha256Hex(source)}`;
       const annotation = await repos.annotations.getById(workItem.sourceAnnotationId);
+      const sourceReply = workItem.sourceReplyId == null
+        ? null
+        : await repos.replies.getById(workItem.sourceReplyId);
 
       const timestamp = now();
       const minted = await mintLeaseToken();
@@ -378,7 +381,9 @@ export function registerPhase4Routes(ctx: Phase4Context): void {
         },
         ...(target === null ? {} : { target }),
         context: {
-          annotationBody: annotation?.body ?? "",
+          // Kept under the established bundle key for compatibility; a
+          // reply-specific item carries the promoted reply's body.
+          annotationBody: sourceReply?.body ?? annotation?.body ?? "",
           chapterSummary: fm.data.summary ?? fm.data.title,
           storyRefs: [...(fm.data.character_refs ?? []), ...(fm.data.timeline_refs ?? [])],
           storyApi: storyApiLinks(deps.config.basePath, guard.project.id),

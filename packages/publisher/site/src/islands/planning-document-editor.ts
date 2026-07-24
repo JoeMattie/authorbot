@@ -14,7 +14,7 @@ import {
   type RepositoryDocumentSource,
   type RevisionProposalAccepted,
 } from "./api.js";
-import { el } from "./dom.js";
+import { el, labeledButton, setLabeledButton } from "./dom.js";
 import {
   editorRevisionMessage,
   editorRevisionNeedsRecoveryWarning,
@@ -288,10 +288,19 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     this.replaceChildren();
     const controls = el("div", "ab-planning-launcher");
     controls.setAttribute("aria-label", `${this.cfg.label} editing`);
-    const edit = el("button", "ab-btn ab-planning-edit", `Edit ${this.cfg.label}`);
-    edit.type = "button";
+    const edit = labeledButton(
+      "ab-btn ab-planning-edit",
+      "Edit",
+      "pencil",
+    );
     edit.setAttribute("aria-expanded", "false");
-    edit.addEventListener("click", () => void this.openEditor());
+    edit.addEventListener("click", () => {
+      if (this.shell === null) {
+        void this.openEditor();
+      } else {
+        void this.cancelEditor();
+      }
+    });
     this.editButton = edit;
     controls.append(edit);
     this.append(controls);
@@ -363,6 +372,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     this.reading.hidden = true;
     this.editButton.setAttribute("aria-expanded", "true");
     this.editButton.disabled = false;
+    this.setLauncherStatus("");
     this.renderLifecycle(this.currentLifecycle());
     window.addEventListener("beforeunload", this.beforeUnload);
     if (this.session !== null) {
@@ -431,7 +441,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     this.errorLine = error;
     this.statusLine = status;
     this.editButton?.setAttribute("aria-controls", shellId);
-    this.append(shell);
+    this.reading?.before(shell);
   }
 
   private mountYamlEditor(content: string): void {
@@ -468,7 +478,10 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     metadata.addEventListener("input", () => this.persistDraft());
     metadataField.append(metadata);
     const bodyLabel = el("p", "ab-field-label ab-planning-body-label", "Character notes");
-    const bodyRoot = el("div", "ab-planning-milkdown-root");
+    const bodyRoot = el(
+      "div",
+      "ab-manuscript-editor-root ab-planning-milkdown-root",
+    );
     this.editorRoot?.append(metadataField, bodyLabel, bodyRoot);
     this.metadataTextarea = metadata;
     this.session = await createLazyManuscriptSurface({
@@ -649,6 +662,7 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     if (this.editButton !== null) {
       this.editButton.setAttribute("aria-expanded", "false");
       this.editButton.removeAttribute("aria-controls");
+      setLabeledButton(this.editButton, "Edit", "pencil");
       if (restoreFocus) this.editButton.focus();
     }
     this.syncNavigationWarning();
@@ -713,10 +727,14 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     if (state === undefined) {
       delete this.dataset["editorRevisionPhase"];
       delete this.dataset["editorProposalId"];
-      if (this.shell === null) this.setLauncherStatus("");
+      this.setLauncherStatus("");
       if (this.editButton !== null) {
         this.editButton.disabled = this.busy;
-        this.editButton.textContent = `Edit ${this.cfg.label}`;
+        setLabeledButton(
+          this.editButton,
+          this.shell === null ? "Edit" : "Stop editing",
+          this.shell === null ? "pencil" : "x",
+        );
       }
       this.syncNavigationWarning();
       return;
@@ -749,6 +767,10 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
     const failed = state.phase === "save_failed" || state.phase === "apply_failed" ||
       state.phase === "deployment_failed";
     if (this.shell !== null && this.statusLine !== null && this.errorLine !== null) {
+      if (this.editButton !== null) {
+        this.editButton.disabled = this.busy;
+        setLabeledButton(this.editButton, "Stop editing", "x");
+      }
       this.statusLine.textContent = message;
       this.statusLine.hidden = failed;
       if (failed) {
@@ -765,10 +787,14 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
         state.phase === "applying" || state.phase === "integrated" ||
         state.phase === "publishing" || state.phase === "deployment_failed";
       this.editButton.disabled = locked;
-      this.editButton.textContent = state.phase === "rejected" || state.phase === "apply_failed" ||
-          state.phase === "save_failed"
-        ? `Edit submitted ${label} draft`
-        : `Edit ${this.cfg.label}`;
+      setLabeledButton(
+        this.editButton,
+        state.phase === "rejected" || state.phase === "apply_failed" ||
+            state.phase === "save_failed"
+          ? "Edit draft"
+          : "Edit",
+        "pencil",
+      );
     }
     this.syncNavigationWarning();
   }

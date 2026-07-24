@@ -131,7 +131,8 @@ function stubFetch(options: {
 }
 
 function mountOutline(): AuthorbotPlanningDocumentEditor {
-  document.body.innerHTML = `<main>
+  const container = document.createElement("div");
+  container.innerHTML = `<main>
     <authorbot-planning-document-editor
       data-api-base="${API}"
       data-project="${PROJECT}"
@@ -142,11 +143,13 @@ function mountOutline(): AuthorbotPlanningDocumentEditor {
       data-reading-id="outline-reading"></authorbot-planning-document-editor>
     <div id="outline-reading"><p>Rendered outline</p></div>
   </main>`;
+  document.body.append(container.firstElementChild!);
   return document.querySelector("authorbot-planning-document-editor") as AuthorbotPlanningDocumentEditor;
 }
 
 function mountCharacter(): AuthorbotPlanningDocumentEditor {
-  document.body.innerHTML = `<main>
+  const container = document.createElement("div");
+  container.innerHTML = `<main>
     <authorbot-planning-document-editor
       data-api-base="${API}"
       data-project="${PROJECT}"
@@ -157,6 +160,7 @@ function mountCharacter(): AuthorbotPlanningDocumentEditor {
       data-reading-id="character-reading"></authorbot-planning-document-editor>
     <div id="character-reading"><p>Rendered character</p></div>
   </main>`;
+  document.body.append(container.firstElementChild!);
   return document.querySelector("authorbot-planning-document-editor") as AuthorbotPlanningDocumentEditor;
 }
 
@@ -202,6 +206,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // The editor shell is intentionally a sibling of the custom element so it
+  // appears inline with the static reading surface. Remove that external
+  // surface before disconnecting its owner to keep teardown deterministic.
+  document.querySelectorAll(".ab-planning-editor-shell").forEach((node) => node.remove());
   document.body.replaceChildren();
   vi.unstubAllGlobals();
   resetManuscriptSurfaceModuleLoaderForTests();

@@ -170,7 +170,7 @@ afterEach(() => {
 });
 
 describe("maintainer revision review element", () => {
-  it("shows author/Work attribution, a moved-base warning, and complete fallback snapshots", async () => {
+  it("shows author/Work attribution, a moved-base warning, and a direct visual diff", async () => {
     stubApi();
     mount();
 
@@ -187,14 +187,8 @@ describe("maintainer revision review element", () => {
     expect(document.querySelector(".ab-revision-warning-moved")?.textContent).toContain(
       "current document is revision 6",
     );
-    expect(document.querySelector(".ab-revision-diff-note")?.textContent).toContain(
-      "complete before and after snapshots",
-    );
-    const snapshots = Array.from(
-      document.querySelectorAll(".ab-revision-diff-snapshot code"),
-      (node) => node.textContent,
-    );
-    expect(snapshots).toEqual(["Before ending.\n", "After ending.\n"]);
+    expect(document.querySelector(".ab-revision-diff")?.getAttribute("role")).toBe("group");
+    expect(document.querySelector(".ab-revision-diff-fallback")).toBeNull();
   });
 
   it("presents maintainer direct edits as one-click Apply changes", async () => {

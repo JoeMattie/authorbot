@@ -262,19 +262,19 @@ describe("inline chapter history", () => {
       "region",
     );
     expect(host.querySelector(".ab-history-current-copy")?.textContent).toContain(
-      "Current published revision: 3",
+      "Current Revision: 3",
     );
-    expect(host.querySelector(".ab-history-current-copy")?.textContent).toContain(
-      "deployed reading page still shows revision 2",
-    );
-    expect(host.querySelector(".ab-history-snapshot code")?.textContent).toBe(content(2));
-    expect(host.querySelector(".ab-history-snapshot img")).toBeNull();
     expect(host.querySelector('.ab-history-revision[data-revision="3"]')).toBeNull();
 
     const revisionTwo = host.querySelector<HTMLButtonElement>(
       '.ab-history-revision[data-revision="2"]',
     )!;
-    expect(revisionTwo.textContent).toContain("commit commit-2");
+    expect(revisionTwo.querySelector(".ab-history-revision-number")?.textContent).toBe(
+      "Revision 2",
+    );
+    expect(revisionTwo.querySelector(".ab-history-revision-date")?.textContent).toContain(
+      "7/22/2026",
+    );
     const revisionOne = host.querySelector<HTMLButtonElement>(
       '.ab-history-revision[data-revision="1"]',
     )!;
@@ -295,15 +295,13 @@ describe("inline chapter history", () => {
       'button[data-compare="current"]',
     )!;
     currentCompare.click();
-    await expect.poll(() =>
-      Array.from(
-        host.querySelectorAll(".ab-history-diff .ab-revision-diff-snapshot code"),
-        (node) => node.textContent,
-      ),
-    ).toEqual([content(2), content(3)]);
-    expect(host.querySelector(".ab-history-diff-heading")?.textContent).toContain(
+    await expect.poll(() => host.querySelector(".ab-history-diff-heading")?.textContent).toContain(
       "Revision 2 compared with current revision 3",
     );
+    await expect.poll(() => host.querySelector(".ab-history-diff .ab-prose-diff")).toBeTruthy();
+    expect(host.querySelector(".ab-history-diff")?.textContent).toContain("Revision 2");
+    expect(host.querySelector(".ab-history-diff")?.textContent).toContain("Current");
+    expect(host.querySelector(".ab-history-diff img")).toBeNull();
 
     host.querySelector<HTMLButtonElement>(".ab-history-restore-button")?.click();
     await expect.poll(() => host.querySelector(".ab-history-restore-success")?.textContent).toContain(
@@ -388,10 +386,10 @@ describe("inline chapter history", () => {
       "Revision 2 of 3",
     );
     host.querySelector<HTMLButtonElement>('button[data-compare="current"]')?.click();
-    await expect.poll(() => host.querySelector(".ab-revision-diff-visual")).toBeTruthy();
+    await expect.poll(() => host.querySelector(".ab-prose-diff")).toBeTruthy();
 
     const diff = host.querySelector<HTMLElement>(".ab-history-diff")!;
-    const visual = host.querySelector<HTMLElement>(".ab-revision-diff-visual")!;
+    const visual = host.querySelector<HTMLElement>(".ab-prose-diff")!;
     const focused = host.querySelector<HTMLButtonElement>(
       'button[data-compare="current"]',
     )!;
@@ -404,7 +402,7 @@ describe("inline chapter history", () => {
     await Promise.resolve();
 
     expect(host.querySelector(".ab-history-diff")).toBe(diff);
-    expect(host.querySelector(".ab-revision-diff-visual")).toBe(visual);
+    expect(host.querySelector(".ab-prose-diff")).toBe(visual);
     expect(document.activeElement).toBe(focused);
   });
 
@@ -481,10 +479,10 @@ describe("inline chapter history", () => {
     await expect.poll(() => host.querySelector(".ab-history-detail-header h3")?.textContent).toBe(
       "Revision 102 of 103",
     );
-    await expect.poll(() => host.querySelector(".ab-revision-diff-visual")).toBeTruthy();
+    await expect.poll(() => host.querySelector(".ab-prose-diff")).toBeTruthy();
 
     const diff = host.querySelector<HTMLElement>(".ab-history-diff")!;
-    const visual = host.querySelector<HTMLElement>(".ab-revision-diff-visual")!;
+    const visual = host.querySelector<HTMLElement>(".ab-prose-diff")!;
     const inline = host.querySelector<HTMLButtonElement>(
       '.ab-revision-diff-layout-button[data-layout="line-by-line"]',
     )!;
@@ -505,13 +503,13 @@ describe("inline chapter history", () => {
     ).toBeTruthy();
 
     expect(host.querySelector(".ab-history-diff")).toBe(diff);
-    expect(host.querySelector(".ab-revision-diff-visual")).toBe(visual);
+    expect(host.querySelector(".ab-prose-diff")).toBe(visual);
     expect(document.activeElement).toBe(inline);
     expect(inline.getAttribute("aria-pressed")).toBe("true");
 
     host.querySelector<HTMLButtonElement>('button[data-compare="current"]')?.click();
     await expect.poll(() =>
-      host.querySelector<HTMLElement>(".ab-revision-diff-visual")?.dataset.layout,
+      host.querySelector<HTMLElement>(".ab-prose-diff")?.dataset.layout,
     ).toBe("line-by-line");
   });
 

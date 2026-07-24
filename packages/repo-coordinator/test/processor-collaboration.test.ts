@@ -169,6 +169,37 @@ describe("decision + work item as one crossing", () => {
     expect(workItem.sections.requestedChange).toContain("Address the note in annotation");
     expect(workItem.sections.requestedChange).not.toContain("suggestion");
   });
+
+  it("uses a chapter discussion as the promoted work request", async () => {
+    const body = "Resolve the loose ending before publication.";
+    const annotation = await enqueueAnnotationCreate(seed, {
+      kind: "comment",
+      scope: "chapter",
+      target: null,
+      body,
+    });
+    const crossing = await enqueueDecisionCreate(seed, {
+      annotationId: annotation.annotationId,
+      decision: {
+        ruleVersion: 0,
+        result: "overridden",
+        rule: "maintainer_override",
+        overrideReason: null,
+        metrics: {},
+      },
+      payloadExtra: { actorId: seed.actorId, createdByActorId: seed.actorId },
+    });
+
+    await processor.drain(seed.projectId);
+
+    const workItemContent = await readFile(
+      join(repo.dir, workItemFilePath(crossing.workItemId)),
+      "utf8",
+    );
+    const workItem = parseWorkItemArtifact(workItemContent);
+    expect(workItem.sections.context).toBe(body);
+    expect(workItem.sections.requestedChange).toBe(body);
+  });
 });
 
 describe("support_changed re-render", () => {

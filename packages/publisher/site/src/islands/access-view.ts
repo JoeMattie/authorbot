@@ -43,7 +43,7 @@ import {
   type Collaborator,
   type PendingAnnotation,
 } from "./access-api.js";
-import { el, srOnly } from "./dom.js";
+import { el, labeledButton, srOnly } from "./dom.js";
 import {
   ANONYMOUS_NOTE,
   CANCEL_LABEL,
@@ -1226,12 +1226,11 @@ export class AuthorbotAccess extends HTMLElement {
 
     if (state === "active") {
       const actions = el("div", "ab-access-row-actions ab-token-actions");
-      const edit = el(
-        "button",
+      const edit = labeledButton(
         "ab-btn ab-edit-token-capabilities",
         "Edit permissions",
-      ) as HTMLButtonElement;
-      edit.type = "button";
+        "pencil",
+      );
       const revoke = el("button", "ab-btn ab-danger ab-revoke-token", `Revoke “${token.name}”`);
       revoke.type = "button";
       const revokeSlot = el("div", "ab-access-confirm-slot");

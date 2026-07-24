@@ -15,6 +15,7 @@ import { AuthorbotCollab } from "./collab-element.js";
 import { AuthorbotDraftChapters } from "./draft-chapters.js";
 import { loadLazyModule } from "./lazy-module.js";
 import { AuthorbotNewChapter } from "./new-chapter-button.js";
+import { AuthorbotReaderControls } from "./reader-controls.js";
 
 const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-collab", AuthorbotCollab],
@@ -24,6 +25,7 @@ const ELEMENTS: ReadonlyArray<readonly [string, CustomElementConstructor]> = [
   ["authorbot-chapter-composer", AuthorbotChapterComposer],
   ["authorbot-draft-chapters", AuthorbotDraftChapters],
   ["authorbot-new-chapter", AuthorbotNewChapter],
+  ["authorbot-reader-controls", AuthorbotReaderControls],
 ];
 
 for (const [tag, constructor] of ELEMENTS) {
@@ -79,3 +81,12 @@ defineLazyElement("authorbot-work-queue", "authorbot-work-queue", () =>
 defineLazyElement("authorbot-revision-review", "authorbot-revision-review", () =>
   import("./revision-review.js").then((module) => module.AuthorbotRevisionReview),
 );
+
+// Character details use Web Awesome's drawer, but only chapter pages with
+// collaboration enabled emit the drawer mount. Keeping this import lazy is
+// what preserves Authorbot's script-free static-book contract.
+if (document.querySelector("[data-character-drawer]") !== null) {
+  void loadLazyModule(() => import("./character-drawer.js"))
+    .then((module) => module.initializeCharacterDrawer())
+    .catch(() => undefined);
+}

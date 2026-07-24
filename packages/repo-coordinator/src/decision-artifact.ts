@@ -39,6 +39,7 @@ export interface DecisionArtifactInput {
   /** Decision UUIDv7. */
   id: string;
   sourceAnnotationId: string;
+  sourceReplyId?: string | null;
   /** Rule name, e.g. `suggestion_to_work_item`. */
   rule: string;
   /** Rule version; `0` marks a maintainer force-create (Phase 3 contract §4). */
@@ -95,6 +96,9 @@ export function renderDecisionArtifact(input: DecisionArtifactInput): RenderedFi
     schema: "authorbot.decision/v1",
     id: input.id,
     source_annotation_id: input.sourceAnnotationId,
+    ...(input.sourceReplyId === null || input.sourceReplyId === undefined
+      ? {}
+      : { source_reply_id: input.sourceReplyId }),
     rule: input.rule,
     rule_version: input.ruleVersion,
     metrics: sortedMetrics(input.metrics),

@@ -228,7 +228,7 @@ describe("promotion surface", () => {
     expect(buttons).toContain("Promote to work");
     expect(promoteBtn()?.hidden).toBe(false);
     expect(buttons).toContain("Reply");
-    expect(buttons).toContain("Withdraw");
+    expect(card.querySelector<HTMLButtonElement>('[aria-label="Withdraw"]')).toBeTruthy();
     expect(card.getAttribute("aria-label")).toContain("on this block");
   });
 

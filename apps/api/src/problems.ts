@@ -120,7 +120,7 @@ export const PROBLEM_TYPES = {
 
 export type ProblemSlug = keyof typeof PROBLEM_TYPES;
 
-const TYPE_PREFIX = "https://authorbot.dev/problems/";
+const TYPE_PREFIX = "urn:authorbot:problem:";
 
 export interface ProblemExtras {
   detail?: string;

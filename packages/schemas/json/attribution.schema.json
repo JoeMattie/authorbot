@@ -24,7 +24,7 @@
           },
           "actor": {
             "type": "string",
-            "pattern": "^(?:github|agent|system):[A-Za-z0-9][A-Za-z0-9._-]*$"
+            "pattern": "^(?:github|agent|local|system):[A-Za-z0-9][A-Za-z0-9._-]*$"
           },
           "work_item_id": {
             "type": "string",

@@ -348,7 +348,7 @@ export async function runScheduledMaintenance(env: WorkerBindings): Promise<void
 function internalProblem(): Response {
   return new Response(
     JSON.stringify({
-      type: "https://authorbot.dev/problems/internal",
+      type: "urn:authorbot:problem:internal",
       title: "Internal error",
       status: 500,
       code: "internal",

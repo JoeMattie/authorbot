@@ -169,6 +169,25 @@ afterEach(() => {
 });
 
 describe("chapter-wide Discussion", () => {
+  it("uses embedded actor attribution when the author is no longer a member", async () => {
+    const discussion = {
+      ...annotation("thread-1"),
+      author: {
+        id: "actor-2",
+        displayName: "Joe Mattie",
+        type: "human",
+      },
+    };
+    stub({
+      session: me(["chapters:read", "comments:read"]),
+      annotations: [discussion],
+    });
+    mount();
+
+    await expect.poll(() => document.querySelector(".ab-discussion-thread .ab-author")?.textContent)
+      .toBe("Joe Mattie");
+  });
+
   it("losslessly suspends and restores annotation entry during chapter edit mode", async () => {
     stub({
       session: me([

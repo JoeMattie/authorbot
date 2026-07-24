@@ -38,6 +38,7 @@ import {
   type PublicationSummary,
   type Reply,
   type ReplyAccepted,
+  type ReplyPromotionResult,
   type ReplyWithdrawAccepted,
   type RepositoryDocumentKind,
   type RepositoryDocumentProposalCommand,
@@ -120,6 +121,7 @@ export interface ProjectStoreApi {
   castVote?: CollabApi["castVote"];
   clearVote?: CollabApi["clearVote"];
   promoteToWork?: CollabApi["promoteToWork"];
+  promoteReplyToWork?: CollabApi["promoteReplyToWork"];
   rejectSuggestion?: CollabApi["rejectSuggestion"];
   claim?: CollabApi["claim"];
   recoverLease?: CollabApi["recoverLease"];
@@ -303,6 +305,10 @@ export interface ProjectStoreState {
   ): Promise<StoreActionResult<ReplyWithdrawAccepted>>;
   setVote(annotationId: string, value: VoteValue | null): Promise<StoreActionResult<VoteResult>>;
   promoteAnnotation(annotationId: string): Promise<StoreActionResult<OverrideResult>>;
+  promoteReply(
+    annotationId: string,
+    replyId: string,
+  ): Promise<StoreActionResult<ReplyPromotionResult>>;
   rejectAnnotation(annotationId: string, reason: string): Promise<StoreActionResult<OverrideResult>>;
   reviewRevision(
     proposalId: string,
@@ -3319,6 +3325,78 @@ export function createProjectStore(
     return { ok: true, value: result.value };
   };
 
+  const promoteReply = async (
+    annotationId: string,
+    replyId: string,
+  ): Promise<StoreActionResult<ReplyPromotionResult>> => {
+    const annotation = store.getState().annotationsById[annotationId];
+    const before = store.getState().repliesById[replyId];
+    const write = api.promoteReplyToWork;
+    if (write === undefined) return unsupported("promote reply");
+    if (annotation === undefined || before === undefined) return unsupported("reply");
+    const generation = authorizationGeneration;
+    const id = mutationId();
+    const fingerprint = commandFingerprint("reply.promote", annotationId, replyId);
+    const key = retainedKeyFor(fingerprint);
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: { ...before, workPromotionPending: true },
+      },
+    });
+    addPendingMutation({
+      id,
+      kind: "work.promote.reply",
+      phase: "optimistic",
+      idempotencyKey: key,
+      fingerprint,
+      chapterId: annotation.chapterId,
+      annotationId,
+      workItemId: null,
+      activityDelta: { openWorkItems: 1 },
+    });
+    const result = await replayOnce(() =>
+      write.call(api, annotationId, replyId, { idempotencyKey: key }),
+    );
+    if (generation !== authorizationGeneration) return credentialChanged();
+    if (!result.ok) {
+      return failOptimistic({
+        result,
+        mutationId: id,
+        fingerprint,
+        chapterId: annotation.chapterId,
+        annotationId,
+        refreshWork: true,
+        rollback: () => {
+          store.setState({
+            repliesById: {
+              ...store.getState().repliesById,
+              [replyId]: before,
+            },
+          });
+        },
+      });
+    }
+    store.setState({
+      repliesById: {
+        ...store.getState().repliesById,
+        [replyId]: {
+          ...before,
+          workItemId: result.value.workItemId,
+          workPromotionPending: false,
+        },
+      },
+    });
+    await settleAcceptedMutation(
+      id,
+      fingerprint,
+      annotation.chapterId,
+      annotationId,
+      true,
+    );
+    return { ok: true, value: result.value };
+  };
+
   const recoverClaim = async (
     bundle: SafeTaskBundle,
   ): Promise<StoreActionResult<SafeTaskBundle>> => {
@@ -4128,6 +4206,7 @@ export function createProjectStore(
     withdrawReply,
     setVote,
     promoteAnnotation: (annotationId) => overrideAnnotation(annotationId, "promote"),
+    promoteReply,
     rejectAnnotation: (annotationId, reason) =>
       overrideAnnotation(annotationId, "reject", reason),
     reviewRevision,

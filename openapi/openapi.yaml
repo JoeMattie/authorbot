@@ -1474,6 +1474,50 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /v1/projects/{projectId}/annotations/{annotationId}/replies/{replyId}/force-create-work-item:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/AnnotationId"
+      - $ref: "#/components/parameters/ReplyId"
+    post:
+      operationId: forceCreateReplyWorkItem
+      tags: [annotations]
+      summary: Promote one reply to a work item without promoting its annotation.
+      description: |
+        Maintainer-only. Creates a separate `ready` work item whose Context is
+        this reply and whose chapter target is inherited from the parent
+        annotation. Reply-level and annotation-level promotion have separate
+        uniqueness domains, so either may happen without consuming the other.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        $ref: "#/components/requestBodies/PromotionBody"
+      responses:
+        "201":
+          description: Reply-specific work item force-created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AnnotationOverrideResult"
+                  - type: object
+                    required: [replyId, workItemId]
+                    properties:
+                      replyId:
+                        $ref: "#/components/schemas/Uuid"
+                      workItemId:
+                        $ref: "#/components/schemas/Uuid"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /v1/projects/{projectId}/annotations/{annotationId}/vote:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -3166,6 +3210,7 @@ paths:
                       properties:
                         perActor: { type: integer }
                         perToken: { type: integer }
+                        perSession: { type: integer }
                         windowSeconds: { type: integer }
                         description: { type: string }
                   notes:
@@ -3878,10 +3923,11 @@ components:
 
     ActorRef:
       type: string
-      pattern: "^(github|agent|system):[A-Za-z0-9][A-Za-z0-9_-]*$"
+      pattern: "^(github|agent|local|system):[A-Za-z0-9][A-Za-z0-9._-]*$"
       description: Actor reference, `<namespace>:<identifier>`.
       examples:
         - github:octocat
+        - local:joe
         - system:rule-engine
 
     StoryNodeId:
@@ -5278,6 +5324,7 @@ components:
           chapterRevision,
           target,
           authorActorId,
+          author,
           body,
           status,
           gitOperationId,
@@ -5306,6 +5353,11 @@ components:
             - type: "null"
         authorActorId:
           $ref: "#/components/schemas/Uuid"
+        author:
+          description: Display-safe attribution for the annotation author.
+          oneOf:
+            - $ref: "#/components/schemas/AnnotationActor"
+            - type: "null"
         body:
           type: string
           description: Markdown body. Untrusted content.
@@ -5325,10 +5377,25 @@ components:
         updatedAt:
           $ref: "#/components/schemas/Timestamp"
 
+    AnnotationActor:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, type]
+      properties:
+        id:
+          $ref: "#/components/schemas/Uuid"
+        displayName:
+          type: string
+        type:
+          oneOf:
+            - type: string
+              enum: [human, agent, system]
+            - type: "null"
+
     Reply:
       type: object
       required:
-        [id, projectId, annotationId, parentReplyId, authorActorId, body, status, gitOperationId, createdAt, updatedAt]
+        [id, projectId, annotationId, parentReplyId, authorActorId, body, status, workItemId, gitOperationId, createdAt, updatedAt]
       properties:
         id:
           $ref: "#/components/schemas/Uuid"
@@ -5348,6 +5415,11 @@ components:
           type: string
           # Mirrors the replies.status DB CHECK constraint.
           enum: [pending_git, open, withdrawn]
+        workItemId:
+          description: Work item created specifically from this reply, if any.
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
         gitOperationId:
           oneOf:
             - $ref: "#/components/schemas/Uuid"
@@ -5388,6 +5460,10 @@ components:
           $ref: "#/components/schemas/Uuid"
         sourceAnnotationId:
           $ref: "#/components/schemas/Uuid"
+        sourceReplyId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
         rule:
           type: string
         ruleVersion:
@@ -5420,6 +5496,10 @@ components:
           $ref: "#/components/schemas/Uuid"
         sourceAnnotationId:
           $ref: "#/components/schemas/Uuid"
+        sourceReplyId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
         actionType:
           type: string
           enum: [create_work_item, reject_suggestion, reopen_suggestion, cancel_work_item]
@@ -5525,6 +5605,10 @@ components:
         status:
           $ref: "#/components/schemas/WorkItemStatus"
         sourceAnnotationId:
+          oneOf:
+            - $ref: "#/components/schemas/Uuid"
+            - type: "null"
+        sourceReplyId:
           oneOf:
             - $ref: "#/components/schemas/Uuid"
             - type: "null"

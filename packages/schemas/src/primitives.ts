@@ -20,8 +20,8 @@ export const NODE_KINDS = [
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
 
-/** Actor reference namespaces (contract section 2). */
-export const ACTOR_NAMESPACES = ["github", "agent", "system"] as const;
+/** Actor reference namespaces (contract section 2 plus portable local auth). */
+export const ACTOR_NAMESPACES = ["github", "agent", "local", "system"] as const;
 export type ActorNamespace = (typeof ACTOR_NAMESPACES)[number];
 
 /** Slug source pattern: `[a-z0-9][a-z0-9-]*` (contract section 2). */
@@ -67,8 +67,9 @@ export function nodeIdOf<K extends NodeKind>(kind: K): z.ZodString {
 /**
  * Actor reference `<namespace>:<identifier>` (contract section 2).
  * The identifier charset is not pinned by the contract; this package accepts
- * `[A-Za-z0-9][A-Za-z0-9._-]*` (covers GitHub logins, agent names, and system
- * components) and rejects whitespace, colons, and leading punctuation.
+ * `[A-Za-z0-9][A-Za-z0-9._-]*` (covers GitHub logins, agent names, portable
+ * local identities, and system components) and rejects whitespace, colons,
+ * and leading punctuation.
  */
 export const actorRefSchema = z
   .string()

@@ -71,12 +71,26 @@ export const forceCreateWorkItemCommandSchema = z.strictObject({
 });
 export type ForceCreateWorkItemCommand = z.infer<typeof forceCreateWorkItemCommandSchema>;
 
+/** Force-create Work from one reply without promoting its whole annotation. */
+export const forceCreateReplyWorkItemCommandSchema = z.strictObject({
+  annotationId: uuidv7Schema,
+  replyId: uuidv7Schema,
+  reason: overrideReasonSchema.optional(),
+});
+export type ForceCreateReplyWorkItemCommand = z.infer<
+  typeof forceCreateReplyWorkItemCommandSchema
+>;
+
 export type SuggestionOverrideDenialReason =
   | "not-maintainer"
   | "not-a-suggestion"
   | "illegal-transition";
 
 export type AnnotationPromotionDenialReason =
+  | "not-maintainer"
+  | "illegal-transition";
+
+export type ReplyPromotionDenialReason =
   | "not-maintainer"
   | "illegal-transition";
 
@@ -168,6 +182,22 @@ export function authorizeForceCreateWorkItem(input: {
     return denied(
       "illegal-transition",
       `an annotation with status "${input.annotationStatus}" cannot receive a work item (only "open")`,
+    );
+  }
+  return ALLOWED;
+}
+
+/** Promote one committed, open reply without changing the parent annotation. */
+export function authorizeForceCreateReplyWorkItem(input: {
+  actorRole: Role;
+  replyStatus: "pending_git" | "open" | "withdrawn";
+}): Decision<ReplyPromotionDenialReason> {
+  const maintainer = requireMaintainer(input.actorRole);
+  if (!maintainer.allowed) return maintainer;
+  if (input.replyStatus !== "open") {
+    return denied(
+      "illegal-transition",
+      `a reply with status "${input.replyStatus}" cannot receive a work item (only "open")`,
     );
   }
   return ALLOWED;

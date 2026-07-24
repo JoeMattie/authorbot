@@ -149,7 +149,11 @@ export async function rebuildProjection(
   // terminal artifact status such as accepted, rejected, or withdrawn.
   const workItemCreatedAnnotationIds = new Set(
     snapshotDecisions
-      .filter(({ parsed }) => deriveDecisionActionType(parsed) === "create_work_item")
+      .filter(
+        ({ parsed }) =>
+          deriveDecisionActionType(parsed) === "create_work_item" &&
+          parsed.artifact.source_reply_id === undefined,
+      )
       .map(({ parsed }) => parsed.artifact.source_annotation_id),
   );
 
@@ -427,6 +431,7 @@ export async function rebuildProjection(
       type: wi.type,
       status: leasedWorkItems.has(wi.id) && wi.status === "ready" ? "leased" : wi.status,
       sourceAnnotationId: wi.source_annotation_id,
+      sourceReplyId: wi.source_reply_id ?? null,
       chapterId: wi.chapter_id,
       baseRevision: wi.base_revision,
       target,
@@ -444,6 +449,7 @@ export async function rebuildProjection(
       id: parsed.artifact.id,
       projectId: project.id,
       sourceAnnotationId: parsed.artifact.source_annotation_id,
+      sourceReplyId: parsed.artifact.source_reply_id ?? null,
       actionType: deriveDecisionActionType(parsed),
       rule: parsed.artifact.rule,
       ruleVersion: parsed.artifact.rule_version,
