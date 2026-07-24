@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/repo-coordinator",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "description": "Outbox processor and Git mirroring for Authorbot: byte-stable annotation/reply artifact rendering, BookRepoWriter with a LocalGitAdapter, and the queued-to-committed git_operations walker (Phase 2 contract section 5)",
   "keywords": [
     "authorbot",

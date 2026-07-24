@@ -498,40 +498,41 @@ describe("finding 7: event streams are bounded", () => {
     expect(text).toContain("retry:");
   });
 
-  it("caps concurrent streams per client and releases the slot when one closes", async () => {
+  it("caps distinct browser streams per credential and replaces a stale same-tab stream", async () => {
     harness.close();
     harness = await makeHarness({
       config: { ssePollMs: 10, sseHeartbeatMs: 10_000, sseMaxStreamsPerClient: 2 },
     });
     const cookie = await devLogin(harness, "listener", "contributor");
-    const open = (): Response | Promise<Response> =>
-      harness.app.request(`/v1/projects/${harness.projectId}/events`, {
-        headers: { Cookie: cookie, "CF-Connecting-IP": "203.0.113.7" },
+    const open = (stream: string, authCookie = cookie): Response | Promise<Response> =>
+      harness.app.request(`/v1/projects/${harness.projectId}/events?stream=${stream}`, {
+        headers: { Cookie: authCookie, "CF-Connecting-IP": "203.0.113.7" },
       });
 
-    const first = await open();
-    const second = await open();
+    const first = await open("tab-a");
+    const second = await open("tab-b");
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
 
-    const third = await open();
+    const third = await open("tab-c");
     expect(third.status).toBe(429);
     expect((await json(third)).code).toBe("rate-limited");
     expect(third.headers.get("Retry-After")).not.toBeNull();
 
-    // A different address is unaffected - the cap is per client, not global.
-    const other = await harness.app.request(`/v1/projects/${harness.projectId}/events`, {
-      headers: { Cookie: cookie, "CF-Connecting-IP": "198.51.100.4" },
-    });
+    // A second credential behind the same address is unaffected. NAT peers
+    // must never share one concurrency bucket.
+    const otherCookie = await devLogin(harness, "other-listener", "contributor");
+    const other = await open("tab-a", otherCookie);
     expect(other.status).toBe(200);
     await other.body?.cancel();
 
-    // Closing one frees exactly one slot.
-    await first.body?.cancel();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const fourth = await open();
-    expect(fourth.status).toBe(200);
-    await fourth.body?.cancel();
+    // A reconnect/navigation from tab-a supersedes and actively closes its
+    // old stream rather than consuming a third slot.
+    const replacement = await open("tab-a");
+    expect(replacement.status).toBe(200);
+    await expect(first.text()).resolves.toContain("retry:");
+
+    await replacement.body?.cancel();
     await second.body?.cancel();
   });
 });

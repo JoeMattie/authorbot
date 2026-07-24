@@ -266,9 +266,25 @@ export function createApi(deps: AppDeps): AuthorbotApi {
   // cross-origin browser request fails at the browser - the correct outcome.
 
   app.onError((error, c) => {
-    // Never echo internals (they may contain SQL values); the correlation id
-    // is the log key.
-    void error;
+    // Never echo or log error messages: SQL and upstream errors can contain
+    // repository values. The stable request metadata and coarse error class
+    // are enough to locate the matching Worker/DO trace by correlation id.
+    const status =
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      typeof error.status === "number" &&
+      Number.isInteger(error.status)
+        ? error.status
+        : undefined;
+    console.error(JSON.stringify({
+      event: "authorbot.request.error",
+      correlationId: c.get("correlationId"),
+      method: c.req.method,
+      path: new URL(c.req.url).pathname,
+      errorName: error instanceof Error ? error.name : typeof error,
+      ...(status === undefined ? {} : { upstreamStatus: status }),
+    }));
     return problem(c as Context<AppEnv>, "internal");
   });
 

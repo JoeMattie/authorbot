@@ -241,6 +241,31 @@ describe("readTextFile", () => {
     await expect(readerFor(fake).readTextFile("chapters/nope.md")).resolves.toBeNull();
   });
 
+  it("retries an isolated upstream failure on an idempotent read", async () => {
+    const fake = await seededFake();
+    let attempts = 0;
+    const reader = new GitHubBookRepoReader({
+      owner: fake.owner,
+      repo: fake.repo,
+      branch: fake.defaultBranch,
+      fetch: async (url, init) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return new Response(JSON.stringify({ message: "temporary gateway failure" }), {
+            status: 502,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return fake.fetch(url, init);
+      },
+    });
+
+    await expect(reader.readTextFile("chapters/001-baseline.md")).resolves.toBe(
+      exampleFiles["chapters/001-baseline.md"],
+    );
+    expect(attempts).toBeGreaterThan(1);
+  });
+
   it("normalizes '.' segments and backslash separators", async () => {
     const fake = await seededFake();
     const reader = readerFor(fake);
