@@ -64,6 +64,8 @@ const step = (msg) => console.log(`\n── ${msg}`);
 const work = await mkdtemp(join(tmpdir(), "authorbot-author-ci-"));
 const vendor = join(work, "vendor");
 const book = join(work, "book");
+const collabBook = join(work, "collab-book");
+const collabSite = join(work, "collab-site");
 
 try {
   step("Packing the CLI and its runtime dependencies");
@@ -121,6 +123,43 @@ try {
     throw new Error("the built site is missing the chapterless empty state");
   }
   await access(join(book, "_site/authorbot-build.json"));
+
+  step("Building an interactive book from the installed tarballs");
+  await cp(join(ROOT, "examples/book-repo"), collabBook, { recursive: true });
+  const collabBuild = run(
+    "npx",
+    [
+      "authorbot",
+      "build",
+      collabBook,
+      "--out",
+      collabSite,
+      "--api-url",
+      "/",
+    ],
+    { cwd: book },
+  );
+  process.stdout.write(collabBuild);
+
+  // This catches source imports that survive the Authorbot workspace's
+  // tsconfig but disappear when Vite compiles the published package in an
+  // author's checkout. The character drawer regressed exactly this way:
+  // its constructor was used only as a TypeScript type, so the packed build
+  // emitted the loader and CSS but erased the custom-element registration.
+  const collabEntry = await readFile(
+    join(collabSite, "_astro", "authorbot-collab.js"),
+    "utf8",
+  );
+  const drawerAsset = collabEntry.match(/assets\/character-drawer-[^"'`]+\.js/)?.[0];
+  if (drawerAsset === undefined) {
+    throw new Error("the packed interactive build emitted no character drawer asset");
+  }
+  const drawerBundle = await readFile(join(collabSite, "_astro", drawerAsset), "utf8");
+  if (!drawerBundle.includes("wa-drawer") || !drawerBundle.includes("customElements.define")) {
+    throw new Error(
+      "the packed interactive build erased the Web Awesome drawer registration",
+    );
+  }
 
   console.log("\n✓ author CI works against packed tarballs: npm ci → validate → build.");
   console.log("  No clone of this repository, no TypeScript compile. Nothing was published.");

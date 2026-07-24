@@ -49,8 +49,8 @@ three, each doing what it is good at.
    ┌──────────────────────────────────────────────────────────────────┐
    │  PRESENTATION PLANE - the published static site                  │
    │                                                                  │
-   │  Plain HTML chapters, story views. No JavaScript required.       │
-   │  Collaboration widgets appear only if an API URL is configured.  │
+   │  Plain HTML chapters and story views remain the readable base.   │
+   │  Hosted/local UI loads JS only when an API URL is configured.    │
    └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,6 +64,11 @@ with its full editorial history.
 
 The rule: **Git holds what should be permanent. The database holds what is
 merely current.**
+
+An API-less build stops at that readable HTML base and emits no client
+JavaScript. Hosted and local-dev builds configure the API and add the same
+progressive-enhancement UI for notes, editing, history, reader controls, and
+character drawers. The prose itself never depends on those scripts.
 
 ---
 

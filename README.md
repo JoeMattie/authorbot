@@ -48,6 +48,13 @@ fast private iteration and source development. Hosted mode is for a durable,
 shared book. A local session can validate and open a draft pull request, but
 it never deploys or merges on its own.
 
+Hosted and local-dev sites are interactive applications. They include the
+progressive-enhancement JavaScript used by editing, history, notes, anchored
+cards, reader controls, and character drawers. An API-less
+`authorbot build`, by contrast, produces a standalone reading site with no
+client JavaScript. In either form, the chapter prose is present in the HTML
+and remains readable if JavaScript fails or is disabled.
+
 ## Hosted mode: create a book
 
 The setup wizard creates the repository, reading site, and optional
@@ -221,8 +228,9 @@ pnpm build:example         # authorbot build examples/book-repo --out _site
 
 `build` refuses to run when `validate` reports errors (`--force` overrides with
 a warning); it renders to a static site with no client JavaScript unless the
-book opts into collaboration. Running the collaboration API and site together
-locally is covered in [`apps/api/README.md`](./apps/api/README.md).
+book opts into collaboration. Hosted and local-dev modes do opt into that
+interactive layer. Running the collaboration API and site together locally is
+covered in [`apps/api/README.md`](./apps/api/README.md).
 
 ### Layout
 

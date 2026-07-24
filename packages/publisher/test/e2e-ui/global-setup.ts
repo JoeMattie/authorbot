@@ -76,6 +76,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     repo: string;
     sqlite: string;
     port: number;
+    allowedHosts: readonly string[];
     basePath?: string;
   }): Promise<ChildProcess> => {
     const child = spawn(process.execPath, [devServerJs], {
@@ -102,6 +103,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         // (contract §2.1): signed-out readers get read-only annotation lists.
         PUBLIC_ANNOTATIONS: "true",
         PORT: String(options.port),
+        ALLOWED_HOSTS: options.allowedHosts.join(","),
         ...(options.basePath === undefined ? {} : { API_BASE_PATH: options.basePath }),
       },
       stdio: ["ignore", "inherit", "inherit"],
@@ -152,7 +154,16 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   // 3. Phase 2 Node dev API per deployment, as child processes
   const apiPort = await freePort();
-  await startApi({ repo: repoDir, sqlite: path.join(tmp, "e2e.sqlite"), port: apiPort });
+  await startApi({
+    repo: repoDir,
+    sqlite: path.join(tmp, "e2e.sqlite"),
+    port: apiPort,
+    allowedHosts: [
+      `127.0.0.1:${String(apiPort)}`,
+      `localhost:${String(apiPort)}`,
+      new URL(site.origin).host,
+    ],
+  });
   await waitForApi(`http://127.0.0.1:${apiPort}`);
   // The site origin now answers /v1/* too - one origin, as deployed.
   site.setApiTarget({ host: "127.0.0.1", port: apiPort });
@@ -165,6 +176,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     repo: baseRepoDir,
     sqlite: path.join(tmp, "e2e-base.sqlite"),
     port: baseApiPort,
+    allowedHosts: [
+      `127.0.0.1:${String(baseApiPort)}`,
+      `localhost:${String(baseApiPort)}`,
+      new URL(baseSite.origin).host,
+    ],
     basePath: BASE_PATH,
   });
   await waitForApi(`http://127.0.0.1:${baseApiPort}${BASE_PATH}`);

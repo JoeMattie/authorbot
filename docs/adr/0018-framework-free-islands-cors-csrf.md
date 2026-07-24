@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted (2026-07-19)
+Superseded in part (2026-07-23)
+
+The API-less byte-comparability, plain-text rendering, CSP, and explicit
+browser-entry decisions remain current. The "framework-free" and "zero runtime
+dependencies" portions were superseded as the product UI grew: current
+interactive builds use Lit for reader controls, Web Awesome for the character
+drawer, and Floating UI for anchored annotation surfaces. Those dependencies
+remain absent from API-less builds.
 
 ## Context
 

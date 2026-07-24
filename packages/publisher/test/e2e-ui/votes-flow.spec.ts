@@ -46,7 +46,8 @@ test("threshold crossing: badge appears live and the item reaches /work/", async
 
   const card = pageA.locator(".ab-card", { hasText: SUGGESTION_BODY }).first();
   await expect(card).toBeVisible();
-  await card.locator(".ab-card-head").click();
+  await card.focus();
+  await card.press("Enter");
   await expect(card).toHaveClass(/ab-active/);
   const approve = card.locator('.ab-vote-btn[data-vote="approve"]');
   await expect(approve).toBeEnabled();
@@ -108,7 +109,8 @@ test("signed-out reader sees the tally but has no enabled controls (§7)", async
   // show_public_annotations: the suggestion renders for the anonymous reader.
   const card = page.locator(".ab-card", { hasText: body }).first();
   await expect(card).toBeVisible();
-  await card.locator(".ab-card-head").click();
+  await card.focus();
+  await card.press("Enter");
   await expect(card).toHaveClass(/ab-active/);
   // Tallies are visible to everyone (counts only).
   await expect(card.locator(".ab-vote-tally")).toContainText("approve");
@@ -140,7 +142,8 @@ test("keyboard-only voting round trip", async ({ browser }) => {
 
   const card = page.locator(".ab-card", { hasText: body }).first();
   await expect(card).toBeVisible();
-  await card.locator(".ab-card-head").click();
+  await card.focus();
+  await card.press("Enter");
   await expect(card).toHaveClass(/ab-active/);
   const approve = card.locator('.ab-vote-btn[data-vote="approve"]');
   const abstain = card.locator('.ab-vote-btn[data-vote="abstain"]');

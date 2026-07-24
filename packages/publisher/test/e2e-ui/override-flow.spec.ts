@@ -33,7 +33,8 @@ test("a maintainer promotes a suggestion to work against a visible tally", async
 
   const card = page.locator(".ab-card", { hasText: SUGGESTION }).first();
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await card.locator(".ab-card-head").click();
+  await card.focus();
+  await card.press("Enter");
   await expect(card).toHaveClass(/ab-active/);
 
   // No work item yet: the rule is not met.

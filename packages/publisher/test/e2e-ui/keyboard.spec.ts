@@ -74,7 +74,7 @@ test("touch readers can discover the per-block annotation affordance", async ({ 
   const block = page.locator('main .prose [id^="b-"]').first();
   await annotate.focus();
   await expect(block).toHaveClass(/ab-note-target-preview/);
-  await expect(page.getByRole("tooltip", { name: "Note on this block" })).toBeVisible();
+  await expect(annotate).toHaveAccessibleName("Note on this block");
   await annotate.click();
   const composer = page.locator(".ab-composer");
   await composer.locator("textarea").fill(TOUCH_BODY);

@@ -298,9 +298,16 @@ const isMain =
 
 if (isMain) {
   const port = Number(process.env["PORT"] ?? 8788);
+  const allowedHosts = process.env["ALLOWED_HOSTS"]
+    ?.split(",")
+    .map((host) => host.trim())
+    .filter((host) => host !== "");
   createNodeDevApi()
     .then((dev) => {
-      serveNodeDevApi(dev, port);
+      serveNodeDevApi(dev, {
+        port,
+        ...(allowedHosts === undefined ? {} : { allowedHosts }),
+      });
       // eslint-disable-next-line no-console
       console.log(
         `authorbot dev server on http://127.0.0.1:${port} (book repo: ${dev.bookRepoPath}, mirror: ${dev.mirror !== null ? "inline" : "queue"})`,

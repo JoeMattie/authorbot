@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/publisher",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "description": "Read-only static-site publisher for Authorbot book repositories: Astro 5 invoked programmatically, sanitized Markdown rendering, story views, and the authorbot.build/v1 manifest (Phase 1 contract sections 1-4)",
   "keywords": [
     "authorbot",
