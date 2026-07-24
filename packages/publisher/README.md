@@ -38,6 +38,10 @@ detection. The CLI wrapper is `authorbot build <repo> [--out <dir>]
 `@authorbot/cli`), which refuses to build when `authorbot validate` reports
 errors unless `--force` is given.
 
+The build also writes `<outDir>/_headers` with a Cloudflare `no-transform`
+cache directive. Cloudflare still counts requests at the edge, but does not
+rewrite the response to inject its browser analytics beacon.
+
 ## How repository data reaches Astro
 
 The Astro project root is the `site/` directory shipped inside this package

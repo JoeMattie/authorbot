@@ -48,6 +48,9 @@ export interface BuildSiteOptions {
 
 export const VIRTUAL_MODULE_ID = "virtual:authorbot-site";
 const RESOLVED_VIRTUAL_MODULE_ID = `\0${VIRTUAL_MODULE_ID}`;
+const CLOUDFLARE_HEADERS = `/*
+  Cache-Control: public, max-age=0, must-revalidate, no-transform
+`;
 
 /** Inline Vite plugin exposing the site model to the Astro templates. */
 function siteDataPlugin(model: SiteModel): {
@@ -435,5 +438,10 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
     `${JSON.stringify(manifest, null, 2)}\n`,
     "utf8",
   );
+  // Cloudflare Web Analytics can inject its browser beacon into HTML at the
+  // edge. Authorbot sites keep request-level Cloudflare analytics, but opt out
+  // of response rewriting (and therefore the third-party browser beacon).
+  // `_headers` must live at the static-assets root, not under a base path.
+  await writeFile(path.join(outDir, "_headers"), CLOUDFLARE_HEADERS, "utf8");
   return manifest;
 }

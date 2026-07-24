@@ -893,6 +893,15 @@ describe("base-path builds are deployable (ADR-0019 §6)", () => {
     await expect(stat(path.join(outBase, "authorbot-build.json"))).resolves.toBeTruthy();
   });
 
+  it("leaves Cloudflare response headers at the static-assets root", async () => {
+    await expect(readFile(path.join(outBase, "_headers"), "utf8")).resolves.toContain(
+      "no-transform",
+    );
+    await expect(
+      stat(path.join(outBase, "my-book", "_headers")),
+    ).rejects.toThrow();
+  });
+
   it("still emits at the root when no base path is configured", async () => {
     await expect(stat(path.join(outPlain, "index.html"))).resolves.toBeTruthy();
   });

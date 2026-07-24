@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/rule-engine",
-  "version": "0.1.41",
+  "version": "0.1.42",
   "description": "Pure declarative rule evaluation for Authorbot governance: vote-tally metric computation and threshold evaluation of the authorbot.instance/v1 rule shape (Phase 3 contract section 3). No user-supplied code is ever evaluated.",
   "keywords": [
     "authorbot",

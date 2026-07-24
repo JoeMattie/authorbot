@@ -9,6 +9,17 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.42
+
+- Production builds now opt out of Cloudflare response rewriting, which
+  prevents the platform from injecting its browser analytics beacon into book
+  pages. Cloudflare's edge request counts remain available, so authors retain
+  ordinary traffic visibility without shipping third-party tracking
+  JavaScript.
+- The generated `_headers` file applies at the static-assets root, including
+  books served beneath a base path. This patch adds no D1 or book-format
+  migration.
+
 ## 0.1.41
 
 - **Normal browsing no longer exhausts the live-event stream limit.** Streams
