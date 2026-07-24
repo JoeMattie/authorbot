@@ -21,6 +21,7 @@ choice, this contract selects one.
 ```text
 <out>/
 ├── index.html                    # book title + chapter index (published only)
+├── _headers                      # no-transform: blocks edge beacon injection
 ├── authorbot-build.json          # build manifest (authorbot.build/v1)
 ├── chapters/<slug>/index.html    # chapter pages per publication.chapter_url
 └── story/
@@ -40,6 +41,9 @@ choice, this contract selects one.
   showing revision number and author actors.
 - Reading pages are fully usable without JavaScript (design §16.1); semantic
   HTML with landmarks, skip link, `lang` from `book.yml`, readable measure.
+- The Cloudflare `_headers` file preserves request-level traffic analytics but
+  opts the static site out of response rewriting, including automatic browser
+  analytics-beacon injection.
 
 ## 3. Build manifest
 

@@ -114,6 +114,7 @@ describe("buildSite on examples/book-repo", () => {
   it("emits the contract section 2 output tree", async () => {
     for (const rel of [
       "index.html",
+      "_headers",
       "authorbot-build.json",
       "chapters/baseline/index.html",
       "chapters/null-results/index.html",
@@ -128,6 +129,12 @@ describe("buildSite on examples/book-repo", () => {
         rel,
       ).resolves.toBeTruthy();
     }
+  });
+
+  it("prevents Cloudflare from injecting a browser analytics beacon", async () => {
+    await expect(readFile(path.join(outDefault, "_headers"), "utf8")).resolves.toBe(
+      "/*\n  Cache-Control: public, max-age=0, must-revalidate, no-transform\n",
+    );
   });
 
   it("excludes the draft chapter from chapters/ and from the index", async () => {
@@ -157,11 +164,11 @@ describe("buildSite on examples/book-repo", () => {
     }
   });
 
-  it("ships no client bundle: only html, css, and the manifest", async () => {
+  it("ships no client bundle: only html, css, headers, and the manifest", async () => {
     const extensions = new Set(
       (await collectFiles(outDefault)).map((file) => path.extname(file)),
     );
-    expect([...extensions].sort()).toEqual([".css", ".html", ".json"]);
+    expect([...extensions].sort()).toEqual(["", ".css", ".html", ".json"]);
   });
 
   it("anchors every marked block in every published chapter", async () => {

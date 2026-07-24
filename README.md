@@ -55,6 +55,10 @@ cards, reader controls, and character drawers. An API-less
 client JavaScript. In either form, the chapter prose is present in the HTML
 and remains readable if JavaScript fails or is disabled.
 
+Production builds also opt out of Cloudflare's browser analytics beacon.
+Cloudflare still records request traffic at the edge, but it does not inject
+third-party analytics JavaScript into Authorbot pages.
+
 ## Hosted mode: create a book
 
 The setup wizard creates the repository, reading site, and optional
