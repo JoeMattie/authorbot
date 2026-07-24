@@ -82,7 +82,9 @@ aggregates (§26.1: aggregate-only), notifications.
   `decision_created`, `decision_support_changed`, `work_item_created`,
   `operation_completed`. `Last-Event-ID` (or `?after=`) resumes; 15s
   heartbeat comments; authenticated project members only. Clients must
-  refetch authoritative resources after reconnect (documented).
+  refetch authoritative resources after reconnect (documented). Browser
+  clients send a stable `stream` id so a reconnect or same-tab navigation
+  replaces its own stale stream instead of consuming another concurrency slot.
 - Same rows are pollable via `GET /v1/projects/{p}/events?after=<id>&poll=1`
   returning JSON (simple-agent fallback, §26.1). On public books, anonymous
   callers and signed-in non-members admitted by an open/approval-gated policy

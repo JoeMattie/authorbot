@@ -9,6 +9,19 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.41
+
+- **Normal browsing no longer exhausts the live-event stream limit.** Streams
+  are scoped to the authenticated credential instead of a shared public IP,
+  and a reconnect or same-tab navigation replaces and closes its stale stream.
+  Unrelated readers behind one NAT no longer consume each other's allowance.
+- Repository-backed reads now retry short-lived GitHub and gateway failures
+  within a small bounded budget. Unexpected API failures also emit safe,
+  correlation-keyed Worker logs without exposing SQL, repository content, or
+  credentials.
+- The event-stream replacement contract is documented in OpenAPI. This patch
+  adds no D1 or book-format migration.
+
 ## 0.1.40
 
 - **Character details open correctly from hosted and local chapter pages.**

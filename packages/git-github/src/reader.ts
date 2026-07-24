@@ -393,6 +393,16 @@ export const MAX_TEXT_FILE_BYTES = 512 * 1024;
 /** Keep the current head plus at most five historical full-tree indexes. */
 export const MAX_TREE_INDEX_CACHE_ENTRIES = 6;
 const DEFAULT_MAX_FILES = 2000;
+const MAX_READ_ATTEMPTS = 3;
+const READ_RETRY_DELAYS_MS = [100, 300] as const;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableReadStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
 
 export class GitHubBookRepoReader implements BookRepoReader {
   readonly owner: string;
@@ -431,11 +441,52 @@ export class GitHubBookRepoReader implements BookRepoReader {
   // ------------------------------------------------------------------ HTTP
 
   async #getJson<T>(url: string, what: string): Promise<T> {
-    const response = await this.#fetch(url, {
-      method: "GET",
-      headers: { accept: GITHUB_ACCEPT },
-    });
-    if (!response.ok) {
+    for (let attempt = 0; attempt < MAX_READ_ATTEMPTS; attempt += 1) {
+      let response: Response;
+      try {
+        response = await this.#fetch(url, {
+          method: "GET",
+          headers: { accept: GITHUB_ACCEPT },
+        });
+      } catch {
+        if (attempt < MAX_READ_ATTEMPTS - 1) {
+          await wait(READ_RETRY_DELAYS_MS[attempt] ?? READ_RETRY_DELAYS_MS.at(-1) ?? 300);
+          continue;
+        }
+        throw new GitHubReadError("http", `${what} failed before receiving a response`);
+      }
+
+      if (response.ok) {
+        try {
+          return (await response.json()) as T;
+        } catch {
+          if (attempt < MAX_READ_ATTEMPTS - 1) {
+            await wait(READ_RETRY_DELAYS_MS[attempt] ?? READ_RETRY_DELAYS_MS.at(-1) ?? 300);
+            continue;
+          }
+          throw new GitHubReadError("http", `${what} returned invalid JSON`, response.status);
+        }
+      }
+
+      // A short retry smooths over an isolated GitHub/gateway 5xx without
+      // pushing retry policy into every source consumer. Do not sleep through
+      // an explicit long rate-limit window inside a user request.
+      const retryAfter = Number(response.headers.get("retry-after"));
+      const retryDelay =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1_000
+          : (READ_RETRY_DELAYS_MS[attempt] ?? READ_RETRY_DELAYS_MS.at(-1) ?? 300);
+      if (
+        isRetryableReadStatus(response.status) &&
+        attempt < MAX_READ_ATTEMPTS - 1 &&
+        retryDelay <= 1_000
+      ) {
+        // Drain the small error body so the underlying connection is reusable.
+        await response.arrayBuffer().catch(() => undefined);
+        await wait(retryDelay);
+        continue;
+      }
+
       let detail = "";
       try {
         const body = (await response.json()) as { message?: unknown };
@@ -449,7 +500,7 @@ export class GitHubBookRepoReader implements BookRepoReader {
         response.status,
       );
     }
-    return (await response.json()) as T;
+    throw new GitHubReadError("http", `${what} exhausted its read retry budget`);
   }
 
   /** Current head commit sha of the configured branch. */

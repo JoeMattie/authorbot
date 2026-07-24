@@ -128,6 +128,12 @@ export interface CollabEventsOptions {
    * browser's `Last-Event-ID` header precedence over that query.
    */
   initialCursor?: number;
+  /**
+   * Stable id for this browser tab. Reconnects and same-tab navigations replace
+   * their prior Worker stream instead of consuming another concurrency slot.
+   * `null` keeps the legacy URL for non-browser clients and focused tests.
+   */
+  streamClientId?: string | null;
   eventSourceFactory?: EventSourceFactory | null;
   poll?: PollTransport;
   pollMs?: number;
@@ -142,6 +148,27 @@ export interface CollabEventsOptions {
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_MAX_POLL_BACKOFF_MS = 30_000;
 const DEFAULT_OPEN_TIMEOUT_MS = 3_000;
+const STREAM_CLIENT_STORAGE_KEY = "authorbot:event-stream-client:v1";
+let pageStreamClientId: string | null = null;
+
+function browserStreamClientId(): string | null {
+  if (pageStreamClientId !== null) return pageStreamClientId;
+  try {
+    const stored = globalThis.sessionStorage.getItem(STREAM_CLIENT_STORAGE_KEY);
+    if (stored !== null && /^[A-Za-z0-9._~-]{1,128}$/u.test(stored)) {
+      pageStreamClientId = stored;
+      return stored;
+    }
+    const created = globalThis.crypto.randomUUID();
+    globalThis.sessionStorage.setItem(STREAM_CLIENT_STORAGE_KEY, created);
+    pageStreamClientId = created;
+    return created;
+  } catch {
+    // Restricted storage or a non-browser runtime: the server retains its
+    // legacy bounded behavior, and native EventSource still reconnects.
+    return null;
+  }
+}
 
 export class CollabEvents {
   private readonly url: string;
@@ -156,6 +183,7 @@ export class CollabEvents {
   private readonly setTimer: (fn: () => void, ms: number) => number;
   private readonly clearTimer: (id: number) => void;
   private readonly hasInitialCursor: boolean;
+  private readonly streamClientId: string | null;
 
   private source: EventSourceLike | null = null;
   private started = false;
@@ -183,6 +211,8 @@ export class CollabEvents {
       options.setTimer ?? ((fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number);
     this.clearTimer = options.clearTimer ?? ((id) => globalThis.clearTimeout(id));
     this.hasInitialCursor = options.initialCursor !== undefined;
+    this.streamClientId =
+      options.streamClientId === undefined ? browserStreamClientId() : options.streamClientId;
     this.cursor = isCursor(options.initialCursor) ? options.initialCursor : 0;
   }
 
@@ -272,11 +302,12 @@ export class CollabEvents {
   }
 
   private streamUrl(): string {
-    if (!this.hasInitialCursor) {
-      return this.url;
-    }
+    const query = new URLSearchParams();
+    if (this.hasInitialCursor) query.set("after", String(this.cursor));
+    if (this.streamClientId !== null) query.set("stream", this.streamClientId);
+    if (query.size === 0) return this.url;
     const separator = this.url.includes("?") ? "&" : "?";
-    return `${this.url}${separator}after=${this.cursor}`;
+    return `${this.url}${separator}${query.toString()}`;
   }
 
   private onFrame(registeredType: string, data: string | undefined): void {

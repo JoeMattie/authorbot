@@ -107,13 +107,14 @@ describe("CollabEvents - SSE transport", () => {
       url: "http://api.test/events",
       onEvent: (e) => received.push(e),
       initialCursor: 4,
+      streamClientId: "test-client",
       eventSourceFactory: factory(),
       setTimer: t.setTimer,
       clearTimer: t.clearTimer,
     });
     client.start();
     const es = FakeEventSource.instances[0]!;
-    expect(es.url).toBe("http://api.test/events?after=4");
+    expect(es.url).toBe("http://api.test/events?after=4&stream=test-client");
     es.open();
     es.emit(evt(5, "vote_aggregate", { annotationId: "a", votes: { approvals: 1 } }));
     es.emit(evt(5, "vote_aggregate", { annotationId: "duplicate" }));

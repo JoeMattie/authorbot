@@ -2417,6 +2417,19 @@ paths:
           schema:
             type: integer
             enum: [1]
+        - name: stream
+          in: query
+          required: false
+          description: |
+            Stable URL-safe browser-tab identifier for SSE only. A newer
+            connection with the same authenticated credential and identifier
+            supersedes the prior stream, preventing stale page navigations
+            from consuming concurrency slots.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._~-]+$'
       responses:
         "200":
           description: |
@@ -2424,8 +2437,10 @@ paths:
 
             A stream is bounded on both axes: the server closes it after five
             minutes (reconnect with `Last-Event-ID`; no events are missed), and
-            one client address may hold only a small number of streams at once.
-            Exceeding the concurrency cap returns `429` with `Retry-After`.
+            one authenticated credential may hold only a small number of
+            distinct browser/agent streams at once. Reconnecting with the same
+            `stream` id replaces the prior connection. Exceeding the
+            concurrency cap returns `429` with `Retry-After`.
           content:
             text/event-stream:
               schema:

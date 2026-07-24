@@ -8,6 +8,7 @@
  * state).
  */
 import type { EventRecord } from "@authorbot/database";
+import type { AuthContext } from "./deps.js";
 
 export const DEFAULT_SSE_POLL_MS = 1_000;
 export const DEFAULT_SSE_HEARTBEAT_MS = 15_000;
@@ -29,11 +30,11 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 15_000;
  */
 export const DEFAULT_SSE_MAX_LIFETIME_MS = 5 * 60_000;
 /**
- * Concurrent streams one client address may hold (per isolate).
+ * Distinct streams one authenticated credential may hold (per isolate).
  *
- * Generous for the honest case - a reader with several tabs open on the book,
- * plus an agent or two - and a hard stop for a loop that opens sockets without
- * closing them. Per isolate rather than globally because Workers scale by
+ * Generous for the honest case - a reader with several tabs open on the book -
+ * and a hard stop for a loop that opens sockets without closing them. Per
+ * isolate rather than globally because Workers scale by
  * running more isolates and there is no shared cheap counter for a read path;
  * an approximate cap that costs nothing is worth more here than an exact one
  * that costs a database round trip on every connect.
@@ -44,46 +45,76 @@ const PAGE_LIMIT = 100;
 
 /** A held stream slot; `release` is idempotent. */
 export interface StreamSlot {
+  /**
+   * Register how to close the stream when a newer connection from the same
+   * browser tab supersedes it. This is deliberately separate from `release`:
+   * replacement actively drains a stale Worker stream instead of merely
+   * forgetting it for accounting purposes.
+   */
+  onSuperseded(close: () => void): void;
   release(): void;
 }
 
 export interface StreamLimiter {
-  /** Take a slot for `key`, or `null` when that client is already at the cap. */
-  acquire(key: string): StreamSlot | null;
-  /** Slots currently held for `key` (tests and diagnostics). */
-  active(key: string): number;
+  /**
+   * Take a slot for one credential and browser client, or `null` when that
+   * credential already has the maximum number of distinct clients.
+   */
+  acquire(ownerKey: string, clientId?: string): StreamSlot | null;
+  /** Distinct client slots currently held for an owner (tests/diagnostics). */
+  active(ownerKey: string): number;
   readonly max: number;
 }
 
 /**
- * Per-client concurrent-stream accounting.
+ * Per-credential, per-browser-client concurrent-stream accounting.
  *
- * Deliberately a plain `Map` with no expiry: a slot is released by the stream
- * that took it - on client disconnect, on the lifetime cap, or on a write
- * failure - and every one of those paths funnels through the same `stop()`, so
- * a key cannot leak while its stream is gone. Keys are removed as their count
- * reaches zero, which is what keeps the map bounded by live connections rather
- * than by every address ever seen.
+ * The earlier limiter counted only `CF-Connecting-IP`. That pooled unrelated
+ * people behind a NAT, and a browser navigating quickly could leave enough
+ * not-yet-cancelled Worker streams behind to reject its next page with 429.
+ * A stable browser client id now replaces its own prior stream. Replacement
+ * actively closes that prior stream, while distinct tabs/agents still count
+ * against the credential's hard ceiling.
  */
 export function createStreamLimiter(
   max: number = DEFAULT_SSE_MAX_STREAMS_PER_CLIENT,
 ): StreamLimiter {
-  const counts = new Map<string, number>();
+  interface HeldStream {
+    close: (() => void) | null;
+  }
+
+  const streams = new Map<string, Map<string | symbol, HeldStream>>();
   return {
     max,
-    active: (key) => counts.get(key) ?? 0,
-    acquire(key) {
-      const held = counts.get(key) ?? 0;
-      if (held >= max) return null;
-      counts.set(key, held + 1);
+    active: (ownerKey) => streams.get(ownerKey)?.size ?? 0,
+    acquire(ownerKey, clientId) {
+      const held = streams.get(ownerKey) ?? new Map<string | symbol, HeldStream>();
+      const slotKey = clientId ?? Symbol("legacy-event-stream");
+      const superseded = held.get(slotKey);
+      if (superseded === undefined && held.size >= max) return null;
+
+      const entry: HeldStream = { close: null };
+      held.set(slotKey, entry);
+      streams.set(ownerKey, held);
+
+      // Store the replacement before closing the old stream. Its synchronous
+      // `release()` then sees that it no longer owns this key and cannot remove
+      // the new connection's slot.
+      superseded?.close?.();
+
       let released = false;
       return {
+        onSuperseded(close) {
+          if (!released) entry.close = close;
+        },
         release() {
           if (released) return;
           released = true;
-          const next = (counts.get(key) ?? 1) - 1;
-          if (next <= 0) counts.delete(key);
-          else counts.set(key, next);
+          entry.close = null;
+          const current = streams.get(ownerKey);
+          if (current?.get(slotKey) !== entry) return;
+          current.delete(slotKey);
+          if (current.size === 0) streams.delete(ownerKey);
         },
       };
     },
@@ -91,23 +122,23 @@ export function createStreamLimiter(
 }
 
 /**
- * The address a stream is counted against.
+ * Stable, non-secret owner for stream accounting.
  *
- * `CF-Connecting-IP` is set by Cloudflare and cannot be spoofed by the client;
- * `X-Forwarded-For` is a fallback for other front ends and is read only for its
- * first entry. A request with neither - every in-process test, and any direct
- * connection - shares the `unknown` bucket, which is the conservative answer:
- * unattributable connections are pooled rather than each granted their own cap.
+ * SSE is available only to authenticated project members, so credential ids
+ * are both more precise and safer than a public IP. A session and token for the
+ * same actor remain independent because they have independent revocation and
+ * capability lifecycles.
  */
-export function streamClientKey(headers: Headers): string {
-  const direct = headers.get("cf-connecting-ip");
-  if (direct !== null && direct.length > 0) return direct;
-  const forwarded = headers.get("x-forwarded-for");
-  if (forwarded !== null && forwarded.length > 0) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first !== undefined && first.length > 0) return first;
+export function streamOwnerKey(auth: AuthContext): string {
+  if (auth.kind === "session" && auth.sessionId !== undefined) {
+    return `session:${auth.sessionId}`;
   }
-  return "unknown";
+  if (auth.kind === "token" && auth.tokenId !== undefined) {
+    return `token:${auth.tokenId}`;
+  }
+  // Auth construction guarantees the credential-specific id. Retaining this
+  // fail-closed fallback keeps out-of-band test contexts bounded by actor.
+  return `${auth.kind}:actor:${auth.actor.id}`;
 }
 
 export function eventJson(event: EventRecord): Record<string, unknown> {
@@ -143,6 +174,8 @@ export interface SseStreamOptions {
   heartbeatMs?: number;
   /** Server-side lifetime cap; the client reconnects with its cursor. */
   maxLifetimeMs?: number;
+  /** Abort a superseded stream from the same browser client immediately. */
+  signal?: AbortSignal;
   /** Run when the stream ends, however it ends (release the client's slot). */
   onClose?: () => void;
 }
@@ -164,6 +197,7 @@ export function sseResponse(options: SseStreamOptions, headers: Headers = new He
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
+  let abortStream: (() => void) | undefined;
 
   const stop = (): void => {
     if (closed) return;
@@ -171,6 +205,7 @@ export function sseResponse(options: SseStreamOptions, headers: Headers = new He
     if (pollTimer !== undefined) clearInterval(pollTimer);
     if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
     if (lifetimeTimer !== undefined) clearTimeout(lifetimeTimer);
+    if (abortStream !== undefined) options.signal?.removeEventListener("abort", abortStream);
     options.onClose?.();
   };
 
@@ -184,6 +219,19 @@ export function sseResponse(options: SseStreamOptions, headers: Headers = new He
           stop();
         }
       };
+      abortStream = (): void => {
+        stop();
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the peer.
+        }
+      };
+      if (options.signal?.aborted === true) {
+        abortStream();
+        return;
+      }
+      options.signal?.addEventListener("abort", abortStream, { once: true });
       const pump = async (): Promise<void> => {
         if (pumping || closed) return;
         pumping = true;

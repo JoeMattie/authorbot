@@ -153,7 +153,7 @@ export interface AppConfig {
    */
   sseMaxLifetimeMs?: number;
   /**
-   * Concurrent SSE connections one client address may hold, per isolate.
+   * Distinct SSE connections one authenticated credential may hold, per isolate.
    * Default `DEFAULT_SSE_MAX_STREAMS_PER_CLIENT`.
    */
   sseMaxStreamsPerClient?: number;

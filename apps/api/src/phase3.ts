@@ -64,7 +64,7 @@ import {
   createStreamLimiter,
   eventJson,
   sseResponse,
-  streamClientKey,
+  streamOwnerKey,
 } from "./sse.js";
 import { adjustTally, tallyJson, tallyToMetrics, type Voter, type VoterActorType } from "./tally.js";
 import { createTokenEventProjector } from "./token-event-visibility.js";
@@ -1645,6 +1645,24 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       });
     }
 
+    // `publicOnly` returned above, so a stream always has a fully resolved
+    // member credential. The optional browser id is stable within a tab and
+    // lets a reconnect or page navigation replace its own stale stream rather
+    // than accumulating slots until the Worker observes socket cancellation.
+    if (requestAuth === undefined) {
+      return problem(c, "unauthorized", { detail: "missing or invalid credential" });
+    }
+    const rawStreamClient = c.req.query("stream");
+    const streamClient =
+      rawStreamClient === undefined
+        ? undefined
+        : z.string().regex(/^[A-Za-z0-9._~-]{1,128}$/u).safeParse(rawStreamClient);
+    if (streamClient !== undefined && !streamClient.success) {
+      return problem(c, "validation-failed", {
+        detail: "event stream client id must be 1-128 URL-safe characters",
+      });
+    }
+
     // SSE. Without a cursor the stream starts at the current head (clients
     // fetch authoritative state first, then stream deltas).
     //
@@ -1652,7 +1670,10 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
     // concurrency cap is refused with a cheap 429 instead of being handed
     // another second-by-second poll. The slot is handed to `onClose`, which
     // every termination path runs - disconnect, lifetime cap, write failure.
-    const slot = streamLimiter.acquire(streamClientKey(c.req.raw.headers));
+    const slot = streamLimiter.acquire(
+      streamOwnerKey(requestAuth),
+      streamClient?.data,
+    );
     if (slot === null) {
       const refusal = problem(c, "rate-limited", {
         detail: `this client already holds the maximum of ${streamLimiter.max} concurrent event streams. Close one, or poll with ?poll=1 instead.`,
@@ -1663,6 +1684,8 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
       refusal.headers.set("Retry-After", "5");
       return refusal;
     }
+    const streamAbort = new AbortController();
+    slot.onSuperseded(() => streamAbort.abort());
     const initialCursor = lastEventId ?? afterParam ?? (await repos.events.latestId(project.id));
     const headers = new Headers();
     const correlationId = c.get("correlationId");
@@ -1679,6 +1702,7 @@ export function registerPhase3Routes(ctx: Phase3Context): void {
         ...(deps.config.sseMaxLifetimeMs !== undefined
           ? { maxLifetimeMs: deps.config.sseMaxLifetimeMs }
           : {}),
+        signal: streamAbort.signal,
         onClose: () => slot.release(),
       },
       headers,
