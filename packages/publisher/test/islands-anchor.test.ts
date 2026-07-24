@@ -57,6 +57,60 @@ describe("stackCards", () => {
     }
   });
 
+  it("keeps a distant bottom note inside a viewport-height rail", () => {
+    const tops = stackCards(
+      [{ id: "bottom-note", desiredTop: 8_327, height: 46 }],
+      12,
+      705,
+    );
+    expect(tops.get("bottom-note")).toBe(659);
+  });
+
+  it("moves an expanded bottom note up so its bottom stays flush with the rail", () => {
+    const tops = stackCards(
+      [{ id: "bottom-note", desiredTop: 650, height: 188 }],
+      12,
+      748,
+    );
+    expect(tops.get("bottom-note")).toBe(560);
+  });
+
+  it("shifts a colliding bottom group upward when its cards fit", () => {
+    const tops = stackCards(
+      [
+        { id: "a", desiredTop: 600, height: 80 },
+        { id: "b", desiredTop: 620, height: 80 },
+      ],
+      12,
+      200,
+    );
+    expect(tops.get("a")).toBe(28);
+    expect(tops.get("b")).toBe(120);
+  });
+
+  it("scrolls only when the packed card content itself is taller than the rail", () => {
+    const tops = stackCards(
+      [
+        { id: "a", desiredTop: 500, height: 100 },
+        { id: "b", desiredTop: 600, height: 100 },
+        { id: "c", desiredTop: 700, height: 100 },
+      ],
+      12,
+      200,
+    );
+    expect([...tops.values()]).toEqual([0, 112, 224]);
+  });
+
+  it("moves a lone oversized active card up instead of adding a cosmetic scrollbar", () => {
+    const tops = stackCards(
+      [{ id: "active", desiredTop: 200, height: 189 }],
+      12,
+      185,
+      "active",
+    );
+    expect(tops.get("active")).toBe(-4);
+  });
+
   it("handles the empty gutter", () => {
     expect(stackCards([]).size).toBe(0);
   });

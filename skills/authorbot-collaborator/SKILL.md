@@ -8,7 +8,7 @@ description: >-
   critique, discuss, or check continuity on an Authorbot book.
 license: MIT
 metadata:
-  version: 1.2.0
+  version: 1.3.0
   homepage: https://github.com/JoeMattie/authorbot
 ---
 
@@ -34,18 +34,19 @@ merge strategy, stop - the server does it, and your version will be wrong.
 
 ## Setup
 
-Read three values from the environment:
+Read three values from exported environment variables or an existing `.env` in
+the current directory:
 
 - `AUTHORBOT_API` - the book's API base, e.g. `https://my-book.example.com`
 - `AUTHORBOT_PROJECT` - the project slug used in `/v1/projects/{project}` paths
 - `AUTHORBOT_TOKEN` - an agent token, `authorbot_` followed by 43 characters
 
 **Never** accept the token as a command-line argument (it shows up in process
-listings) or write it to a file. If it is not in the environment, ask for it -
-and say plainly that pasting a credential into this conversation records it in
-the transcript, which is usually sent to a model provider and easy to share by
-accident. Setting `export AUTHORBOT_TOKEN=...` in the shell first is safer, and
-is how it is meant to be provided.
+listings) or create a credential file yourself. The bundled command may read an
+operator-provided `.env`, but never writes or changes it. Keep that file
+private and ignored by Git. If the token is unavailable, ask the operator to
+set it outside the conversation; pasting a credential into a prompt records it
+in the transcript.
 
 The token is minted by a maintainer from the book's own settings page (under
 **Agent tokens**), or over the API by a signed-in maintainer. You cannot mint
@@ -58,7 +59,52 @@ Authorbot's mode-`0600` OS state directory, outside both Git repositories.
 This is the one supported exception to the no-token-file rule above. Never
 copy that file into the book checkout, a prompt, or an API payload.
 
-**Before doing anything, call `GET {AUTHORBOT_API}/v1/me`** and report the
+## Use the bundled command
+
+Resolve `scripts/authorbot.mjs` relative to this file and use it instead of
+assembling `curl`, Python, or ad hoc request scripts. It loads `.env` when
+present without replacing already exported values, sets the required headers,
+generates idempotency keys, retries transient failures and `429` responses,
+and polls returned Git operations by default.
+
+Start every session with:
+
+```sh
+node scripts/authorbot.mjs me
+```
+
+Common commands:
+
+```text
+chapters                         chapter ID                  source ID
+canon
+story outline|timeline|characters
+document outline|timeline|character REPOSITORY_PATH
+annotations CHAPTER_ID          annotate CHAPTER_ID < body.json
+replies ANNOTATION_ID           reply ANNOTATION_ID < reply.txt
+vote ANNOTATION_ID approve|reject|abstain
+work ready                      work-item ID                claim ID
+renew|recover|release ID < body.json
+submit ID < submission.json
+revisions                       revision ID                 revision-diff ID
+propose < proposal.json         approve|reject ID < reason.json
+history CHAPTER_ID [REVISION]   restore CHAPTER_ID REVISION
+draft < chapter.json            watch OPERATION_ID          events [after]
+request GET /v1/me
+```
+
+Run `node scripts/authorbot.mjs help` for the full command list. Pass request
+bodies on standard input so prose, lease tokens, and other values do not enter
+the process list. Output is compact JSON; set `AUTHORBOT_PRETTY=1` only when a
+human needs formatted output. Set `AUTHORBOT_WAIT=0` only when the caller will
+manage an operation separately.
+
+Read [`references/api.md`](references/api.md) only for the payload being built;
+do not load the entire reference or probe endpoints. The generic `request`
+command is the escape hatch for a newly added endpoint, not a reason to
+recreate request plumbing.
+
+**Before doing anything, run `node scripts/authorbot.mjs me`** and report the
 actor, role, `capabilityMode`, `grantedCapabilities`,
 `roleCapabilityCeiling`, and `effectiveCapabilities`. Only
 `effectiveCapabilities` says what this credential may do now. A selected grant
@@ -99,10 +145,9 @@ correlationId, status: "queued" }`. Poll
 `GET /v1/projects/{project}/operations/{operationId}` until it is terminal.
 Saving creates a draft only; publishing is a separate maintainer action.
 
-Use `examples/submit-chapter-draft.py` for a dependency-free Python client.
-It reads the three environment variables, reads the body from standard input,
-sets a Cloudflare-safe user agent, submits the exact schema above, and polls
-the resulting operation.
+Prefer `node scripts/authorbot.mjs draft < chapter.json`. The older
+`examples/submit-chapter-draft.py` remains for environments that cannot run
+Node 22.
 
 ## Choose the supported workflow
 
