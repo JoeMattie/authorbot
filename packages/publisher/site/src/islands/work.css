@@ -44,7 +44,6 @@ body:has(.work-page) main {
 }
 
 .work-page .work-intro {
-  max-width: 60ch;
   margin: 0;
   color: var(--text-muted, #989289);
   font: 400 17px/1.6 var(--font-body, "Source Serif 4", Georgia, serif);

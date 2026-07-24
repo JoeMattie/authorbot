@@ -46,6 +46,7 @@ export const workItemSchema = z.strictObject({
   type: workItemTypeSchema,
   status: workItemStatusSchema,
   source_annotation_id: uuidv7Schema.optional(),
+  source_reply_id: uuidv7Schema.optional(),
   chapter_id: uuidv7Schema.optional(),
   base_revision: z.number().int().min(1).optional(),
   priority: workItemPrioritySchema,

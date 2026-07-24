@@ -124,7 +124,7 @@ describe("revision diff core", () => {
 });
 
 describe("revision diff progressive renderer", () => {
-  it("keeps exact snapshots available to assistive technology while enhancement is pending", () => {
+  it("exposes one accessible loading surface while enhancement is pending", () => {
     let resolveCore!: (core: { renderRevisionDiffHtml: typeof renderRevisionDiffHtml }) => void;
     const pending = new Promise<{ renderRevisionDiffHtml: typeof renderRevisionDiffHtml }>(
       (resolve) => {
@@ -138,16 +138,11 @@ describe("revision diff progressive renderer", () => {
       { coreLoader: () => pending },
     );
 
-    const fallback = node.querySelector<HTMLDetailsElement>(".ab-revision-diff-fallback");
-    const snapshots = node.querySelectorAll<HTMLElement>(".ab-revision-diff-snapshot");
     expect(node.getAttribute("aria-label")).toBe("Draft 9");
-    expect(fallback?.open).toBe(true);
-    expect(fallback?.classList.contains("ab-revision-diff-fallback-accessible")).toBe(true);
-    expect(fallback?.querySelector<HTMLElement>("summary")?.tabIndex).toBe(-1);
-    expect(snapshots[0]?.getAttribute("aria-label")).toBe("Before");
-    expect(snapshots[1]?.getAttribute("aria-label")).toBe("After");
-    expect(snapshots[0]?.querySelector("code")?.textContent).toBe(HOSTILE);
-    expect(snapshots[1]?.querySelector("code")?.textContent).toBe(`After & ${HOSTILE}`);
+    expect(node.querySelector('[role="status"]')?.textContent).toBe(
+      "Loading visual comparison…",
+    );
+    expect(node.querySelector(".ab-revision-diff-fallback")).toBeNull();
     expect(node.querySelector("img, script")).toBeNull();
 
     resolveCore({ renderRevisionDiffHtml });
@@ -233,7 +228,7 @@ describe("revision diff progressive renderer", () => {
     expect(layouts).toHaveLength(count);
   });
 
-  it("removes line-number gutters and keeps exact snapshots screen-reader-only after enhancement", async () => {
+  it("removes line-number gutters and renders one direct accessible comparison", async () => {
     const numbered = [
       "--- a/chapter.md",
       "+++ b/chapter.md",
@@ -262,14 +257,8 @@ describe("revision diff progressive renderer", () => {
     expect(node.querySelector(".ab-revision-diff-visual")?.textContent).not.toContain(
       "@@ -12 +12 @@",
     );
-    const fallback = node.querySelector<HTMLDetailsElement>(".ab-revision-diff-fallback")!;
-    expect(fallback.open).toBe(true);
-    expect(fallback.hasAttribute("hidden")).toBe(false);
-    expect(fallback.classList.contains("ab-revision-diff-fallback-accessible")).toBe(true);
-    expect(fallback.querySelector<HTMLElement>("summary")?.tabIndex).toBe(-1);
-    expect(
-      Array.from(fallback.querySelectorAll("code"), (code) => code.textContent),
-    ).toEqual(["Before.", "After."]);
+    expect(node.querySelector(".ab-revision-diff-fallback")).toBeNull();
+    expect(node.querySelector(".ab-revision-diff-visual")?.getAttribute("aria-hidden")).toBeNull();
   });
 
   it("sanitizes hostile renderer markup before inserting the supplemental visual diff", async () => {
@@ -293,10 +282,10 @@ describe("revision diff progressive renderer", () => {
     expect(visual?.querySelector("[onclick], [onerror], [style], [src]")).toBeNull();
     expect(visual?.textContent).toContain("Visible text");
     expect((globalThis as { pwned?: boolean }).pwned).toBeUndefined();
-    expect(node.querySelector(".ab-revision-diff-fallback code")?.textContent).toBe("safe");
+    expect(node.querySelector(".ab-revision-diff-fallback")).toBeNull();
   });
 
-  it("does not request the core without a unified diff and keeps fallback open on chunk failure", async () => {
+  it("does not request the core without a unified diff and reports renderer failure", async () => {
     const withoutDiffLoader = vi.fn();
     const noDiff = host();
     const noDiffHandle = renderRevisionDiff(
@@ -304,10 +293,11 @@ describe("revision diff progressive renderer", () => {
       { unifiedDiff: null, before: "Before.", after: "After." },
       { coreLoader: withoutDiffLoader },
     );
-    await expect(noDiffHandle.ready).resolves.toBe("fallback");
+    await expect(noDiffHandle.ready).resolves.toBe("unavailable");
     expect(withoutDiffLoader).not.toHaveBeenCalled();
-    expect(noDiff.querySelector<HTMLDetailsElement>("details")?.open).toBe(true);
-    expect(noDiff.querySelector("summary")?.hasAttribute("tabindex")).toBe(false);
+    expect(noDiff.querySelector('[role="status"]')?.textContent).toBe(
+      "Visual comparison unavailable.",
+    );
 
     const failed = host();
     const failedHandle = renderRevisionDiff(
@@ -315,13 +305,10 @@ describe("revision diff progressive renderer", () => {
       { unifiedDiff: UNIFIED, before: "Before.", after: "After." },
       { coreLoader: async () => Promise.reject(new TypeError("chunk unavailable")) },
     );
-    await expect(failedHandle.ready).resolves.toBe("fallback");
-    const fallback = failed.querySelector<HTMLDetailsElement>("details");
-    expect(fallback?.open).toBe(true);
-    expect(fallback?.classList.contains("ab-revision-diff-fallback-accessible")).toBe(false);
-    expect(fallback?.querySelector("summary")?.hasAttribute("tabindex")).toBe(false);
-    expect(failed.querySelector('[role="status"]')?.textContent).toContain(
-      "plain-text comparison",
+    await expect(failedHandle.ready).resolves.toBe("unavailable");
+    expect(failed.querySelector(".ab-revision-diff-fallback")).toBeNull();
+    expect(failed.querySelector('[role="status"]')?.textContent).toBe(
+      "Visual comparison unavailable.",
     );
   });
 });

@@ -20,6 +20,7 @@ import {
   type DecisionRecord,
   type GitOperationRecord,
   type OutboxRecord,
+  type ReplyRecord,
   type Repositories,
   type SqlDatabase,
   type SqlStatement,
@@ -1045,7 +1046,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       // this re-render, a projection rebuild would restore the old `open`
       // annotation artifact and resurrect voting and promotion controls even
       // though the decision and work item were already committed.
-      if (kind === "decision.create") {
+      if (kind === "decision.create" && decision.sourceReplyId == null) {
         const annotation = await mustAnnotation(decision.sourceAnnotationId);
         const authorRef = await actorRef(annotation.authorActorId);
         let transitionedStatus: Exclude<AnnotationRecord["status"], "pending_git">;
@@ -1664,6 +1665,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
         type: "resolve_conflict",
         status: "ready",
         sourceAnnotationId: workItem.sourceAnnotationId,
+        sourceReplyId: workItem.sourceReplyId ?? null,
         chapterId: workItem.chapterId,
         baseRevision: outcome.currentRevision,
         target: workItem.target,
@@ -1686,6 +1688,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       type: "resolve_conflict",
       status: "ready",
       sourceAnnotationId: conflict.sourceAnnotationId,
+      sourceReplyId: conflict.sourceReplyId ?? null,
       chapterId: conflict.chapterId,
       baseRevision: conflict.baseRevision,
       priority: conflict.priority,
@@ -1778,7 +1781,9 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       const outcome = resolved.outcome;
       const statements: SqlStatement[] = [
         repos.workItems.updateStatusStatement(workItem.id, "completed", ts),
-        repos.annotations.updateStatusStatement(workItem.sourceAnnotationId, "accepted", ts),
+        ...(workItem.sourceReplyId == null
+          ? [repos.annotations.updateStatusStatement(workItem.sourceAnnotationId, "accepted", ts)]
+          : []),
         repos.submissions.transitionStateStatement(payload.submissionId, "applying", "applied", ts),
         ...(proposal === null
           ? []
@@ -2036,6 +2041,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     return renderDecisionArtifact({
       id: decision.id,
       sourceAnnotationId: decision.sourceAnnotationId,
+      sourceReplyId: decision.sourceReplyId ?? null,
       rule: decision.rule,
       ruleVersion: decision.ruleVersion,
       metrics: decision.metrics,
@@ -2063,6 +2069,7 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     } = {},
   ): Promise<RenderedFile> {
     const annotation = await mustAnnotation(workItem.sourceAnnotationId);
+    const reply = workItem.sourceReplyId == null ? null : await mustReply(workItem.sourceReplyId);
     const createdBy =
       createdByActorId === undefined ? SYSTEM_RULE_ENGINE_REF : await actorRef(createdByActorId);
     return renderWorkItemArtifact({
@@ -2070,18 +2077,23 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
       type: workItem.type,
       status: overrides.status ?? workItem.status,
       sourceAnnotationId: workItem.sourceAnnotationId,
+      sourceReplyId: workItem.sourceReplyId ?? null,
       chapterId: workItem.chapterId,
       baseRevision: workItem.baseRevision,
       priority: workItem.priority,
       createdBy,
       createdAt: workItem.createdAt,
-      context: annotation.body,
+      context: reply?.body ?? annotation.body,
       originalText: quoteExact(workItem.target),
       // The annotation body is context, not already-final prose. Suggestions
       // ask the claimant to apply the proposed change; comments are editorial
       // notes and must not be mislabeled as suggestions in the durable task.
       requestedChange:
-        annotation.kind === "suggestion"
+        reply !== null
+          ? `Address reply ${reply.id} in annotation ${workItem.sourceAnnotationId} (see Context).`
+          : annotation.kind === "comment" && annotation.scope === "chapter"
+          ? annotation.body
+          : annotation.kind === "suggestion"
           ? `Apply the change proposed in suggestion ${workItem.sourceAnnotationId} (see Context).`
           : `Address the note in annotation ${workItem.sourceAnnotationId} (see Context).`,
       ...(overrides.completion === undefined ? {} : { completion: overrides.completion }),
@@ -2092,6 +2104,12 @@ export function createProcessor(options: CreateProcessorOptions): Processor {
     const annotation = await repos.annotations.getById(id);
     if (!annotation) throw new Error(`annotation ${id} not found`);
     return annotation;
+  }
+
+  async function mustReply(id: string): Promise<ReplyRecord> {
+    const reply = await repos.replies.getById(id);
+    if (!reply) throw new Error(`reply ${id} not found`);
+    return reply;
   }
 
   async function mustDecision(id: string): Promise<DecisionRecord> {

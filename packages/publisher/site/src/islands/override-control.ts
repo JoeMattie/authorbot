@@ -8,7 +8,7 @@
  * affordances to offer.
  */
 import type { Annotation } from "./api.js";
-import { el } from "./dom.js";
+import { el, iconButton } from "./dom.js";
 import { tallyOrEmpty, tallySummary } from "./vote-view.js";
 
 export type OverrideAction = "promote" | "reject";
@@ -24,6 +24,7 @@ export interface OverrideControlDeps {
   draft: OverrideDraft;
   canPromote: boolean;
   canReject: boolean;
+  compactPromotion?: boolean;
   onDraftChange: (draft: OverrideDraft) => void;
   onSubmit: (action: OverrideAction, reason?: string) => Promise<string | null>;
 }
@@ -63,6 +64,7 @@ export class OverrideControl {
     this.action = deps.draft.action === "reject" ? "reject" : null;
 
     this.root = el("div", "ab-override");
+    this.root.classList.toggle("ab-override-compact", deps.compactPromotion === true);
     this.root.setAttribute("role", "group");
     this.root.setAttribute("aria-label", "Maintainer actions");
 
@@ -75,7 +77,13 @@ export class OverrideControl {
     this.roles.append(this.maintainerLine, this.humanMaintainerLine);
 
     const actions = el("div", "ab-actions ab-override-actions");
-    this.promoteBtn = el("button", "ab-btn ab-primary ab-override-btn", "Promote to work");
+    this.promoteBtn = deps.compactPromotion === true
+      ? iconButton(
+          "ab-btn ab-icon-btn ab-outline-action ab-override-btn",
+          "Promote to work",
+          "check",
+        )
+      : el("button", "ab-btn ab-primary ab-override-btn", "Promote to work");
     this.promoteBtn.type = "button";
     this.promoteBtn.dataset.override = "promote";
     this.promoteBtn.addEventListener("click", () => void this.promote());

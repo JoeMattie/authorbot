@@ -137,6 +137,12 @@ export interface Annotation {
   chapterRevision: number;
   target: AnnotationTarget | null;
   authorActorId: string;
+  /** Display-safe attribution embedded by current APIs; older APIs omit it. */
+  author?: {
+    id: string;
+    displayName: string;
+    type: string | null;
+  } | null;
   body: string;
   status: string;
   gitOperationId: string | null;
@@ -214,6 +220,10 @@ export interface Reply {
   authorActorId: string;
   body: string;
   status: string;
+  /** Non-null after this individual reply has been promoted to Work. */
+  workItemId?: string | null;
+  /** Browser-only optimistic state while reply promotion is in flight. */
+  workPromotionPending?: boolean;
   /** Lets a refetched pending reply resume its Git-operation reconciliation. */
   gitOperationId?: string | null;
   createdAt: string;
@@ -836,6 +846,11 @@ export interface OverrideResult {
   correlationId: string;
 }
 
+export interface ReplyPromotionResult extends OverrideResult {
+  replyId: string;
+  workItemId: string;
+}
+
 /**
  * A caller may retain one key across retries of the same logical command.
  * When omitted, the legacy behavior remains: each method call gets a fresh
@@ -1202,6 +1217,18 @@ export class CollabApi {
     } catch {
       return { ok: false, status: 0, message: "network error" };
     }
+  }
+
+  /** Requeue an accepted Git write after its underlying cause has been fixed. */
+  async retryOperation(
+    operationId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<{ operationId: string; state: "queued"; correlationId: string }>> {
+    return this.accept(
+      this.projectUrl(`/operations/${encodeURIComponent(operationId)}/retry`),
+      {},
+      options,
+    );
   }
 
   // ---- votes (Phase 3 contract §2) -----------------------------------------
@@ -1758,6 +1785,26 @@ export class CollabApi {
       // reject, which only transitions the suggestion and answers 200.
       [201],
       { mutation: true, subject: "work promotion" },
+    );
+  }
+
+  /** Promote one reply to Work without promoting or closing its annotation. */
+  async promoteReplyToWork(
+    annotationId: string,
+    replyId: string,
+    options?: MutationOptions,
+  ): Promise<ApiResult<ReplyPromotionResult>> {
+    return this.jsonResult<ReplyPromotionResult>(
+      this.post(
+        this.projectUrl(
+          `/annotations/${encodeURIComponent(annotationId)}/replies/` +
+            `${encodeURIComponent(replyId)}/force-create-work-item`,
+        ),
+        {},
+        options,
+      ),
+      [201],
+      { mutation: true, subject: "reply work promotion" },
     );
   }
 

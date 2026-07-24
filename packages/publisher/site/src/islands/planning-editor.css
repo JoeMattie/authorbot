@@ -1,9 +1,5 @@
 authorbot-planning-document-editor {
-  display: block;
-}
-
-authorbot-planning-document-editor:empty {
-  display: none;
+  display: contents;
 }
 
 authorbot-outline-summaries {
@@ -109,7 +105,23 @@ authorbot-outline-summaries:empty {
   align-items: center;
   justify-content: flex-end;
   gap: 8px 12px;
-  margin: 0 0 1.25rem;
+  margin: 0;
+}
+
+.ab-planning-edit {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.ab-planning-edit .ab-inline-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
 }
 
 .ab-planning-launcher-status {
@@ -120,8 +132,13 @@ authorbot-outline-summaries:empty {
 }
 
 .ab-planning-editor-shell {
+  box-sizing: border-box;
   width: 100%;
-  margin: 0 0 2rem;
+  margin: 0;
+  padding: clamp(18px, 3vw, 28px);
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 12px;
+  background: var(--surface-card, var(--surface));
 }
 
 .ab-planning-editor-title {
@@ -184,7 +201,7 @@ authorbot-outline-summaries:empty {
   max-width: none;
 }
 
-.ab-planning-milkdown-root .ProseMirror {
+.ab-manuscript-editor-root.ab-planning-milkdown-root .ProseMirror {
   min-height: 22rem;
   padding: 2rem clamp(1.1rem, 5vw, 3rem);
   color: var(--text-body, var(--fg));
@@ -224,7 +241,7 @@ authorbot-outline-summaries:empty {
     min-height: 44px;
   }
 
-  .ab-planning-milkdown-root .ProseMirror {
+  .ab-manuscript-editor-root.ab-planning-milkdown-root .ProseMirror {
     padding: 1.2rem 1rem;
   }
 }

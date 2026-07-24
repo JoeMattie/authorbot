@@ -75,9 +75,46 @@ main.ab-enabled {
   font-size: 0.75rem;
 }
 
+.ab-icon-btn {
+  display: inline-flex;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.ab-inline-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.ab-labeled-icon {
+  display: inline-flex;
+  gap: 0.42rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.ab-outline-action {
+  border-color: var(--blue-500, var(--link));
+  background: transparent;
+  color: var(--blue-300, var(--link));
+}
+
+.ab-withdraw-icon {
+  background: transparent;
+}
+
 .ab-chip {
   display: inline-block;
+  height: 11px;
   padding: 0.02rem 0.45rem;
+  padding-top: 1px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface);
@@ -260,19 +297,21 @@ main.ab-enabled {
 
 .ab-block-ui {
   position: absolute;
-  left: -3rem;
+  left: -3.35rem;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  width: 2.75rem;
+  width: 2.25rem;
   align-items: center;
 }
 
 .ab-annotate,
 .ab-marker {
   font: inherit;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  min-height: 2.25rem;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -298,6 +337,11 @@ main.ab-enabled {
   .ab-btn-small {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .ab-icon-btn {
+    width: 44px;
+    height: 44px;
   }
 
   .ab-textarea,
@@ -382,6 +426,13 @@ main.ab-enabled {
 
 .ab-cards {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.ab-gutter .ab-cards[data-layout-ready="false"] {
+  visibility: hidden;
 }
 
 .ab-gutter .ab-card-shell {
@@ -391,6 +442,10 @@ main.ab-enabled {
 }
 
 .ab-card-shell {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -406,6 +461,7 @@ main.ab-enabled {
 .ab-card-head {
   display: flex;
   flex-wrap: wrap;
+  min-width: 0;
   align-items: baseline;
   gap: 0.4rem;
 }
@@ -1113,6 +1169,10 @@ main.ab-enabled {
   outline-offset: 2px;
 }
 
+.ab-override-btn[hidden] {
+  display: none;
+}
+
 /* `display: block` on the form would defeat `[hidden] { display: none }`. */
 .ab-override-form[hidden] {
   display: none;
@@ -1200,25 +1260,211 @@ main.ab-enabled {
 .chapter-reading-layout.ab-reading-layout {
   position: relative;
   display: grid;
+  container-type: inline-size;
   grid-template-columns: minmax(0, 3fr) minmax(320px, 1.35fr);
   gap: 44px;
   align-items: start;
+}
+
+.ab-reader-controls {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 7px;
+  justify-self: end;
+}
+
+authorbot-reader-controls {
+  display: block;
+  width: 75px;
+  min-width: 75px;
+  height: 34px;
+  min-height: 34px;
+}
+
+authorbot-chapter-summary-editor {
+  display: block;
+  min-height: 34px;
+  margin-top: 0.7rem;
+}
+
+authorbot-chapter-summary-editor[hidden] {
+  display: none;
+}
+
+.ab-reader-control {
+  display: inline-flex;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 999px;
+  background: var(--surface-card, var(--bg));
+  color: var(--text-muted, var(--muted));
+  font: 600 11px/1.2 var(--font-display, system-ui, sans-serif);
+  cursor: pointer;
+}
+
+.ab-reader-control[hidden] {
+  display: none;
+}
+
+.ab-reader-control:hover,
+.ab-reader-control[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--blue-500, var(--link)) 55%, transparent);
+  color: var(--text-strong, var(--fg));
+}
+
+.ab-reader-control-glyph {
+  display: block;
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  color: var(--text-link, var(--link));
+  opacity: 1;
+}
+
+.ab-reader-control-panel-glyph {
+  position: relative;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+
+.ab-reader-control-panel-glyph::after {
+  position: absolute;
+  top: -2px;
+  right: 4px;
+  bottom: -2px;
+  width: 2px;
+  background: currentColor;
+  content: "";
+}
+
+.ab-reader-control-full-glyph {
+  background:
+    linear-gradient(currentColor, currentColor) left top / 7px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) left top / 2px 7px no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 7px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 2px 7px no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / 7px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / 2px 7px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 7px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 2px 7px no-repeat;
+}
+
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"] > .ab-gutter,
+.chapter-reading-layout.ab-reading-layout > .ab-gutter[hidden] {
+  display: none;
+}
+
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"] .ab-block-ui {
+  right: -3.35rem;
+  left: auto;
+}
+
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"] .ab-marker-icon {
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border-radius: 999px;
+}
+
+.ab-marker-icon .ab-inline-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.ab-note-popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  display: grid;
+  gap: 9px;
+  width: min(360px, calc(100vw - 48px));
+  max-height: min(70vh, 620px);
+  padding: 4px 4px 12px;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+}
+
+.ab-note-popover-card-close {
+  display: inline-grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -6px -7px 0 0;
+  padding: 5px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-strong, var(--fg)) 6%, transparent);
+  color: var(--text-strong, var(--fg));
+  cursor: pointer;
+}
+
+.ab-note-popover-card-close:hover {
+  background: var(--surface-raised, var(--surface));
+}
+
+.ab-note-popover-card-close .ab-inline-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.ab-note-popover .ab-card-shell {
+  position: static;
+}
+
+.ab-note-popover-card {
+  box-shadow: var(--shadow-lg, 0 16px 45px rgb(0 0 0 / 28%));
+}
+
+.chapter-reading-layout.ab-reading-layout[data-reader-width="current"][data-notes-visibility="hidden"]
+  > .chapter-reading-column {
+  justify-self: center;
+}
+
+.chapter-reading-layout.ab-reading-layout[data-reader-width="full"]
+  > .chapter-reading-column {
+  width: 100%;
+  max-width: none;
+}
+
+.ab-enabled .chapter-reading-layout.ab-reading-layout[data-reader-width="full"]
+  .chapter {
+  max-width: none;
+}
+
+.ab-enabled .chapter-reading-layout.ab-reading-layout[data-reader-width="full"]
+  .prose {
+  max-width: none;
 }
 
 .chapter-reading-column {
   min-width: 0;
 }
 
-.ab-enabled .chapter {
+.chapter-reading-layout.ab-reading-layout .chapter {
   max-width: 64ch;
 }
 
-.ab-enabled .chapter-header {
+.chapter-reading-layout.ab-reading-layout .chapter-header {
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border-subtle, var(--border));
 }
 
-.ab-enabled .chapter-header h1 {
+.chapter-reading-layout.ab-reading-layout .chapter-header h1 {
   margin: 0.4rem 0 0;
   color: var(--text-strong, var(--fg));
   font-family: var(--font-display, "Space Grotesk", system-ui, sans-serif);
@@ -1227,25 +1473,25 @@ main.ab-enabled {
   letter-spacing: -0.035em;
 }
 
-.ab-enabled .prose {
+.chapter-reading-layout.ab-reading-layout .prose {
   color: var(--text-body, var(--fg));
   font-family: var(--font-body, "Source Serif 4", Georgia, serif);
   font-size: 19px;
-  line-height: 1.75;
+  line-height: 34px;
   text-wrap: pretty;
 }
 
-.ab-enabled .prose p {
+.chapter-reading-layout.ab-reading-layout .prose p {
   margin-bottom: 1.35em;
 }
 
-.ab-enabled .prose blockquote {
+.chapter-reading-layout.ab-reading-layout .prose blockquote {
   border-left-color: var(--blue-500, var(--link));
   background: var(--tint-primary, var(--surface));
   color: var(--text-muted, var(--muted));
 }
 
-.ab-enabled .prose pre {
+.chapter-reading-layout.ab-reading-layout .prose pre {
   border-color: var(--border-default, var(--border));
   border-radius: 9px;
   background: var(--gray-950, #141210);
@@ -1253,7 +1499,17 @@ main.ab-enabled {
 }
 
 .ab-reading-layout > authorbot-collab {
-  display: contents;
+  display: block;
+  grid-row: 1;
+  grid-column: 2;
+  width: 100%;
+  min-width: 320px;
+  min-height: 1px;
+}
+
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"]
+  > authorbot-collab {
+  display: none;
 }
 
 .chapter-reading-layout.ab-reading-layout > .ab-gutter {
@@ -1276,29 +1532,6 @@ main.ab-enabled {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 12px;
-}
-
-.ab-notes-mode-toggle {
-  min-height: 30px;
-  padding: 4px 8px;
-  border: 1px solid var(--border-default, var(--border));
-  border-radius: 7px;
-  background: var(--surface-card, var(--bg));
-  color: var(--text-body, var(--fg));
-  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
-  cursor: pointer;
-}
-
-.ab-notes-mode-toggle:hover:not(:disabled),
-.ab-notes-mode-toggle:focus-visible,
-.ab-notes-mode-toggle[aria-pressed="true"] {
-  border-color: var(--blue-500, var(--link));
-  background: var(--surface-selected, var(--surface));
-  outline: 0;
-}
-
-.ab-notes-mode-toggle[hidden] {
-  display: none;
 }
 
 .ab-note-nav {
@@ -1444,6 +1677,9 @@ main.ab-enabled {
 
 .ab-card .ab-body {
   margin: 13px 0 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--text-body, var(--fg));
   font: 400 15px/1.55 var(--font-body, "Source Serif 4", Georgia, serif);
 }
@@ -1451,12 +1687,22 @@ main.ab-enabled {
 .ab-suggestion-diff {
   display: grid;
   gap: 7px;
+  min-width: 0;
+  max-width: 100%;
   margin-top: 13px;
   padding: 11px 12px;
   border: 1px solid var(--border-default, var(--border));
   border-radius: 8px;
   background: var(--surface-sunken, var(--bg));
   font: 400 13px/1.55 var(--font-body, "Source Serif 4", Georgia, serif);
+  overflow-wrap: anywhere;
+}
+
+.ab-suggestion-diff > del,
+.ab-suggestion-diff > ins {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .ab-diff-original {
@@ -1481,14 +1727,18 @@ main.ab-enabled {
     var(--green-400, #62c889) 16%,
     var(--surface-card, var(--bg))
   );
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--green-400, #62c889) 20%, transparent);
+  box-shadow: none;
 }
 
-.ab-card.ab-promoted:focus-visible,
-.ab-card.ab-promoted.ab-active {
+.ab-card.ab-promoted:focus-visible {
   border-color: var(--green-400, #62c889);
   outline: 2px solid var(--green-400, #62c889);
   outline-offset: 2px;
+}
+
+.ab-card.ab-promoted.ab-active {
+  border-color: var(--green-400, #62c889);
+  outline: 0;
 }
 
 .ab-accepted-badge {
@@ -1498,7 +1748,11 @@ main.ab-enabled {
 }
 
 .ab-card.ab-promoted .ab-suggestion-diff {
-  border-color: color-mix(in srgb, var(--green-400, #62c889) 48%, transparent);
+  box-sizing: border-box;
+  max-width: 100%;
+  padding-right: 0;
+  padding-left: 0;
+  border: 0;
   background: color-mix(in srgb, var(--green-400, #62c889) 8%, transparent);
 }
 
@@ -1518,6 +1772,11 @@ main.ab-enabled {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   transition: background 140ms ease-out, box-shadow 140ms ease-out;
+}
+
+::highlight(ab-composer-selection) {
+  background: color-mix(in srgb, var(--blue-500, var(--link)) 34%, transparent);
+  color: inherit;
 }
 
 .ab-highlight-comment {
@@ -1764,11 +2023,31 @@ main.ab-enabled {
 }
 
 .ab-discussion-thread {
-  padding: 16px 18px;
+  position: relative;
+  padding: 18px 64px 18px 22px;
   border-color: var(--border-default, var(--border));
   border-radius: 10px;
   background: var(--surface-card, var(--bg));
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.14));
+}
+
+.ab-discussion-thread .ab-override-compact .ab-override-tally,
+.ab-discussion-thread .ab-override-compact .ab-override-roles {
+  display: none;
+}
+
+.ab-discussion-thread .ab-override-compact [data-override="promote"] {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  border-color: var(--green-400, #62c889);
+  background: color-mix(in srgb, var(--green-400, #62c889) 10%, transparent);
+  color: var(--green-400, #62c889);
+}
+
+.ab-discussion-thread .ab-override-compact .ab-override-actions {
+  min-height: 0;
+  margin: 0;
 }
 
 .ab-discussion-thread:focus-visible {
@@ -1802,6 +2081,14 @@ main.ab-enabled {
 @media (max-width: 959.9px) {
   .chapter-reading-layout.ab-reading-layout {
     display: block;
+  }
+
+  .ab-reading-layout > authorbot-collab {
+    display: none;
+  }
+
+  .ab-reader-controls {
+    justify-self: start;
   }
 
   .ab-discussion-boundary {
@@ -1867,24 +2154,6 @@ main.ab-enabled {
   z-index: 12;
 }
 
-.ab-note-tooltip {
-  position: absolute;
-  top: 4px;
-  left: calc(100% + 7px);
-  z-index: 20;
-  width: max-content;
-  max-width: 12rem;
-  padding: 5px 8px;
-  border: 1px solid var(--border-default, var(--border));
-  border-radius: 6px;
-  background: var(--surface-raised, var(--surface));
-  box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.18));
-  color: var(--text-body, var(--fg));
-  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
-  pointer-events: none;
-}
-
-.ab-note-tooltip[hidden],
 .ab-authbar[hidden] {
   display: none;
 }
@@ -1910,6 +2179,7 @@ main.ab-enabled {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 3px;
 }
 
@@ -1917,6 +2187,8 @@ main.ab-enabled {
    mounted so focus restoration and optimistic controls retain their state. */
 .ab-card-summary {
   display: none;
+  gap: 7px;
+  align-items: center;
   width: 100%;
   min-width: 0;
   padding: 0;
@@ -1926,14 +2198,28 @@ main.ab-enabled {
   color: var(--text-body, var(--fg));
   font: 600 12px/1.45 var(--font-display, system-ui, sans-serif);
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
 }
 
+.ab-card-summary-author {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--tint-primary, var(--surface-raised, var(--surface)));
+  color: var(--on-tint-primary, var(--text-strong, var(--fg)));
+  font: 650 9px/1.3 var(--font-mono, ui-monospace, monospace);
+}
+
+.ab-card-summary-body {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ab-card.ab-note-collapsed {
-  min-height: 38px;
-  padding: 9px 11px;
+  min-height: 32px;
+  padding: 6px 8px;
 }
 
 .ab-card.ab-note-collapsed > :not(.ab-card-summary) {
@@ -1941,11 +2227,44 @@ main.ab-enabled {
 }
 
 .ab-card.ab-note-collapsed > .ab-card-summary {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .ab-note-collapse {
-  margin-top: 11px;
+  display: inline-grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -6px -7px 0 0;
+  padding: 5px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-strong, var(--fg)) 6%, transparent);
+  color: var(--text-strong, var(--fg));
+  cursor: pointer;
+}
+
+.ab-note-collapse:hover {
+  background: var(--surface-raised, var(--surface));
+  color: var(--text-strong, var(--fg));
+}
+
+.ab-note-collapse .ab-inline-icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.35;
+}
+
+.ab-card-head-collapsible {
+  cursor: pointer;
+}
+
+.ab-card-head-collapsible:hover .ab-note-collapse {
+  background: color-mix(in srgb, var(--text-strong, var(--fg)) 12%, transparent);
+  color: var(--green-300, var(--text-strong, var(--fg)));
 }
 
 /* Inline hosts are inert on desktop; the exact same ordered card nodes mount
@@ -1994,13 +2313,13 @@ main.ab-enabled {
     color: var(--text-body, var(--fg));
   }
 
+  .ab-inline-notes .ab-card-head,
+  .ab-discussion-thread .ab-card-head {
+    align-items: center;
+  }
+
   .ab-inline-notes .ab-card.ab-note-collapsed {
     padding: 10px 12px;
   }
 
-  .ab-note-tooltip {
-    right: 0;
-    left: auto;
-    transform: translateY(calc(-100% - 6px));
-  }
 }

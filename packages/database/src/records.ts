@@ -387,6 +387,8 @@ export interface DecisionRecord {
   id: string;
   projectId: string;
   sourceAnnotationId: string;
+  /** Set when this decision promotes one reply rather than its whole annotation. */
+  sourceReplyId?: string | null;
   actionType: string;
   rule: string;
   ruleVersion: number;
@@ -408,6 +410,8 @@ export interface WorkItemRecord {
   type: WorkItemType;
   status: WorkItemStatus;
   sourceAnnotationId: string;
+  /** Set when the requested change came from one reply in the annotation thread. */
+  sourceReplyId?: string | null;
   chapterId: string;
   baseRevision: number;
   /** Annotation target selector snapshot incl. quote; null for chapter scope. */

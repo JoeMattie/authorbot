@@ -54,15 +54,7 @@ const chapterCharacters = site.characters.filter((character) =>
       </a>
       {
         collab && (
-          <authorbot-chapter-history
-            data-api-base={collab.apiBase}
-            data-project={collab.projectSlug}
-            data-base={site.basePath}
-            data-chapter-id={chapter.id}
-            data-chapter-title={chapter.title}
-            data-chapter-revision={chapter.revision}
-            data-chapter-status={chapter.status}
-          />
+          <authorbot-reader-controls data-project={collab.projectSlug} />
         )
       }
     </div>
@@ -111,22 +103,42 @@ const chapterCharacters = site.characters.filter((character) =>
                   />
                 )}
                 {chapterCharacters.map((character) => (
-                  <a class="character-chip" href={character.href}>{character.name}</a>
+                  <a
+                    class="character-chip"
+                    href={character.href}
+                    data-character-drawer-link={collab ? true : undefined}
+                    aria-haspopup={collab ? "dialog" : undefined}
+                  >
+                    {character.name}
+                  </a>
                 ))}
               </div>
             )}
           </header>
           {
             collab && (
-              <authorbot-manuscript-editor
-                data-api-base={collab.apiBase}
-                data-project={collab.projectSlug}
-                data-chapter-id={chapter.id}
-                data-chapter-title={chapter.title}
-              />
+              <div class="chapter-author-actions">
+                <authorbot-chapter-history
+                  data-api-base={collab.apiBase}
+                  data-project={collab.projectSlug}
+                  data-base={site.basePath}
+                  data-chapter-id={chapter.id}
+                  data-chapter-title={chapter.title}
+                  data-chapter-revision={chapter.revision}
+                  data-chapter-status={chapter.status}
+                />
+                <authorbot-manuscript-editor
+                  data-api-base={collab.apiBase}
+                  data-project={collab.projectSlug}
+                  data-chapter-id={chapter.id}
+                  data-chapter-title={chapter.title}
+                />
+              </div>
             )
           }
-          <div class="prose" set:html={chapter.html} />
+          <div class="chapter-manuscript-surface" data-chapter-manuscript-surface>
+            <div class="prose" set:html={chapter.html} />
+          </div>
           {
             showFooter && (
               <footer class="chapter-footer">
@@ -148,6 +160,34 @@ const chapterCharacters = site.characters.filter((character) =>
       </div>
       {collab && <Collab collab={collab} chapter={chapter} />}
     </div>
+    {
+      collab && chapterCharacters.length > 0 && (
+        <wa-drawer
+          class="character-drawer"
+          data-character-drawer
+          placement="end"
+          light-dismiss
+        >
+          <span class="character-drawer-label" slot="label">
+            <span class="character-drawer-eyebrow">Character</span>
+            <span data-character-drawer-title>Character details</span>
+          </span>
+          <a
+            class="character-drawer-page"
+            slot="header-actions"
+            data-character-drawer-page
+            href={site.basePath}
+          >
+            Open full page
+          </a>
+          <div
+            class="character-drawer-content"
+            data-character-drawer-content
+            aria-live="polite"
+          />
+        </wa-drawer>
+      )
+    }
   </div>
   <nav class="chapter-nav" aria-label="Chapter navigation">
     <span

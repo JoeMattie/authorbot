@@ -196,6 +196,7 @@ export interface WorkItemArtifactInput {
   type: WorkItemType;
   status: WorkItemStatus;
   sourceAnnotationId: string;
+  sourceReplyId?: string | null;
   chapterId: string;
   baseRevision: number;
   priority: WorkItemPriority;
@@ -261,6 +262,9 @@ export function renderWorkItemArtifact(input: WorkItemArtifactInput): RenderedFi
     type: input.type,
     status: input.status,
     source_annotation_id: input.sourceAnnotationId,
+    ...(input.sourceReplyId === null || input.sourceReplyId === undefined
+      ? {}
+      : { source_reply_id: input.sourceReplyId }),
     chapter_id: input.chapterId,
     base_revision: input.baseRevision,
     priority: input.priority,

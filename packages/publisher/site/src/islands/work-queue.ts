@@ -20,6 +20,7 @@ import {
   type Me,
   type WorkItem,
 } from "./api.js";
+import { chapterHistoryHash } from "../lib/chapter-history-link.js";
 import { el, srOnly } from "./dom.js";
 import { tallyOrEmpty, tallySummary } from "./vote-view.js";
 import { ClaimPanel, typeLabel, workTypeIcon, type ChapterRef } from "./work-claim.js";
@@ -658,9 +659,14 @@ export class AuthorbotWorkQueue extends HTMLElement {
     }
 
     const links = el("p", "ab-work-actions ab-completed-links");
-    if (chapterRef !== undefined && item.source !== null) {
-      const source = el("a", "ab-btn ab-completed-source", "Source note");
-      source.href = `${chapterRef.href}#authorbot-note-${encodeURIComponent(item.sourceAnnotationId)}`;
+    const historyRevision = item.resultingRevision ?? item.baseRevision;
+    if (chapterRef !== undefined && historyRevision !== null) {
+      const source = el(
+        "a",
+        "ab-btn ab-completed-source",
+        "Load in History Viewer",
+      );
+      source.href = `${chapterRef.href}${chapterHistoryHash(historyRevision)}`;
       links.append(source);
     }
     if (typeof item.revisionProposalId === "string" && item.revisionProposalId.length > 0) {

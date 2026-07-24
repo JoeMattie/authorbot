@@ -354,15 +354,16 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
           const id = ids.get(entry.target as HTMLElement);
           if (id !== undefined) listener(id, entry.isIntersecting);
         }
-      }, { threshold: 0 });
+      }, { threshold: 0, rootMargin: "-57px 0px 0px 0px" });
       for (const [, node] of entries) observer.observe(node);
       this.visibilityCleanup = () => observer.disconnect();
     } else {
       const measure = (): void => {
+        const top = 57;
         const bottom = window.innerHeight || document.documentElement.clientHeight;
         for (const [id, node] of entries) {
           const rect = node.getBoundingClientRect();
-          listener(id, rect.bottom >= 0 && rect.top <= bottom);
+          listener(id, rect.bottom >= top && rect.top <= bottom);
         }
       };
       window.addEventListener("scroll", measure, { passive: true });

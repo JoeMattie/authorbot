@@ -193,7 +193,13 @@ const RECONCILE_SUBMISSION_LIMIT = 100;
  */
 async function reanchorChapterAnnotations(
   options: FinalizeSubmissionOptions,
-  workItem: { id: string; projectId: string; chapterId: string; sourceAnnotationId: string },
+  workItem: {
+    id: string;
+    projectId: string;
+    chapterId: string;
+    sourceAnnotationId: string;
+    sourceReplyId?: string | null;
+  },
   ts: string,
 ): Promise<void> {
   const { db, writer, clock } = options;
@@ -219,7 +225,11 @@ async function reanchorChapterAnnotations(
       revision: chapter.revision,
       blockIds: chapter.blockIds,
       correlationId: workItem.id,
-      skipAnnotationId: workItem.sourceAnnotationId,
+      // Annotation-level Work accepts its source note. Reply-level Work keeps
+      // the parent thread open, so that annotation must re-anchor normally.
+      ...(workItem.sourceReplyId == null
+        ? { skipAnnotationId: workItem.sourceAnnotationId }
+        : {}),
     },
     ts,
   );
@@ -442,7 +452,13 @@ async function recordConflictProblem(
   repos: ReturnType<typeof createRepositories>,
   gitOperationId: string,
   submission: { id: string; workItemId: string },
-  workItem: { id: string; projectId: string; chapterId: string; sourceAnnotationId: string },
+  workItem: {
+    id: string;
+    projectId: string;
+    chapterId: string;
+    sourceAnnotationId: string;
+    sourceReplyId?: string | null;
+  },
   ts: string,
   reason: string | null,
 ): Promise<void> {
@@ -457,7 +473,12 @@ async function recordConflictProblem(
     );
   }
   const siblings = await repos.workItems.listBySourceAnnotation(workItem.sourceAnnotationId);
-  const conflictItem = siblings.find((w) => w.type === "resolve_conflict" && w.status === "ready");
+  const conflictItem = siblings.find(
+    (w) =>
+      w.type === "resolve_conflict" &&
+      w.status === "ready" &&
+      (w.sourceReplyId ?? null) === (workItem.sourceReplyId ?? null),
+  );
   const problem = {
     code: "submission-conflict",
     status: 409,

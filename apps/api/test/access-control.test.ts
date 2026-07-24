@@ -1200,6 +1200,20 @@ describe("rate limits (exit criterion 1)", () => {
     expect(body.limitClass).toBe("annotation");
   });
 
+  it("keeps rapid human interaction above the agent ceiling", async () => {
+    const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
+    const unknownChapter = uuidv7();
+    // This is one request beyond the agent-owner ceiling. A signed-in browser
+    // must still have room for a fast moderation or dogfooding session.
+    for (let i = 0; i < 61; i += 1) {
+      const response = await harness.app.request(
+        `/v1/projects/${harness.projectId}/chapters/${unknownChapter}/annotations`,
+        jsonRequest("POST", validAnnotationPayload(), { Cookie: maintainer }),
+      );
+      expect(response.status).toBe(404);
+    }
+  });
+
   it("does not fire on reads", async () => {
     const maintainer = await devLogin(harness, "initial-maintainer", "maintainer");
     const { token } = await mintToken(harness, maintainer, [
@@ -1226,6 +1240,7 @@ describe("rate limits (exit criterion 1)", () => {
       expect(body.classes[name].perActor).toBeGreaterThan(0);
       // A single token may never outrun its owner.
       expect(body.classes[name].perToken).toBeLessThanOrEqual(body.classes[name].perActor);
+      expect(body.classes[name].perSession).toBeGreaterThan(body.classes[name].perToken);
       expect(body.classes[name].description.length).toBeGreaterThan(0);
     }
     expect(body.notes.join(" ")).toMatch(/reads are never counted/i);

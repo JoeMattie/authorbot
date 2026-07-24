@@ -81,6 +81,16 @@ function dateLabel(value: string): string {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString();
 }
 
+function shortDateLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  return `${date.toLocaleDateString()} · ${date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })}`;
+}
+
 function plainLabel(value: string | null): string {
   return value === null || value.trim() === ""
     ? "Recorded revision"
@@ -173,13 +183,11 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
 
   attributeChangedCallback(name: string, _before: string | null, after: string | null): void {
     if (name !== "hidden" || !this.started) return;
-    if (after !== null) {
-      this.diffHandle?.destroy();
-      this.diffHandle = null;
-      this.renderedDetailState = null;
-    } else {
-      this.sync();
-    }
+    // Hiding is a reversible view toggle, not an unmount. Preserve the
+    // enhanced prose diff so reopening cannot briefly or permanently expose
+    // its plain-text fallback. A reopen still reconciles any store changes
+    // that arrived while the panel was hidden.
+    if (after === null) this.sync();
   }
 
   /** Select a revision requested by a static contributor attribution link. */
@@ -222,12 +230,22 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     rail.setAttribute("aria-label", "Chapter revisions");
     this.currentCopy = el("p", "ab-history-current-copy");
     const nav = el("div", "ab-history-stepper");
-    this.olderButton = el("button", "ab-history-step", "← Older revision");
+    this.olderButton = el("button", "ab-history-step");
     this.olderButton.type = "button";
+    this.olderButton.setAttribute("aria-label", "Older revision");
+    this.olderButton.append(
+      el("span", "ab-history-step-arrow", "←"),
+      el("span", "ab-history-step-label", "Older revision"),
+    );
     this.olderButton.disabled = true;
     this.olderButton.addEventListener("click", () => this.stepOlder());
-    this.newerButton = el("button", "ab-history-step", "Newer revision →");
+    this.newerButton = el("button", "ab-history-step");
     this.newerButton.type = "button";
+    this.newerButton.setAttribute("aria-label", "Newer revision");
+    this.newerButton.append(
+      el("span", "ab-history-step-label", "Newer revision"),
+      el("span", "ab-history-step-arrow", "→"),
+    );
     this.newerButton.disabled = true;
     this.newerButton.addEventListener("click", () => this.stepNewer());
     nav.append(this.olderButton, this.newerButton);
@@ -337,7 +355,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       this.list.textContent = "";
       this.renderedListSignature = "";
       this.renderedDetailState = null;
-      this.renderDetailPlaceholder("Loading revision history…");
+      this.renderDetailPlaceholder("Loading revision history…", true);
       return;
     }
     this.status.hidden = true;
@@ -362,6 +380,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     this.newerButton.disabled = true;
     this.renderedDetailState = null;
     this.renderDetailPlaceholder(message);
+    this.markDetailReady();
   }
 
   private renderPageError(message: string): void {
@@ -379,19 +398,13 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       void this.store?.getState().refreshChapterHistory(this.cfg.chapterId);
     });
     this.detail.append(retry);
+    this.markDetailReady();
   }
 
   private renderCurrentClarity(page: ChapterHistoryPage): void {
-    const status = page.current.status.toLowerCase();
-    const currentLabel =
-      status === "published"
-        ? `Current published revision: ${page.current.revision}.`
-        : `Current ${plainLabel(status)} revision: ${page.current.revision}.`;
-    const deployed =
-      this.cfg.chapterRevision === page.current.revision
-        ? " This reading page matches it."
-        : ` This deployed reading page still shows revision ${this.cfg.chapterRevision}; it will catch up after the next successful publish.`;
-    this.currentCopy.textContent = currentLabel + deployed;
+    this.currentCopy.replaceChildren(
+      el("strong", undefined, `Current Revision: ${page.current.revision}`),
+    );
   }
 
   private ensureSelectedDetail(page: ChapterHistoryPage): void {
@@ -537,8 +550,7 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       el(
         "span",
         "ab-history-revision-date",
-        `${dateLabel(item.createdAt)}${item.author === null ? "" : ` · ${item.author.displayName}`}` +
-          `${item.status === null ? "" : ` · ${plainLabel(item.status)}`} · ${shortCommit(item.commitSha)}`,
+        shortDateLabel(item.createdAt),
       ),
     );
     if (item.isCurrent) button.append(el("span", "ab-history-current-badge", "Current"));
@@ -634,10 +646,10 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
   }
 
   private renderDetail(page: ChapterHistoryPage, me: Me | null): void {
-    this.diffHandle?.destroy();
-    this.diffHandle = null;
     const selected = this.selectedRevision;
     if (this.store === null || selected === null) {
+      this.diffHandle?.destroy();
+      this.diffHandle = null;
       this.renderDetailPlaceholder(
         "There are no earlier revisions yet. The current version is already on this page.",
       );
@@ -648,6 +660,9 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     const status = state.chapterHistoryDetailStatusByKey[key];
     const detail = state.chapterHistoryDetailByKey[key];
     if (status === "error") {
+      this.clearDetailLoading();
+      this.diffHandle?.destroy();
+      this.diffHandle = null;
       const message = state.chapterHistoryDetailErrorByKey[key] ?? "request failed";
       this.detail.replaceChildren(
         this.detailHeader(this.historyMetadata(page, selected), page),
@@ -664,30 +679,44 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
         );
       });
       this.detail.append(retry);
+      this.markDetailReady();
       return;
     }
     if (detail === undefined || status !== "ready") {
+      if (this.detail.querySelector(".ab-history-detail-body") !== null) {
+        this.showDetailLoading(`Loading revision ${selected}…`);
+        return;
+      }
+      this.diffHandle?.destroy();
+      this.diffHandle = null;
+      this.detail.setAttribute("aria-busy", "true");
       this.detail.replaceChildren(
         this.detailHeader(this.historyMetadata(page, selected), page),
         this.comparisonControls(selected, page),
-        el("p", "ab-history-detail-loading", "Loading snapshot and comparison…"),
+        this.loadingIndicator("Loading snapshot and comparison…"),
       );
       return;
     }
-    const fragment = document.createDocumentFragment();
-    fragment.append(this.detailHeader(detail.selected, page));
-    fragment.append(this.comparisonControls(detail.selected.revision, page));
-    const snapshot = el("section", "ab-history-snapshot");
-    snapshot.append(
-      el("h3", undefined, `Revision ${detail.selected.revision} Markdown snapshot`),
+    this.clearDetailLoading();
+    this.diffHandle?.destroy();
+    this.diffHandle = null;
+    const controls = el("aside", "ab-history-detail-controls");
+    controls.append(
+      this.detailHeader(detail.selected, page),
+      this.comparisonControls(detail.selected.revision, page),
     );
-    const pre = el("pre");
-    pre.append(el("code", undefined, detail.selected.content));
-    snapshot.append(pre);
-    fragment.append(snapshot);
+    const body = el("div", "ab-history-detail-body");
 
     if (detail.comparison === null || detail.diff === null) {
-      fragment.append(
+      const snapshot = el("section", "ab-history-snapshot");
+      snapshot.append(
+        el("h3", undefined, `Revision ${detail.selected.revision} Markdown snapshot`),
+      );
+      const pre = el("pre");
+      pre.append(el("code", undefined, detail.selected.content));
+      snapshot.append(pre);
+      body.append(snapshot);
+      body.append(
         el(
           "p",
           "ab-history-no-comparison",
@@ -696,14 +725,20 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
             : `Revision ${detail.selected.revision} is the current ${plainLabel(detail.current.status)} revision, so there is no second snapshot to compare.`,
         ),
       );
+      this.detail.replaceChildren(
+        controls,
+        body,
+        this.restoreAction(detail, page, me),
+      );
+      this.markDetailReady();
     } else {
       const comparisonHeading =
         this.comparison === "previous"
           ? `Changes from revision ${detail.comparison.revision} to ${detail.selected.revision}`
           : `Revision ${detail.selected.revision} compared with current revision ${detail.comparison.revision}`;
-      fragment.append(el("h3", "ab-history-diff-heading", comparisonHeading));
+      body.append(el("h3", "ab-history-diff-heading", comparisonHeading));
       if (detail.diff.computationLimited) {
-        fragment.append(
+        body.append(
           el(
             "p",
             "ab-history-diff-limit",
@@ -712,8 +747,13 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
         );
       }
       const host = el("div", "ab-history-diff");
-      fragment.append(host);
-      this.detail.replaceChildren(fragment);
+      host.dataset["comparisonSurface"] = "word-lines";
+      body.append(host);
+      this.detail.replaceChildren(
+        controls,
+        body,
+        this.restoreAction(detail, page, me),
+      );
       this.diffHandle = renderRevisionDiff(host, {
         unifiedDiff: detail.diff.unifiedDiff,
         before:
@@ -726,17 +766,18 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
             : detail.comparison.content,
         label: comparisonHeading,
       }, {
-        preferredLayout: this.diffLayoutPreference,
+        preferredLayout: "line-by-line",
+        proseFlow: true,
         onPreferredLayoutChange: (layout) => {
           this.diffLayoutPreference = layout;
         },
       });
-      this.detail.append(this.restoreAction(detail, page, me));
+      const changeIndex = this.changeIndex(host, detail.selected.revision);
+      if (changeIndex !== null) controls.append(changeIndex);
+      this.markDetailReady();
       this.focusPendingComparison();
       return;
     }
-    fragment.append(this.restoreAction(detail, page, me));
-    this.detail.replaceChildren(fragment);
     this.focusPendingComparison();
   }
 
@@ -801,6 +842,63 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
       controls.append(button);
     }
     return controls;
+  }
+
+  private changedParagraphs(host: HTMLElement): HTMLElement[] {
+    return Array.from(
+      host.querySelectorAll<HTMLElement>(".ab-prose-diff-line"),
+    ).filter(
+      (line) =>
+        line.querySelector("del, ins") !== null ||
+        line.classList.contains("ab-prose-diff-removed") ||
+        line.classList.contains("ab-prose-diff-added"),
+    );
+  }
+
+  private changeIndex(host: HTMLElement, revision: number): HTMLElement | null {
+    const changed = this.changedParagraphs(host);
+    if (changed.length === 0) return null;
+    const nav = el("nav", "ab-history-change-index");
+    nav.setAttribute("aria-label", `Changed paragraphs in revision ${revision}`);
+    nav.append(el("h4", undefined, "Changed paragraphs"));
+    const list = el("ol");
+    for (const [index, paragraph] of changed.entries()) {
+      const item = el("li");
+      const button = el("button", "ab-history-change-link");
+      button.type = "button";
+      const text = (paragraph.textContent ?? "").replace(/\s+/gu, " ").trim();
+      const preview =
+        text === ""
+          ? `Changed paragraph ${index + 1}`
+          : text.length > 82
+            ? `${text.slice(0, 79).trimEnd()}…`
+            : text;
+      button.append(
+        el("span", "ab-history-change-number", String(index + 1)),
+        el("span", "ab-history-change-preview", preview),
+      );
+      button.addEventListener("click", () => {
+        const target = this.changedParagraphs(host)[index];
+        if (target === undefined) return;
+        for (const active of host.querySelectorAll(".ab-history-change-target")) {
+          active.classList.remove("ab-history-change-target");
+        }
+        target.classList.add("ab-history-change-target");
+        target.scrollIntoView({
+          behavior: globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+          block: "start",
+        });
+        globalThis.setTimeout(() => {
+          target.classList.remove("ab-history-change-target");
+        }, 1400);
+      });
+      item.append(button);
+      list.append(item);
+    }
+    nav.append(list);
+    return nav;
   }
 
   private restoreAction(
@@ -875,10 +973,46 @@ export class AuthorbotChapterHistoryPanel extends HTMLElement {
     return section;
   }
 
-  private renderDetailPlaceholder(message: string): void {
+  private renderDetailPlaceholder(message: string, loading = false): void {
     this.diffHandle?.destroy();
     this.diffHandle = null;
-    this.detail.replaceChildren(el("p", "ab-history-detail-loading", message));
+    this.clearDetailLoading();
+    if (loading) {
+      this.detail.setAttribute("aria-busy", "true");
+      this.detail.replaceChildren(this.loadingIndicator(message));
+    } else {
+      this.detail.replaceChildren(el("p", "ab-history-detail-loading", message));
+    }
+  }
+
+  private loadingIndicator(message: string, overlay = false): HTMLElement {
+    const indicator = el(
+      "div",
+      overlay ? "ab-history-loading-overlay" : "ab-history-detail-loading",
+    );
+    indicator.append(
+      el("span", "ab-history-loading-spinner"),
+      el("span", undefined, message),
+    );
+    return indicator;
+  }
+
+  private showDetailLoading(message: string): void {
+    this.detail.setAttribute("aria-busy", "true");
+    this.detail.classList.add("ab-history-detail-is-loading");
+    this.detail.querySelector(".ab-history-loading-overlay")?.remove();
+    this.detail.append(this.loadingIndicator(message, true));
+  }
+
+  private clearDetailLoading(): void {
+    this.detail.removeAttribute("aria-busy");
+    this.detail.classList.remove("ab-history-detail-is-loading");
+    this.detail.querySelector(".ab-history-loading-overlay")?.remove();
+  }
+
+  private markDetailReady(): void {
+    this.dataset["historyReady"] = "true";
+    this.dispatchEvent(new CustomEvent("authorbot-history-ready"));
   }
 
   private alert(message: string): HTMLParagraphElement {

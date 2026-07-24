@@ -14,7 +14,9 @@ import {
   type ChapterSummaryProposalCommand,
   type Me,
 } from "./api.js";
-import { el } from "./dom.js";
+import { el, labeledButton } from "./dom.js";
+import { createLazyManuscriptSurface } from "./manuscript-surface-loader.js";
+import type { ManuscriptSurfaceSession } from "./manuscript-surface.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 
@@ -71,7 +73,8 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
   private store!: ProjectStore;
   private button: HTMLButtonElement | null = null;
   private shell: HTMLElement | null = null;
-  private summaryInput: HTMLTextAreaElement | null = null;
+  private session: ManuscriptSurfaceSession | null = null;
+  private summaryDisplay: HTMLElement | null = null;
   private notesInput: HTMLTextAreaElement | null = null;
   private errorLine: HTMLElement | null = null;
   private statusLine: HTMLElement | null = null;
@@ -100,6 +103,9 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
     this.busy = false;
     this.generation += 1;
     window.removeEventListener("beforeunload", this.beforeUnload);
+    void this.session?.destroy();
+    this.session = null;
+    if (this.summaryDisplay !== null) this.summaryDisplay.hidden = false;
   }
 
   private current(generation = this.generation): boolean {
@@ -115,19 +121,21 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
         store.getState().sessionStatus !== "ready" ||
         !mayEditSummary(store.getState().session)
       ) {
+        this.hidden = true;
         return;
       }
+      this.hidden = false;
       this.store = store;
       this.renderLauncher();
     } catch {
       // Progressive enhancement: a failed authoring chunk leaves the deck alone.
+      this.hidden = true;
     }
   }
 
   private renderLauncher(): void {
     this.replaceChildren();
-    const button = el("button", "ab-btn ab-summary-edit", "Edit summary");
-    button.type = "button";
+    const button = labeledButton("ab-btn ab-summary-edit", "Edit summary", "pencil");
     button.setAttribute("aria-expanded", "false");
     button.addEventListener("click", () => void this.open());
     const launcher = el("div", "ab-summary-launcher");
@@ -163,10 +171,10 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
       return;
     }
     this.source = result.value;
-    this.mountForm(result.value);
+    await this.mountForm(result.value, generation);
   }
 
-  private mountForm(source: ChapterSource): void {
+  private async mountForm(source: ChapterSource, generation: number): Promise<void> {
     const button = this.button;
     if (button === null) return;
     const editorId = `ab-summary-editor-${++editorSequence}`;
@@ -183,23 +191,18 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
       "This creates a reviewable metadata revision. The published summary stays unchanged on this page until the next deployment.",
     );
 
-    const summaryLabel = el("label", "ab-summary-editor-field");
-    summaryLabel.append(el("span", "ab-field-label", "Summary"));
-    const summary = el("textarea", "ab-textarea ab-summary-editor-input");
-    summary.rows = 4;
-    summary.maxLength = 2000;
-    summary.value = source.summary ?? "";
-    summary.setAttribute(
-      "aria-describedby",
-      `${editorId}-summary-help`,
+    const summaryLabel = el("p", "ab-field-label ab-summary-editor-field-label", "Summary");
+    const summary = el(
+      "div",
+      "ab-manuscript-editor-root ab-summary-editor-root",
     );
+    summary.setAttribute("aria-describedby", `${editorId}-summary-help`);
     const help = el(
-      "span",
+      "p",
       "ab-field-help",
       "Leave this empty to remove the chapter summary.",
     );
     help.id = `${editorId}-summary-help`;
-    summaryLabel.append(summary, help);
 
     const notesLabel = el("label", "ab-summary-editor-field");
     notesLabel.append(el("span", "ab-field-label", "Notes for reviewer (optional)"));
@@ -233,24 +236,52 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
       actions.append(apply);
     }
 
-    shell.append(heading, guidance, summaryLabel, notesLabel, error, status, actions);
-    this.append(shell);
+    shell.append(heading, guidance, summaryLabel, summary, help, notesLabel, error, status, actions);
+    this.summaryDisplay = this.parentElement?.querySelector<HTMLElement>(".chapter-deck") ?? null;
+    if (this.summaryDisplay !== null) {
+      this.summaryDisplay.before(shell);
+    } else {
+      this.before(shell);
+    }
     this.shell = shell;
-    this.summaryInput = summary;
     this.notesInput = notes;
     this.errorLine = error;
     this.statusLine = status;
     button.setAttribute("aria-expanded", "true");
     button.setAttribute("aria-controls", editorId);
     this.setLauncherStatus("");
+    try {
+      this.session = await createLazyManuscriptSurface({
+        root: summary,
+        markdown: source.summary ?? "",
+        blockIds: [],
+        activation: "edit",
+        accessibleName: `Chapter summary for ${source.title || this.cfg.chapterTitle}`,
+        allowBlockNotes: false,
+      });
+    } catch (caught) {
+      if (!this.current(generation)) return;
+      this.close(false);
+      this.setLauncherStatus(
+        `The summary editor could not open: ${
+          caught instanceof Error ? caught.message : String(caught)
+        }`,
+        true,
+      );
+      return;
+    }
+    if (!this.current(generation)) {
+      this.close(false);
+      return;
+    }
+    if (this.summaryDisplay !== null) this.summaryDisplay.hidden = true;
     window.addEventListener("beforeunload", this.beforeUnload);
-    summary.focus();
-    summary.setSelectionRange(summary.value.length, summary.value.length);
+    this.session.focus();
   }
 
   private async submit(applyImmediately: boolean): Promise<void> {
     const source = this.source;
-    const summary = this.summaryInput;
+    const summary = this.session;
     const error = this.errorLine;
     const status = this.statusLine;
     if (
@@ -267,8 +298,12 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
       this.showError("You no longer have permission to apply chapter summaries.");
       return;
     }
-    const proposedContent = normalizedSummary(summary.value);
+    const proposedContent = normalizedSummary(summary.getMarkdown());
     const baseContent = normalizedSummary(source.summary ?? "");
+    if (proposedContent.length > 2000) {
+      this.showError("Keep the chapter summary at 2,000 characters or fewer.");
+      return;
+    }
     if (proposedContent === baseContent) {
       this.showError("Change or clear the summary before submitting it.");
       return;
@@ -329,7 +364,10 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
     window.removeEventListener("beforeunload", this.beforeUnload);
     this.shell?.remove();
     this.shell = null;
-    this.summaryInput = null;
+    void this.session?.destroy();
+    this.session = null;
+    if (this.summaryDisplay !== null) this.summaryDisplay.hidden = false;
+    this.summaryDisplay = null;
     this.notesInput = null;
     this.errorLine = null;
     this.statusLine = null;
@@ -343,8 +381,8 @@ export class AuthorbotChapterSummaryEditor extends HTMLElement {
 
   private isDirty(): boolean {
     const source = this.source;
-    if (source === null || this.summaryInput === null) return false;
-    return normalizedSummary(this.summaryInput.value) !== normalizedSummary(source.summary ?? "") ||
+    if (source === null || this.session === null) return false;
+    return normalizedSummary(this.session.getMarkdown()) !== normalizedSummary(source.summary ?? "") ||
       (this.notesInput?.value.trim() ?? "") !== "";
   }
 

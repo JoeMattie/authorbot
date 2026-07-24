@@ -353,7 +353,7 @@ describe("work queue claim affordance (contract §7)", () => {
     );
     expect(
       completed.querySelector<HTMLAnchorElement>(".ab-completed-source")?.href,
-    ).toContain(`authorbot-note-${completedWorkItem().sourceAnnotationId}`);
+    ).toContain("#authorbot-history-revision-5");
     expect(
       completed.querySelector(".ab-completed-revision")?.getAttribute("href"),
     ).toBe("../revisions/?proposal=revision-1");
@@ -428,7 +428,7 @@ describe("work queue claim affordance (contract §7)", () => {
       [`${API}/v1/projects/${PROJECT}/work-items/${WORK_ITEM_ID}/claim`]: {
         status: 409,
         body: {
-          type: "https://authorbot.dev/problems/lease-held",
+          type: "urn:authorbot:problem:lease-held",
           title: "lease held",
           detail: "work item is already leased",
           holder: "vale",

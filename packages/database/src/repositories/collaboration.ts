@@ -280,15 +280,16 @@ export class DecisionsRepository {
     return this.db
       .prepare(
         `INSERT INTO decisions
-           (id, project_id, source_annotation_id, action_type, rule,
+           (id, project_id, source_annotation_id, source_reply_id, action_type, rule,
             rule_version, metrics, result, support_changed, override_reason,
             work_item_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
         record.projectId,
         record.sourceAnnotationId,
+        record.sourceReplyId ?? null,
         record.actionType,
         record.rule,
         record.ruleVersion,
@@ -318,6 +319,7 @@ export class DecisionsRepository {
         record.sourceAnnotationId,
         record.actionType,
         record.ruleVersion,
+        record.sourceReplyId ?? null,
       );
       // Work-item creation has ONE uniqueness domain per annotation across all
       // rule_versions (contract §4: a rule crossing and a maintainer
@@ -325,7 +327,9 @@ export class DecisionsRepository {
       // on that partial index rather than the exact triple, the existing row
       // carries a different rule_version - find it by action_type.
       if (existing === null && record.actionType === "create_work_item") {
-        existing = await this.getWorkItemCreation(record.sourceAnnotationId);
+        existing = record.sourceReplyId == null
+          ? await this.getWorkItemCreation(record.sourceAnnotationId)
+          : await this.getReplyWorkItemCreation(record.sourceReplyId);
       }
       if (existing === null) throw error; // Some other unique index (e.g. id).
       return { status: "already_decided", existing };
@@ -342,10 +346,24 @@ export class DecisionsRepository {
     const row = await this.db
       .prepare(
         `SELECT * FROM decisions
-         WHERE source_annotation_id = ? AND action_type = 'create_work_item'
+         WHERE source_annotation_id = ? AND source_reply_id IS NULL
+           AND action_type = 'create_work_item'
          LIMIT 1`,
       )
       .bind(sourceAnnotationId)
+      .first();
+    return row ? mapDecision(row) : null;
+  }
+
+  /** The single work-item-creating decision for one individual reply. */
+  async getReplyWorkItemCreation(sourceReplyId: string): Promise<DecisionRecord | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT * FROM decisions
+         WHERE source_reply_id = ? AND action_type = 'create_work_item'
+         LIMIT 1`,
+      )
+      .bind(sourceReplyId)
       .first();
     return row ? mapDecision(row) : null;
   }
@@ -360,14 +378,25 @@ export class DecisionsRepository {
     sourceAnnotationId: string,
     actionType: string,
     ruleVersion: number,
+    sourceReplyId: string | null = null,
   ): Promise<DecisionRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT * FROM decisions
-         WHERE source_annotation_id = ? AND action_type = ? AND rule_version = ?`,
-      )
-      .bind(sourceAnnotationId, actionType, ruleVersion)
-      .first();
+    const row = sourceReplyId === null
+      ? await this.db
+          .prepare(
+            `SELECT * FROM decisions
+             WHERE source_annotation_id = ? AND source_reply_id IS NULL
+               AND action_type = ? AND rule_version = ?`,
+          )
+          .bind(sourceAnnotationId, actionType, ruleVersion)
+          .first()
+      : await this.db
+          .prepare(
+            `SELECT * FROM decisions
+             WHERE source_annotation_id = ? AND source_reply_id = ?
+               AND action_type = ? AND rule_version = ?`,
+          )
+          .bind(sourceAnnotationId, sourceReplyId, actionType, ruleVersion)
+          .first();
     return row ? mapDecision(row) : null;
   }
 
@@ -429,13 +458,14 @@ export class DecisionsRepository {
     return this.db
       .prepare(
         `INSERT INTO decisions
-           (id, project_id, source_annotation_id, action_type, rule,
+           (id, project_id, source_annotation_id, source_reply_id, action_type, rule,
             rule_version, metrics, result, support_changed, override_reason,
             work_item_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            project_id = excluded.project_id,
            source_annotation_id = excluded.source_annotation_id,
+           source_reply_id = excluded.source_reply_id,
            action_type = excluded.action_type,
            rule = excluded.rule,
            rule_version = excluded.rule_version,
@@ -451,6 +481,7 @@ export class DecisionsRepository {
         record.id,
         record.projectId,
         record.sourceAnnotationId,
+        record.sourceReplyId ?? null,
         record.actionType,
         record.rule,
         record.ruleVersion,
@@ -479,6 +510,9 @@ function mapDecision(row: SqlRow): DecisionRecord {
     id: String(row["id"]),
     projectId: String(row["project_id"]),
     sourceAnnotationId: String(row["source_annotation_id"]),
+    sourceReplyId: row["source_reply_id"] === null || row["source_reply_id"] === undefined
+      ? null
+      : String(row["source_reply_id"]),
     actionType: String(row["action_type"]),
     rule: String(row["rule"]),
     ruleVersion: Number(row["rule_version"]),
@@ -499,9 +533,9 @@ export class WorkItemsRepository {
     return this.db
       .prepare(
         `INSERT INTO work_items
-           (id, project_id, type, status, source_annotation_id, chapter_id,
+           (id, project_id, type, status, source_annotation_id, source_reply_id, chapter_id,
             base_revision, target, priority, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         record.id,
@@ -509,6 +543,7 @@ export class WorkItemsRepository {
         record.type,
         record.status,
         record.sourceAnnotationId,
+        record.sourceReplyId ?? null,
         record.chapterId,
         record.baseRevision,
         record.target === null ? null : JSON.stringify(record.target),
@@ -588,8 +623,8 @@ export class WorkItemsRepository {
            w.*,
            a.kind AS source_kind,
            a.scope AS source_scope,
-           a.body AS source_body,
-           a.status AS source_status,
+           COALESCE(source_reply.body, a.body) AS source_body,
+           COALESCE(source_reply.status, a.status) AS source_status,
            c.title AS chapter_title,
            c.slug AS chapter_slug,
            s.actor_id AS completed_by_actor_id,
@@ -605,6 +640,7 @@ export class WorkItemsRepository {
            reviewer.external_identity AS approved_by_external_identity
          FROM completed_page w
          LEFT JOIN annotations a ON a.id = w.source_annotation_id
+         LEFT JOIN replies source_reply ON source_reply.id = w.source_reply_id
          LEFT JOIN chapters c ON c.id = w.chapter_id AND c.project_id = w.project_id
          LEFT JOIN submissions s ON s.id = (
            SELECT candidate.id
@@ -648,14 +684,15 @@ export class WorkItemsRepository {
     return this.db
       .prepare(
         `INSERT INTO work_items
-           (id, project_id, type, status, source_annotation_id, chapter_id,
+           (id, project_id, type, status, source_annotation_id, source_reply_id, chapter_id,
             base_revision, target, priority, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            project_id = excluded.project_id,
            type = excluded.type,
            status = excluded.status,
            source_annotation_id = excluded.source_annotation_id,
+           source_reply_id = excluded.source_reply_id,
            chapter_id = excluded.chapter_id,
            base_revision = excluded.base_revision,
            target = excluded.target,
@@ -669,6 +706,7 @@ export class WorkItemsRepository {
         record.type,
         record.status,
         record.sourceAnnotationId,
+        record.sourceReplyId ?? null,
         record.chapterId,
         record.baseRevision,
         record.target === null ? null : JSON.stringify(record.target),
@@ -695,6 +733,9 @@ function mapWorkItem(row: SqlRow): WorkItemRecord {
     type: String(row["type"]) as WorkItemRecord["type"],
     status: String(row["status"]) as WorkItemStatus,
     sourceAnnotationId: String(row["source_annotation_id"]),
+    sourceReplyId: row["source_reply_id"] === null || row["source_reply_id"] === undefined
+      ? null
+      : String(row["source_reply_id"]),
     chapterId: String(row["chapter_id"]),
     baseRevision: Number(row["base_revision"]),
     target: row["target"] === null ? null : (JSON.parse(String(row["target"])) as unknown),

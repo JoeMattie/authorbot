@@ -1,0 +1,103 @@
+.character-drawer {
+  --size: min(540px, 100vw);
+  --spacing: 18px;
+  --backdrop-filter: blur(1px);
+  --show-duration: 180ms;
+  --hide-duration: 160ms;
+
+  color: var(--text-body, var(--fg));
+  font-family: var(--font-display, system-ui, sans-serif);
+}
+
+.character-drawer::part(dialog) {
+  border-left: 1px solid var(--border-default, var(--border));
+  background: var(--surface-page, var(--bg));
+  color: var(--text-body, var(--fg));
+  box-shadow: -24px 0 70px rgb(0 0 0 / 30%);
+}
+
+.character-drawer::part(header) {
+  align-items: center;
+  padding: 14px 16px 13px 18px;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  background: var(--surface-raised, var(--surface));
+}
+
+.character-drawer::part(title) {
+  color: var(--text-strong, var(--fg));
+  font: 600 20px/1.2 var(--font-display, system-ui, sans-serif);
+}
+
+.character-drawer::part(header-actions) {
+  align-items: center;
+  padding-inline-start: 12px;
+}
+
+.character-drawer::part(close-button__base) {
+  border-color: var(--border-default, var(--border));
+  background: transparent;
+  color: var(--text-muted, var(--muted));
+}
+
+.character-drawer::part(body) {
+  padding: 0;
+  overscroll-behavior: contain;
+}
+
+.character-drawer-label {
+  display: grid;
+  gap: 3px;
+}
+
+.character-drawer-eyebrow {
+  color: var(--text-faint, var(--muted));
+  font: 600 10px/1.3 var(--font-mono, monospace);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.character-drawer-page {
+  color: var(--text-link, var(--link));
+  font: 600 11px/1.3 var(--font-display, system-ui, sans-serif);
+}
+
+.character-drawer-content {
+  min-height: calc(100dvh - 66px);
+  padding: 0 24px 32px;
+}
+
+.character-drawer-content[role="status"],
+.character-drawer-content[role="alert"] {
+  padding-top: 24px;
+  color: var(--text-muted, var(--muted));
+  font: 14px/1.5 var(--font-display, system-ui, sans-serif);
+}
+
+.character-drawer-content .character-detail {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .character-drawer::part(dialog) {
+    border-left: 0;
+  }
+
+  .character-drawer::part(header) {
+    padding-inline: 14px;
+  }
+
+  .character-drawer-page {
+    display: none;
+  }
+
+  .character-drawer-content {
+    padding-inline: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .character-drawer {
+    --show-duration: 0ms;
+    --hide-duration: 0ms;
+  }
+}

@@ -47,7 +47,7 @@
 .ab-revision-diff-visual {
   max-width: 100%;
   margin: 0 0 14px;
-  overflow-x: auto;
+  overflow-x: clip;
   border: 1px solid var(--border-default, #332f2a);
   border-radius: 8px;
   background: var(--surface-page, var(--bg, #1b1815));
@@ -85,18 +85,27 @@
 .ab-revision-diff-visual .d2h-code-line,
 .ab-revision-diff-visual .d2h-code-side-line,
 .ab-revision-diff-visual .d2h-code-line-ctn {
-  font-family: var(--font-body, "Source Serif 4", Georgia, serif);
-  font-size: 19px;
-  line-height: 1.75;
+  font-family: var(--font-mono, "Courier New", Courier, monospace);
+  font-size: 14px;
+  line-height: 1.58;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .ab-revision-diff-visual .d2h-code-line,
 .ab-revision-diff-visual .d2h-code-side-line {
   display: block;
   width: 100%;
-  padding: 3px 12px;
+  padding: 6px 12px;
+}
+
+.ab-revision-diff-visual[data-layout="line-by-line"] .d2h-code-line-ctn {
+  max-width: 84ch;
+}
+
+.ab-revision-diff-visual[data-layout="side-by-side"] .d2h-code-line-ctn {
+  max-width: 58ch;
 }
 
 /* The prose comparison does not need source-code gutters. These are also
@@ -107,62 +116,85 @@
   display: none !important;
 }
 
-.ab-revision-diff-fallback {
-  margin: 0;
-  border: 1px solid var(--border-default, #332f2a);
-  border-radius: 8px;
-  background: var(--surface-sunken, #141210);
-}
-
-.ab-revision-diff-fallback-accessible {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  margin: -1px !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  clip: rect(0 0 0 0) !important;
-  clip-path: inset(50%) !important;
-  border: 0 !important;
-  white-space: nowrap !important;
-}
-
-.ab-revision-diff-fallback summary {
-  padding: 10px 12px;
-  color: var(--text-muted, #989289);
-  font: 600 12px/1.4 var(--font-display, system-ui, sans-serif);
-  cursor: pointer;
-}
-
-.ab-revision-diff-snapshot {
-  padding: 0 12px 12px;
-}
-
-.ab-revision-diff-snapshot h3 {
-  margin: 0 0 6px;
-  color: var(--text-faint, #89837a);
-  font: 600 10px/1.4 var(--font-mono, monospace);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.ab-revision-diff-snapshot pre {
-  max-height: 40vh;
-  margin: 0;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--text-body, #c2bdb2);
-  font: 400 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
-}
-
 .ab-revision-diff-status {
   margin: 8px 0 0;
   color: var(--text-muted, #989289);
   font: 400 12px/1.5 var(--font-display, system-ui, sans-serif);
 }
 
-@media (max-width: 1435px) {
+.ab-prose-diff {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default, #332f2a);
+  border-radius: 9px;
+  background: var(--surface-page, var(--bg, #1b1815));
+}
+
+.ab-prose-diff[data-layout="side-by-side"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ab-prose-diff-column {
+  min-width: 0;
+  padding: 14px 16px 20px;
+}
+
+.ab-prose-diff-column + .ab-prose-diff-column {
+  border-left: 1px solid var(--border-subtle, #282420);
+}
+
+.ab-prose-diff-column h4 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -14px -16px 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border-subtle, #282420);
+  background: var(--surface-raised, #282420);
+  color: var(--text-muted, #989289);
+  font: 600 10px/1.35 var(--font-display, system-ui, sans-serif);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ab-prose-diff-line {
+  min-height: 1.58em;
+  padding: 2px 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-body, #c2bdb2);
+  font: 400 14px/1.58 var(--font-mono, "Courier New", Courier, monospace);
+}
+
+.ab-prose-diff-line + .ab-prose-diff-line {
+  margin-top: 2px;
+}
+
+.ab-prose-diff-removed {
+  background: var(--tint-danger, rgb(224 85 79 / 10%));
+}
+
+.ab-prose-diff-added {
+  background: var(--tint-success, rgb(70 164 112 / 10%));
+}
+
+.ab-prose-diff-line del,
+.ab-prose-diff-line ins {
+  border-radius: 2px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ab-prose-diff-line del {
+  background: rgb(224 85 79 / 38%);
+}
+
+.ab-prose-diff-line ins {
+  background: rgb(70 164 112 / 40%);
+}
+
+@media (max-width: 1599px) {
   .ab-revision-diff-visual {
     border-radius: 6px;
   }
@@ -174,4 +206,92 @@
   .ab-revision-diff-visual .d2h-file-header {
     position: static;
   }
+
+  .ab-prose-diff[data-layout="side-by-side"] {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Chapter history is prose, not a code review table. Its diff lives directly
+   in the ordinary reading measure and inherits the normal manuscript rhythm. */
+.ab-history-diff .ab-prose-diff {
+  display: block;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ab-history-diff .ab-prose-diff-column {
+  padding: 0;
+}
+
+.ab-history-diff .ab-prose-diff-column + .ab-prose-diff-column {
+  border-left: 0;
+}
+
+.ab-history-diff .ab-prose-diff-line {
+  min-height: 0;
+  margin: 0 0 1.35em;
+  padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-wrap: pretty;
+}
+
+.ab-history-diff .ab-prose-diff-line.ab-prose-diff-code-line {
+  margin: 0;
+  padding: 0 0.85rem;
+  background: var(--surface-sunken, #141210);
+  color: var(--text-body, #c2bdb2);
+  font: 400 0.82em/1.6 var(--font-mono, "Courier New", Courier, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: wrap;
+}
+
+.ab-history-diff
+  .ab-prose-diff-line:not(.ab-prose-diff-code-line)
+  + .ab-prose-diff-code-line,
+.ab-history-diff .ab-prose-diff-column > .ab-prose-diff-code-line:first-child {
+  padding-top: 0.7rem;
+  border-radius: 7px 7px 0 0;
+}
+
+.ab-history-diff .ab-prose-diff-code-line:not(:has(+ .ab-prose-diff-code-line)) {
+  margin-bottom: 1.35em;
+  padding-bottom: 0.7rem;
+  border-radius: 0 0 7px 7px;
+}
+
+.ab-history-diff .ab-prose-diff-line del,
+.ab-history-diff .ab-prose-diff-line ins {
+  display: inline;
+  margin: 0 0.02em;
+  padding: 0.04em 0.08em;
+  border: 0;
+  border-radius: 2px;
+  font: inherit;
+  line-height: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.ab-history-diff .ab-prose-diff-line del {
+  background-color: rgb(224 85 79 / 34%) !important;
+  color: inherit;
+  opacity: 0.68;
+  text-decoration-color: currentColor !important;
+  text-decoration-line: line-through !important;
+  text-decoration-thickness: 1px;
+}
+
+.ab-history-diff .ab-prose-diff-line ins {
+  background-color: rgb(70 164 112 / 38%) !important;
+  color: inherit;
+  text-decoration-color: transparent !important;
+  text-decoration-line: none !important;
 }

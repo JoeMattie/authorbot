@@ -11,6 +11,7 @@
 import type { Annotation } from "./api.js";
 
 const PRESENTABLE_STATUSES = new Set(["open", "pending_git", "work_item_created"]);
+const STICKY_HEADER_CLEARANCE = 57;
 
 /** Whole-chapter first, then manuscript block and selector occurrence. */
 export function orderedChapterNotes(
@@ -141,7 +142,10 @@ export class StaticChapterNotesTargetAdapter implements ChapterNotesTargetAdapte
           const blockId = byElement.get(entry.target as HTMLElement);
           if (blockId !== undefined) listener(blockId, entry.isIntersecting);
         }
-      }, { threshold: 0 });
+      }, {
+        threshold: 0,
+        rootMargin: `-${STICKY_HEADER_CLEARANCE}px 0px 0px 0px`,
+      });
       for (const block of this.blocks.values()) observer.observe(block);
       return () => observer.disconnect();
     }
@@ -149,7 +153,7 @@ export class StaticChapterNotesTargetAdapter implements ChapterNotesTargetAdapte
     // DOM test environments and older embedded browsers get a small,
     // deterministic fallback. Real browsers use IntersectionObserver above.
     const measure = (): void => {
-      const top = 0;
+      const top = STICKY_HEADER_CLEARANCE;
       const bottom = window.innerHeight || document.documentElement.clientHeight;
       for (const [blockId, block] of this.blocks) {
         const rect = block.getBoundingClientRect();

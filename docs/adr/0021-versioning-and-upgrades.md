@@ -9,8 +9,8 @@ own GitHub repository, Cloudflare account, Worker, D1 database, GitHub App,
 and secrets. Their CI checks out this repository at a pinned ref, builds it in
 their runner, and deploys to their infrastructure. We operate no service on
 their behalf, hold none of their data, and receive no telemetry. (The
-`authorbot.dev` strings in error payloads are RFC 7807 problem *type*
-identifiers, not endpoints, and are never dereferenced.)
+`urn:authorbot:problem:…` strings in error payloads are stable RFC 9457 problem
+*type* identifiers, not API endpoints.)
 
 Two consequences follow, and they pull in opposite directions:
 

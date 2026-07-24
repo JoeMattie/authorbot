@@ -143,14 +143,21 @@ function stubFetch(options: {
 }
 
 function mount(): AuthorbotManuscriptEditor {
-  document.body.innerHTML = `<article>
-    <authorbot-manuscript-editor
-      data-api-base="${API}"
-      data-project="${PROJECT}"
-      data-chapter-id="${CHAPTER}"
-      data-chapter-title="Loose Ends"></authorbot-manuscript-editor>
-    <div class="prose"><p id="b-${BLOCK}">Original chapter prose.</p></div>
+  const container = document.createElement("div");
+  container.innerHTML = `<article class="chapter">
+    <div class="chapter-author-actions">
+      <button type="button">History</button>
+      <authorbot-manuscript-editor
+        data-api-base="${API}"
+        data-project="${PROJECT}"
+        data-chapter-id="${CHAPTER}"
+        data-chapter-title="Loose Ends"></authorbot-manuscript-editor>
+    </div>
+    <div class="chapter-manuscript-surface" data-chapter-manuscript-surface>
+      <div class="prose"><p id="b-${BLOCK}">Original chapter prose.</p></div>
+    </div>
   </article>`;
+  document.body.append(container.firstElementChild!);
   return document.querySelector("authorbot-manuscript-editor") as AuthorbotManuscriptEditor;
 }
 
@@ -282,6 +289,11 @@ describe("in-place manuscript editor launcher", () => {
     (document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).click();
     await expect.poll(() => createSurface.mock.calls.length).toBe(1);
     expect(prose.hidden).toBe(true);
+    const editButton = document.querySelector(".ab-manuscript-edit") as HTMLButtonElement;
+    expect(editButton.textContent).toBe("Stop editing");
+    expect(editButton.disabled).toBe(false);
+    expect(editButton.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector(".ab-manuscript-launcher-status")).toBeNull();
     expect(document.querySelector('[role="textbox"]')?.getAttribute("aria-label"))
       .toBe("Chapter text for Loose Ends");
     expect(createSurface.mock.calls[0]?.[0]).toMatchObject({
@@ -290,6 +302,13 @@ describe("in-place manuscript editor launcher", () => {
       blockIds: [BLOCK],
       allowBlockNotes: false,
     });
+
+    (document.querySelector(".ab-manuscript-editor-actions .ab-btn") as HTMLButtonElement)
+      .click();
+    await expect.poll(() => document.querySelector(".ab-manuscript-editor-shell")).toBeNull();
+    expect(editButton.textContent).toBe("Edit chapter");
+    expect(editButton.disabled).toBe(false);
+    expect(editButton.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("offers no Edit affordance from role alone without revisions:write", async () => {

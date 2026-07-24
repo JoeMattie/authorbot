@@ -46,9 +46,16 @@ describe("cursor pagination", () => {
       );
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        items: { id: string }[];
+        items: {
+          id: string;
+          author: { id: string; displayName: string; type: string | null } | null;
+        }[];
         nextCursor: string | null;
       };
+      expect(body.items[0]?.author).toMatchObject({
+        displayName: "pager",
+        type: "human",
+      });
       seen.push(...body.items.map((item) => item.id));
       cursor = body.nextCursor;
       pages += 1;

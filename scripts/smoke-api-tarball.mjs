@@ -223,22 +223,23 @@ try {
     "0011_phase11_revision_proposals.sql",
     "0012_chapter_summaries.sql",
     "0013_phase11_capabilities_backfill.sql",
+    "0014_reply_work_promotion.sql",
   ];
   for (const name of required) {
     if (!migrations.includes(name)) {
       throw new Error(`installed @authorbot/api is missing migration ${name}`);
     }
   }
-  const beyondBoundary = migrations.find((name) => Number.parseInt(name.slice(0, 4), 10) > 13);
+  const beyondBoundary = migrations.find((name) => Number.parseInt(name.slice(0, 4), 10) > 14);
   if (beyondBoundary !== undefined) {
     throw new Error(
       `installed @authorbot/api unexpectedly contains ${beyondBoundary}; ` +
-        "v0.1.38 ends at migration 0013",
+        "v0.1.39 ends at migration 0014",
     );
   }
 
   console.log(`Migrations present: ${required.join(", ")}`);
-  console.log("Migration boundary: 0013.");
+  console.log("Migration boundary: 0014.");
 
   step("Starting local authoring from the installed CLI without native SQLite");
   await expectMissing(join(scratch, "node_modules/better-sqlite3"));

@@ -1,9 +1,14 @@
 authorbot-chapter-summary-editor {
   display: block;
+  min-height: 34px;
   margin-top: 0.7rem;
 }
 
 authorbot-chapter-summary-editor:empty {
+  display: block;
+}
+
+authorbot-chapter-summary-editor[hidden] {
   display: none;
 }
 
@@ -29,7 +34,7 @@ authorbot-chapter-summary-editor:empty {
 .ab-summary-editor-shell {
   display: grid;
   gap: 0.8rem;
-  margin-top: 0.8rem;
+  margin: 0.8rem 0;
   padding: 1rem;
   border: 1px solid var(--border-default, var(--border));
   border-radius: 10px;
@@ -59,12 +64,26 @@ authorbot-chapter-summary-editor:empty {
   gap: 0.35rem;
 }
 
-.ab-summary-editor-field .ab-field-label {
+.ab-summary-editor-field-label {
   margin: 0;
 }
 
-.ab-summary-editor-input {
+.ab-summary-editor-root,
+.ab-summary-editor-root .ProseMirror {
   min-height: 6.5rem;
+}
+
+.ab-summary-editor-root {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: 10px;
+  background: var(--surface-card, var(--surface));
+  box-shadow: var(--shadow-sm, 0 4px 14px rgba(0, 0, 0, 0.1));
+  font-size: 1rem;
+  line-height: 1.55;
 }
 
 .ab-summary-editor-notes {

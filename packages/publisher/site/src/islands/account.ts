@@ -151,6 +151,7 @@ export class AuthorbotAccount extends HTMLElement {
       if (state.sessionStatus === "error") {
         this.renderedSession = undefined;
         this.textContent = "";
+        this.syncWorkNavigation(false);
         const release = this.releaseConnection;
         this.releaseConnection = null;
         release?.();
@@ -164,6 +165,7 @@ export class AuthorbotAccount extends HTMLElement {
       this.onResize();
     }
     const canReadWork = hasEffectiveCapability(state.session, "work:read", "work:read");
+    this.syncWorkNavigation(canReadWork);
     if (!canReadWork) {
       const release = this.releaseConnection;
       this.releaseConnection = null;
@@ -183,6 +185,16 @@ export class AuthorbotAccount extends HTMLElement {
     this.syncGlobalWorkCount(
       state.workItemsStatus === "ready" ? state.workItemIds.length : 0,
     );
+  }
+
+  /** Work is product chrome only for collaborators who can actually open it. */
+  private syncWorkNavigation(visible: boolean): void {
+    let changed = false;
+    for (const item of document.querySelectorAll<HTMLElement>('[data-collab-nav="work"]')) {
+      changed ||= item.hidden === visible;
+      item.hidden = !visible;
+    }
+    if (changed) this.onResize();
   }
 
   /** Keep the top-bar Work badge useful on every page, not only /work/. */

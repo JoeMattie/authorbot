@@ -1,6 +1,6 @@
 /** Capability-gated, click-lazy entry point for the inline chapter time machine. */
 import { hasEffectiveCapability, type Me } from "./api.js";
-import { el } from "./dom.js";
+import { el, labeledButton } from "./dom.js";
 import { loadLazyModule } from "./lazy-module.js";
 import { loadProjectStore } from "./project-store-loader.js";
 import { chapterHistoryRevisionFromHash } from "../lib/chapter-history-link.js";
@@ -84,7 +84,14 @@ export class AuthorbotChapterHistory extends HTMLElement {
   private panel: ChapterHistoryPanelElement | null = null;
   private status: HTMLSpanElement | null = null;
   private terminalChunkFailure = false;
+  private prose: HTMLElement | null = null;
+  private gutter: HTMLElement | null = null;
+  private proseWasHidden = false;
+  private gutterWasHidden = false;
+  private historyModeActive = false;
   private panelId: string | null = null;
+  private historyLoadingOverlay: HTMLElement | null = null;
+  private manuscriptResizeObserver: ResizeObserver | null = null;
 
   connectedCallback(): void {
     if (this.started) return;
@@ -97,6 +104,11 @@ export class AuthorbotChapterHistory extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.setHistoryMode(false);
+    this.manuscriptResizeObserver?.disconnect();
+    this.manuscriptResizeObserver = null;
+    this.panel?.remove();
+    this.panel = null;
     this.started = false;
     this.generation += 1;
     globalThis.removeEventListener?.("hashchange", this.onHashChange);
@@ -127,13 +139,9 @@ export class AuthorbotChapterHistory extends HTMLElement {
     this.textContent = "";
     const panelId = `ab-chapter-history-${++panelSequence}`;
     this.panelId = panelId;
-    const button = el("button", "ab-history-trigger");
-    button.type = "button";
+    const button = labeledButton("ab-history-trigger", "History", "history");
     button.setAttribute("aria-expanded", "false");
     button.setAttribute("aria-controls", panelId);
-    const icon = el("span", "ab-history-trigger-icon", "↶");
-    icon.setAttribute("aria-hidden", "true");
-    button.append(icon, document.createTextNode("History"));
     button.addEventListener("click", () => void this.toggle(panelId));
     const status = el("span", "ab-history-entry-status");
     status.setAttribute("role", "status");
@@ -152,8 +160,11 @@ export class AuthorbotChapterHistory extends HTMLElement {
       this.panel.hidden = !opening;
       button.setAttribute("aria-expanded", String(opening));
       if (opening) {
+        this.setHistoryMode(true);
         if (revision !== null) this.panel.showRevision?.(revision);
-        this.panel.focus();
+        this.panel.focus({ preventScroll: true });
+      } else {
+        this.setHistoryMode(false);
       }
       return;
     }
@@ -186,11 +197,20 @@ export class AuthorbotChapterHistory extends HTMLElement {
       if (initialRevision !== null) panel.dataset.initialRevision = String(initialRevision);
       panel.tabIndex = -1;
       panel.addEventListener("authorbot-history-close", () => this.closePanel());
-      this.append(panel);
+      panel.addEventListener("authorbot-history-ready", () => {
+        this.finishHistoryLoading();
+      });
       this.panel = panel;
+      const prose = this.chapterProse();
+      if (prose !== null) {
+        prose.before(panel);
+      } else {
+        (this.manuscriptSurface() ?? this.closest("article") ?? this).append(panel);
+      }
       button.setAttribute("aria-expanded", "true");
+      this.setHistoryMode(true);
       this.hideStatus();
-      panel.focus();
+      panel.focus({ preventScroll: true });
     } catch {
       if (!this.isCurrent()) return;
       this.terminalChunkFailure = true;
@@ -208,7 +228,113 @@ export class AuthorbotChapterHistory extends HTMLElement {
     if (this.panel === null || this.button === null) return;
     this.panel.hidden = true;
     this.button.setAttribute("aria-expanded", "false");
+    this.setHistoryMode(false);
     this.button.focus();
+  }
+
+  /** History takes over the same inline reading surface as chapter editing. */
+  private setHistoryMode(active: boolean): void {
+    if (active === this.historyModeActive) return;
+    const chapter = this.closest<HTMLElement>("article.chapter") ?? this.closest("article");
+    const layout = this.closest<HTMLElement>(".ab-reading-layout");
+    if (active) {
+      this.historyModeActive = true;
+      this.prose = this.chapterProse(chapter);
+      this.gutter = layout?.querySelector<HTMLElement>(":scope > .ab-gutter") ?? null;
+      this.observeManuscriptMeasure(layout);
+      this.proseWasHidden = this.prose?.hidden ?? false;
+      this.gutterWasHidden = this.gutter?.hidden ?? false;
+      if (this.gutter !== null) this.gutter.hidden = true;
+      layout?.classList.add("ab-history-active");
+      if (this.panel?.dataset.historyReady === "true") {
+        if (this.prose !== null) this.prose.hidden = true;
+      } else {
+        this.beginHistoryLoading();
+      }
+      return;
+    }
+    this.clearHistoryLoading();
+    if (this.prose !== null) this.prose.hidden = this.proseWasHidden;
+    if (this.gutter !== null) this.gutter.hidden = this.gutterWasHidden;
+    layout?.classList.remove("ab-history-active");
+    this.manuscriptResizeObserver?.disconnect();
+    this.manuscriptResizeObserver = null;
+    layout?.style.removeProperty("--ab-manuscript-surface-width");
+    this.historyModeActive = false;
+    this.prose = null;
+    this.gutter = null;
+  }
+
+  /**
+   * History controls can occupy the Notes column, but its prose keeps the
+   * exact live manuscript measure. The chapter's 64ch cap makes that narrower
+   * than the reading column's nominal 700px track.
+   */
+  private observeManuscriptMeasure(layout: HTMLElement | null): void {
+    const surface = this.manuscriptSurface();
+    if (layout === null || surface === null) return;
+    const update = (): void => {
+      const width = surface.getBoundingClientRect().width;
+      if (width > 0) {
+        layout.style.setProperty("--ab-manuscript-surface-width", `${width}px`);
+      }
+    };
+    update();
+    this.manuscriptResizeObserver?.disconnect();
+    this.manuscriptResizeObserver = new ResizeObserver(update);
+    this.manuscriptResizeObserver.observe(surface);
+  }
+
+  private beginHistoryLoading(): void {
+    const surface = this.manuscriptSurface();
+    if (surface === null || this.prose === null || this.panel === null) return;
+    surface.classList.add("ab-history-source-loading");
+    this.prose.classList.add("ab-history-source-loading-prose");
+    this.panel.classList.add("ab-history-panel-preparing");
+    const overlay = el("div", "ab-history-source-loading-overlay");
+    overlay.setAttribute("role", "status");
+    overlay.append(
+      el("span", "ab-history-loading-spinner"),
+      el("span", undefined, "Loading revision…"),
+    );
+    surface.append(overlay);
+    this.historyLoadingOverlay = overlay;
+  }
+
+  private finishHistoryLoading(): void {
+    if (!this.historyModeActive) return;
+    this.clearHistoryLoading();
+    if (this.prose !== null) this.prose.hidden = true;
+  }
+
+  private clearHistoryLoading(): void {
+    this.manuscriptSurface()?.classList.remove("ab-history-source-loading");
+    this.prose?.classList.remove("ab-history-source-loading-prose");
+    this.panel?.classList.remove("ab-history-panel-preparing");
+    this.historyLoadingOverlay?.remove();
+    this.historyLoadingOverlay = null;
+  }
+
+  /**
+   * Only the article's direct manuscript is replaceable. History's rendered
+   * diff deliberately shares the `prose` class, so a descendant-wide lookup
+   * starts selecting the diff itself after the first open.
+   */
+  private chapterProse(chapter?: HTMLElement | null): HTMLElement | null {
+    const surface = this.manuscriptSurface(chapter);
+    return surface?.querySelector<HTMLElement>(":scope > .prose") ?? null;
+  }
+
+  private manuscriptSurface(chapter?: HTMLElement | null): HTMLElement | null {
+    const article =
+      chapter ??
+      this.closest<HTMLElement>("article.chapter") ??
+      this.closest<HTMLElement>("article");
+    return (
+      article?.querySelector<HTMLElement>(
+        ":scope > [data-chapter-manuscript-surface]",
+      ) ?? null
+    );
   }
 
   private showStatus(message: string): void {

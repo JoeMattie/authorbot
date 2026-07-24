@@ -52,11 +52,14 @@ export class AuthorbotNewChapter extends HTMLElement {
   private async start(): Promise<void> {
     const auth = await this.api.meResult();
     if (!auth.ok) {
+      this.hidden = true;
       return; // unreachable API: no collaboration chrome at all
     }
     if (!canAuthorChapters(auth.value)) {
+      this.hidden = true;
       return;
     }
+    this.hidden = false;
     const link = el("a", "ab-new-chapter ab-btn ab-primary", "New chapter");
     link.href = this.cfg.href;
     this.textContent = "";

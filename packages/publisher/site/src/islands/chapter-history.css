@@ -12,7 +12,26 @@ authorbot-chapter-history {
   display: contents;
 }
 
-.ab-history-trigger {
+.chapter-author-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  min-height: 34px;
+  margin: -0.35rem 0 1.1rem;
+}
+
+.chapter-author-actions authorbot-manuscript-editor {
+  display: contents;
+}
+
+.chapter-author-actions .ab-manuscript-launcher {
+  margin: 0;
+}
+
+.ab-history-trigger,
+.chapter-author-actions .ab-manuscript-edit {
   display: inline-flex;
   gap: 7px;
   align-items: center;
@@ -29,16 +48,19 @@ authorbot-chapter-history {
 }
 
 .ab-history-trigger:hover,
-.ab-history-trigger[aria-expanded="true"] {
+.ab-history-trigger[aria-expanded="true"],
+.chapter-author-actions .ab-manuscript-edit:hover:not(:disabled),
+.chapter-author-actions .ab-manuscript-edit[aria-expanded="true"] {
   border-color: color-mix(in srgb, var(--green-400, #58c786) 58%, transparent);
   background: color-mix(in srgb, var(--green-500, #35ab64) 11%, var(--surface-card, #221f1b));
   color: var(--text-strong, #f1efea);
 }
 
-.ab-history-trigger-icon {
+.ab-history-trigger .ab-inline-icon,
+.chapter-author-actions .ab-manuscript-edit .ab-inline-icon {
   color: var(--green-300, #7edfa1);
-  font-size: 16px;
-  line-height: 1;
+  width: 16px;
+  height: 16px;
 }
 
 .ab-history-entry-status {
@@ -52,20 +74,62 @@ authorbot-chapter-history-panel {
   display: block;
   grid-column: 1 / -1;
   justify-self: center;
-  width: min(100%, var(--ab-chapter-reading-measure));
+  width: 100%;
   min-width: 0;
   outline: none;
+}
+
+@media (max-width: 639.9px) {
+  .chapter-author-actions {
+    margin-top: 0;
+  }
+
+  .chapter-author-actions .ab-manuscript-edit {
+    width: auto;
+  }
 }
 
 authorbot-chapter-history-panel[hidden] {
   display: none;
 }
 
+.chapter-manuscript-surface.ab-history-source-loading {
+  position: relative;
+}
+
+.ab-history-source-loading-prose {
+  filter: blur(3px);
+  opacity: 0.48;
+  pointer-events: none;
+  transition: filter 160ms ease, opacity 160ms ease;
+}
+
+authorbot-chapter-history-panel.ab-history-panel-preparing {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ab-history-source-loading-overlay {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: min(28vh, 240px);
+  color: var(--text-strong, #f1efea);
+  font: 600 12px/1.4 var(--font-display, system-ui, sans-serif);
+}
+
 .ab-history-panel-shell {
   position: relative;
   isolation: isolate;
+  width: min(100%, var(--ab-chapter-reading-measure));
   min-width: 0;
-  overflow: clip;
+  overflow: visible;
   border: 1px solid color-mix(in srgb, var(--green-500, #35ab64) 38%, var(--border-default, #48423b));
   border-radius: 14px;
   background: var(--surface-page, var(--bg, #1b1815));
@@ -150,8 +214,14 @@ authorbot-chapter-history-panel[hidden] {
   font: 400 11px/1.55 var(--font-display, system-ui, sans-serif);
 }
 
+.ab-history-current-copy strong {
+  color: var(--text-strong, #f1efea);
+  font-weight: 700;
+}
+
 .ab-history-stepper {
   display: grid;
+  container-type: inline-size;
   grid-template-columns: 1fr 1fr;
   gap: 7px;
   margin: 0 18px 14px;
@@ -167,6 +237,38 @@ authorbot-chapter-history-panel[hidden] {
   color: var(--text-body, #c2bdb2);
   font: 600 10px/1.35 var(--font-display, system-ui, sans-serif);
   cursor: pointer;
+}
+
+.ab-history-step {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.ab-history-step-arrow {
+  display: inline-flex;
+  align-items: center;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.ab-history-step-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+@container (max-width: 220px) {
+  .ab-history-step-label {
+    display: none;
+  }
+
+  .ab-history-step {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
 }
 
 .ab-history-step:disabled,
@@ -221,15 +323,33 @@ authorbot-chapter-history-panel[hidden] {
 .ab-history-revision {
   position: relative;
   display: grid;
-  gap: 3px;
+  container-type: inline-size;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  gap: 3px 8px;
+  align-content: center;
+  align-items: center;
+  min-width: 0;
   width: 100%;
   padding: 10px 11px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: inherit;
+  overflow: hidden;
   text-align: left;
   cursor: pointer;
+}
+
+@container (max-width: 168px) {
+  .ab-history-revision-date {
+    display: none;
+  }
+}
+
+.ab-history-revision > span {
+  align-self: center;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .ab-history-revision:hover,
@@ -249,15 +369,17 @@ authorbot-chapter-history-panel[hidden] {
 }
 
 .ab-history-revision-summary {
+  overflow: hidden;
   color: var(--text-muted, #989289);
   font: 400 12px/1.4 var(--font-body, Georgia, serif);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ab-history-revision-date {
   color: var(--text-faint, #767069);
   font: 400 9px/1.45 var(--font-mono, monospace);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .ab-history-current-badge,
@@ -327,7 +449,7 @@ authorbot-chapter-history-panel[hidden] {
 .ab-history-compare-controls {
   display: inline-flex;
   gap: 6px;
-  margin: 0 0 18px;
+  margin: 0 0 15px;
   padding: 3px;
   border: 1px solid var(--border-subtle, #34302b);
   border-radius: 9px;
@@ -376,42 +498,62 @@ authorbot-chapter-history-panel[hidden] {
   margin-top: 4px;
 }
 
+.ab-history-diff[data-comparison-surface="word-lines"] {
+  min-width: 0;
+}
+
+.ab-history-diff .ab-prose-diff-line del,
+.ab-history-diff .ab-prose-diff-line ins {
+  padding: 0.04em 0.08em;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.ab-history-diff .ab-prose-diff-line del {
+  background-color: rgb(224 85 79 / 34%) !important;
+  opacity: 0.68;
+  text-decoration-color: currentColor !important;
+  text-decoration-line: line-through !important;
+}
+
+.ab-history-diff .ab-prose-diff-line ins {
+  background-color: rgb(70 164 112 / 38%) !important;
+  text-decoration-color: transparent !important;
+  text-decoration-line: none !important;
+}
+
+.ab-history-diff .ab-prose-diff-line.ab-prose-diff-code-line {
+  margin: 0;
+  padding: 0 0.85rem;
+  background: var(--surface-sunken, #141210);
+  color: var(--text-body, #c2bdb2);
+  font: 400 0.82em/1.6 var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: wrap;
+}
+
+.ab-history-diff
+  .ab-prose-diff-line:not(.ab-prose-diff-code-line)
+  + .ab-prose-diff-code-line,
+.ab-history-diff .ab-prose-diff-column > .ab-prose-diff-code-line:first-child {
+  padding-top: 0.7rem;
+  border-radius: 7px 7px 0 0;
+}
+
+.ab-history-diff .ab-prose-diff-code-line:not(:has(+ .ab-prose-diff-code-line)) {
+  margin-bottom: 1.35em;
+  padding-bottom: 0.7rem;
+  border-radius: 0 0 7px 7px;
+}
+
 .ab-history-diff-limit,
 .ab-history-no-comparison {
   margin: 0 0 16px;
   border: 1px solid var(--border-subtle, #34302b);
   border-radius: 8px;
   background: var(--surface-sunken, #141210);
-}
-
-/* The optional visual diff owns richer styles. These shell styles keep the
-   complete semantic fallback useful when that second chunk cannot load. */
-.ab-history-diff .ab-revision-diff-fallback {
-  margin: 0;
-  border: 1px solid var(--border-default, #48423b);
-  border-radius: 8px;
-  background: var(--surface-sunken, #141210);
-}
-
-.ab-history-diff .ab-revision-diff-fallback summary {
-  padding: 10px 12px;
-  color: var(--text-muted, #989289);
-  font: 600 12px/1.4 var(--font-display, system-ui, sans-serif);
-  cursor: pointer;
-}
-
-.ab-history-diff .ab-revision-diff-snapshot {
-  padding: 0 12px 12px;
-}
-
-.ab-history-diff .ab-revision-diff-snapshot pre {
-  max-height: 36vh;
-  margin: 0;
-  overflow: auto;
-  color: var(--text-body, #c2bdb2);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font: 400 19px/1.75 var(--font-body, "Source Serif 4", Georgia, serif);
 }
 
 .ab-history-restore {
@@ -452,27 +594,25 @@ authorbot-chapter-history-panel[hidden] {
   outline-offset: 2px;
 }
 
-@media (min-width: 1436px) {
-  authorbot-chapter-history-panel {
-    width: min(
-      calc(var(--ab-chapter-reading-measure) + var(--ab-chapter-reading-measure)),
-      calc(100vw - 36px)
-    );
-  }
-
+@media (min-width: 1600px) {
   .ab-history-layout {
-    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    position: relative;
+    display: block;
   }
 
   .ab-history-rail {
-    position: sticky;
-    top: 76px;
-    align-self: start;
+    position: absolute;
+    top: 0;
+    right: calc(100% + 22px);
+    width: min(220px, calc((100vw - 1240px) / 2 - 18px));
     max-height: calc(100vh - 92px);
     overflow-y: auto;
+    overflow-x: clip;
     overscroll-behavior: contain;
-    border-right: 1px solid var(--border-subtle, #34302b);
-    border-bottom: 0;
+    border: 1px solid var(--border-subtle, #34302b);
+    border-radius: 12px;
+    background: var(--surface-page, var(--bg, #1b1815));
+    box-shadow: 0 16px 44px rgb(0 0 0 / 18%);
     scrollbar-gutter: stable;
   }
 
@@ -480,6 +620,14 @@ authorbot-chapter-history-panel[hidden] {
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;
+  }
+
+  .ab-history-panel-shell {
+    width: min(100%, calc(var(--ab-chapter-reading-measure) + 504px));
+  }
+
+  .ab-history-diff:has(.ab-prose-diff[data-layout="side-by-side"]) {
+    width: 100%;
   }
 }
 
@@ -516,4 +664,282 @@ authorbot-chapter-history-panel[hidden] {
     transition: none;
     animation: none;
   }
+}
+
+/* Seamless manuscript history. The chapter remains the center surface while
+   revision navigation occupies the page margins. */
+.ab-history-panel-shell {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ab-history-panel-header,
+.ab-history-diff-heading,
+.ab-history-diff .ab-revision-diff-layout {
+  display: none;
+}
+
+.ab-history-detail {
+  width: min(100%, var(--ab-chapter-reading-measure));
+  margin: 0 auto;
+  padding: 0;
+}
+
+.ab-history-layout {
+  display: block;
+}
+
+/* The rail only floats when the viewport has a genuine left margin for it.
+   Below this breakpoint an overlay would cover the unchanged reading column. */
+@media (min-width: 1600px) {
+  .ab-history-rail {
+    position: fixed;
+    z-index: 30;
+    top: 68px;
+    bottom: 18px;
+    left: 24px;
+    width: min(280px, calc((100vw - 1160px) / 2 - 24px));
+    max-height: none;
+    padding: 14px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    scrollbar-gutter: stable;
+  }
+
+  .ab-history-list {
+    box-sizing: border-box;
+    width: 100%;
+    max-height: none;
+    padding: 0 12px 0 30px;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .ab-history-list::before {
+    left: 21px;
+  }
+
+  .ab-history-list-item {
+    margin-bottom: 8px;
+  }
+
+  .ab-history-list-item::before {
+    left: -13px;
+  }
+
+  .ab-history-revision {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    padding: 9px 10px;
+    border-color: color-mix(
+      in srgb,
+      var(--border-subtle, #34302b) 72%,
+      transparent
+    );
+    background: rgb(0 0 0 / 5%);
+  }
+
+  .ab-history-revision-summary {
+    display: none;
+  }
+}
+
+@media (min-width: 1600px) {
+  .chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"]
+    .ab-history-rail {
+    width: min(280px, calc((100vw - 760px) / 2 - 24px));
+  }
+}
+
+.ab-history-detail {
+  position: relative;
+}
+
+.ab-history-detail-is-loading > :not(.ab-history-loading-overlay) {
+  filter: blur(3px);
+  opacity: 0.48;
+  pointer-events: none;
+  transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.ab-history-loading-overlay,
+.ab-history-detail-loading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+
+.ab-history-loading-overlay {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  min-height: 180px;
+  color: var(--text-strong, #f1efea);
+  font: 600 12px/1.4 var(--font-display, system-ui, sans-serif);
+}
+
+.ab-history-loading-spinner {
+  display: block;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 2px solid color-mix(in srgb, var(--green-300, #7edfa1) 28%, transparent);
+  border-top-color: var(--green-300, #7edfa1);
+  border-radius: 50%;
+  animation: ab-history-spin 700ms linear infinite;
+}
+
+@keyframes ab-history-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (min-width: 960px) {
+  .chapter-reading-layout.ab-reading-layout[data-notes-visibility="shown"]
+    .ab-history-detail {
+    display: grid;
+    grid-template-columns:
+      minmax(
+        0,
+        var(--ab-manuscript-surface-width, var(--ab-chapter-reading-measure))
+      )
+      minmax(320px, 1fr);
+    gap: 44px;
+    width: 100cqw;
+    max-width: none;
+    margin: 0;
+  }
+
+  .chapter-reading-layout.ab-reading-layout[data-notes-visibility="shown"]
+    .ab-history-detail-controls {
+    position: sticky;
+    top: 72px;
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+    max-height: calc(100vh - 90px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .chapter-reading-layout.ab-reading-layout[data-notes-visibility="shown"]
+    .ab-history-detail-body {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    min-width: 0;
+  }
+
+  .chapter-reading-layout.ab-reading-layout[data-notes-visibility="shown"]
+    .ab-history-restore {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    max-height: calc(100vh - 316px);
+    overflow-y: auto;
+  }
+}
+
+.ab-history-change-index {
+  margin-top: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle, #34302b);
+}
+
+.ab-history-change-index h4 {
+  margin: 0 0 8px;
+  color: var(--text-faint, #767069);
+  font: 600 10px/1.35 var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ab-history-change-index ol {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ab-history-change-link {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #989289);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ab-history-change-link:hover,
+.ab-history-change-link:focus-visible {
+  background: var(--surface-raised, #282420);
+  color: var(--text-strong, #f1efea);
+}
+
+.ab-history-change-number {
+  display: grid;
+  place-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green-400, #58c786) 16%, transparent);
+  color: var(--green-300, #7edfa1);
+  font: 600 9px/1 var(--font-mono, monospace);
+}
+
+.ab-history-change-preview {
+  overflow: hidden;
+  font: 400 11px/1.45 var(--font-display, system-ui, sans-serif);
+  text-overflow: ellipsis;
+}
+
+.ab-history-change-target {
+  scroll-margin-top: 84px;
+  animation: ab-history-target 1.4s ease-out;
+}
+
+@keyframes ab-history-target {
+  0%,
+  45% {
+    background-color: color-mix(
+      in srgb,
+      var(--blue-500, #5d8fc7) 16%,
+      transparent
+    );
+  }
+}
+
+/* History inherits the reader's existing width and Notes geometry. The
+   selected snapshot rail substitutes for Notes; it is not a third column. */
+.chapter-reading-layout.ab-reading-layout.ab-history-active[data-reader-width="full"]
+  .ab-history-detail {
+  width: 100%;
+  max-width: none;
+}
+
+.chapter-reading-layout.ab-reading-layout.ab-history-active[data-reader-width="full"]
+  .ab-prose-diff.prose {
+  max-width: none;
+}
+
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"]
+  .ab-history-detail-controls,
+.chapter-reading-layout.ab-reading-layout[data-notes-visibility="hidden"]
+  .ab-history-restore {
+  display: none;
 }
