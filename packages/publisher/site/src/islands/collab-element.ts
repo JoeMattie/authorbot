@@ -1267,14 +1267,15 @@ export class AuthorbotCollab extends HTMLElement {
       mark.classList.toggle("ab-highlight-active", mark.dataset.annotationId === annotationId);
     }
     if (this.targetAdapter.setHighlights !== undefined) this.renderRangeHighlights();
-    const card = this.cardEls.get(annotationId);
-    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     if (moveFocus) {
-      card?.focus();
+      this.pendingAnnotationFocusId = annotationId;
     }
     this.refreshCardExpansion();
     this.updateNoteNavigation();
     this.layout();
+    // Expansion changes the measured card height. Re-run after style/layout
+    // settles so a bottom-anchored card is placed from its expanded size.
+    this.scheduleLayout();
   }
 
   private collapseAnnotation(annotationId: string): void {
@@ -2003,10 +2004,7 @@ export class AuthorbotCollab extends HTMLElement {
           if (first === undefined) {
             return;
           }
-          this.activateAnnotation(first.id);
-          const card = this.cardEls.get(first.id);
-          card?.scrollIntoView({ block: "nearest" });
-          card?.focus();
+          this.activateAnnotation(first.id, true);
         });
         ui.append(marker);
       } else {
@@ -2889,6 +2887,8 @@ export class AuthorbotCollab extends HTMLElement {
       ui.style.top = `${block.getBoundingClientRect().top - proseRect.top}px`;
     }
     if (!this.isDesktop || !this.notesPanelVisible) {
+      this.gutter.style.height = "";
+      this.gutter.style.maxHeight = "";
       this.cardsHost.style.height = "";
       this.cardsHost.dataset.layoutReady = "true";
       for (const card of this.cardEls.values()) {
@@ -2899,6 +2899,21 @@ export class AuthorbotCollab extends HTMLElement {
       }
       return;
     }
+    const gutterTop = this.gutter.getBoundingClientRect().top;
+    const localToolbar = document.querySelector<HTMLElement>(
+      "[data-authorbot-local-toolbar]",
+    );
+    const toolbarRect = localToolbar?.getBoundingClientRect();
+    const visibleBottom =
+      toolbarRect !== undefined &&
+      toolbarRect.height > 0 &&
+      toolbarRect.top > gutterTop &&
+      toolbarRect.top < window.innerHeight
+        ? toolbarRect.top
+        : window.innerHeight;
+    const gutterHeight = Math.max(0, visibleBottom - gutterTop - 16);
+    this.gutter.style.height = `${gutterHeight}px`;
+    this.gutter.style.maxHeight = `${gutterHeight}px`;
     void this.layoutGutterCards(generation);
   }
 
@@ -2932,6 +2947,7 @@ export class AuthorbotCollab extends HTMLElement {
       });
     }
     const hostTop = this.cardsHost.getBoundingClientRect().top;
+    const availableHeight = this.cardsHost.clientHeight;
     const measured = await Promise.all(
       anchored.map(async ({ id, anchor, target }): Promise<StackItem> => {
         if (anchor === null) {
@@ -2940,11 +2956,11 @@ export class AuthorbotCollab extends HTMLElement {
         try {
           const position = await computePosition(anchor, target, {
             placement: "right-start",
-            strategy: "absolute",
+            strategy: "fixed",
           });
           return {
             id,
-            desiredTop: Math.max(0, position.y),
+            desiredTop: position.y - hostTop,
             height: target.offsetHeight,
           };
         } catch {
@@ -2964,7 +2980,12 @@ export class AuthorbotCollab extends HTMLElement {
       return;
     }
     const items: StackItem[] = measured;
-    const assigned = stackCards(items, CARD_GAP);
+    const assigned = stackCards(
+      items,
+      CARD_GAP,
+      availableHeight,
+      this.activeAnnotationId,
+    );
     let bottom = 0;
     for (const [id, top] of assigned) {
       const target = id === "\0composer" ? this.composerEl : this.cardEls.get(id);
@@ -2975,6 +2996,21 @@ export class AuthorbotCollab extends HTMLElement {
       bottom = Math.max(bottom, top + target.offsetHeight);
     }
     this.cardsHost.style.height = `${bottom}px`;
+    const activeTop =
+      this.activeAnnotationId === null ? undefined : assigned.get(this.activeAnnotationId);
+    const activeCard =
+      this.activeAnnotationId === null ? undefined : this.cardEls.get(this.activeAnnotationId);
+    if (activeTop !== undefined && activeCard !== undefined) {
+      // When the expanded card itself is taller than the rail, reveal its
+      // bottom edge. Cards that fit are already moved upward by stackCards,
+      // so this remains zero and never creates a cosmetic scrollbar.
+      this.cardsHost.scrollTop = Math.max(
+        0,
+        activeTop + activeCard.offsetHeight - availableHeight,
+      );
+    } else if (bottom <= availableHeight) {
+      this.cardsHost.scrollTop = 0;
+    }
     this.cardsHost.dataset.layoutReady = "true";
     this.focusPendingAnnotation();
   }

@@ -261,6 +261,13 @@ describe("authorbot-collab element", () => {
     expect(highlight?.classList.contains("ab-highlight-suggestion")).toBe(true);
     expect(highlight?.getAttribute("tabindex")).toBe("0");
 
+    // Opening from the prose marker must not scroll the card at its stale
+    // collapsed position. The gutter layout moves the expanded card into view.
+    const scrollCard = vi.fn();
+    card.scrollIntoView = scrollCard;
+    (document.querySelector(".ab-marker") as HTMLButtonElement).click();
+    expect(scrollCard).not.toHaveBeenCalled();
+
     // Navigation is reciprocal: selecting prose reveals its card, and
     // selecting the card brings the anchored prose back into view.
     const targetBlock = document.getElementById(`b-${BLOCK_ID}`) as HTMLElement;
