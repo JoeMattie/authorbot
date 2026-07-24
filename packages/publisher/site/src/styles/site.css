@@ -882,6 +882,7 @@ table.timeline tbody th {
   }
 
   .site-nav {
+    flex: 1 1 auto;
     min-width: 0;
     overflow-x: auto;
     overscroll-behavior-inline: contain;
@@ -895,6 +896,7 @@ table.timeline tbody th {
 
 @media (max-width: 640px) {
   .site-header nav {
+    overflow: hidden;
     padding: 0 10px;
   }
 

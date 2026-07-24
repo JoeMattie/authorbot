@@ -8,6 +8,11 @@ Cloudflare is still the production runtime. Local authoring uses the same API,
 database schema, publisher, browser UI, and Git commit path, but swaps D1 for
 Node's built-in SQLite and the GitHub writer for a local worktree.
 
+Local authoring is an interactive collaboration build, so its browser UI
+includes the same progressive-enhancement JavaScript as hosted mode. The
+script-free contract applies only to an API-less `authorbot build`; in both
+cases the reading HTML remains usable without JavaScript.
+
 ## Start it
 
 From a book repository:

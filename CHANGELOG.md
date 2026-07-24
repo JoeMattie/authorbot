@@ -9,6 +9,48 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.40
+
+- **Character details open correctly from hosted and local chapter pages.**
+  The 0.1.39 packed publisher could erase Web Awesome's runtime drawer import
+  when a book built outside the Authorbot workspace. Character links still
+  fetched their detail page, but the unregistered element stayed invisible.
+  The drawer now has an explicit runtime registration boundary, a browser
+  regression, and a packed-tarball build check that exercises the same
+  consumer context used by book CI.
+- The README and publisher architecture docs now state the browser contract
+  directly: hosted and local-dev modes include progressive-enhancement
+  JavaScript, while an API-less build remains script-free and readable.
+- The mobile header now contains its scrollable navigation at 320px, and
+  keyboard-created notes receive focus only after their anchored gutter layout
+  is visible.
+- This hotfix adds no D1 or book-format migration.
+
+## 0.1.39
+
+- **The hosted and local authoring UI now share the dogfooded reading
+  experience.** Chapter and summary editing load in place without clearing the
+  manuscript, reader controls can hide notes and use the available reading
+  width, and character links open full details in a right-side drawer.
+  Outline, timeline, and character editing use the same compact controls and
+  in-place loading behavior.
+- **Chapter history now reads as a seamless layer over the manuscript.** The
+  revision rail stays beside the page, selected revision controls occupy the
+  notes column, and word- and sentence-level changes render in the normal
+  prose surface with semantic inserted and deleted colors. Revision loading
+  preserves the current view until the replacement is ready.
+- **Notes and discussions are denser and more capable.** Anchored comments
+  follow the manuscript without covering it, collapsed notes retain the
+  author and text, reply and thread promotion create Work with the discussion
+  text intact, and editor/comment handoffs preserve selections and unsaved
+  input.
+- **The browser UI now uses focused lightweight primitives where they help.**
+  Lit owns reader controls, Web Awesome supplies the character drawer, and
+  Floating UI positions anchored annotation surfaces; the rest remains
+  progressive-enhancement custom elements over static reading HTML.
+- This release adds D1 migration `0014_reply_work_promotion.sql` and no
+  book-format migration.
+
 ## 0.1.38
 
 - **Authorbot now has a complete local authoring mode.** `authorbot dev` runs

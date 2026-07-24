@@ -4,6 +4,15 @@ import WaDrawer from "@awesome.me/webawesome/dist/components/drawer/drawer.js";
 import "../styles/character-drawer.css";
 
 export function initializeCharacterDrawer(): void {
+  // Keep this constructor in the browser bundle as a runtime value. When the
+  // published package is built from an author's checkout, Authorbot's
+  // tsconfig is not present and Vite can otherwise erase this import as
+  // type-only. Web Awesome normally self-registers through its decorator; the
+  // guarded definition also makes the boundary explicit and resilient.
+  if (customElements.get("wa-drawer") === undefined) {
+    customElements.define("wa-drawer", WaDrawer);
+  }
+
   const drawer = document.querySelector<WaDrawer>("[data-character-drawer]");
   if (drawer === null || drawer.dataset.ready === "true") return;
   drawer.dataset.ready = "true";

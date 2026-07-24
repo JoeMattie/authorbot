@@ -81,6 +81,8 @@ test("annotation lifecycle: create, anchor, reply, persist, withdraw", async ({ 
   await page.reload();
   const persisted = page.locator(".ab-card", { hasText: SUGGESTION_BODY });
   await expect(persisted).toBeVisible();
+  await persisted.focus();
+  await persisted.press("Enter");
   await expect(persisted.locator(".ab-status-open")).toBeVisible();
   await expect(persisted.locator(".ab-quote")).not.toBeEmpty();
   await expect(persisted.locator(".ab-reply", { hasText: REPLY_BODY })).toBeVisible();

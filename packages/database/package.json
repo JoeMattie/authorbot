@@ -1,6 +1,6 @@
 {
   "name": "@authorbot/database",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "description": "SqlDatabase portability interface (D1 + built-in Node SQLite adapters), SQL migrations runner, and typed repositories for Authorbot operational tables",
   "keywords": [
     "authorbot",

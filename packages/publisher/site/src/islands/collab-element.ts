@@ -273,6 +273,7 @@ export class AuthorbotCollab extends HTMLElement {
   private lastCapture: CapturedSelection | null = null;
   private lastSelectionRange: Range | null = null;
   private activeAnnotationId: string | null = null;
+  private pendingAnnotationFocusId: string | null = null;
   private discussionVisibleLimit = DISCUSSION_PAGE_SIZE;
   private explicitExpandedAnnotationId: string | null = null;
   private visibleBlockIds = new Set<string>();
@@ -1732,11 +1733,10 @@ export class AuthorbotCollab extends HTMLElement {
     const operationId = result.value.operationId;
     this.markAnnotationSyncing(annotationId, operationId);
     this.announce("Annotation submitted; syncing.");
+    this.activeAnnotationId = annotationId;
+    this.explicitExpandedAnnotationId = annotationId;
+    this.pendingAnnotationFocusId = annotationId;
     this.renderAll();
-    const card = this.cardEls.get(annotationId);
-    if (card !== undefined) {
-      card.focus();
-    }
   }
 
   private latchComposerSelection(): void {
@@ -2021,6 +2021,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.syncGutterAutoUpdates();
     this.layout();
     this.restoreFocus(restore);
+    this.focusPendingAnnotation();
     this.activateNoteFragment();
   }
 
@@ -2180,6 +2181,14 @@ export class AuthorbotCollab extends HTMLElement {
       document.querySelector<HTMLElement>("authorbot-account .ab-account-signin, authorbot-account .ab-account-identity") ??
       this.authbar;
     fallback.focus();
+  }
+
+  private focusPendingAnnotation(): void {
+    if (this.pendingAnnotationFocusId === null) return;
+    const card = this.cardEls.get(this.pendingAnnotationFocusId);
+    if (card === undefined || getComputedStyle(card).visibility === "hidden") return;
+    card.focus({ preventScroll: true });
+    if (document.activeElement === card) this.pendingAnnotationFocusId = null;
   }
 
   private statusLabel(annotation: Annotation): { label: string; hint: string | null } {
@@ -2967,5 +2976,6 @@ export class AuthorbotCollab extends HTMLElement {
     }
     this.cardsHost.style.height = `${bottom}px`;
     this.cardsHost.dataset.layoutReady = "true";
+    this.focusPendingAnnotation();
   }
 }

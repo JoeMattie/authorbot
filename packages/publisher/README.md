@@ -6,8 +6,8 @@ reading site with Astro 5 invoked programmatically and writes the
 `authorbot.build/v1` manifest. Without an API base the output contains
 **zero client JavaScript** - no `<script>` tags anywhere, byte-identical to
 a pre-collaboration build. With one (`apiUrl` option / `--api-url` /
-`publication.api_url`), chapter pages additionally mount the framework-free
-collaboration islands (see below).
+`publication.api_url`), pages mount the progressive-enhancement collaboration
+UI used by hosted and local-dev mode (see below).
 
 ## Public API
 
@@ -101,10 +101,11 @@ boundary:
   character index and detail (frontmatter fields, rendered body, chapters
   whose `character_refs` mention the character).
 
-One shared stylesheet (`site/src/styles/site.css`, emitted as a single
-hashed file), ~65ch measure, `prefers-color-scheme` dark mode, skip link,
-landmarks, `lang` from `book.yml`. No CSS framework, no icons, no client
-bundle.
+The API-less build uses one shared stylesheet
+(`site/src/styles/site.css`, emitted as a single hashed file), ~65ch measure,
+`prefers-color-scheme` dark mode, skip link, landmarks, and `lang` from
+`book.yml`. It has no client bundle. Hosted and local-dev builds add the
+interactive assets described below.
 
 ## Collaboration islands (`api_url`, Phase 2b contract §1-§4, ADR-0019)
 
@@ -132,24 +133,26 @@ section with current summaries in canonical chapter order. Draft and proposed
 titles and summaries never enter static HTML, and the page performs no
 per-chapter repository reads.
 
-When enabled, **chapter pages only** gain four insertions (index, story, and
-character pages are untouched):
+When enabled, pages gain only the collaboration assets and mounts they use:
 
 - a CSP `<meta>` tag: `default-src 'self'; connect-src 'self'; img-src 'self'
   data:; font-src 'self' data:` - same-origin only, so `'self'` covers the API
   too (ADR-0019 §1); no
   `'unsafe-inline'` needed, since the islands touch styles via the CSSOM only;
 - a `<link>` to `_astro/authorbot-collab.css`;
-- the mount element (see contract below);
+- the page-specific mount elements (see the chapter contract below), including
+  a lazy Web Awesome character drawer on chapter pages that reference
+  characters;
 - a `<script type="module">` for `_astro/authorbot-collab.js`.
 
-The islands are **framework-free custom elements** (ADR-0018) in
+The islands are progressive-enhancement custom elements in
 `site/src/islands/`, bundled by an explicit Vite step (`buildIslands()`) run
-only when enabled, with stable asset names - deliberately outside Astro's
-script pipeline, which would emit chunks even into disabled builds. No
-runtime dependencies. Annotation/reply bodies render as plain text (`textContent` +
-`white-space: pre-wrap`; the bundle contains no `innerHTML` - asserted by
-test); no client-side Markdown.
+only when enabled, with stable entry asset names. Most interaction is direct
+DOM code; Lit owns the small reader-controls element, Web Awesome supplies the
+character drawer, and Floating UI positions anchored annotation surfaces.
+These dependencies stay out of API-less builds. Annotation and reply bodies
+render as plain text (`textContent` + `white-space: pre-wrap`; the bundle
+contains no `innerHTML` - asserted by test), with no client-side Markdown.
 
 Features (contract §2): `/v1/me` auth state with a GitHub sign-in link
 carrying `return_to`; annotation gutter cards (≥960 px, collision-stacked)

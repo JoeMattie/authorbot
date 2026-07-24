@@ -87,9 +87,27 @@ for (const width of [320, 390]) {
       return {
         pageFits: document.documentElement.scrollWidth <= viewport,
         boxesFit: boxes.every((box) => box.left >= 0 && box.right <= viewport),
+        overflow:
+          document.documentElement.scrollWidth <= viewport
+            ? []
+            : [...document.querySelectorAll<HTMLElement>("body *")]
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    selector: `${element.tagName.toLowerCase()}.${[...element.classList].join(".")}`,
+                    left: Math.round(rect.left),
+                    right: Math.round(rect.right),
+                    width: Math.round(rect.width),
+                  };
+                })
+                .filter(({ left, right }) => left < 0 || right > viewport)
+                .slice(0, 12),
       };
     });
-    expect(layout).toEqual({ pageFits: true, boxesFit: true });
+    expect(layout, JSON.stringify(layout.overflow, null, 2)).toMatchObject({
+      pageFits: true,
+      boxesFit: true,
+    });
     await context.close();
   });
 }
