@@ -325,6 +325,52 @@ describe("repository planning document editor", () => {
     expect(window.sessionStorage.length).toBe(0);
   });
 
+  it("lets publication lag remain status instead of locking a fresh outline edit", async () => {
+    stubFetch({
+      role: "maintainer",
+      capabilities: ["revisions:write", "revisions:review"],
+      proposalStatus: 202,
+    });
+    mountOutline();
+    await expect.poll(() => document.querySelector(".ab-planning-edit")).toBeTruthy();
+    (document.querySelector(".ab-planning-edit") as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelector(".ab-planning-source")).toBeTruthy();
+
+    const source = document.querySelector(".ab-planning-source") as HTMLTextAreaElement;
+    source.value = `${OUTLINE}# submitted edit\n`;
+    source.dispatchEvent(new Event("input", { bubbles: true }));
+    (document.querySelector(".ab-planning-apply") as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelector(".ab-planning-editor-shell")).toBeNull();
+
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    store.getState().reconcileEvent({
+      id: 41,
+      type: "revision_proposal_applied",
+      payload: { revisionProposalId: "proposal-1", commitSha: "e".repeat(40) },
+    });
+    store.getState().reconcileEvent({
+      id: 42,
+      type: "publication_updated",
+      payload: {
+        integratedCommit: "e".repeat(40),
+        buildStatus: "failed",
+        deployedCommit: null,
+      },
+    });
+
+    const edit = document.querySelector(".ab-planning-edit") as HTMLButtonElement;
+    await expect.poll(() => edit.disabled).toBe(false);
+    expect(document.querySelector(".ab-planning-launcher-status")?.textContent)
+      .toContain("Publication failed");
+    edit.click();
+
+    await expect.poll(() => document.querySelector(".ab-planning-source")).toBeTruthy();
+    expect((document.querySelector(".ab-planning-source") as HTMLTextAreaElement).value)
+      .toBe(OUTLINE);
+    expect(store.getState().editorRevisionsByTargetKey).toEqual({});
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
   it("keeps a failed stale draft open, saved, and protected from accidental loss", async () => {
     stubFetch({ capabilities: ["revisions:write"], proposalStatus: 409 });
     mountOutline();

@@ -383,6 +383,29 @@ describe("in-place manuscript editor launcher", () => {
     expect(unload.defaultPrevented).toBe(true);
   });
 
+  it("starts a fresh chapter edit while an earlier proposal waits for review", async () => {
+    stubFetch({ capabilities: ["chapters:read", "revisions:write"] });
+    mount();
+    await expect.poll(() => document.querySelector(".ab-manuscript-edit")).toBeTruthy();
+    (document.querySelector(".ab-manuscript-edit") as HTMLButtonElement).click();
+    await expect.poll(() => createSurface.mock.calls.length).toBe(1);
+
+    surfaceMarkdown = "Submitted chapter prose.";
+    lastSurfaceOptions?.onMarkdownChange?.(surfaceMarkdown);
+    (document.querySelector('[data-manuscript-submit="review"]') as HTMLButtonElement).click();
+    await expect.poll(() => document.querySelector(".ab-manuscript-editor-shell")).toBeNull();
+
+    const edit = document.querySelector(".ab-manuscript-edit") as HTMLButtonElement;
+    expect(edit.disabled).toBe(false);
+    edit.click();
+
+    await expect.poll(() => createSurface.mock.calls.length).toBe(2);
+    expect(createSurface.mock.calls[1]?.[0].markdown).toBe("Original chapter prose.");
+    expect(getProjectStore({ apiBase: API, project: PROJECT }).getState()
+      .editorRevisionsByTargetKey).toEqual({});
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
   it("offers one-click apply only to a reviewing maintainer", async () => {
     stubFetch({
       role: "maintainer",
