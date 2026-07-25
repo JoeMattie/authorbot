@@ -96,9 +96,16 @@ function stubApi(options: {
   scopes?: string[];
   proposals?: RevisionProposalSummary[];
   linkedProposals?: RevisionProposalSummary[];
+  proposalListResponse?: (read: number) => Response | Promise<Response>;
+  proposalDetailResponse?: (
+    proposal: RevisionProposalSummary,
+    read: number,
+  ) => Response | Promise<Response>;
 } = {}): void {
   const proposals = options.proposals ?? [summary(PROPOSAL)];
   const linkedProposals = options.linkedProposals ?? [];
+  let proposalListReads = 0;
+  let proposalDetailReads = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -115,11 +122,17 @@ function stubApi(options: {
       }
       if (url.includes("/events?")) return json(404, { detail: "event feed unavailable" });
       if (url.includes("/revision-proposals?")) {
+        if (options.proposalListResponse !== undefined) {
+          return options.proposalListResponse(proposalListReads++);
+        }
         return json(200, { items: proposals, nextCursor: null });
       }
       const selected = [...proposals, ...linkedProposals]
         .find((proposal) => url.includes(proposal.id));
       if (method === "GET" && selected !== undefined) {
+        if (options.proposalDetailResponse !== undefined) {
+          return options.proposalDetailResponse(selected, proposalDetailReads++);
+        }
         return json(200, detail(selected.id, selected));
       }
       if (url.endsWith("/approve")) {
@@ -326,6 +339,50 @@ describe("maintainer revision review element", () => {
     expect(replacement).not.toBe(original);
     expect(replacement.value).toBe("The last image needs one more beat.");
     expect(document.activeElement).toBe(replacement);
+  });
+
+  it("keeps the revision list and selected detail mounted during background refreshes", async () => {
+    let resolveListRefresh!: (response: Response) => void;
+    let resolveDetailRefresh!: (response: Response) => void;
+    const pendingListRefresh = new Promise<Response>((resolve) => {
+      resolveListRefresh = resolve;
+    });
+    const pendingDetailRefresh = new Promise<Response>((resolve) => {
+      resolveDetailRefresh = resolve;
+    });
+    stubApi({
+      proposalListResponse: (read) =>
+        read === 0
+          ? json(200, { items: [summary(PROPOSAL)], nextCursor: null })
+          : pendingListRefresh,
+      proposalDetailResponse: (proposal, read) =>
+        read === 0 ? json(200, detail(proposal.id, proposal)) : pendingDetailRefresh,
+    });
+    mount();
+
+    await expect.poll(
+      () => document.querySelector<HTMLTextAreaElement>(".ab-revision-reason"),
+    ).toBeTruthy();
+    const listItem = document.querySelector<HTMLElement>(".ab-revision-list-item")!;
+    const reason = document.querySelector<HTMLTextAreaElement>(".ab-revision-reason")!;
+    reason.value = "Keep this draft stable.";
+    reason.dispatchEvent(new Event("input", { bubbles: true }));
+    reason.focus();
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    const listRefresh = store.getState().refreshRevisionProposals();
+    const detailRefresh = store.getState().refreshRevisionProposal(PROPOSAL);
+
+    expect(document.querySelector(".ab-revision-list-item")).toBe(listItem);
+    expect(document.querySelector(".ab-revision-reason")).toBe(reason);
+    expect(reason.value).toBe("Keep this draft stable.");
+    expect(document.activeElement).toBe(reason);
+    expect(
+      document.querySelector<HTMLElement>(".ab-revision-list-status")?.hidden,
+    ).toBe(true);
+
+    resolveListRefresh(json(200, { items: [summary(PROPOSAL)], nextCursor: null }));
+    resolveDetailRefresh(json(200, detail(PROPOSAL)));
+    await Promise.all([listRefresh, detailRefresh]);
   });
 
   it("does not require a rejection note and withholds decisions without review authority", async () => {
