@@ -348,7 +348,17 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       return;
     }
     this.source = read.value;
-    const stored = loadChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    const saved = loadChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    const stored = saved !== null &&
+        (saved.proposalId === undefined || this.needsRecoveryWarning())
+      ? saved
+      : null;
+    if (saved !== null && stored === null) {
+      clearChapterDraft(storageOrNull(), this.cfg.project, this.cfg.chapterId);
+    }
+    if (this.currentLifecycle() !== undefined && !this.needsRecoveryWarning()) {
+      this.store.getState().forgetEditorRevision(this.target!.key);
+    }
     if (
       stored !== null &&
       (stored.baseRevision !== read.value.revision || stored.baseContentHash !== contentHash)
@@ -948,9 +958,10 @@ export class AuthorbotManuscriptEditor extends HTMLElement {
       this.setLauncherStatus(message, failed);
     }
     if (this.editButton !== null && this.editorShell === null) {
-      const locked = state.phase === "saving" || state.phase === "pending_review" ||
-        state.phase === "applying" || state.phase === "integrated" ||
-        state.phase === "publishing" || state.phase === "deployment_failed";
+      // Review and publication progress belongs beside the editor; it must
+      // not monopolize the chapter target. Exact source revision/hash checks
+      // remain the authoritative concurrency guard for the next edit.
+      const locked = state.phase === "saving" || state.phase === "applying";
       this.editButton.disabled = locked;
       setLabeledButton(
         this.editButton,

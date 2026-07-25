@@ -340,7 +340,17 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
       return;
     }
     this.source = result.value;
-    const draft = readDraft(this.cfg);
+    const stored = readDraft(this.cfg);
+    const draft = stored !== null &&
+        (stored.proposalId === undefined || this.needsRecoveryWarning())
+      ? stored
+      : null;
+    if (stored !== null && draft === null) {
+      clearDraft(this.cfg);
+    }
+    if (this.currentLifecycle() !== undefined && !this.needsRecoveryWarning()) {
+      this.store.getState().forgetEditorRevision(this.target!.key);
+    }
     this.baseContentHash = draft?.baseContentHash ?? result.value.contentHash;
     const content = draft?.content ?? result.value.content;
     this.buildShell(
@@ -783,9 +793,10 @@ export class AuthorbotPlanningDocumentEditor extends HTMLElement {
       this.setLauncherStatus(message, failed);
     }
     if (this.editButton !== null && this.shell === null) {
-      const locked = state.phase === "saving" || state.phase === "pending_review" ||
-        state.phase === "applying" || state.phase === "integrated" ||
-        state.phase === "publishing" || state.phase === "deployment_failed";
+      // The repository hash is the concurrency guard. A prior proposal's
+      // review/publication lifecycle is useful status, not an editor lock.
+      // Only an in-flight save/apply can make a fresh source read premature.
+      const locked = state.phase === "saving" || state.phase === "applying";
       this.editButton.disabled = locked;
       setLabeledButton(
         this.editButton,
