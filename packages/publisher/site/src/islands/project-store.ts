@@ -410,6 +410,17 @@ export function chapterHistoryDetailKey(
   return JSON.stringify([chapterId, revision, compare]);
 }
 
+/**
+ * Preserve normalized entity identity when a refresh returns the same row.
+ * Store subscribers use identity to decide which custom-element subtree
+ * actually changed, so replacing equal rows would needlessly rebuild every
+ * note after any authoritative read.
+ */
+function sameAnnotation(left: Annotation | undefined, right: Annotation): boolean {
+  if (left === undefined) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 /** Cursor pages can overlap while Git history is moving; the newest read wins. */
 function mergeChapterHistoryRows(
   existing: readonly ChapterHistoryRevision[],
@@ -1081,8 +1092,14 @@ export function createProjectStore(
     annotationId: string | null,
     refreshWork: boolean,
     deferToOperation = false,
+    skipInitialRefresh = false,
   ): Promise<void> => {
     updatePendingMutation(id, "accepted");
+    // An accepted asynchronous command already has an operation context that
+    // will refresh every affected projection at terminal settlement. Reading
+    // immediately can race the operation and replace the optimistic row with
+    // an older server snapshot, producing a visible empty-state flash.
+    if (skipInitialRefresh) return;
     const refreshed = await refreshMutationResources(chapterId, annotationId, refreshWork);
     // With no loaded projection, the normalized response is already the only
     // visible state. Otherwise only a successful post-command read may retire
@@ -1309,7 +1326,10 @@ export function createProjectStore(
         delete annotationsById[id];
       }
       for (const annotation of result.value) {
-        annotationsById[annotation.id] = annotation;
+        const previous = state.annotationsById[annotation.id];
+        annotationsById[annotation.id] = sameAnnotation(previous, annotation)
+          ? (previous ?? annotation)
+          : annotation;
       }
       store.setState({
         annotationsById,
@@ -2851,7 +2871,15 @@ export function createProjectStore(
       mutationId: id,
       fingerprint,
     });
-    await settleAcceptedMutation(id, fingerprint, chapterId, accepted.annotationId, false, true);
+    await settleAcceptedMutation(
+      id,
+      fingerprint,
+      chapterId,
+      accepted.annotationId,
+      false,
+      true,
+      true,
+    );
     return { ok: true, value: accepted };
   };
 

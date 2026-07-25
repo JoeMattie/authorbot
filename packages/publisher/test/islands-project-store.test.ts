@@ -176,6 +176,43 @@ describe("project-scoped editorial store", () => {
     expect(secondPage).toBe(true);
   });
 
+  it("preserves unchanged annotation identities across authoritative refreshes", async () => {
+    const secondId = "019cadfd-8900-7140-98fb-ceff64cada38";
+    let rows: Annotation[] = [
+      annotation(),
+      { ...annotation(), id: secondId, body: "Leave this alone." },
+    ];
+    const store = await readyStore(
+      baseApi({
+        async annotations() {
+          return {
+            ok: true,
+            value: structuredClone(rows),
+          };
+        },
+      }),
+    );
+    const firstBefore = store.getState().annotationsById[ANNOTATION];
+    const secondBefore = store.getState().annotationsById[secondId];
+
+    await store.getState().refreshAnnotations(CHAPTER);
+
+    expect(store.getState().annotationsById[ANNOTATION]).toBe(firstBefore);
+    expect(store.getState().annotationsById[secondId]).toBe(secondBefore);
+
+    rows = [
+      rows[0] as Annotation,
+      { ...(rows[1] as Annotation), body: "Only this row changed." },
+    ];
+    await store.getState().refreshAnnotations(CHAPTER);
+
+    expect(store.getState().annotationsById[ANNOTATION]).toBe(firstBefore);
+    expect(store.getState().annotationsById[secondId]).not.toBe(secondBefore);
+    expect(store.getState().annotationsById[secondId]?.body).toBe(
+      "Only this row changed.",
+    );
+  });
+
   it("fails a malformed or unbounded Work pagination chain within a fixed read budget", async () => {
     let repeatedReads = 0;
     const repeated = createProjectStore(
@@ -1414,7 +1451,7 @@ describe("project-scoped editorial store", () => {
         baseApi({
           async annotations() {
             annotationReads += 1;
-            if (annotationReads === 3) {
+            if (annotationReads === 2) {
               return { ok: false, status: 503, message: "projection temporarily stale" };
             }
             return { ok: true, value: annotationReads === 1 ? [annotation()] : authoritative };
@@ -1447,13 +1484,13 @@ describe("project-scoped editorial store", () => {
       ]);
 
       await store.getState().refreshOperation(operationId);
-      expect(annotationReads).toBe(3);
+      expect(annotationReads).toBe(2);
       expect(Object.keys(store.getState().pendingMutations)).toHaveLength(1);
       expect(vi.getTimerCount()).toBe(1);
 
       await vi.advanceTimersToNextTimerAsync();
       await flushMicrotasks();
-      expect(annotationReads).toBe(4);
+      expect(annotationReads).toBe(3);
       expect(store.getState().pendingMutations).toEqual({});
     } finally {
       vi.useRealTimers();

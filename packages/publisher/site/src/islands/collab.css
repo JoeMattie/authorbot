@@ -431,6 +431,10 @@ main.ab-enabled {
   overflow-x: clip;
 }
 
+.ab-note-cards {
+  display: contents;
+}
+
 .ab-gutter .ab-cards[data-layout-ready="false"] {
   visibility: hidden;
 }
@@ -1513,25 +1517,34 @@ authorbot-chapter-summary-editor[hidden] {
 }
 
 .chapter-reading-layout.ab-reading-layout > .ab-gutter {
-  position: sticky;
+  position: relative;
   z-index: 4;
-  top: 76px;
+  top: auto;
   left: auto;
+  align-self: stretch;
   grid-column: 2;
   grid-row: 1;
   width: auto;
   min-width: 0;
   max-width: 460px;
+  height: auto;
+  max-height: none;
   padding: 0 3px 18px;
 }
 
 .ab-rail-head {
+  position: sticky;
+  z-index: 200;
+  top: 69px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
+  padding: 8px 0;
+  background: var(--surface-page, var(--bg));
+  box-shadow: 0 1px 0 var(--border-subtle, var(--border));
 }
 
 .ab-note-nav {
@@ -1595,10 +1608,17 @@ authorbot-chapter-summary-editor[hidden] {
 }
 
 .ab-gutter .ab-card-shell {
+  z-index: var(--ab-anchor-depth, 1);
   border: 1px solid var(--border-default, var(--border));
   border-radius: 10px;
   background: var(--surface-card, var(--bg));
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.16));
+}
+
+.ab-gutter .ab-card.ab-note-expanded,
+.ab-gutter .ab-card.ab-active,
+.ab-gutter .ab-card:focus-within {
+  z-index: 100;
 }
 
 .ab-gutter .ab-card {
@@ -1742,9 +1762,13 @@ authorbot-chapter-summary-editor[hidden] {
 }
 
 .ab-accepted-badge {
-  margin-left: auto;
   background: var(--green-400, #62c889);
   color: var(--gray-950, #101812);
+}
+
+.ab-card-accepted-row {
+  display: flex;
+  margin-top: 7px;
 }
 
 .ab-card.ab-promoted .ab-suggestion-diff {
@@ -2158,14 +2182,11 @@ authorbot-chapter-summary-editor[hidden] {
   display: none;
 }
 
-/* Navigation remains outside the scrolling list, so Previous and Next are
-   reachable even when one expanded note is taller than the viewport. `auto`
-   creates a scrollbar only when the ordered card stack actually overflows. */
+/* Cards and prose share document space. Each card's absolute top is the
+   corresponding paragraph's top relative to this gutter. */
 .chapter-reading-layout.ab-reading-layout > .ab-gutter {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 92px);
-  max-height: calc(100vh - 92px);
   overflow: visible;
 }
 
@@ -2177,9 +2198,7 @@ authorbot-chapter-summary-editor[hidden] {
 .ab-gutter .ab-cards {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  overflow: visible;
   padding: 3px;
 }
 
@@ -2283,7 +2302,7 @@ authorbot-chapter-summary-editor[hidden] {
   .ab-inline-notes:not(:empty) {
     display: block;
     width: 100%;
-    margin: 0 0 1.35rem;
+    margin: 0 0 0.75rem;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     font-size: 0.85rem;
     line-height: 1.45;
@@ -2294,22 +2313,22 @@ authorbot-chapter-summary-editor[hidden] {
   }
 
   .ab-inline-notes-block:not(:empty) {
-    margin-top: -0.55rem;
+    margin-top: -0.8rem;
   }
 
   .ab-inline-notes .ab-card-shell,
   .ab-inline-notes .ab-composer {
     position: static;
     width: 100%;
-    margin: 0 0 10px;
+    margin: 0 0 6px;
     border: 1px solid var(--border-default, var(--border));
-    border-radius: 10px;
+    border-radius: 8px;
     background: var(--surface-card, var(--bg));
     box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.14));
   }
 
   .ab-inline-notes .ab-card {
-    padding: 13px 14px;
+    padding: 10px 11px;
     color: var(--text-body, var(--fg));
   }
 
@@ -2319,7 +2338,38 @@ authorbot-chapter-summary-editor[hidden] {
   }
 
   .ab-inline-notes .ab-card.ab-note-collapsed {
-    padding: 10px 12px;
+    padding: 7px 9px;
+  }
+
+  .ab-inline-notes .ab-card .ab-body {
+    margin-top: 8px;
+    line-height: 1.45;
+  }
+
+  .ab-inline-notes .ab-votes {
+    margin-top: 8px;
+  }
+
+  .ab-inline-notes .ab-vote-tally {
+    margin-top: 2px;
+    font-size: 11px;
+  }
+
+  .ab-inline-notes .ab-override {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 10px;
+    margin-top: 7px;
+    padding-top: 7px;
+  }
+
+  .ab-inline-notes .ab-override-actions {
+    margin-top: 0;
+  }
+
+  .ab-inline-notes .ab-actions {
+    margin-top: 6px;
   }
 
 }

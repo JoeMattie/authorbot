@@ -13,6 +13,35 @@ export interface StackItem {
   height: number;
 }
 
+/** Convert a viewport-space prose coordinate into the gutter's document space. */
+export function documentAnchorTop(anchorTop: number, hostTop: number): number {
+  return anchorTop - hostTop;
+}
+
+export interface DocumentAnchorStackPosition {
+  top: number;
+  left: number;
+  depth: number;
+}
+
+/**
+ * Notes sharing one prose anchor peek out diagonally instead of occupying the
+ * exact same rectangle. Cap the visual cascade so large threads stay in-bounds.
+ */
+export function documentAnchorStackPosition(
+  anchorTop: number,
+  hostTop: number,
+  stackIndex: number,
+): DocumentAnchorStackPosition {
+  const depth = Math.min(4, Math.max(0, Math.floor(stackIndex)));
+  const peek = depth * 12;
+  return {
+    top: documentAnchorTop(anchorTop, hostTop) + peek,
+    left: peek,
+    depth,
+  };
+}
+
 /**
  * Assign each card a top such that cards never overlap, preserving desired
  * order (ties broken by id for determinism). Without a viewport limit, cards

@@ -14,7 +14,11 @@
  *   `setAttribute("style", …)`, so the contract §3 CSP holds without
  *   `'unsafe-inline'` styles.
  */
-import { stackCards, type StackItem } from "./anchor.js";
+import {
+  documentAnchorStackPosition,
+  documentAnchorTop,
+} from "./anchor.js";
+import { gsap } from "gsap";
 import {
   autoUpdate,
   computePosition,
@@ -56,7 +60,6 @@ import { iconButton, inlineIcon } from "./dom.js";
 import type { ProjectStore } from "./project-store.js";
 import { loadProjectStore } from "./project-store-loader.js";
 import {
-  noteIsExpanded,
   orderedChapterNotes,
   StaticChapterNotesTargetAdapter,
   type ChapterNotesTargetAdapter,
@@ -83,7 +86,6 @@ interface FocusRestore {
 }
 
 const DESKTOP_QUERY = "(min-width: 960px)";
-const CARD_GAP = 12;
 const DISCUSSION_PAGE_SIZE = 20;
 const REPLY_HYDRATION_CONCURRENCY = 4;
 const NOTE_FRAGMENT_PREFIX = "authorbot-note-";
@@ -247,6 +249,10 @@ export class AuthorbotCollab extends HTMLElement {
   private nextNoteBtn!: HTMLButtonElement;
   private authbar!: HTMLElement;
   private cardsHost!: HTMLElement;
+  private notesCardsHost!: HTMLElement;
+  private notesErrorEl: HTMLElement | null = null;
+  private renderedHighlightSignature: string | null = null;
+  private renderedMarkerSignature: string | null = null;
   private discussion!: HTMLElement;
   private discussionThreadsHost!: HTMLElement;
   private discussionComposerHost!: HTMLElement;
@@ -276,13 +282,10 @@ export class AuthorbotCollab extends HTMLElement {
   private pendingAnnotationFocusId: string | null = null;
   private discussionVisibleLimit = DISCUSSION_PAGE_SIZE;
   private explicitExpandedAnnotationId: string | null = null;
-  private visibleBlockIds = new Set<string>();
-  private suppressedAnnotationIds = new Set<string>();
   /** The last deep link applied, so background refreshes never steal scroll. */
   private activatedNoteFragment: string | null = null;
   private targetAdapter!: ChapterNotesTargetAdapter;
   private staticTargetAdapter!: StaticChapterNotesTargetAdapter;
-  private stopTargetVisibility: (() => void) | null = null;
   private chapterEditModeActive = false;
 
   private mql!: MediaQueryList;
@@ -358,8 +361,6 @@ export class AuthorbotCollab extends HTMLElement {
     this.unsubscribeStore = null;
     this.releaseConnection?.();
     this.releaseConnection = null;
-    this.stopTargetVisibility?.();
-    this.stopTargetVisibility = null;
     if (this.refetchTimer !== undefined) {
       window.clearTimeout(this.refetchTimer);
       this.refetchTimer = undefined;
@@ -373,6 +374,7 @@ export class AuthorbotCollab extends HTMLElement {
       this.resizeTimer = undefined;
     }
     this.clearGutterAutoUpdates();
+    gsap.killTweensOf([...this.cardEls.values()]);
     if (this.layoutFrame !== undefined) {
       window.cancelAnimationFrame(this.layoutFrame);
       this.layoutFrame = undefined;
@@ -415,6 +417,8 @@ export class AuthorbotCollab extends HTMLElement {
     this.authbar.hidden = true;
     this.cardsHost = el("div", "ab-cards");
     this.cardsHost.dataset.layoutReady = "false";
+    this.notesCardsHost = el("div", "ab-note-cards");
+    this.cardsHost.append(this.notesCardsHost);
 
     this.railHeader = el("header", "ab-rail-head");
     this.railHeader.append(el("span", "ab-rail-eyebrow", "Notes on this chapter"));
@@ -592,29 +596,10 @@ export class AuthorbotCollab extends HTMLElement {
       this.blockUis,
     );
     this.targetAdapter = this.staticTargetAdapter;
-    this.observeTargetVisibility();
 
     this.mql = window.matchMedia(DESKTOP_QUERY);
     this.placeContainers();
     this.connectGlobalListeners();
-  }
-
-  private observeTargetVisibility(): void {
-    this.stopTargetVisibility?.();
-    this.stopTargetVisibility = this.targetAdapter.observeVisibility((blockId, visible) => {
-      if (visible) {
-        this.visibleBlockIds.add(blockId);
-      } else {
-        this.visibleBlockIds.delete(blockId);
-        for (const annotation of this.visibleNotes()) {
-          if (annotation.target?.blockId === blockId) {
-            this.suppressedAnnotationIds.delete(annotation.id);
-          }
-        }
-      }
-      this.refreshCardExpansion();
-      this.layout();
-    });
   }
 
   private connectGlobalListeners(): void {
@@ -651,7 +636,7 @@ export class AuthorbotCollab extends HTMLElement {
 
   private readonly onMediaChange = (): void => {
     this.placeContainers();
-    this.renderAll();
+    this.renderAll(new Set(this.cardEls.keys()));
   };
 
   private readonly onResize = (): void => {
@@ -664,7 +649,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.notesPanelVisible = visible !== false;
     this.closeHiddenNotesPopover();
     this.placeContainers();
-    this.renderAll();
+    this.renderAll(new Set(this.cardEls.keys()));
   };
 
   private get isDesktop(): boolean {
@@ -797,7 +782,7 @@ export class AuthorbotCollab extends HTMLElement {
       if (!(await this.loadAnnotations(generation, store, cfg))) return;
     }
     if (!this.isCurrentMount(generation)) return;
-    this.renderAll();
+    this.renderAll(new Set(this.cardEls.keys()));
     if (this.me !== null || cfg.showPublic) {
       if (!this.isCurrentMount(generation)) return;
       // Match the existing connection ordering: the first authoritative reply
@@ -889,7 +874,7 @@ export class AuthorbotCollab extends HTMLElement {
       const generation = this.mountGeneration;
       if (!(await this.loadReplies(generation, this.store, added))) return;
     }
-    this.renderAll();
+    this.renderAll(new Set(this.cardEls.keys()));
     this.discussionThreadsHost
       .querySelector<HTMLElement>(`[data-annotation-id]:nth-child(${before + 1})`)
       ?.focus();
@@ -948,7 +933,9 @@ export class AuthorbotCollab extends HTMLElement {
           }
           continue;
         }
-        if (this.syncRepliesFromStore([annotation])) this.renderAll();
+        if (this.syncRepliesFromStore([annotation])) {
+          this.renderChangedAnnotations(annotation.id);
+        }
       }
       return true;
     };
@@ -964,7 +951,12 @@ export class AuthorbotCollab extends HTMLElement {
     const store = this.store;
     if (!(await this.loadAnnotations(generation, store))) return;
     if (!this.isCurrentMount(generation)) return;
-    this.renderAll();
+    if (
+      this.cfg !== null &&
+      store.getState().annotationStatusByChapter[this.cfg.chapterId] !== "ready"
+    ) {
+      this.renderAll();
+    }
     void this.loadReplies(generation, store);
   }
 
@@ -994,6 +986,25 @@ export class AuthorbotCollab extends HTMLElement {
     this.me = state.session;
     if (sessionChanged) this.memberNames = new Map();
     const nextAnnotations = ids.flatMap((id) => state.annotationsById[id] ?? []);
+    const preserveCardIds = new Set<string>();
+    if (!sessionChanged) {
+      const beforeById = new Map(
+        this.annotations.map((annotation) => [annotation.id, annotation] as const),
+      );
+      for (const annotation of nextAnnotations) {
+        if (beforeById.get(annotation.id) !== annotation) continue;
+        const nextReplyIds = state.replyIdsByAnnotation[annotation.id] ?? [];
+        const currentReplies = this.repliesByAnnotation.get(annotation.id) ?? [];
+        if (
+          nextReplyIds.length === currentReplies.length &&
+          nextReplyIds.every(
+            (id, index) => state.repliesById[id] === currentReplies[index],
+          )
+        ) {
+          preserveCardIds.add(annotation.id);
+        }
+      }
+    }
     const onlyVoteDataChanged =
       nextAnnotations.length === this.annotations.length &&
       nextAnnotations.every((next, index) => {
@@ -1032,7 +1043,7 @@ export class AuthorbotCollab extends HTMLElement {
         replyIds.flatMap((id) => state.repliesById[id] ?? []),
       );
     }
-    this.renderAll();
+    this.renderAll(preserveCardIds);
   }
 
   /** Test and rolling-deployment adapter; the project store owns the feed. */
@@ -1108,7 +1119,7 @@ export class AuthorbotCollab extends HTMLElement {
     if (action === "promote") {
       this.openReplyFor = null;
       this.replyParent = null;
-      this.renderAll();
+      this.renderChangedAnnotations(annotationId);
     }
     this.announce(
       action === "promote"
@@ -1259,9 +1270,9 @@ export class AuthorbotCollab extends HTMLElement {
     }
     this.activeAnnotationId = annotationId;
     this.explicitExpandedAnnotationId = annotationId;
-    this.suppressedAnnotationIds.delete(annotationId);
     for (const [id, card] of this.cardEls) {
       card.classList.toggle("ab-active", id === annotationId);
+      this.tweenCardLayer(card);
     }
     for (const mark of this.proseEl.querySelectorAll<HTMLElement>(".ab-inline-highlight")) {
       mark.classList.toggle("ab-highlight-active", mark.dataset.annotationId === annotationId);
@@ -1278,19 +1289,19 @@ export class AuthorbotCollab extends HTMLElement {
     this.scheduleLayout();
   }
 
+  private revealAnnotation(annotationId: string, moveFocus = false): void {
+    const annotation = this.visibleNotes().find(({ id }) => id === annotationId);
+    if (annotation === undefined || annotation.target === null) {
+      this.activateAnnotation(annotationId, moveFocus);
+      return;
+    }
+    this.activateAnnotation(annotationId, moveFocus);
+    this.targetAdapter.reveal(annotation.target.blockId);
+  }
+
   private collapseAnnotation(annotationId: string): void {
     if (this.explicitExpandedAnnotationId === annotationId) {
       this.explicitExpandedAnnotationId = null;
-    }
-    const annotation = this.visibleNotes().find(({ id }) => id === annotationId);
-    if (
-      annotation?.target !== null &&
-      annotation?.target !== undefined &&
-      this.visibleBlockIds.has(annotation.target.blockId)
-    ) {
-      this.suppressedAnnotationIds.add(annotationId);
-    } else {
-      this.suppressedAnnotationIds.delete(annotationId);
     }
     this.refreshCardExpansion();
     this.cardEls.get(annotationId)?.focus();
@@ -1298,21 +1309,126 @@ export class AuthorbotCollab extends HTMLElement {
   }
 
   private refreshCardExpansion(): void {
-    const state = {
-      explicitAnnotationId: this.explicitExpandedAnnotationId,
-      visibleBlockIds: this.visibleBlockIds,
-      suppressedAnnotationIds: this.suppressedAnnotationIds,
-    };
     for (const annotation of this.visibleNotes()) {
       const card = this.cardEls.get(annotation.id);
       if (card === undefined) continue;
-      const expanded = noteIsExpanded(annotation, state);
-      card.classList.toggle("ab-note-collapsed", !expanded);
-      card.classList.toggle("ab-note-expanded", expanded);
-      card.setAttribute("aria-expanded", String(expanded));
-      card.querySelector<HTMLElement>(".ab-card-summary")
-        ?.setAttribute("aria-expanded", String(expanded));
+      const expanded =
+        annotation.target === null ||
+        annotation.id === this.explicitExpandedAnnotationId;
+      this.setCardExpansion(card, expanded);
     }
+  }
+
+  private setCardExpansion(card: HTMLElement, expanded: boolean): void {
+    const wasExpanded = card.classList.contains("ab-note-expanded");
+    const initialized = card.dataset.expansionReady === "true";
+    const applyState = (nextExpanded: boolean): void => {
+      card.classList.remove("ab-note-closing");
+      card.classList.toggle("ab-note-collapsed", !nextExpanded);
+      card.classList.toggle("ab-note-expanded", nextExpanded);
+      card.setAttribute("aria-expanded", String(nextExpanded));
+      card.querySelector<HTMLElement>(".ab-card-summary")
+        ?.setAttribute("aria-expanded", String(nextExpanded));
+    };
+    card.dataset.expansionReady = "true";
+    if (!initialized) {
+      applyState(expanded);
+      this.tweenCardLayer(card, false);
+      return;
+    }
+    if (wasExpanded === expanded) {
+      gsap.killTweensOf(card, "clipPath,opacity,height,overflow");
+      gsap.set(card, { clearProps: "clipPath,opacity,height,overflow" });
+      applyState(expanded);
+      this.tweenCardLayer(card);
+      return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      applyState(expanded);
+      this.tweenCardLayer(card, false);
+      return;
+    }
+
+    gsap.killTweensOf(card, "clipPath,opacity,height,overflow");
+    if (expanded) {
+      const collapsedHeight = card.offsetHeight;
+      applyState(true);
+      const expandedHeight = card.offsetHeight;
+      gsap.fromTo(
+        card,
+        {
+          height: collapsedHeight,
+          overflow: "hidden",
+          opacity: 0.82,
+        },
+        {
+          height: expandedHeight,
+          opacity: 1,
+          duration: 0.24,
+          ease: "power3.out",
+          overwrite: "auto",
+          onComplete: () => {
+            gsap.set(card, {
+              clearProps: "height,overflow,opacity",
+            });
+            this.layout();
+          },
+        },
+      );
+      this.tweenCardLayer(card);
+      return;
+    }
+
+    const expandedHeight = card.offsetHeight;
+    applyState(false);
+    const collapsedHeight = card.offsetHeight;
+    gsap.fromTo(
+      card,
+      {
+        height: expandedHeight,
+        overflow: "hidden",
+        opacity: 0.82,
+      },
+      {
+        height: collapsedHeight,
+        opacity: 1,
+        duration: 0.18,
+        ease: "power2.out",
+        overwrite: "auto",
+        onComplete: () => {
+          gsap.set(card, {
+            clearProps: "height,overflow,opacity",
+          });
+          this.tweenCardLayer(card);
+          this.layout();
+        },
+      },
+    );
+    this.tweenCardLayer(card);
+  }
+
+  private tweenCardLayer(card: HTMLElement, animate = true): void {
+    const front =
+      card.classList.contains("ab-note-expanded") ||
+      card.classList.contains("ab-active") ||
+      card.matches(":focus-within");
+    const x = front ? -24 : 0;
+    if (
+      !animate ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      gsap.set(card, { x });
+      return;
+    }
+    gsap.to(card, {
+      x,
+      duration: 0.2,
+      ease: "power3.out",
+      overwrite: "auto",
+      onComplete: () => {
+        if (!front) gsap.set(card, { clearProps: "transform" });
+      },
+    });
   }
 
   /** Move through the deterministic rail order and reveal the prose target. */
@@ -1325,9 +1441,8 @@ export class AuthorbotCollab extends HTMLElement {
     const annotation = visible[index];
     if (annotation === undefined || index === current) return;
 
-    this.activateAnnotation(annotation.id);
+    this.revealAnnotation(annotation.id);
     const block = this.blockFor(annotation);
-    if (annotation.target !== null) this.targetAdapter.reveal(annotation.target.blockId);
     this.cardEls.get(annotation.id)?.focus({ preventScroll: block !== null });
     this.announce(`Note ${index + 1} of ${visible.length}.`);
   }
@@ -1353,6 +1468,17 @@ export class AuthorbotCollab extends HTMLElement {
         (a, b) =>
           (b.target?.textPosition?.start ?? 0) - (a.target?.textPosition?.start ?? 0),
       );
+    const signature = JSON.stringify(
+      annotations.map((annotation) => ({
+        id: annotation.id,
+        kind: annotation.kind,
+        target: annotation.target,
+        author: this.authorName(annotation.authorActorId),
+        active: annotation.id === this.activeAnnotationId,
+      })),
+    );
+    if (signature === this.renderedHighlightSignature) return;
+    this.renderedHighlightSignature = signature;
     if (this.targetAdapter.setHighlights !== undefined) {
       this.targetAdapter.setHighlights(annotations.flatMap((annotation) => {
         const position = annotation.target?.textPosition;
@@ -1514,7 +1640,7 @@ export class AuthorbotCollab extends HTMLElement {
               message: this.friendlySyncError(message ?? "The comment could not be saved."),
             },
       );
-      this.renderAll();
+      this.renderChangedAnnotations(annotationId);
     });
   }
 
@@ -1522,22 +1648,26 @@ export class AuthorbotCollab extends HTMLElement {
     const operationId = annotation.gitOperationId;
     if (operationId === null) return;
     this.annotationSync.set(annotation.id, { phase: "syncing" });
-    this.renderAll();
+    this.renderChangedAnnotations(annotation.id);
     const result = await this.api.retryOperation(operationId);
     if (!result.ok) {
       this.annotationSync.set(annotation.id, {
         phase: "failed",
         message: this.friendlyWriteError(result.status, result.message),
       });
-      this.renderAll();
+      this.renderChangedAnnotations(annotation.id);
       return;
     }
     this.markAnnotationSyncing(annotation.id, operationId);
     this.announce("Retrying comment save.");
-    this.renderAll();
+    this.renderChangedAnnotations(annotation.id);
   }
 
-  private markReplySyncing(replyId: string, operationId: string): void {
+  private markReplySyncing(
+    annotationId: string,
+    replyId: string,
+    operationId: string,
+  ): void {
     this.replySync.set(replyId, { phase: "syncing" });
     this.pollOperation(operationId, (outcome, message) => {
       if (outcome === "committed") {
@@ -1551,7 +1681,7 @@ export class AuthorbotCollab extends HTMLElement {
             : { phase: "failed", message: message ?? "failed" },
         );
       }
-      this.renderAll();
+      this.renderChangedAnnotations(annotationId);
     });
   }
 
@@ -1612,6 +1742,18 @@ export class AuthorbotCollab extends HTMLElement {
     this.renderComposer();
   }
 
+  private focusComposerTextarea(): void {
+    const textarea = this.composerEl?.querySelector<HTMLTextAreaElement>("textarea");
+    if (textarea === null || textarea === undefined) return;
+    const draft = this.composer.draft;
+    const documentAnchored =
+      this.isDesktop &&
+      this.notesPanelVisible &&
+      draft !== null &&
+      draft.scope !== "chapter";
+    textarea.focus(documentAnchored ? { preventScroll: true } : undefined);
+  }
+
   private openComposer(draft: ComposerDraft, returnFocus: HTMLElement): void {
     if (this.chapterEditModeActive) return;
     if (
@@ -1624,8 +1766,9 @@ export class AuthorbotCollab extends HTMLElement {
     this.composerReturnFocus = returnFocus;
     if (draft.scope === "range") this.latchComposerSelection();
     this.dispatchComposer({ type: "open", draft });
-    this.composerEl?.querySelector("textarea")?.focus();
-    this.layout();
+    // The rail owns the form's absolute position. Focusing it must not let the
+    // browser choose a different page position on the reader's behalf.
+    this.focusComposerTextarea();
   }
 
   private closeComposer(): void {
@@ -1711,6 +1854,7 @@ export class AuthorbotCollab extends HTMLElement {
         };
     const result = await this.store.getState().createAnnotation(cfg.chapterId, command);
     if (!result.ok) {
+      this.syncFromStore();
       if (result.status === 409) {
         // Stale build-time revision: every retry with this page is guaranteed
         // to fail, so disable Post and say why in human terms.
@@ -1726,8 +1870,8 @@ export class AuthorbotCollab extends HTMLElement {
       return;
     }
     if (result.value.outcome === "pending_review") {
+      this.syncFromStore();
       this.announce("Contribution submitted for maintainer review.");
-      this.renderAll();
       return;
     }
     const annotationId = result.value.annotationId;
@@ -1737,7 +1881,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.activeAnnotationId = annotationId;
     this.explicitExpandedAnnotationId = annotationId;
     this.pendingAnnotationFocusId = annotationId;
-    this.renderAll();
+    this.renderChangedAnnotations(annotationId);
   }
 
   private latchComposerSelection(): void {
@@ -1762,7 +1906,7 @@ export class AuthorbotCollab extends HTMLElement {
     this.composerReturnFocus = returnFocus;
     this.renderComposer();
     if (!this.chapterEditModeActive) {
-      this.composerEl?.querySelector("textarea")?.focus();
+      this.focusComposerTextarea();
     }
   }
 
@@ -1915,12 +2059,50 @@ export class AuthorbotCollab extends HTMLElement {
 
   // ---- cards ---------------------------------------------------------------
 
-  private renderAll(): void {
-    const restore = this.captureFocus();
-    this.clearGutterAutoUpdates();
-    if (this.isDesktop && this.notesPanelVisible) {
-      this.cardsHost.dataset.layoutReady = "false";
+  private reconcileElementChildren(
+    host: HTMLElement,
+    desired: readonly HTMLElement[],
+  ): void {
+    const desiredSet = new Set(desired);
+    for (const child of [...host.children]) {
+      if (child instanceof HTMLElement && !desiredSet.has(child)) {
+        child.remove();
+      }
     }
+    let cursor = host.firstElementChild;
+    for (const element of desired) {
+      if (cursor === element) {
+        cursor = cursor.nextElementSibling;
+        continue;
+      }
+      host.insertBefore(element, cursor);
+    }
+  }
+
+  /** Rebuild only the cards whose local presentation state changed. */
+  private renderChangedAnnotations(...changedIds: string[]): void {
+    const changed = new Set(changedIds);
+    this.renderAll(
+      new Set(
+        this.annotations
+          .filter(({ id }) => !changed.has(id))
+          .map(({ id }) => id),
+      ),
+    );
+  }
+
+  private renderAll(
+    preserveCardIds: ReadonlySet<string> = new Set(),
+  ): void {
+    const restore = this.captureFocus();
+    const reusableCards = new Map(
+      [...this.cardEls].filter(
+        ([id, card]) =>
+          preserveCardIds.has(id) &&
+          card.dataset.annotationId === id,
+      ),
+    );
+    this.clearGutterAutoUpdates();
     if (!this.notesPanelVisible) this.closeHiddenNotesPopover();
     // Notes and replies hydrate independently of the session. Keep live auth
     // controls mounted across those updates so a field cannot be detached
@@ -1933,29 +2115,46 @@ export class AuthorbotCollab extends HTMLElement {
       this.renderAuthbar();
       this.renderedAuthSession = this.me;
     }
+    for (const id of this.cardEls.keys()) {
+      if (preserveCardIds.has(id)) continue;
+      this.voteControls.delete(id);
+      this.overrideControls.delete(id);
+    }
     this.cardEls.clear();
-    this.voteControls.clear();
-    this.overrideControls.clear();
-    this.cardsHost.textContent = "";
+    this.notesErrorEl?.remove();
+    this.notesErrorEl = null;
     this.targetAdapter.clearInlineNotes();
+    const desiredNoteCards: HTMLElement[] = [];
     for (const annotation of this.visibleNotes()) {
-      const card = this.buildCard(annotation);
+      const reusable = reusableCards.get(annotation.id);
+      const card =
+        reusable?.dataset.surface === "note"
+          ? reusable
+          : this.buildCard(annotation);
       this.cardEls.set(annotation.id, card);
       if (this.isDesktop && this.notesPanelVisible) {
-        this.cardsHost.append(card);
+        desiredNoteCards.push(card);
       } else if (!this.isDesktop) {
         this.targetAdapter.mountInlineNote(annotation.target?.blockId ?? null, card);
       }
     }
-    this.renderDiscussion();
+    this.reconcileElementChildren(this.notesCardsHost, desiredNoteCards);
+    this.renderDiscussion(reusableCards);
     this.renderRangeHighlights();
     if (this.loadError !== null) {
       const error = el("p", "ab-error", `Annotations unavailable: ${this.loadError}`);
+      this.notesErrorEl = error;
       if (this.isDesktop) {
         this.cardsHost.append(error);
       } else {
         this.targetAdapter.mountInlineNote(null, error);
       }
+    }
+    for (const id of this.voteControls.keys()) {
+      if (!this.cardEls.has(id)) this.voteControls.delete(id);
+    }
+    for (const id of this.overrideControls.keys()) {
+      if (!this.cardEls.has(id)) this.overrideControls.delete(id);
     }
     // Write affordances are gated (§2.2): pencils stay for signed-out
     // visitors (they lead to sign-in) but disappear for signed-in read-only
@@ -1971,46 +2170,7 @@ export class AuthorbotCollab extends HTMLElement {
         annotate.hidden = !showPencils;
       }
     }
-    for (const [block, ui] of this.blockUis) {
-      const count = this.visibleNotes().filter(
-        (annotation) => annotation.target?.blockId === block.id.slice(2),
-      ).length;
-      ui.querySelector(".ab-marker")?.remove();
-      if (count > 0) {
-        block.classList.add("ab-annotated");
-        const marker = el("button", "ab-marker");
-        marker.type = "button";
-        if (this.isDesktop && !this.notesPanelVisible) {
-          marker.classList.add("ab-marker-icon");
-          marker.append(
-            inlineIcon("note"),
-            srOnly(`${count} annotation${count === 1 ? "" : "s"} on this block; show`),
-          );
-          marker.title = `${count} note${count === 1 ? "" : "s"}`;
-        } else {
-          marker.append(
-            el("span", "ab-marker-count", String(count)),
-            srOnly(`${count} annotation${count === 1 ? "" : "s"} on this block; show`),
-          );
-        }
-        marker.addEventListener("click", () => {
-          if (this.isDesktop && !this.notesPanelVisible) {
-            this.showHiddenNotes(block.id.slice(2), marker);
-            return;
-          }
-          const first = this.visibleNotes().find(
-            (annotation) => annotation.target?.blockId === block.id.slice(2),
-          );
-          if (first === undefined) {
-            return;
-          }
-          this.activateAnnotation(first.id, true);
-        });
-        ui.append(marker);
-      } else {
-        block.classList.remove("ab-annotated");
-      }
-    }
+    this.renderBlockMarkers();
     if (this.composer.phase !== "closed") {
       this.renderComposer();
     }
@@ -2021,6 +2181,61 @@ export class AuthorbotCollab extends HTMLElement {
     this.restoreFocus(restore);
     this.focusPendingAnnotation();
     this.activateNoteFragment();
+  }
+
+  private renderBlockMarkers(): void {
+    const notesByBlock = new Map<string, Annotation[]>();
+    for (const annotation of this.visibleNotes()) {
+      const blockId = annotation.target?.blockId;
+      if (blockId === undefined) continue;
+      const notes = notesByBlock.get(blockId) ?? [];
+      notes.push(annotation);
+      notesByBlock.set(blockId, notes);
+    }
+    const signature = JSON.stringify({
+      compact: this.isDesktop && !this.notesPanelVisible,
+      blocks: [...notesByBlock].map(([blockId, notes]) => [
+        blockId,
+        notes.map(({ id }) => id),
+      ]),
+    });
+    if (signature === this.renderedMarkerSignature) return;
+    this.renderedMarkerSignature = signature;
+    for (const [block, ui] of this.blockUis) {
+      const blockId = block.id.slice(2);
+      const notes = notesByBlock.get(blockId) ?? [];
+      const count = notes.length;
+      ui.querySelector(".ab-marker")?.remove();
+      if (count === 0) {
+        block.classList.remove("ab-annotated");
+        continue;
+      }
+      block.classList.add("ab-annotated");
+      const marker = el("button", "ab-marker");
+      marker.type = "button";
+      if (this.isDesktop && !this.notesPanelVisible) {
+        marker.classList.add("ab-marker-icon");
+        marker.append(
+          inlineIcon("note"),
+          srOnly(`${count} annotation${count === 1 ? "" : "s"} on this block; show`),
+        );
+        marker.title = `${count} note${count === 1 ? "" : "s"}`;
+      } else {
+        marker.append(
+          el("span", "ab-marker-count", String(count)),
+          srOnly(`${count} annotation${count === 1 ? "" : "s"} on this block; show`),
+        );
+      }
+      marker.addEventListener("click", () => {
+        if (this.isDesktop && !this.notesPanelVisible) {
+          this.showHiddenNotes(blockId, marker);
+          return;
+        }
+        const first = notes[0];
+        if (first !== undefined) this.activateAnnotation(first.id, true);
+      });
+      ui.append(marker);
+    }
   }
 
   /** Resolve a Work-history source-note link after its API-backed card mounts. */
@@ -2040,15 +2255,22 @@ export class AuthorbotCollab extends HTMLElement {
     this.activateAnnotation(annotationId);
   }
 
-  private renderDiscussion(): void {
-    this.discussionThreadsHost.replaceChildren();
+  private renderDiscussion(
+    reusableCards: ReadonlyMap<string, HTMLElement> = new Map(),
+  ): void {
     const all = this.discussionThreads();
     const visible = this.visibleDiscussionThreads();
+    const desiredCards: HTMLElement[] = [];
     for (const annotation of visible) {
-      const card = this.buildCard(annotation, "discussion");
+      const reusable = reusableCards.get(annotation.id);
+      const card =
+        reusable?.dataset.surface === "discussion"
+          ? reusable
+          : this.buildCard(annotation, "discussion");
       this.cardEls.set(annotation.id, card);
-      this.discussionThreadsHost.append(card);
+      desiredCards.push(card);
     }
+    this.reconcileElementChildren(this.discussionThreadsHost, desiredCards);
     this.discussionEmpty.hidden = all.length > 0 || this.loadError !== null;
     this.discussionMore.hidden = visible.length >= all.length;
     this.discussionMore.textContent = all.length - visible.length === 1
@@ -2060,11 +2282,7 @@ export class AuthorbotCollab extends HTMLElement {
       this.chapterEditModeActive || (this.me !== null && !this.canComment());
   }
 
-  /**
-   * §4 focus management across full re-renders: renderAll() rebuilds every
-   * card, which would otherwise drop keyboard/screen-reader focus to <body>
-   * whenever an unrelated background sync settles.
-   */
+  /** Preserve keyboard focus when the card containing it must be rebuilt. */
   private captureFocus(): FocusRestore | null {
     const active = document.activeElement as HTMLElement | null;
     if (
@@ -2216,6 +2434,7 @@ export class AuthorbotCollab extends HTMLElement {
     card.tabIndex = -1;
     card.dataset.annotationId = annotation.id;
     card.dataset.surface = surface;
+    let activatedOnPointerDown = false;
     card.classList.toggle("ab-discussion-thread", surface === "discussion");
     card.classList.toggle("ab-active", annotation.id === this.activeAnnotationId);
     card.classList.toggle("ab-promoted", promoted);
@@ -2247,8 +2466,11 @@ export class AuthorbotCollab extends HTMLElement {
     );
     summary.addEventListener("click", (event) => {
       event.stopPropagation();
-      this.activateAnnotation(annotation.id);
-      if (annotation.target !== null) this.targetAdapter.reveal(annotation.target.blockId);
+      if (activatedOnPointerDown) {
+        activatedOnPointerDown = false;
+        return;
+      }
+      this.revealAnnotation(annotation.id);
       card.focus({ preventScroll: true });
     });
     card.append(summary);
@@ -2257,10 +2479,12 @@ export class AuthorbotCollab extends HTMLElement {
     if (block !== null) {
       card.addEventListener("focusin", () => {
         block.classList.add("ab-target");
+        this.tweenCardLayer(card);
       });
       card.addEventListener("focusout", (event) => {
         if (!card.contains(event.relatedTarget as Node | null)) {
           block.classList.remove("ab-target");
+          window.requestAnimationFrame(() => this.tweenCardLayer(card));
         }
       });
       card.addEventListener("mouseenter", () => block.classList.add("ab-target"));
@@ -2302,29 +2526,54 @@ export class AuthorbotCollab extends HTMLElement {
         this.collapseAnnotation(annotation.id);
       });
     }
-    if (promoted) {
-      header.append(el("span", "ab-chip ab-accepted-badge", "Accepted"));
-    } else {
+    if (!promoted) {
       header.append(el("span", `ab-chip ab-status-${status.label} ab-card-status`, status.label));
     }
     if (collapse !== null) header.append(collapse);
     card.append(header);
+    if (promoted) {
+      const acceptedRow = el("div", "ab-card-accepted-row");
+      acceptedRow.append(el("span", "ab-chip ab-accepted-badge", "Accepted"));
+      card.append(acceptedRow);
+    }
 
+    card.addEventListener("pointerdown", (event) => {
+      if (
+        event.button !== 0 ||
+        !card.classList.contains("ab-note-collapsed") ||
+        !(event.target instanceof Element) ||
+        (event.target !== card &&
+          event.target.closest(".ab-card-summary") === null)
+      ) {
+        return;
+      }
+      // A peeking card can move when focus raises it. Activate before that
+      // movement so the exposed edge cannot escape between press and click.
+      event.preventDefault();
+      activatedOnPointerDown = true;
+      window.setTimeout(() => {
+        activatedOnPointerDown = false;
+      }, 0);
+      this.revealAnnotation(annotation.id);
+      card.focus({ preventScroll: true });
+    });
     card.addEventListener("click", (event) => {
+      if (activatedOnPointerDown) {
+        activatedOnPointerDown = false;
+        return;
+      }
       if (
         event.target instanceof Element &&
         event.target.closest("button, a, input, textarea, select") !== null
       ) {
         return;
       }
-      this.activateAnnotation(annotation.id);
-      if (annotation.target !== null) this.targetAdapter.reveal(annotation.target.blockId);
+      this.revealAnnotation(annotation.id);
     });
     card.addEventListener("keydown", (event) => {
       if (event.target === card && (event.key === "Enter" || event.key === " ")) {
         event.preventDefault();
-        this.activateAnnotation(annotation.id);
-        if (annotation.target !== null) this.targetAdapter.reveal(annotation.target.blockId);
+        this.revealAnnotation(annotation.id);
       }
     });
 
@@ -2426,7 +2675,7 @@ export class AuthorbotCollab extends HTMLElement {
         this.replyParent = null;
         this.replyDraft = ""; // a fresh form starts empty
         this.replyError = null;
-        this.renderAll();
+        this.renderChangedAnnotations(annotation.id);
         this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
       });
       actions.append(reply);
@@ -2448,7 +2697,7 @@ export class AuthorbotCollab extends HTMLElement {
       withdraw.addEventListener("click", () => {
         if (!withdrawing) {
           this.confirmWithdraw = annotation.id;
-          this.renderAll();
+          this.renderChangedAnnotations(annotation.id);
           this.cardEls.get(annotation.id)?.querySelector<HTMLButtonElement>(".ab-danger")?.focus();
           return;
         }
@@ -2461,7 +2710,7 @@ export class AuthorbotCollab extends HTMLElement {
         keep.type = "button";
         keep.addEventListener("click", () => {
           this.confirmWithdraw = null;
-          this.renderAll();
+          this.renderChangedAnnotations(annotation.id);
           this.cardEls.get(annotation.id)?.focus();
         });
         actions.append(keep);
@@ -2549,7 +2798,7 @@ export class AuthorbotCollab extends HTMLElement {
           this.replyParent = reply.id;
           this.replyDraft = "";
           this.replyError = null;
-          this.renderAll();
+          this.renderChangedAnnotations(annotation.id);
           this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
         });
         actions.append(replyBtn);
@@ -2572,7 +2821,7 @@ export class AuthorbotCollab extends HTMLElement {
         withdraw.addEventListener("click", () => {
           if (!confirming) {
             this.confirmWithdrawReply = reply.id;
-            this.renderAll();
+            this.renderChangedAnnotations(annotation.id);
             this.cardEls
               .get(annotation.id)
               ?.querySelector<HTMLButtonElement>(`[data-reply-withdraw="${reply.id}"]`)
@@ -2583,7 +2832,7 @@ export class AuthorbotCollab extends HTMLElement {
           // removes the body optimistically and restores it on rejection.
           this.confirmWithdrawReply = null;
           this.replySync.delete(reply.id);
-          this.renderAll();
+          this.renderChangedAnnotations(annotation.id);
           void this.withdrawReply(annotation, reply);
         });
         actions.append(withdraw);
@@ -2592,7 +2841,7 @@ export class AuthorbotCollab extends HTMLElement {
           keep.type = "button";
           keep.addEventListener("click", () => {
             this.confirmWithdrawReply = null;
-            this.renderAll();
+            this.renderChangedAnnotations(annotation.id);
             this.cardEls.get(annotation.id)?.querySelector<HTMLElement>(
               `[data-reply-id="${reply.id}"]`,
             )?.focus();
@@ -2645,7 +2894,7 @@ export class AuthorbotCollab extends HTMLElement {
       this.replyParent = null;
       this.replyDraft = "";
       this.replyError = null;
-      this.renderAll();
+      this.renderChangedAnnotations(annotation.id);
       this.cardEls.get(annotation.id)?.focus();
     });
     actions.append(post, cancel);
@@ -2667,7 +2916,7 @@ export class AuthorbotCollab extends HTMLElement {
         this.replyParent = null;
         this.replyDraft = "";
         this.replyError = null;
-        this.renderAll();
+        this.renderChangedAnnotations(annotation.id);
         this.cardEls.get(annotation.id)?.focus();
         const result = await this.store.getState().createReply(annotation.id, body, parent);
         if (!result.ok) {
@@ -2675,16 +2924,16 @@ export class AuthorbotCollab extends HTMLElement {
           this.replyParent = parent ?? null;
           this.replyDraft = body;
           this.replyError = this.friendlyWriteError(result.status, result.message);
-          this.renderAll();
+          this.renderChangedAnnotations(annotation.id);
           if (!this.chapterEditModeActive) {
             this.cardEls.get(annotation.id)?.querySelector("textarea")?.focus();
           }
           return;
         }
         const replyId = result.value.replyId;
-        this.markReplySyncing(replyId, result.value.operationId);
+        this.markReplySyncing(annotation.id, replyId, result.value.operationId);
         this.announce("Reply submitted; syncing.");
-        this.renderAll();
+        this.renderChangedAnnotations(annotation.id);
         this.cardEls.get(annotation.id)?.focus();
       })();
     });
@@ -2698,7 +2947,7 @@ export class AuthorbotCollab extends HTMLElement {
         phase: "failed",
         message: this.friendlyWriteError(result.status, result.message),
       });
-      this.renderAll();
+      this.renderChangedAnnotations(annotation.id);
       return;
     }
     this.annotationSync.set(annotation.id, { phase: "syncing" });
@@ -2716,9 +2965,9 @@ export class AuthorbotCollab extends HTMLElement {
           ? { phase: "stale", message: REFRESH_HINT }
           : { phase: "failed", message: message ?? "withdraw failed" },
       );
-      this.renderAll();
+      this.renderChangedAnnotations(annotation.id);
     });
-    this.renderAll();
+    this.renderChangedAnnotations(annotation.id);
   }
 
   private async withdrawReply(annotation: Annotation, reply: Reply): Promise<void> {
@@ -2729,7 +2978,7 @@ export class AuthorbotCollab extends HTMLElement {
         message: this.friendlyWriteError(result.status, result.message),
       });
       this.announce("Reply withdrawal failed. The reply was restored.");
-      this.renderAll();
+      this.renderChangedAnnotations(annotation.id);
       return;
     }
     this.replySync.set(reply.id, { phase: "syncing" });
@@ -2747,9 +2996,9 @@ export class AuthorbotCollab extends HTMLElement {
           ? { phase: "stale", message: REFRESH_HINT }
           : { phase: "failed", message: message ?? "withdraw failed" },
       );
-      this.renderAll();
+      this.renderChangedAnnotations(annotation.id);
     });
-    this.renderAll();
+    this.renderChangedAnnotations(annotation.id);
   }
 
   // ---- auth bar ------------------------------------------------------------
@@ -2857,7 +3106,9 @@ export class AuthorbotCollab extends HTMLElement {
       if (anchor === null || card === undefined || !card.isConnected) continue;
       this.gutterAutoUpdateCleanups.push(
         autoUpdate(anchor, card, this.scheduleLayout, {
-          ancestorScroll: true,
+          // Anchor and gutter share document space, so scrolling cannot change
+          // their relative coordinate.
+          ancestorScroll: false,
           ancestorResize: true,
           elementResize: true,
           layoutShift: true,
@@ -2874,7 +3125,12 @@ export class AuthorbotCollab extends HTMLElement {
       );
       if (anchor !== undefined && this.composerEl.isConnected) {
         this.gutterAutoUpdateCleanups.push(
-          autoUpdate(anchor, this.composerEl, this.scheduleLayout),
+          autoUpdate(anchor, this.composerEl, this.scheduleLayout, {
+            ancestorScroll: false,
+            ancestorResize: true,
+            elementResize: true,
+            layoutShift: true,
+          }),
         );
       }
     }
@@ -2887,91 +3143,85 @@ export class AuthorbotCollab extends HTMLElement {
       ui.style.top = `${block.getBoundingClientRect().top - proseRect.top}px`;
     }
     if (!this.isDesktop || !this.notesPanelVisible) {
-      this.gutter.style.height = "";
-      this.gutter.style.maxHeight = "";
       this.cardsHost.style.height = "";
       this.cardsHost.dataset.layoutReady = "true";
       for (const card of this.cardEls.values()) {
+        card.hidden = false;
         card.style.top = "";
+        card.style.left = "";
+        card.style.right = "";
+        card.style.removeProperty("--ab-anchor-depth");
       }
       if (this.composerEl !== null) {
         this.composerEl.style.top = "";
+        this.composerEl.style.left = "";
+        this.composerEl.style.right = "";
+        this.composerEl.style.removeProperty("--ab-anchor-depth");
       }
       return;
     }
-    const gutterTop = this.gutter.getBoundingClientRect().top;
-    const localToolbar = document.querySelector<HTMLElement>(
-      "[data-authorbot-local-toolbar]",
-    );
-    const toolbarRect = localToolbar?.getBoundingClientRect();
-    const visibleBottom =
-      toolbarRect !== undefined &&
-      toolbarRect.height > 0 &&
-      toolbarRect.top > gutterTop &&
-      toolbarRect.top < window.innerHeight
-        ? toolbarRect.top
-        : window.innerHeight;
-    const gutterHeight = Math.max(0, visibleBottom - gutterTop - 16);
-    this.gutter.style.height = `${gutterHeight}px`;
-    this.gutter.style.maxHeight = `${gutterHeight}px`;
-    void this.layoutGutterCards(generation);
+    this.layoutGutterCards(generation);
   }
 
-  private async layoutGutterCards(generation: number): Promise<void> {
-    const anchored: Array<{
-      id: string;
-      anchor: HTMLElement | null;
-      target: HTMLElement;
-    }> = [];
+  private layoutGutterCards(generation: number): void {
+    const hostTop = this.cardsHost.getBoundingClientRect().top;
+    let contentBottom = 0;
+    const stackCounts = new Map<string, number>();
+    const nextStackIndex = (key: string): number => {
+      const index = stackCounts.get(key) ?? 0;
+      stackCounts.set(key, index + 1);
+      return index;
+    };
+    const placeAtAnchor = (
+      target: HTMLElement,
+      anchor: HTMLElement | null,
+      stackIndex: number,
+    ): void => {
+      const anchorTop = anchor?.getBoundingClientRect().top ?? hostTop;
+      const position = documentAnchorStackPosition(
+        anchorTop,
+        hostTop,
+        stackIndex,
+      );
+      target.hidden = false;
+      target.style.top = `${position.top}px`;
+      target.style.left = `${position.left}px`;
+      target.style.right = `${-position.left}px`;
+      target.style.setProperty("--ab-anchor-depth", String(position.depth + 1));
+      contentBottom = Math.max(
+        contentBottom,
+        position.top + target.offsetHeight,
+      );
+    };
+
     for (const annotation of this.visibleNotes()) {
       const card = this.cardEls.get(annotation.id);
       if (card === undefined) continue;
-      anchored.push({
-        id: annotation.id,
-        anchor: this.blockFor(annotation),
-        target: card,
-      });
+      const stackKey = annotation.target?.blockId ?? "\0chapter";
+      placeAtAnchor(
+        card,
+        this.blockFor(annotation),
+        nextStackIndex(stackKey),
+      );
     }
+
     if (
       this.composerEl !== null &&
       this.composer.draft !== null &&
       this.composer.draft.scope !== "chapter"
     ) {
-      const block =
-        this.blocks.find((candidate) => candidate.id === `b-${this.composer.draft?.blockId}`) ??
-        null;
-      anchored.push({
-        id: "\0composer",
-        anchor: block,
-        target: this.composerEl,
-      });
+      const anchor =
+        this.blocks.find(
+          (candidate) => candidate.id === `b-${this.composer.draft?.blockId}`,
+        ) ?? null;
+      const stackKey = this.composer.draft.blockId ?? "\0chapter";
+      placeAtAnchor(
+        this.composerEl,
+        anchor,
+        nextStackIndex(stackKey),
+      );
     }
-    const hostTop = this.cardsHost.getBoundingClientRect().top;
-    const availableHeight = this.cardsHost.clientHeight;
-    const measured = await Promise.all(
-      anchored.map(async ({ id, anchor, target }): Promise<StackItem> => {
-        if (anchor === null) {
-          return { id, desiredTop: 0, height: target.offsetHeight };
-        }
-        try {
-          const position = await computePosition(anchor, target, {
-            placement: "right-start",
-            strategy: "fixed",
-          });
-          return {
-            id,
-            desiredTop: position.y - hostTop,
-            height: target.offsetHeight,
-          };
-        } catch {
-          return {
-            id,
-            desiredTop: Math.max(0, anchor.getBoundingClientRect().top - hostTop),
-            height: target.offsetHeight,
-          };
-        }
-      }),
-    );
+
     if (
       generation !== this.layoutGeneration ||
       !this.isDesktop ||
@@ -2979,38 +3229,12 @@ export class AuthorbotCollab extends HTMLElement {
     ) {
       return;
     }
-    const items: StackItem[] = measured;
-    const assigned = stackCards(
-      items,
-      CARD_GAP,
-      availableHeight,
-      this.activeAnnotationId,
+    const proseBottom = documentAnchorTop(
+      this.proseEl.getBoundingClientRect().bottom,
+      hostTop,
     );
-    let bottom = 0;
-    for (const [id, top] of assigned) {
-      const target = id === "\0composer" ? this.composerEl : this.cardEls.get(id);
-      if (target === null || target === undefined) {
-        continue;
-      }
-      target.style.top = `${top}px`;
-      bottom = Math.max(bottom, top + target.offsetHeight);
-    }
-    this.cardsHost.style.height = `${bottom}px`;
-    const activeTop =
-      this.activeAnnotationId === null ? undefined : assigned.get(this.activeAnnotationId);
-    const activeCard =
-      this.activeAnnotationId === null ? undefined : this.cardEls.get(this.activeAnnotationId);
-    if (activeTop !== undefined && activeCard !== undefined) {
-      // When the expanded card itself is taller than the rail, reveal its
-      // bottom edge. Cards that fit are already moved upward by stackCards,
-      // so this remains zero and never creates a cosmetic scrollbar.
-      this.cardsHost.scrollTop = Math.max(
-        0,
-        activeTop + activeCard.offsetHeight - availableHeight,
-      );
-    } else if (bottom <= availableHeight) {
-      this.cardsHost.scrollTop = 0;
-    }
+    this.cardsHost.style.height =
+      `${Math.max(0, proseBottom, contentBottom)}px`;
     this.cardsHost.dataset.layoutReady = "true";
     this.focusPendingAnnotation();
   }

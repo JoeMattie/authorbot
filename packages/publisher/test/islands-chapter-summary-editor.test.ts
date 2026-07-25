@@ -141,7 +141,6 @@ beforeEach(() => {
       activation: options.activation,
       notes: {
         elementFor: () => null,
-        observeVisibility: () => () => {},
         setPreview: () => {},
         reveal: () => {},
         clearInlineNotes: () => {},
