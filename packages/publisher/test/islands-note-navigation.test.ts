@@ -109,6 +109,8 @@ it("moves to the next and previous note, focuses it, and reveals its target", as
   expect(previous?.disabled).toBe(false);
   const active = document.querySelector(".ab-card.ab-active") as HTMLElement;
   expect(active.querySelector(".ab-body")?.textContent).toBe("Second note");
+  expect(active.classList.contains("ab-note-expanded")).toBe(true);
+  expect(active.querySelector(".ab-card-summary")?.getAttribute("aria-expanded")).toBe("true");
   expect(document.activeElement).toBe(active);
   expect(revealSecond).toHaveBeenCalledWith({
     block: "center",
@@ -119,6 +121,15 @@ it("moves to the next and previous note, focuses it, and reveals its target", as
   previous?.click();
   expect(position?.textContent).toBe("1 / 2");
   expect(document.querySelector(".ab-card.ab-active .ab-body")?.textContent).toBe("First note");
+
+  const secondCard = [...document.querySelectorAll<HTMLElement>(".ab-card")]
+    .find((card) => card.querySelector(".ab-body")?.textContent === "Second note");
+  secondCard?.dispatchEvent(
+    new MouseEvent("pointerdown", { bubbles: true, button: 0 }),
+  );
+  expect(secondCard?.classList.contains("ab-note-expanded")).toBe(true);
+  expect(secondCard?.querySelector(".ab-card-summary")?.getAttribute("aria-expanded"))
+    .toBe("true");
 });
 
 it("disables both navigation buttons for an empty chapter", async () => {
@@ -134,6 +145,35 @@ it("disables both navigation buttons for an empty chapter", async () => {
   );
 });
 
+it("keeps same-anchor cards fixed in document space with a visible diagonal peek", async () => {
+  stub([
+    annotation("stack-1", BLOCK_1, "First stacked note", "2026-07-19T00:00:00Z"),
+    annotation("stack-2", BLOCK_1, "Second stacked note", "2026-07-19T00:01:00Z"),
+    annotation("stack-3", BLOCK_1, "Third stacked note", "2026-07-19T00:02:00Z"),
+  ]);
+  mount();
+  await expect.poll(() => document.querySelectorAll(".ab-card").length).toBe(3);
+
+  const cards = [...document.querySelectorAll<HTMLElement>(".ab-card")];
+  expect(cards.map(({ style }) => [style.left, style.right])).toEqual([
+    ["0px", "0px"],
+    ["12px", "-12px"],
+    ["24px", "-24px"],
+  ]);
+  expect(cards.map((card) => card.style.getPropertyValue("--ab-anchor-depth")))
+    .toEqual(["1", "2", "3"]);
+  const positions = cards.map(({ style }) => style.top);
+
+  window.dispatchEvent(new Event("scroll"));
+
+  expect(cards.map(({ style }) => style.top)).toEqual(positions);
+  expect(cards.map(({ style }) => [style.left, style.right])).toEqual([
+    ["0px", "0px"],
+    ["12px", "-12px"],
+    ["24px", "-24px"],
+  ]);
+});
+
 it("mounts mobile notes inline in stable order and keeps chapter threads in Discussion", async () => {
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
@@ -145,13 +185,6 @@ it("mounts mobile notes inline in stable order and keeps chapter threads in Disc
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(() => true),
   })));
-  vi.stubGlobal(
-    "IntersectionObserver",
-    class {
-      observe(): void {}
-      disconnect(): void {}
-    },
-  );
   stub([
     annotation("second", BLOCK_2, "Second block", "2026-07-19T00:02:00Z"),
     {

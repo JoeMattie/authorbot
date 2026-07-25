@@ -11,7 +11,6 @@
 import type { Annotation } from "./api.js";
 
 const PRESENTABLE_STATUSES = new Set(["open", "pending_git", "work_item_created"]);
-const STICKY_HEADER_CLEARANCE = 57;
 
 /** Whole-chapter first, then manuscript block and selector occurrence. */
 export function orderedChapterNotes(
@@ -40,25 +39,6 @@ export function orderedChapterNotes(
     });
 }
 
-export interface NoteExpansionState {
-  readonly explicitAnnotationId: string | null;
-  readonly visibleBlockIds: ReadonlySet<string>;
-  /** A reader-closed note stays shut until its target leaves the viewport. */
-  readonly suppressedAnnotationIds: ReadonlySet<string>;
-}
-
-export function noteIsExpanded(
-  annotation: Annotation,
-  state: NoteExpansionState,
-): boolean {
-  if (annotation.target === null) return true;
-  if (state.explicitAnnotationId === annotation.id) return true;
-  return !state.suppressedAnnotationIds.has(annotation.id) &&
-    state.visibleBlockIds.has(annotation.target.blockId);
-}
-
-export type TargetVisibilityListener = (blockId: string, visible: boolean) => void;
-
 /** Presentation-only range decoration projected from durable annotation data. */
 export interface ChapterNoteHighlight {
   annotationId: string;
@@ -78,7 +58,6 @@ export interface ChapterNoteHighlight {
  */
 export interface ChapterNotesTargetAdapter {
   elementFor(blockId: string): HTMLElement | null;
-  observeVisibility(listener: TargetVisibilityListener): () => void;
   setPreview(blockId: string, visible: boolean): void;
   reveal(blockId: string, behavior?: ScrollBehavior): void;
   clearInlineNotes(): void;
@@ -130,43 +109,6 @@ export class StaticChapterNotesTargetAdapter implements ChapterNotesTargetAdapte
 
   elementFor(blockId: string): HTMLElement | null {
     return this.blocks.get(blockId) ?? null;
-  }
-
-  observeVisibility(listener: TargetVisibilityListener): () => void {
-    if (typeof IntersectionObserver === "function") {
-      const byElement = new Map<HTMLElement, string>(
-        [...this.blocks].map(([blockId, block]) => [block, blockId]),
-      );
-      const observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          const blockId = byElement.get(entry.target as HTMLElement);
-          if (blockId !== undefined) listener(blockId, entry.isIntersecting);
-        }
-      }, {
-        threshold: 0,
-        rootMargin: `-${STICKY_HEADER_CLEARANCE}px 0px 0px 0px`,
-      });
-      for (const block of this.blocks.values()) observer.observe(block);
-      return () => observer.disconnect();
-    }
-
-    // DOM test environments and older embedded browsers get a small,
-    // deterministic fallback. Real browsers use IntersectionObserver above.
-    const measure = (): void => {
-      const top = STICKY_HEADER_CLEARANCE;
-      const bottom = window.innerHeight || document.documentElement.clientHeight;
-      for (const [blockId, block] of this.blocks) {
-        const rect = block.getBoundingClientRect();
-        listener(blockId, rect.bottom >= top && rect.top <= bottom);
-      }
-    };
-    window.addEventListener("scroll", measure, { passive: true });
-    window.addEventListener("resize", measure);
-    window.requestAnimationFrame(measure);
-    return () => {
-      window.removeEventListener("scroll", measure);
-      window.removeEventListener("resize", measure);
-    };
   }
 
   setPreview(blockId: string, visible: boolean): void {

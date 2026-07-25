@@ -36,7 +36,6 @@ import { $prose } from "@milkdown/kit/utils";
 import type {
   ChapterNoteHighlight,
   ChapterNotesTargetAdapter,
-  TargetVisibilityListener,
 } from "./chapter-notes-presentation.js";
 import "./milkdown-manuscript-surface.css";
 import type {
@@ -327,8 +326,6 @@ class BlockNoteHandleView implements PluginView {
 /** ProseMirror implementation of the presentation-only notes target contract. */
 export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter {
   private widgetSequence = 0;
-  private visibilityCleanup: (() => void) | null = null;
-
   constructor(
     private readonly view: EditorView,
     private readonly bridge: DecorationsBridge,
@@ -340,44 +337,6 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
     if (range === null) return null;
     const node = this.view.nodeDOM(range.from);
     return node instanceof HTMLElement ? node : node?.parentElement ?? null;
-  }
-
-  observeVisibility(listener: TargetVisibilityListener): () => void {
-    this.visibilityCleanup?.();
-    const entries = this.bridge.blockIds
-      .map((id) => [id, this.elementFor(id)] as const)
-      .filter((entry): entry is readonly [string, HTMLElement] => entry[1] !== null);
-    if (typeof IntersectionObserver === "function") {
-      const ids = new Map(entries.map(([id, node]) => [node, id]));
-      const observer = new IntersectionObserver((observed) => {
-        for (const entry of observed) {
-          const id = ids.get(entry.target as HTMLElement);
-          if (id !== undefined) listener(id, entry.isIntersecting);
-        }
-      }, { threshold: 0, rootMargin: "-57px 0px 0px 0px" });
-      for (const [, node] of entries) observer.observe(node);
-      this.visibilityCleanup = () => observer.disconnect();
-    } else {
-      const measure = (): void => {
-        const top = 57;
-        const bottom = window.innerHeight || document.documentElement.clientHeight;
-        for (const [id, node] of entries) {
-          const rect = node.getBoundingClientRect();
-          listener(id, rect.bottom >= top && rect.top <= bottom);
-        }
-      };
-      window.addEventListener("scroll", measure, { passive: true });
-      window.addEventListener("resize", measure);
-      window.requestAnimationFrame(measure);
-      this.visibilityCleanup = () => {
-        window.removeEventListener("scroll", measure);
-        window.removeEventListener("resize", measure);
-      };
-    }
-    return () => {
-      this.visibilityCleanup?.();
-      this.visibilityCleanup = null;
-    };
   }
 
   setPreview(blockId: string, visible: boolean): void {
@@ -459,8 +418,6 @@ export class ProseMirrorChapterNotesAdapter implements ChapterNotesTargetAdapter
   }
 
   destroy(): void {
-    this.visibilityCleanup?.();
-    this.visibilityCleanup = null;
   }
 }
 

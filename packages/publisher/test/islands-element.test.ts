@@ -173,6 +173,94 @@ describe("authorbot-collab element", () => {
     expect(refreshed.value).toBe("still-typing");
   });
 
+  it("rebuilds only the card whose local UI state changes", async () => {
+    const note = (id: string, body: string) => ({
+      id,
+      chapterId: CHAPTER_ID,
+      kind: "comment",
+      scope: "block",
+      chapterRevision: 3,
+      target: { blockId: BLOCK_ID },
+      authorActorId: "actor-1",
+      body,
+      status: "open",
+      gitOperationId: null,
+      createdAt: "2026-07-19T00:00:00Z",
+    });
+    stubFetch({
+      [`${API}/v1/me`]: {
+        status: 200,
+        body: {
+          actor: { id: "actor-1", displayName: "mara", externalIdentity: "github:mara" },
+          scopes: ["chapters:read", "annotations:read", "annotations:write"],
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/chapters/${CHAPTER_ID}/annotations`]: {
+        status: 200,
+        body: {
+          items: [
+            {
+              ...note("ann-local-state", "Open a reply here."),
+              scope: "range",
+              target: {
+                blockId: BLOCK_ID,
+                textPosition: { start: 4, end: 9 },
+                textQuote: { exact: "drift" },
+              },
+            },
+            note("ann-stable-sibling", "This card must stay mounted."),
+          ],
+          nextCursor: null,
+        },
+      },
+      [`${API}/v1/projects/hollow-creek-anomaly/annotations/`]: {
+        status: 404,
+        body: { detail: "no replies route" },
+      },
+    });
+    mount();
+    await expect.poll(
+      () =>
+        document.querySelectorAll<HTMLElement>(
+          ".ab-card[data-annotation-id]",
+        ).length,
+    ).toBe(2);
+    const changedBefore = document.querySelector<HTMLElement>(
+      '.ab-card[data-annotation-id="ann-local-state"]',
+    ) as HTMLElement;
+    const stableBefore = document.querySelector<HTMLElement>(
+      '.ab-card[data-annotation-id="ann-stable-sibling"]',
+    ) as HTMLElement;
+    const notesHost = stableBefore.parentElement;
+    const prose = document.querySelector(".prose");
+    const highlight = document.querySelector(".ab-inline-highlight");
+    const marker = document.querySelector(".ab-marker");
+    const removed: Node[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) removed.push(...record.removedNodes);
+    });
+    observer.observe(notesHost as HTMLElement, { childList: true });
+
+    const reply = [...changedBefore.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Reply",
+    ) as HTMLButtonElement;
+    reply.click();
+    await Promise.resolve();
+    observer.disconnect();
+
+    expect(
+      document.querySelector('.ab-card[data-annotation-id="ann-local-state"]'),
+    ).not.toBe(changedBefore);
+    expect(
+      document.querySelector('.ab-card[data-annotation-id="ann-stable-sibling"]'),
+    ).toBe(stableBefore);
+    expect(stableBefore.parentElement).toBe(notesHost);
+    expect(document.querySelector(".prose")).toBe(prose);
+    expect(document.querySelector(".ab-inline-highlight")).toBe(highlight);
+    expect(document.querySelector(".ab-marker")).toBe(marker);
+    expect(removed).not.toContain(stableBefore);
+  });
+
   it("adds a keyboard 'Annotate' affordance per anchored block (§2.2, §4)", async () => {
     stubFetch({
       [`${API}/v1/me`]: { status: 401, body: {} },
@@ -742,6 +830,19 @@ describe("authorbot-collab element", () => {
   });
 
   it("clears and closes the note composer before its POST finishes", async () => {
+    const existing = {
+      id: "ann-existing",
+      chapterId: CHAPTER_ID,
+      kind: "comment",
+      scope: "block",
+      chapterRevision: 3,
+      target: { blockId: BLOCK_ID },
+      authorActorId: "actor-2",
+      body: "Existing note must keep its DOM node.",
+      status: "open",
+      gitOperationId: null,
+      createdAt: "2026-07-23T00:00:00Z",
+    };
     let finishPost: ((response: Response) => void) | undefined;
     const pendingPost = new Promise<Response>((resolve) => {
       finishPost = resolve;
@@ -763,6 +864,16 @@ describe("authorbot-collab element", () => {
         if (init?.method === "POST" && url.includes("/chapters/") && url.endsWith("/annotations")) {
           return pendingPost;
         }
+        if (
+          (init?.method === undefined || init.method === "GET") &&
+          url.includes(`/chapters/${CHAPTER_ID}/annotations`)
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ items: [existing], nextCursor: null }),
+          } as Response;
+        }
         return {
           ok: true,
           status: 200,
@@ -773,6 +884,19 @@ describe("authorbot-collab element", () => {
 
     mount();
     await expect.poll(() => document.querySelector(".ab-annotate")).toBeTruthy();
+    const existingCard = document.querySelector<HTMLElement>(
+      '[data-annotation-id="ann-existing"]',
+    );
+    expect(existingCard).toBeTruthy();
+    const notesHost = existingCard?.parentElement;
+    const prose = document.querySelector(".prose");
+    const childMutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => {
+      childMutations.push(...records);
+    });
+    if (notesHost !== null && notesHost !== undefined) {
+      observer.observe(notesHost, { childList: true });
+    }
     (document.querySelector(".ab-annotate") as HTMLButtonElement).click();
     const form = document.querySelector(".ab-composer") as HTMLFormElement;
     const textarea = form.querySelector("textarea") as HTMLTextAreaElement;
@@ -783,14 +907,49 @@ describe("authorbot-collab element", () => {
     // The fetch promise is deliberately unresolved. Closing cannot depend on
     // the round trip or operation polling.
     expect(document.querySelector(".ab-composer")).toBeNull();
+    expect(document.querySelector('[data-annotation-id="ann-existing"]')).toBe(
+      existingCard,
+    );
+    expect(
+      document.querySelector('[data-annotation-id^="local:"]')?.textContent,
+    ).toContain("Close this composer immediately.");
     finishPost?.({
       ok: true,
       status: 202,
-      json: async () => ({ annotationId: "ann-new", operationId: "op-new" }),
+      json: async () => ({
+        annotationId: "ann-new",
+        operationId: "op-new",
+        correlationId: "corr-new",
+        status: "queued",
+      }),
     } as Response);
-    await expect.poll(() => document.querySelector(".ab-card")?.textContent).toContain(
-      "Close this composer immediately.",
+    await expect.poll(
+      () =>
+        getProjectStore({
+          apiBase: API,
+          project: "hollow-creek-anomaly",
+        }).getState().annotationIdsByChapter[CHAPTER_ID],
+    ).toContain("ann-new");
+    await expect.poll(
+      () =>
+        [...document.querySelectorAll<HTMLElement>("[data-annotation-id]")]
+          .map(({ dataset }) => dataset.annotationId),
+    ).toContain("ann-new");
+    expect(
+      document.querySelector('[data-annotation-id="ann-new"]')?.textContent,
+    ).toContain("Close this composer immediately.");
+    expect(document.querySelector('[data-annotation-id="ann-existing"]')).toBe(
+      existingCard,
     );
+    expect(existingCard?.parentElement).toBe(notesHost);
+    expect(document.querySelector(".prose")).toBe(prose);
+    await Promise.resolve();
+    observer.disconnect();
+    expect(
+      childMutations.some((record) =>
+        [...record.removedNodes].includes(existingCard as Node)
+      ),
+    ).toBe(false);
   });
 
   it("clears and closes the reply form before its POST finishes", async () => {

@@ -1,5 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { stackCards } from "../site/src/islands/anchor.js";
+import {
+  documentAnchorStackPosition,
+  documentAnchorTop,
+  stackCards,
+} from "../site/src/islands/anchor.js";
+
+describe("documentAnchorTop", () => {
+  it("keeps a note at its paragraph's document-space offset", () => {
+    expect(documentAnchorTop(860, 140)).toBe(720);
+  });
+
+  it("is invariant when the page scrolls", () => {
+    expect(documentAnchorTop(860 - 300, 140 - 300)).toBe(720);
+  });
+
+  it("peeks notes sharing an anchor diagonally without moving the anchor group", () => {
+    expect(documentAnchorStackPosition(860, 140, 0)).toEqual({
+      top: 720,
+      left: 0,
+      depth: 0,
+    });
+    expect(documentAnchorStackPosition(860, 140, 2)).toEqual({
+      top: 744,
+      left: 24,
+      depth: 2,
+    });
+  });
+
+  it("caps large same-anchor threads at a 48px peek", () => {
+    expect(documentAnchorStackPosition(860, 140, 20)).toEqual({
+      top: 768,
+      left: 48,
+      depth: 4,
+    });
+  });
+});
 
 /** Gutter collision stacking (Phase 2b contract §2.1). */
 describe("stackCards", () => {

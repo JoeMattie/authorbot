@@ -38,7 +38,6 @@ const session = (options: ManuscriptSurfaceOptions): ManuscriptSurfaceSession =>
   activation: options.activation,
   notes: {
     elementFor: () => null,
-    observeVisibility: () => () => {},
     setPreview: () => {},
     reveal: () => {},
     clearInlineNotes: () => {},

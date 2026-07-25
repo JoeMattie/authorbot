@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Annotation } from "../site/src/islands/api.js";
 import {
-  noteIsExpanded,
   orderedChapterNotes,
   StaticChapterNotesTargetAdapter,
 } from "../site/src/islands/chapter-notes-presentation.js";
@@ -62,31 +61,6 @@ describe("chapter note presentation model", () => {
       "late-offset",
       "second-block",
     ]);
-  });
-
-  it("expands viewport and explicit notes while allowing a viewport note to be closed", () => {
-    const annotation = note("note-a", { blockId: BLOCK_A });
-    const visible = new Set([BLOCK_A]);
-    expect(noteIsExpanded(annotation, {
-      explicitAnnotationId: null,
-      visibleBlockIds: visible,
-      suppressedAnnotationIds: new Set(),
-    })).toBe(true);
-    expect(noteIsExpanded(annotation, {
-      explicitAnnotationId: null,
-      visibleBlockIds: visible,
-      suppressedAnnotationIds: new Set([annotation.id]),
-    })).toBe(false);
-    expect(noteIsExpanded(annotation, {
-      explicitAnnotationId: annotation.id,
-      visibleBlockIds: new Set(),
-      suppressedAnnotationIds: new Set([annotation.id]),
-    })).toBe(true);
-    expect(noteIsExpanded(note("whole", null), {
-      explicitAnnotationId: null,
-      visibleBlockIds: new Set(),
-      suppressedAnnotationIds: new Set(),
-    })).toBe(true);
   });
 });
 
