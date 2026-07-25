@@ -9,6 +9,18 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.44
+
+- **Anchored notes stay attached to their passage without viewport jitter.**
+  Notes that share a prose anchor now overlap predictably, and the active note
+  moves forward and left so the cards behind it remain visible.
+- Opening, closing, and layer changes use GSAP motion without scaling note
+  text. Clicking any exposed part of a folded card expands it.
+- Saving or updating one note no longer reconstructs every card or prose
+  highlight. Unchanged notes, markers, and surrounding page state remain
+  mounted through authoritative refreshes.
+- This patch adds no D1 or book-format migration.
+
 ## 0.1.42
 
 - Production builds now opt out of Cloudflare response rewriting, which
