@@ -374,6 +374,42 @@ describe("work queue claim affordance (contract §7)", () => {
     ))).toBe(true);
   });
 
+  it("keeps completed work visually stable during a background refresh", async () => {
+    let completedReads = 0;
+    let resolveRefresh!: (body: unknown) => void;
+    const pendingRefresh = new Promise<unknown>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    stubFetch(
+      queueRoutes(
+        [workItem()],
+        meEditor,
+        () => ({
+          status: 200,
+          body: completedReads++ === 0
+            ? { items: [completedWorkItem()], nextCursor: null }
+            : pendingRefresh,
+        }),
+      ),
+    );
+    const element = mount();
+
+    await expect.poll(() => element.querySelectorAll(".ab-completed-item").length).toBe(1);
+    const status = element.querySelector<HTMLElement>(".ab-completed-status") as HTMLElement;
+    const store = getProjectStore({ apiBase: API, project: PROJECT });
+    const refresh = store.getState().refreshCompletedWorkItems();
+
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
+    expect(element.querySelectorAll(".ab-completed-item")).toHaveLength(1);
+
+    resolveRefresh({ items: [completedWorkItem()], nextCursor: null });
+    await refresh;
+    expect(status.hidden).toBe(true);
+    expect(status.textContent).toBe("");
+    expect(element.querySelectorAll(".ab-completed-item")).toHaveLength(1);
+  });
+
   it("clears private rows and claim controls when the browser credential changes", async () => {
     let currentMe: unknown = meEditor;
     stubFetch({
