@@ -1600,10 +1600,20 @@ export function createProjectStore(
     const cursor = mode === "more"
       ? (current.completedWorkItemsNextCursor ?? undefined)
       : undefined;
-    store.setState({
-      completedWorkItemsStatus: "loading",
-      completedWorkItemsError: null,
-    });
+    // Live project events refresh the first history page in the background.
+    // Once history is ready, keep that stable projection visible while the
+    // refresh is in flight: publishing a transient `loading` state makes the
+    // Work page flash a misleading "Loading more completed work…" row for
+    // every unrelated project event. Initial reads and explicit pagination
+    // still expose their loading state.
+    const backgroundRefresh =
+      mode === "refresh" && current.completedWorkItemsStatus === "ready";
+    if (!backgroundRefresh) {
+      store.setState({
+        completedWorkItemsStatus: "loading",
+        completedWorkItemsError: null,
+      });
+    }
     const generation = authorizationGeneration;
     completedWorkItemsRequest = (async () => {
       const result = await read.call(api, cursor, COMPLETED_WORK_ITEM_PAGE_SIZE);
