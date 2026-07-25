@@ -211,10 +211,18 @@ export class AuthorbotRevisionReview extends HTMLElement {
     const state = this.store.getState();
     const me = state.session;
     const ids = this.listedProposalIds();
+    // Preserve an authoritative list while a live event refreshes it. The
+    // refreshed rows will still change the projection when they arrive, but
+    // the request's intermediate status alone must not clear the rail.
+    const listStatus =
+      state.revisionProposalsStatus === "loading" &&
+        this.listProjection?.status === "ready"
+        ? "ready"
+        : state.revisionProposalsStatus;
     const nextListProjection: RevisionListProjection = {
       sessionStatus: state.sessionStatus,
       session: me,
-      status: state.revisionProposalsStatus,
+      status: listStatus,
       error: state.revisionProposalsError,
       ids,
       proposals: ids.map((id) => state.revisionProposalsById[id]),
@@ -269,18 +277,32 @@ export class AuthorbotRevisionReview extends HTMLElement {
   private currentDetailProjection(me: Me | null): RevisionDetailProjection {
     const state = this.store.getState();
     const proposalId = this.selectedProposalId;
+    const proposal = proposalId === null
+      ? undefined
+      : state.revisionProposalsById[proposalId];
+    const detailStatus = proposalId === null
+      ? undefined
+      : state.revisionProposalDetailStatusById[proposalId];
+    // A selected detail refresh retains its complete snapshot in the store.
+    // Normalize only that intermediate status so the diff and decision form
+    // stay mounted; a changed proposal object, error, or final status still
+    // produces the normal authoritative render.
+    const status =
+      detailStatus === "loading" &&
+        this.detailProjection?.proposalId === proposalId &&
+        this.detailProjection.status === "ready" &&
+        proposal !== undefined &&
+        isRevisionProposalDetail(proposal)
+        ? "ready"
+        : detailStatus;
     return {
       proposalId,
       session: me,
-      status: proposalId === null
-        ? undefined
-        : state.revisionProposalDetailStatusById[proposalId],
+      status,
       error: proposalId === null
         ? undefined
         : state.revisionProposalDetailErrorById[proposalId],
-      proposal: proposalId === null
-        ? undefined
-        : state.revisionProposalsById[proposalId],
+      proposal,
     };
   }
 

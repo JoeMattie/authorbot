@@ -182,8 +182,15 @@ export class AuthorbotAccount extends HTMLElement {
       this.releaseConnection = () => {};
       this.releaseConnection = state.retainConnection();
     }
+    // A live event refreshes the ready queue through a transient `loading`
+    // state while retaining the last authoritative ids. Keep that stable
+    // count visible until the refresh either replaces it or fails; treating
+    // every non-ready state as zero makes the header badge blink on every
+    // project event.
     this.syncGlobalWorkCount(
-      state.workItemsStatus === "ready" ? state.workItemIds.length : 0,
+      state.workItemsStatus === "ready" || state.workItemsStatus === "loading"
+        ? state.workItemIds.length
+        : 0,
     );
   }
 

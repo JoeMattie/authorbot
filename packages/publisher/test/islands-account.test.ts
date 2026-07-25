@@ -70,6 +70,58 @@ describe("account identity", () => {
     ).toEqual(["Reviews", "Settings"]);
   });
 
+  it("keeps the Work badge stable while the ready queue refreshes", async () => {
+    let workReads = 0;
+    let resolveRefresh!: (body: unknown) => void;
+    const pendingRefresh = new Promise<unknown>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/v1/me")) {
+          return response({
+            actor: { id: "actor-5", displayName: "Editor", externalIdentity: "github:editor" },
+            scopes: ["work:read"],
+            memberships: [{ role: "editor" }],
+          });
+        }
+        if (url.includes("/work-items?status=ready")) {
+          return response(
+            workReads++ === 0
+              ? { items: [{ id: "work-1" }, { id: "work-2" }], nextCursor: null }
+              : pendingRefresh,
+          );
+        }
+        return response({ detail: "not found" }, 404);
+      }),
+    );
+    const badge = document.createElement("span");
+    badge.dataset.workCount = "";
+    badge.hidden = true;
+    const account = document.createElement("authorbot-account") as AuthorbotAccount;
+    account.dataset.apiBase = "http://api.test";
+    account.dataset.project = "stable-work-badge";
+    account.dataset.base = "/";
+    document.body.append(badge, account);
+
+    await expect.poll(() => badge.textContent).toBe("2");
+    const store = getProjectStore({
+      apiBase: "http://api.test",
+      project: "stable-work-badge",
+    });
+    const refresh = store.getState().refreshWorkItems();
+
+    expect(badge.textContent).toBe("2");
+    expect(badge.hidden).toBe(false);
+
+    resolveRefresh({ items: [{ id: "work-1" }], nextCursor: null });
+    await refresh;
+    expect(badge.textContent).toBe("1");
+    expect(badge.hidden).toBe(false);
+  });
+
   it("counts every page of ready work for the global badge", async () => {
     const firstPage = Array.from({ length: 50 }, (_, index) => ({ id: `work-${index}` }));
     vi.stubGlobal(
