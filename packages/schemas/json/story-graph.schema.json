@@ -16,7 +16,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development):[a-z0-9][a-z0-9-]*$"
               },
               "title": {
                 "type": "string",
@@ -27,7 +27,7 @@
               },
               "parent": {
                 "type": "string",
-                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development):[a-z0-9][a-z0-9-]*$"
               },
               "order": {
                 "type": "number"
@@ -70,7 +70,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development):[a-z0-9][a-z0-9-]*$"
               },
               "title": {
                 "type": "string",
@@ -81,7 +81,7 @@
               },
               "parent": {
                 "type": "string",
-                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+                "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development):[a-z0-9][a-z0-9-]*$"
               },
               "order": {
                 "type": "number"
@@ -101,6 +101,12 @@
                   "part",
                   "scene",
                   "beat",
+                  "character",
+                  "concept",
+                  "rule",
+                  "theme",
+                  "motif",
+                  "development",
                   "custom"
                 ]
               },
@@ -131,11 +137,11 @@
         "properties": {
           "from": {
             "type": "string",
-            "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+            "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development):[a-z0-9][a-z0-9-]*$"
           },
           "to": {
             "type": "string",
-            "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule):[a-z0-9][a-z0-9-]*$"
+            "pattern": "^(?:premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development):[a-z0-9][a-z0-9-]*$"
           },
           "type": {
             "type": "string",

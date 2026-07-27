@@ -17,8 +17,8 @@ const { nodes } = Astro.props;
           <article class="story-outline-card">
             <header class="story-outline-card-header">
               <span class={`story-type-pill story-type-${node.type}`}>{node.type}</span>
-              {node.chapterHref ? (
-                <a class="story-outline-title" href={node.chapterHref}>{node.title ?? node.id}</a>
+              {node.href ? (
+                <a class="story-outline-title" href={node.href}>{node.title ?? node.id}</a>
               ) : (
                 <span class="story-outline-title">{node.title ?? node.id}</span>
               )}

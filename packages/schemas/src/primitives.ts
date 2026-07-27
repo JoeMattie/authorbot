@@ -17,6 +17,9 @@ export const NODE_KINDS = [
   "location",
   "concept",
   "rule",
+  "theme",
+  "motif",
+  "development",
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number];
 

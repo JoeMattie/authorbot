@@ -529,3 +529,61 @@ describe("loadSiteModel - duplicate character ids", () => {
     ).toBe(true);
   });
 });
+
+describe("loadSiteModel - semantic outline nodes", () => {
+  it("accepts theme/motif nodes and links character nodes to their pages", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await mkdir(path.join(repo, "story", "characters"), { recursive: true });
+    await writeFile(
+      path.join(repo, "story", "characters", "mara.md"),
+      [
+        "---",
+        "schema: authorbot.character/v1",
+        "id: character:mara",
+        "name: Mara Voss",
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      path.join(repo, "story", "outline.yml"),
+      [
+        "schema: authorbot.story-graph/v1",
+        "nodes:",
+        "  - id: theme:observation",
+        "    type: theme",
+        "    title: Observation changes the observed",
+        "    order: 1",
+        "  - id: character:mara",
+        "    type: character",
+        "    parent: theme:observation",
+        "    order: 2",
+        "  - id: motif:the-window",
+        "    type: motif",
+        "    title: The window",
+        "    parent: theme:observation",
+        "    order: 3",
+        "  - id: development:going-public",
+        "    type: development",
+        "    title: Mara goes public",
+        "    parent: theme:observation",
+        "    order: 4",
+        "",
+      ].join("\n"),
+    );
+    const { model } = await loadSiteModel({ repoPath: repo });
+    const theme = model.outline?.[0];
+    expect(theme?.type).toBe("theme");
+    const character = theme?.children.find((node) => node.id === "character:mara");
+    expect(character?.type).toBe("character");
+    // No node title: the character record supplies the display name.
+    expect(character?.title).toBe("Mara Voss");
+    expect(character?.href).toBe("/story/characters/mara/");
+    const motif = theme?.children.find((node) => node.id === "motif:the-window");
+    expect(motif?.href).toBeUndefined();
+  });
+});

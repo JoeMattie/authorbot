@@ -59,8 +59,12 @@ export interface OutlineNode {
   title?: string;
   summary?: string;
   order: number;
-  /** For `chapter` nodes whose chapter is included in this build. */
-  chapterHref?: string;
+  /**
+   * Title link target: the chapter page for `chapter` nodes whose chapter is
+   * included in this build, or the character page for nodes whose id matches
+   * a loaded character record.
+   */
+  href?: string;
   /** Chapter status shown on chapter nodes when known. */
   status?: string;
   /** Scene planning fields, when the story graph provides them. */

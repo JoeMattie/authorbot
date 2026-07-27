@@ -28,7 +28,7 @@ package in the same change.
 - Entity IDs (`book.id`, `chapter.id`, annotation, work item, decision,
   release IDs): UUIDv7, lowercase.
 - Story node / timeline / bible IDs: `<kind>:<slug>` where kind is one of
-  `premise|arc|part|chapter|scene|beat|event|character|location|concept|rule`
+  `premise|arc|part|chapter|scene|beat|event|character|location|concept|rule|theme|motif|development`
   and slug matches `[a-z0-9][a-z0-9-]*`.
 - Actor references: `<namespace>:<identifier>` where namespace is one of
   `github|agent|system` (e.g. `github:octocat`, `system:rule-engine`).
@@ -84,7 +84,8 @@ config). Where the design is silent:
   token so public bylines do not expose its opaque actor id.
 - Character frontmatter: `schema`, `id` (`character:<slug>`), `name`; optional
   `aliases`, `summary`, `status`.
-- Story graph node `type`: `premise|arc|part|chapter|scene|beat|custom`;
+- Story graph node `type`: `premise|arc|part|chapter|scene|beat|character|`
+  `concept|rule|theme|motif|development|custom`;
   `order`: number; chapter nodes carry `chapter_id` (UUID of a chapter).
 - Timeline event: `id` (`event:<slug>`), `sort_key` (number), `display_time`,
   `title`; optional `participants`, `locations`, `chapter_refs`, `facts`.

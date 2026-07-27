@@ -1179,6 +1179,30 @@ authorbot-story-view-tabs:not([data-interactive]) .story-view-panel + .story-vie
   color: var(--blue-300, var(--text-link, var(--link)));
 }
 
+.story-type-character {
+  color: var(--green-400, #72c79a);
+}
+
+.story-type-concept {
+  color: var(--purple-400, #a98ef0);
+}
+
+.story-type-rule {
+  color: var(--red-400, #f0736f);
+}
+
+.story-type-theme {
+  color: var(--teal-400, #4fbdb7);
+}
+
+.story-type-motif {
+  color: var(--pink-400, #e08bc4);
+}
+
+.story-type-development {
+  color: var(--amber-400, #e9b23f);
+}
+
 .story-outline-title {
   color: var(--text-strong, var(--fg));
   font-family: var(--font-display, system-ui, sans-serif);

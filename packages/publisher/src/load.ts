@@ -386,6 +386,7 @@ async function loadCharacters(
 function buildOutline(
   data: unknown,
   includedById: ReadonlyMap<string, SiteChapter>,
+  characters: LoadedCharacter[],
   warnings: string[],
 ): OutlineNode[] | null {
   if (data === undefined) {
@@ -397,6 +398,9 @@ function buildOutline(
     return null;
   }
   const nodes = result.data.nodes;
+  const charactersById = new Map(
+    characters.map((entry) => [entry.refsId, entry.character]),
+  );
   const knownIds = new Set(nodes.map((node) => node.id));
   const childrenOf = new Map<string, StoryGraphNode[]>();
   const roots: StoryGraphNode[] = [];
@@ -468,11 +472,21 @@ function buildOutline(
         out.title = title;
       }
       if (chapter !== undefined) {
-        out.chapterHref = chapter.href;
+        out.href = chapter.href;
         out.status = chapter.status;
       }
-    } else if (node.title !== undefined) {
-      out.title = node.title;
+    } else {
+      // Nodes backed by a character record (any type, so `custom` graphs
+      // predating the `character` node type still benefit) link to the
+      // character page and fall back to the character's display name.
+      const character = charactersById.get(node.id);
+      const title = node.title ?? character?.name;
+      if (title !== undefined) {
+        out.title = title;
+      }
+      if (character !== undefined) {
+        out.href = character.href;
+      }
     }
     return out;
   };
@@ -722,6 +736,7 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
   const outline = buildOutline(
     parseYamlSafe(outlineSource, "story outline", warnings),
     includedById,
+    characters,
     warnings,
   );
 

@@ -10,6 +10,12 @@ export const STORY_NODE_TYPES = [
   "chapter",
   "scene",
   "beat",
+  "character",
+  "concept",
+  "rule",
+  "theme",
+  "motif",
+  "development",
   "custom",
 ] as const;
 export type StoryNodeType = (typeof STORY_NODE_TYPES)[number];
@@ -36,7 +42,20 @@ export type StoryGraphChapterNode = z.infer<typeof storyGraphChapterNodeSchema>;
 /** All non-chapter node types; scene-style fields are optional. */
 export const storyGraphStoryNodeSchema = z.strictObject({
   ...nodeCommonFields,
-  type: z.enum(["premise", "arc", "part", "scene", "beat", "custom"]),
+  type: z.enum([
+    "premise",
+    "arc",
+    "part",
+    "scene",
+    "beat",
+    "character",
+    "concept",
+    "rule",
+    "theme",
+    "motif",
+    "development",
+    "custom",
+  ]),
   goal: z.string().optional(),
   conflict: z.string().optional(),
   outcome: z.string().optional(),

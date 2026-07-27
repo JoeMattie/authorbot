@@ -31,7 +31,7 @@ describe("uuidv7Schema", () => {
 
 describe("nodeIdSchema", () => {
   it("accepts every known kind", () => {
-    for (const id of ["premise:main", "arc:one", "part:one", "chapter:opening", "scene:x1", "beat:midpoint", "event:first-contact", "character:protagonist", "location:main-lab", "concept:causal-projector", "rule:no-retcons"]) {
+    for (const id of ["premise:main", "arc:one", "part:one", "chapter:opening", "scene:x1", "beat:midpoint", "event:first-contact", "character:protagonist", "location:main-lab", "concept:causal-projector", "rule:no-retcons", "theme:observation", "motif:the-window", "development:mara-goes-public"]) {
       expectValid(nodeIdSchema, id);
     }
   });

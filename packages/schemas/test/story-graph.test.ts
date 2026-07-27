@@ -15,6 +15,19 @@ describe("storyGraphSchema", () => {
     });
   });
 
+  it("accepts semantic node types", () => {
+    const graph = clone(validStoryGraph);
+    graph.nodes.push(
+      { id: "character:mara", type: "character", title: "Mara", order: 50 },
+      { id: "concept:causal-projector", type: "concept", order: 60 },
+      { id: "rule:no-retcons", type: "rule", order: 70 },
+      { id: "theme:observation", type: "theme", order: 80 },
+      { id: "motif:the-window", type: "motif", order: 90 },
+      { id: "development:going-public", type: "development", order: 100 },
+    );
+    expectValid(storyGraphSchema, graph);
+  });
+
   it("rejects an unknown node type", () => {
     const bad = clone(validStoryGraph);
     bad.nodes[0].type = "epilogue";
