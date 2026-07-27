@@ -9,6 +9,25 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.49
+
+- **Books can ship cover art on the landing page.** `book.yml` gains
+  `publication.cover_images` (ordered image paths under `public/`) and an
+  optional `cover_images_label`. The masthead shows lightweight WebP
+  thumbnails, generated at build time, beside the title on wide screens and
+  between the title and the logline on phones. Clicking one opens a lightbox
+  with the full image and a link to the original; the lightbox is pure CSS,
+  so the static site still ships zero JavaScript.
+- **Books own a `public/` directory now.** Anything in it is copied verbatim
+  into the built site, by `authorbot build` and `authorbot dev` alike. The
+  validator warns when a `public/` entry would shadow a generated page.
+- Generated validate and publish workflows trigger on `public/**`;
+  `authorbot upgrade` adds the filter to existing books (migration
+  `0002-public-assets-workflow-paths`, workflow files only - it does not
+  touch prose).
+- This release adds no D1 migration and no book-format migration to content
+  files; no previously valid book changes validity.
+
 ## 0.1.48
 
 - **The story graph accepts semantic planning nodes.** Outline nodes can now
