@@ -198,8 +198,57 @@ const failSafeD1Migrations: BookRepoMigration = {
   },
 };
 
+const VALIDATE_WORKFLOW = ".github/workflows/validate.yml";
+
+/**
+ * 0.1.49 introduced book-owned static assets: `public/` is copied verbatim
+ * into the built site (cover images live there). The generated workflows
+ * filter on content paths, so without `public/**` an asset-only push would
+ * neither validate nor republish. This inserts the filter after each
+ * generated `- "story/**"` entry (validate.yml has one per trigger); a
+ * custom workflow without that recognizable entry is left alone.
+ */
+const publicAssetsWorkflowPaths: BookRepoMigration = {
+  id: "0002-public-assets-workflow-paths",
+  from: "0.1.0",
+  to: "0.1.49",
+  description:
+    "Trigger the validate and publish workflows on public/** so book-owned static assets republish the site",
+  async apply(repo) {
+    const changed: string[] = [];
+    for (const file of [VALIDATE_WORKFLOW, PUBLISH_WORKFLOW]) {
+      if (!(await repo.exists(file))) {
+        continue;
+      }
+      const before = await repo.read(file);
+      if (before.includes('- "public/**"')) {
+        continue;
+      }
+      const newline = before.includes("\r\n") ? "\r\n" : "\n";
+      const lines = before.split(/\r?\n/);
+      let touched = false;
+      for (let index = lines.length - 1; index >= 0; index--) {
+        const match = /^(\s*)- "story\/\*\*"$/.exec(lines[index] ?? "");
+        if (match !== null) {
+          lines.splice(index + 1, 0, `${match[1] ?? ""}- "public/**"`);
+          touched = true;
+        }
+      }
+      if (!touched) {
+        continue;
+      }
+      await repo.write(file, lines.join(newline));
+      changed.push(file);
+    }
+    return changed;
+  },
+};
+
 /** The migrations this release of the toolchain knows how to run. */
-export const BOOK_REPO_MIGRATIONS: readonly BookRepoMigration[] = [failSafeD1Migrations];
+export const BOOK_REPO_MIGRATIONS: readonly BookRepoMigration[] = [
+  failSafeD1Migrations,
+  publicAssetsWorkflowPaths,
+];
 
 export interface SelectedMigration {
   readonly migration: BookRepoMigration;

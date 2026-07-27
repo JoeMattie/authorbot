@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { bookConfigSchema } from "@authorbot/schemas";
 import {
@@ -8,7 +9,7 @@ import {
   unsafeRepoPathReason,
 } from "./common.js";
 import type { FindingCollector } from "./findings.js";
-import { readTextIfExists } from "./fs-utils.js";
+import { listDirEntries, readTextIfExists } from "./fs-utils.js";
 
 /** Settings the rest of the validator needs, with design section 25 defaults. */
 export interface BookSettings {
@@ -93,6 +94,95 @@ function checkChapterUrlPattern(findings: FindingCollector, pattern: string): vo
   }
 }
 
+async function isFile(absPath: string): Promise<boolean> {
+  try {
+    return (await stat(absPath)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `publication.cover_images` entries must live under `public/` because that
+ * is the only directory the publisher copies verbatim into the built site;
+ * a cover anywhere else would validate here and 404 in production. A path
+ * that is safe and well-placed but absent is a warning, not an error, so a
+ * book can configure covers before committing the (large, binary) images.
+ */
+async function checkCoverImages(
+  root: string,
+  findings: FindingCollector,
+  coverImages: unknown,
+): Promise<void> {
+  if (!Array.isArray(coverImages)) {
+    return;
+  }
+  for (const [index, cover] of coverImages.entries()) {
+    if (typeof cover !== "string" || cover.length === 0) {
+      continue; // the schema pass reports the type error
+    }
+    const pointer = `/publication/cover_images/${index}`;
+    const reason = unsafeRepoPathReason(cover);
+    if (reason !== null) {
+      findings.error(
+        "PATH_UNSAFE",
+        "book.yml",
+        `publication.cover_images entry "${cover}" ${reason}`,
+        pointer,
+      );
+      continue;
+    }
+    if (!cover.startsWith("public/")) {
+      findings.error(
+        "BOOK_CONFIG_INVALID",
+        "book.yml",
+        `publication.cover_images entry "${cover}" must live under public/ (the directory copied into the built site)`,
+        pointer,
+      );
+      continue;
+    }
+    if (!(await isFile(path.join(root, cover)))) {
+      findings.warning(
+        "BOOK_CONFIG_INVALID",
+        "book.yml",
+        `publication.cover_images entry "${cover}" does not exist yet; the build will skip it`,
+        pointer,
+      );
+    }
+  }
+}
+
+/**
+ * `public/` is copied verbatim into the site output, so a top-level entry
+ * named like a generated route would silently shadow (or be shadowed by)
+ * built pages. Warn rather than error: the collision is almost certainly a
+ * mistake, but the build itself does not fail on it.
+ */
+async function checkPublicDirCollisions(
+  root: string,
+  findings: FindingCollector,
+  chapterUrl: string,
+): Promise<void> {
+  const entries = await listDirEntries(path.join(root, "public"));
+  if (entries.length === 0) {
+    return;
+  }
+  const chapterRoot = chapterUrl
+    .split("/")
+    .filter((segment) => segment.length > 0)[0]
+    ?.toLowerCase();
+  for (const entry of entries) {
+    const name = entry.name.toLowerCase();
+    if (RESERVED_TOP_SEGMENTS.has(name) || (chapterRoot !== undefined && !chapterRoot.includes("{slug}") && name === chapterRoot)) {
+      findings.warning(
+        "PATH_UNSAFE",
+        `public/${entry.name}`,
+        `public/${entry.name} collides with the generated "${name}" output path and may shadow built pages`,
+      );
+    }
+  }
+}
+
 function settingPath(
   findings: FindingCollector,
   raw: unknown,
@@ -170,6 +260,8 @@ export async function loadBookConfig(
       settings.chapterUrl = publication.chapter_url;
       checkChapterUrlPattern(findings, publication.chapter_url);
     }
+    await checkCoverImages(root, findings, publication.cover_images);
+    await checkPublicDirCollisions(root, findings, settings.chapterUrl);
   }
 
   const result = bookConfigSchema.safeParse(parsed.data);

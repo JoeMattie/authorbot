@@ -91,6 +91,18 @@
         },
         "show_public_annotations": {
           "type": "boolean"
+        },
+        "cover_images": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "cover_images_label": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

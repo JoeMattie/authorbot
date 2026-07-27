@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { BuildManifest } from "@authorbot/schemas";
 import { build, dev } from "astro";
 import type { Plugin, ProxyOptions, ViteDevServer } from "vite";
+import { isDirectory } from "./fs-utils.js";
 import { loadSiteModel, PublisherError } from "./load.js";
 import { createManifest, detectGitCommit } from "./manifest.js";
 import type { SiteModel } from "./model.js";
@@ -116,6 +117,8 @@ const DEV_ASSET_ENTRIES: Readonly<Record<string, string>> = Object.freeze({
 export async function startDevSite(options: StartDevSiteOptions): Promise<DevSite> {
   const siteRoot = fileURLToPath(new URL("../site/", import.meta.url));
   const islandsRoot = path.join(siteRoot, "src", "islands");
+  const bookPublicDir = path.join(options.repoPath, "public");
+  const hasBookPublicDir = await isDirectory(bookPublicDir);
   let current = await loadSiteModel({
     repoPath: options.repoPath,
     includeDrafts: true,
@@ -185,6 +188,19 @@ export async function startDevSite(options: StartDevSiteOptions): Promise<DevSit
           next();
           return;
         }
+        // Cover thumbnails exist only in memory during dev; production
+        // builds write them into `_astro/` on disk.
+        const cover =
+          asset === undefined
+            ? undefined
+            : current.coverAssets.find((entry) => entry.fileName === asset);
+        if (cover !== undefined) {
+          res.statusCode = 200;
+          res.setHeader("content-type", "image/webp");
+          res.setHeader("cache-control", "no-cache");
+          res.end(Buffer.from(cover.data));
+          return;
+        }
         if (pathname === "/__authorbot/status" && options.status !== undefined) {
           void options.status().then((status) => {
             res.statusCode = 200;
@@ -205,6 +221,7 @@ export async function startDevSite(options: StartDevSiteOptions): Promise<DevSit
     root: siteRoot,
     output: "static",
     base: "/",
+    ...(hasBookPublicDir ? { publicDir: bookPublicDir } : {}),
     integrations: [],
     devToolbar: { enabled: false },
     logLevel: "warn",
@@ -360,7 +377,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   const outDir = path.resolve(options.outDir);
   const siteRoot = fileURLToPath(new URL("../site/", import.meta.url));
 
-  const { model, warnings } = await loadSiteModel({
+  const { model, warnings, coverAssets } = await loadSiteModel({
     repoPath,
     baseUrl: options.baseUrl,
     includeDrafts: options.includeDrafts,
@@ -390,6 +407,14 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   const siteOutDir =
     model.basePath === "/" ? outDir : path.join(outDir, ...model.basePath.split("/").filter(Boolean));
 
+  // Book-owned static assets: `public/` in the repository is copied verbatim
+  // into the site output by Astro's public-dir passthrough. The site package
+  // ships no public dir of its own, so pointing Astro at the book's is safe;
+  // when the book has none, Astro's default (`<siteRoot>/public`, absent)
+  // keeps today's behavior.
+  const bookPublicDir = path.join(repoPath, "public");
+  const hasBookPublicDir = await isDirectory(bookPublicDir);
+
   const packageRoot = fileURLToPath(new URL("../", import.meta.url));
   const previousCwd = process.cwd();
   process.chdir(packageRoot);
@@ -399,6 +424,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
       outDir: siteOutDir,
       output: "static",
       base: model.basePath,
+      ...(hasBookPublicDir ? { publicDir: bookPublicDir } : {}),
       integrations: [],
       devToolbar: { enabled: false },
       logLevel: options.logLevel ?? "warn",
@@ -424,6 +450,16 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
     // Islands land beside the rest of the site's assets, under the same base
     // path prefix their `<script src>` tags point at.
     await buildIslands(siteRoot, siteOutDir, model.basePath);
+  }
+
+  if (coverAssets.length > 0) {
+    // Cover thumbnails carry a content hash in their names, so they land in
+    // `_astro/` beside Astro's own immutable assets.
+    const assetDir = path.join(siteOutDir, "_astro");
+    await mkdir(assetDir, { recursive: true });
+    for (const asset of coverAssets) {
+      await writeFile(path.join(assetDir, asset.fileName), asset.data);
+    }
   }
 
   const commit =

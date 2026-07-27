@@ -354,6 +354,164 @@ h1:first-child,
   font-style: normal;
 }
 
+/* Cover thumbnails share the masthead: beside the title on wide screens,
+   between the title and the logline on narrow ones. The grid applies only
+   when covers exist, so a coverless masthead keeps its flow layout. */
+.book-masthead-with-covers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "eyebrow covers"
+    "title covers"
+    "logline covers"
+    "meta covers";
+  column-gap: clamp(20px, 4vw, 40px);
+  align-items: start;
+}
+
+.book-masthead-with-covers .page-eyebrow {
+  grid-area: eyebrow;
+}
+
+.book-masthead-with-covers h1 {
+  grid-area: title;
+}
+
+.book-masthead-with-covers .book-logline {
+  grid-area: logline;
+}
+
+.book-masthead-with-covers .book-meta {
+  grid-area: meta;
+  align-self: end;
+}
+
+.book-covers {
+  grid-area: covers;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.book-covers-label {
+  margin: 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.book-cover-list {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.book-cover-thumb {
+  display: block;
+  border-radius: 5px;
+}
+
+.book-cover-thumb img {
+  display: block;
+  width: 64px;
+  height: 96px;
+  object-fit: cover;
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+}
+
+.book-cover-thumb:hover img,
+.book-cover-thumb:focus-visible img {
+  border-color: var(--text-link, var(--orange-500));
+}
+
+@media (max-width: 640px) {
+  .book-masthead-with-covers {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "eyebrow"
+      "title"
+      "covers"
+      "logline"
+      "meta";
+  }
+
+  .book-covers {
+    margin-top: 16px;
+  }
+
+  .book-cover-thumb img {
+    width: 56px;
+    height: 84px;
+  }
+}
+
+/* Script-free cover lightbox: hidden until its fragment is targeted. The
+   overlay is dark in both themes, like any photography lightbox. */
+.cover-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.cover-modal:target {
+  display: flex;
+}
+
+.cover-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.86);
+}
+
+.cover-modal-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(92vw, 640px);
+  margin: 0;
+}
+
+.cover-modal-body img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 78vh;
+  margin: 0 auto;
+  border-radius: 6px;
+  background: #101216;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.cover-modal-body figcaption {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #e8eaef;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cover-modal-body figcaption a {
+  color: inherit;
+}
+
+.cover-modal-close {
+  margin-left: auto;
+}
+
 .chapter-author-tools {
   margin: 20px 0;
 }

@@ -530,6 +530,91 @@ describe("loadSiteModel - duplicate character ids", () => {
   });
 });
 
+describe("loadSiteModel - cover images", () => {
+  const PNG_1X1 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  it("thumbnails existing covers, skips missing ones, and carries the label", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await writeFile(
+      path.join(repo, "book.yml"),
+      [
+        "schema: authorbot.book/v1",
+        `id: ${BOOK_ID}`,
+        "title: Test Book",
+        "slug: test-book",
+        "language: en",
+        "publication:",
+        "  cover_images:",
+        "    - public/covers/one.png",
+        "    - public/covers/two.png",
+        "  cover_images_label: Cover candidates",
+        "",
+      ].join("\n"),
+    );
+    await mkdir(path.join(repo, "public", "covers"), { recursive: true });
+    await writeFile(path.join(repo, "public", "covers", "one.png"), PNG_1X1);
+    const { model, warnings, coverAssets } = await loadSiteModel({ repoPath: repo });
+
+    expect(model.book.coversLabel).toBe("Cover candidates");
+    expect(model.book.covers).toHaveLength(1);
+    const cover = model.book.covers?.[0];
+    expect(cover?.label).toBe("Cover 1");
+    expect(cover?.full).toBe("/covers/one.png");
+    expect(cover?.thumb).toMatch(/^\/_astro\/authorbot-cover-1\.[0-9a-f]{10}\.webp$/);
+    expect(coverAssets).toHaveLength(1);
+    expect(cover?.thumb.endsWith(`/${coverAssets[0]?.fileName}`)).toBe(true);
+    // WebP magic: RIFF....WEBP.
+    const data = coverAssets[0]?.data;
+    expect(data && Buffer.from(data.slice(0, 4)).toString("ascii")).toBe("RIFF");
+    expect(data && Buffer.from(data.slice(8, 12)).toString("ascii")).toBe("WEBP");
+    expect(warnings.some((warning) => warning.includes('"public/covers/two.png" does not exist'))).toBe(
+      true,
+    );
+  });
+
+  it("emits no covers and no assets when none are configured", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    const { model, coverAssets } = await loadSiteModel({ repoPath: repo });
+    expect(model.book.covers).toBeUndefined();
+    expect(coverAssets).toEqual([]);
+  });
+
+  it("prefixes cover hrefs with the base path", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await writeFile(
+      path.join(repo, "book.yml"),
+      [
+        "schema: authorbot.book/v1",
+        `id: ${BOOK_ID}`,
+        "title: Test Book",
+        "slug: test-book",
+        "language: en",
+        "publication:",
+        "  cover_images:",
+        "    - public/covers/one.png",
+        "",
+      ].join("\n"),
+    );
+    await mkdir(path.join(repo, "public", "covers"), { recursive: true });
+    await writeFile(path.join(repo, "public", "covers", "one.png"), PNG_1X1);
+    const { model } = await loadSiteModel({
+      repoPath: repo,
+      baseUrl: "https://example.org/books/test/",
+    });
+    expect(model.book.covers?.[0]?.full).toBe("/books/test/covers/one.png");
+    expect(model.book.covers?.[0]?.thumb.startsWith("/books/test/_astro/")).toBe(true);
+  });
+});
+
 describe("loadSiteModel - semantic outline nodes", () => {
   it("accepts theme/motif nodes and links character nodes to their pages", async () => {
     const repo = await makeRepo([

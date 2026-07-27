@@ -64,6 +64,15 @@ export const bookConfigSchema = z.strictObject({
       show_revision: z.boolean().optional(),
       show_attribution: z.boolean().optional(),
       show_public_annotations: z.boolean().optional(),
+      /**
+       * Ordered cover images for the landing-page masthead, repo-relative
+       * paths under `public/` (the book-owned static directory copied
+       * verbatim into the built site). The publisher generates lightweight
+       * WebP thumbnails from them at build time.
+       */
+      cover_images: z.array(z.string().min(1)).min(1).optional(),
+      /** Label for the cover thumbnail group (default "Cover art"). */
+      cover_images_label: z.string().min(1).optional(),
     })
     .optional(),
   /**

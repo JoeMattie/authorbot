@@ -22,6 +22,8 @@ const lastUpdated = publishedDates.at(-1)?.slice(0, 10);
 const logline =
   site.outline?.find((node) => node.type === "premise" && node.summary)?.summary ??
   site.chapters.find((chapter) => chapter.summary)?.summary;
+const covers = site.book.covers ?? [];
+const coversLabel = site.book.coversLabel ?? "Cover art";
 ---
 
 <Base
@@ -32,9 +34,33 @@ const logline =
   activeNav="chapters"
 >
   <div class="reading-index">
-    <header class="book-masthead">
+    <header class:list={["book-masthead", covers.length > 0 && "book-masthead-with-covers"]}>
       <p class="page-eyebrow">A serial book, written in the open</p>
       <h1>{site.book.title}</h1>
+      {covers.length > 0 && (
+        <nav class="book-covers" aria-label={coversLabel}>
+          <p class="book-covers-label" aria-hidden="true">{coversLabel}</p>
+          <ul class="book-cover-list">
+            {covers.map((cover, index) => (
+              <li>
+                <a
+                  class="book-cover-thumb"
+                  href={`#cover-${index + 1}`}
+                  aria-label={`View ${cover.label} full size`}
+                >
+                  <img
+                    src={cover.thumb}
+                    alt={cover.label}
+                    width="64"
+                    height="96"
+                    decoding="async"
+                  />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
       {logline && <p class="book-logline">{logline}</p>}
       <p class="book-meta">
         <span>{site.chapters.length} {site.chapters.length === 1 ? "chapter" : "chapters"}</span>
@@ -105,6 +131,25 @@ const logline =
       )
     }
   </div>
+  {
+    /* Script-free cover lightboxes: a thumbnail links to its overlay's
+       fragment, `:target` shows it, and closing is a link back to an inert
+       fragment (so the page does not scroll). The browser's Back button
+       closes it too. Keeps the static build's zero-JavaScript contract. */
+    covers.map((cover, index) => (
+      <div class="cover-modal" id={`cover-${index + 1}`} role="dialog" aria-label={cover.label}>
+        <a class="cover-modal-backdrop" href="#_" aria-label="Close"></a>
+        <figure class="cover-modal-body">
+          <img src={cover.full} alt={cover.label} loading="lazy" decoding="async" />
+          <figcaption>
+            <span>{cover.label}</span>
+            <a href={cover.full} target="_blank" rel="noopener">Open original</a>
+            <a class="cover-modal-close" href="#_">Close</a>
+          </figcaption>
+        </figure>
+      </div>
+    ))
+  }
   {
     collab && (
       <authorbot-chapter-activity

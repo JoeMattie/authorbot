@@ -145,6 +145,18 @@ export interface SiteCollab {
   devLogin: boolean;
 }
 
+export interface SiteCover {
+  /** Absolute href of the full-size original, base path included. */
+  full: string;
+  /**
+   * Absolute href of the generated WebP thumbnail; falls back to the
+   * original when thumbnail generation is unavailable.
+   */
+  thumb: string;
+  /** Accessible name, e.g. `Cover 1`. */
+  label: string;
+}
+
 export interface SiteBook {
   title: string;
   slug: string;
@@ -157,6 +169,10 @@ export interface SiteBook {
   showRevision: boolean;
   /** `publication.show_attribution` (default false). */
   showAttribution: boolean;
+  /** Masthead cover images (`publication.cover_images`), in config order. */
+  covers?: SiteCover[];
+  /** `publication.cover_images_label` (the template defaults to "Cover art"). */
+  coversLabel?: string;
 }
 
 export interface SiteModel {

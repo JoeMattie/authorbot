@@ -18,6 +18,28 @@ describe("bookConfigSchema", () => {
     });
   });
 
+  it("accepts publication cover images with a label", () => {
+    const config = clone(validBook);
+    config.publication.cover_images = [
+      "public/covers/cover-1.png",
+      "public/covers/cover-2.png",
+    ];
+    config.publication.cover_images_label = "Cover candidates";
+    expectValid(bookConfigSchema, config);
+  });
+
+  it("rejects an empty cover image list", () => {
+    const bad = clone(validBook);
+    bad.publication.cover_images = [];
+    expectInvalid(bookConfigSchema, bad);
+  });
+
+  it("rejects a non-string cover image entry", () => {
+    const bad = clone(validBook);
+    bad.publication.cover_images = [42];
+    expectInvalid(bookConfigSchema, bad);
+  });
+
   it("rejects a wrong schema discriminator", () => {
     const bad = clone(validBook);
     bad.schema = "authorbot.book/v2";

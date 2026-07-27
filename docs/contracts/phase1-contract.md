@@ -24,12 +24,20 @@ choice, this contract selects one.
 ├── _headers                      # no-transform: blocks edge beacon injection
 ├── authorbot-build.json          # build manifest (authorbot.build/v1)
 ├── chapters/<slug>/index.html    # chapter pages per publication.chapter_url
+├── <public/**>                   # book-owned static assets, copied verbatim
+├── _astro/authorbot-cover-*.webp # cover thumbnails (publication.cover_images)
 └── story/
     ├── index.html                # outline tree
     ├── timeline/index.html       # timeline table
     └── characters/index.html     # character index
         └── <slug>/index.html     # character detail
 ```
+
+- A book-owned `public/` directory is copied verbatim into the output root
+  (0.1.49). `publication.cover_images` names ordered images under it; the
+  build renders masthead thumbnails (generated WebP under `_astro/`, named by
+  content hash) that open a script-free `:target` lightbox. Both are optional:
+  a book without them emits exactly the tree above.
 
 - Chapters with `status: published` are included by default; `--include-drafts`
   adds `draft`/`proposed` chapters with a visible draft banner. `archived` is

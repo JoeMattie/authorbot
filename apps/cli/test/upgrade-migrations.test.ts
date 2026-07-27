@@ -28,9 +28,10 @@ afterEach(cleanupTempDirs);
 const at = mustParseVersion;
 
 describe("the shipped registry", () => {
-  it("contains the fail-safe D1 workflow migration", () => {
+  it("contains the fail-safe D1 workflow migration and the public/** paths migration", () => {
     expect(BOOK_REPO_MIGRATIONS.map((migration) => migration.id)).toEqual([
       "0001-fail-safe-d1-migrations",
+      "0002-public-assets-workflow-paths",
     ]);
     expect(
       selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.30"), at("0.1.31")).map(
@@ -38,6 +39,11 @@ describe("the shipped registry", () => {
       ),
     ).toEqual(["0001-fail-safe-d1-migrations"]);
     expect(selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.31"), at("0.1.31"))).toEqual([]);
+    expect(
+      selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.48"), at("0.1.49")).map(
+        (selected) => selected.migration.id,
+      ),
+    ).toEqual(["0002-public-assets-workflow-paths"]);
   });
 
   it("rewrites the generated migration step without disturbing custom workflow content", async () => {
@@ -101,6 +107,68 @@ jobs:
     const custom = migrationRepoFor(nodeFs, customPath);
     expect((await applyMigrations(selected, custom)).changed).toEqual([]);
     expect(await custom.read(".github/workflows/publish.yml")).toBe("name: custom\njobs: {}\n");
+  });
+
+  it("adds public/** to every generated path filter, once, idempotently", async () => {
+    const validate = `name: validate
+on:
+  push:
+    paths:
+      - "book.yml"
+      - "chapters/**"
+      - "story/**"
+      - ".authorbot/**"
+  pull_request:
+    paths:
+      - "book.yml"
+      - "chapters/**"
+      - "story/**"
+      - ".authorbot/**"
+`;
+    const publish = `name: publish
+on:
+  push:
+    paths:
+      - "book.yml"
+      - "chapters/**"
+      - "story/**"
+      - ".authorbot/releases/**"
+`;
+    const repoPath = await makeBookRepo();
+    await mkdir(path.join(repoPath, ".github/workflows"), { recursive: true });
+    await nodeFs.writeFile(path.join(repoPath, ".github/workflows/validate.yml"), validate);
+    await nodeFs.writeFile(path.join(repoPath, ".github/workflows/publish.yml"), publish);
+    const repo = migrationRepoFor(nodeFs, repoPath);
+    const selected = selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.48"), at("0.1.49"));
+
+    const first = await applyMigrations(selected, repo);
+    expect([...first.changed].sort()).toEqual([
+      ".github/workflows/publish.yml",
+      ".github/workflows/validate.yml",
+    ]);
+    const migratedValidate = await repo.read(".github/workflows/validate.yml");
+    const migratedPublish = await repo.read(".github/workflows/publish.yml");
+    expect(() => parseYaml(migratedValidate)).not.toThrow();
+    expect(() => parseYaml(migratedPublish)).not.toThrow();
+    expect(migratedValidate.match(/- "public\/\*\*"/g)).toHaveLength(2);
+    expect(migratedPublish.match(/- "public\/\*\*"/g)).toHaveLength(1);
+    expect(migratedValidate).toContain('- "story/**"\n      - "public/**"\n      - ".authorbot/**"');
+
+    const second = await applyMigrations(selected, repo);
+    expect(second.changed).toEqual([]);
+    expect(await repo.read(".github/workflows/validate.yml")).toBe(migratedValidate);
+  });
+
+  it("leaves a workflow without the generated story filter alone", async () => {
+    const repoPath = await makeBookRepo();
+    await mkdir(path.join(repoPath, ".github/workflows"), { recursive: true });
+    await nodeFs.writeFile(
+      path.join(repoPath, ".github/workflows/publish.yml"),
+      "name: custom\non:\n  push: {}\n",
+    );
+    const repo = migrationRepoFor(nodeFs, repoPath);
+    const selected = selectMigrations(BOOK_REPO_MIGRATIONS, at("0.1.48"), at("0.1.49"));
+    expect((await applyMigrations(selected, repo)).changed).toEqual([]);
   });
 });
 

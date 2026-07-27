@@ -272,6 +272,9 @@ importers:
       lit:
         specifier: ^3.3.3
         version: 3.3.3
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
       vite:
         specifier: ^6.4.0
         version: 6.4.3(@types/node@22.20.1)(yaml@2.9.0)

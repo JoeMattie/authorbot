@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseChapterMarkdown } from "@authorbot/markdown";
 import {
@@ -17,6 +19,7 @@ import type {
   OutlineNode,
   SiteChapter,
   SiteCharacter,
+  SiteCover,
   SiteModel,
   TimelineRow,
 } from "./model.js";
@@ -44,6 +47,12 @@ export interface LoadedSite {
   model: SiteModel;
   /** Non-fatal problems (skipped records); relevant under `--force`. */
   warnings: string[];
+  /**
+   * Generated cover thumbnails, keyed by `_astro/` file name. `buildSite`
+   * writes them beside the other assets; the dev server serves them from
+   * memory. Empty when the book configures no covers (or none exist).
+   */
+  coverAssets: { fileName: string; data: Uint8Array }[];
 }
 
 const DEFAULT_CHAPTERS_GLOB = "chapters/*.md";
@@ -602,6 +611,89 @@ function buildTimeline(
   return timeline;
 }
 
+/** Thumbnail bounds: 4x the 64x96 CSS size, plenty for any device pixel ratio. */
+const COVER_THUMB_WIDTH = 256;
+const COVER_THUMB_HEIGHT = 384;
+
+/**
+ * Load `publication.cover_images`: read each file, generate a WebP thumbnail
+ * named by content hash under `_astro/`, and produce the model's cover
+ * entries. sharp is imported lazily and only when covers are configured; a
+ * platform that cannot load it still ships covers, with thumbnails linking
+ * the originals (heavier page, never a broken one). Missing files are
+ * skipped with a warning so a book can configure covers ahead of committing
+ * the binaries.
+ */
+async function buildCovers(
+  repoPath: string,
+  coverImages: readonly string[] | undefined,
+  basePath: string,
+  warnings: string[],
+): Promise<{ covers: SiteCover[]; coverAssets: LoadedSite["coverAssets"] }> {
+  const covers: SiteCover[] = [];
+  const coverAssets: LoadedSite["coverAssets"] = [];
+  if (coverImages === undefined || coverImages.length === 0) {
+    return { covers, coverAssets };
+  }
+  let sharp: typeof import("sharp") | null | undefined;
+  for (const [index, rel] of coverImages.entries()) {
+    if (!rel.startsWith("public/") || rel.split(/[/\\]/).some((segment) => segment === "..")) {
+      warnings.push(`cover image "${rel}" is not a safe path under public/; skipped`);
+      continue;
+    }
+    let source: Buffer;
+    try {
+      source = await readFile(path.join(repoPath, rel));
+    } catch {
+      warnings.push(`cover image "${rel}" does not exist; skipped`);
+      continue;
+    }
+    // Label by config position so "Cover 2" stays "Cover 2" even when an
+    // earlier image is missing.
+    const label = `Cover ${index + 1}`;
+    const full = `${basePath}${rel.slice("public/".length)}`;
+    if (sharp === undefined) {
+      try {
+        // sharp is CJS (`export =`): the ESM namespace wraps it in `default`.
+        sharp = (
+          (await import("sharp")) as unknown as { default: typeof import("sharp") }
+        ).default;
+      } catch (error) {
+        sharp = null;
+        warnings.push(
+          `cover thumbnails unavailable (sharp failed to load: ${
+            error instanceof Error ? error.message : String(error)
+          }); thumbnails will link the original images`,
+        );
+      }
+    }
+    let thumb = full;
+    if (sharp !== null) {
+      try {
+        const data = await sharp(source)
+          .resize(COVER_THUMB_WIDTH, COVER_THUMB_HEIGHT, {
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .webp({ quality: 78 })
+          .toBuffer();
+        const hash = createHash("sha256").update(data).digest("hex").slice(0, 10);
+        const fileName = `authorbot-cover-${index + 1}.${hash}.webp`;
+        coverAssets.push({ fileName, data });
+        thumb = `${basePath}_astro/${fileName}`;
+      } catch (error) {
+        warnings.push(
+          `cover image "${rel}" could not be thumbnailed (${
+            error instanceof Error ? error.message : String(error)
+          }); the thumbnail links the original`,
+        );
+      }
+    }
+    covers.push({ full, thumb, label });
+  }
+  return { covers, coverAssets };
+}
+
 /**
  * Load a book repository into the JSON-serializable {@link SiteModel}.
  * Chapters with `status: published` are included by default; `includeDrafts`
@@ -748,6 +840,13 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
     warnings,
   );
 
+  const { covers, coverAssets } = await buildCovers(
+    repoPath,
+    book.publication?.cover_images,
+    basePath,
+    warnings,
+  );
+
   const model: SiteModel = {
     book: {
       title: book.title,
@@ -771,5 +870,11 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
   if (book.planning?.method !== undefined) {
     model.book.planningMethod = book.planning.method;
   }
-  return { model, warnings };
+  if (covers.length > 0) {
+    model.book.covers = covers;
+  }
+  if (book.publication?.cover_images_label !== undefined) {
+    model.book.coversLabel = book.publication.cover_images_label;
+  }
+  return { model, warnings, coverAssets };
 }
