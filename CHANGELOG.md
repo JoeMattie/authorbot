@@ -9,6 +9,21 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.48
+
+- **The story graph accepts semantic planning nodes.** Outline nodes can now
+  be typed `character`, `concept`, `rule`, `theme`, `motif`, or `development`
+  instead of hiding behind `custom`, and node ids may use the new `theme:`,
+  `motif:`, and `development:` kinds anywhere a `<kind>:<slug>` id is
+  accepted (outline, links, and the API's structural projections).
+- On the published outline page, any node whose id matches a character record
+  now links to that character's page, and inherits the character's display
+  name when the node carries no title of its own. This applies to older
+  graphs that used `type: custom` for character nodes too. Each new node type
+  gets its own pill color.
+- This release adds no D1 or book-format migration; no previously valid book
+  changes validity.
+
 ## 0.1.44
 
 - **Anchored notes stay attached to their passage without viewport jitter.**
