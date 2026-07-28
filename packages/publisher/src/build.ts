@@ -188,17 +188,18 @@ export async function startDevSite(options: StartDevSiteOptions): Promise<DevSit
           next();
           return;
         }
-        // Cover thumbnails exist only in memory during dev; production
-        // builds write them into `_astro/` on disk.
-        const cover =
+        // Generated image thumbnails (covers, character portraits) exist
+        // only in memory during dev; production builds write them into
+        // `_astro/` on disk.
+        const image =
           asset === undefined
             ? undefined
-            : current.coverAssets.find((entry) => entry.fileName === asset);
-        if (cover !== undefined) {
+            : current.imageAssets.find((entry) => entry.fileName === asset);
+        if (image !== undefined) {
           res.statusCode = 200;
           res.setHeader("content-type", "image/webp");
           res.setHeader("cache-control", "no-cache");
-          res.end(Buffer.from(cover.data));
+          res.end(Buffer.from(image.data));
           return;
         }
         if (pathname === "/__authorbot/status" && options.status !== undefined) {
@@ -377,7 +378,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   const outDir = path.resolve(options.outDir);
   const siteRoot = fileURLToPath(new URL("../site/", import.meta.url));
 
-  const { model, warnings, coverAssets } = await loadSiteModel({
+  const { model, warnings, imageAssets } = await loadSiteModel({
     repoPath,
     baseUrl: options.baseUrl,
     includeDrafts: options.includeDrafts,
@@ -452,12 +453,12 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
     await buildIslands(siteRoot, siteOutDir, model.basePath);
   }
 
-  if (coverAssets.length > 0) {
-    // Cover thumbnails carry a content hash in their names, so they land in
-    // `_astro/` beside Astro's own immutable assets.
+  if (imageAssets.length > 0) {
+    // Generated thumbnails carry a content hash in their names, so they land
+    // in `_astro/` beside Astro's own immutable assets.
     const assetDir = path.join(siteOutDir, "_astro");
     await mkdir(assetDir, { recursive: true });
-    for (const asset of coverAssets) {
+    for (const asset of imageAssets) {
       await writeFile(path.join(assetDir, asset.fileName), asset.data);
     }
   }

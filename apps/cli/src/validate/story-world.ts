@@ -2,11 +2,18 @@ import path from "node:path";
 import { characterSchema, timelineSchema } from "@authorbot/schemas";
 import type { BookSettings } from "./book.js";
 import type { ChapterInfo } from "./chapters.js";
-import { emitSchemaIssues, isRecord, parseYamlDoc, readFrontmatter } from "./common.js";
+import {
+  emitSchemaIssues,
+  isRecord,
+  parseYamlDoc,
+  readFrontmatter,
+  unsafeRepoPathReason,
+} from "./common.js";
 import type { FindingCollector } from "./findings.js";
 import {
   expandGlob,
   isDirectory,
+  isFile,
   listDirEntries,
   readTextIfExists,
   repoRelative,
@@ -93,8 +100,51 @@ async function loadCharacters(
     if (!result.success) {
       emitSchemaIssues(findings, "CHARACTER_FILE_INVALID", rel, result.error);
     }
+    await checkCharacterImage(root, findings, rel, fm.image);
   }
   return ids;
+}
+
+/**
+ * A character `image` must live under `public/` because that is the only
+ * directory the publisher copies verbatim into the built site; an image
+ * anywhere else would validate here and 404 in production. A path that is
+ * safe and well-placed but absent is a warning, not an error, so a record
+ * can name its portrait before the (large, binary) image is committed - the
+ * build renders the character without one. Mirrors `checkCoverImages`.
+ */
+async function checkCharacterImage(
+  root: string,
+  findings: FindingCollector,
+  rel: string,
+  image: unknown,
+): Promise<void> {
+  if (typeof image !== "string" || image.length === 0) {
+    return; // absent, or the schema pass reports the type error
+  }
+  const pointer = "/image";
+  const reason = unsafeRepoPathReason(image);
+  if (reason !== null) {
+    findings.error("PATH_UNSAFE", rel, `character image "${image}" ${reason}`, pointer);
+    return;
+  }
+  if (!image.startsWith("public/")) {
+    findings.error(
+      "CHARACTER_FILE_INVALID",
+      rel,
+      `character image "${image}" must live under public/ (the directory copied into the built site)`,
+      pointer,
+    );
+    return;
+  }
+  if (!(await isFile(path.join(root, image)))) {
+    findings.warning(
+      "CHARACTER_FILE_INVALID",
+      rel,
+      `character image "${image}" does not exist yet; the build will skip it`,
+      pointer,
+    );
+  }
 }
 
 interface TimelineLoad {

@@ -1,4 +1,3 @@
-import { stat } from "node:fs/promises";
 import path from "node:path";
 import { bookConfigSchema } from "@authorbot/schemas";
 import {
@@ -9,7 +8,7 @@ import {
   unsafeRepoPathReason,
 } from "./common.js";
 import type { FindingCollector } from "./findings.js";
-import { listDirEntries, readTextIfExists } from "./fs-utils.js";
+import { isFile, listDirEntries, readTextIfExists } from "./fs-utils.js";
 
 /** Settings the rest of the validator needs, with design section 25 defaults. */
 export interface BookSettings {
@@ -91,14 +90,6 @@ function checkChapterUrlPattern(findings: FindingCollector, pattern: string): vo
       `publication.chapter_url "${pattern}" ${reason}`,
       pointer,
     );
-  }
-}
-
-async function isFile(absPath: string): Promise<boolean> {
-  try {
-    return (await stat(absPath)).isFile();
-  } catch {
-    return false;
   }
 }
 

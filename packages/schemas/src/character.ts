@@ -13,5 +13,13 @@ export const characterSchema = z.strictObject({
   summary: z.string().optional(),
   /** Free-form record status; the contract does not pin an enum. */
   status: z.string().min(1).optional(),
+  /**
+   * Portrait image, a repo-relative path under `public/` (the directory
+   * copied verbatim into the built site), e.g.
+   * `public/characters/mara-voss.png`. Path safety (no traversal, under
+   * `public/`) is enforced by the validate gate and the publisher, matching
+   * `publication.cover_images`.
+   */
+  image: z.string().min(1).optional(),
 });
 export type Character = z.infer<typeof characterSchema>;

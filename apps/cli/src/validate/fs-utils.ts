@@ -19,6 +19,14 @@ export async function isDirectory(absPath: string): Promise<boolean> {
   }
 }
 
+export async function isFile(absPath: string): Promise<boolean> {
+  try {
+    return (await stat(absPath)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** Directory entries, or [] when the directory does not exist. */
 export async function listDirEntries(absPath: string): Promise<Dirent[]> {
   try {

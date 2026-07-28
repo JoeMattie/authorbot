@@ -50,6 +50,51 @@ describe("repository planning document validation", () => {
     });
   });
 
+  it("accepts a character image under public/", async () => {
+    const result = await validateRepositoryDocument({
+      kind: "character",
+      path: "story/characters/mara.md",
+      content: [
+        "---",
+        "schema: authorbot.character/v1",
+        "id: character:mara",
+        "name: Mara Voss",
+        "image: public/characters/mara.png",
+        "---",
+        "",
+        "Body.",
+      ].join("\n"),
+    });
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    "public/../secrets.png",
+    "/etc/passwd",
+    "assets/mara.png",
+    "C:/images/mara.png",
+  ])("rejects the unsafe character image path %s", async (image) => {
+    expect(
+      await validateRepositoryDocument({
+        kind: "character",
+        path: "story/characters/mara.md",
+        content: [
+          "---",
+          "schema: authorbot.character/v1",
+          "id: character:mara",
+          "name: Mara Voss",
+          `image: ${image}`,
+          "---",
+          "",
+          "Body.",
+        ].join("\n"),
+      }),
+    ).toEqual({
+      ok: false,
+      issues: ["character image must be a repository-relative path under public/"],
+    });
+  });
+
   it("rejects invalid schemas, unsafe prose, and mismatched extensions", async () => {
     expect(
       await validateRepositoryDocument({

@@ -34,6 +34,18 @@ describe("characterSchema", () => {
     expectInvalid(characterSchema, bad);
   });
 
+  it("rejects an empty image path", () => {
+    const bad = clone(validCharacter);
+    bad.image = "";
+    expectInvalid(characterSchema, bad);
+  });
+
+  it("rejects a non-string image", () => {
+    const bad = clone(validCharacter);
+    bad.image = ["public/characters/protagonist.png"];
+    expectInvalid(characterSchema, bad);
+  });
+
   it("rejects an unknown key", () => {
     const bad = clone(validCharacter);
     bad.age = 34;

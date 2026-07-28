@@ -111,6 +111,7 @@ export const validCharacter = {
   aliases: ["The Lead"],
   summary: "Keeps the experiment honest.",
   status: "active",
+  image: "public/characters/protagonist.png",
 };
 
 export const validRangeAnnotation = {

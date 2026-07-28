@@ -26,6 +26,7 @@ choice, this contract selects one.
 ├── chapters/<slug>/index.html    # chapter pages per publication.chapter_url
 ├── <public/**>                   # book-owned static assets, copied verbatim
 ├── _astro/authorbot-cover-*.webp # cover thumbnails (publication.cover_images)
+├── _astro/authorbot-character-*.webp # character portrait thumbnails (character `image`)
 └── story/
     ├── index.html                # outline tree
     ├── timeline/index.html       # timeline table
@@ -38,6 +39,11 @@ choice, this contract selects one.
   build renders masthead thumbnails (generated WebP under `_astro/`, named by
   content hash) that open a script-free `:target` lightbox. Both are optional:
   a book without them emits exactly the tree above.
+- A character record's optional `image` (0.1.50) names a portrait under
+  `public/` the same way. The character index cards and the detail page's
+  right gutter render a generated WebP thumbnail (never the full-size
+  original) that opens the same script-free lightbox; characters without an
+  image render plainly (no avatar).
 
 - Chapters with `status: published` are included by default; `--include-drafts`
   adds `draft`/`proposed` chapters with a visible draft banner. `archived` is

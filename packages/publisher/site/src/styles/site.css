@@ -354,17 +354,16 @@ h1:first-child,
   font-style: normal;
 }
 
-/* Cover thumbnails share the masthead: beside the title on wide screens,
-   between the title and the logline on narrow ones. The grid applies only
-   when covers exist, so a coverless masthead keeps its flow layout. */
-.book-masthead-with-covers {
+/* Cover thumbnails share the masthead's top group with the eyebrow and
+   title, stacked two wide so the title keeps its room; the logline and
+   meta flow full-width below the group. The grid applies only when covers
+   exist, so a coverless masthead keeps its flow layout. */
+.book-masthead-with-covers .book-masthead-top {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     "eyebrow covers"
-    "title covers"
-    "logline covers"
-    "meta covers";
+    "title covers";
   column-gap: clamp(20px, 4vw, 40px);
   align-items: start;
 }
@@ -375,15 +374,6 @@ h1:first-child,
 
 .book-masthead-with-covers h1 {
   grid-area: title;
-}
-
-.book-masthead-with-covers .book-logline {
-  grid-area: logline;
-}
-
-.book-masthead-with-covers .book-meta {
-  grid-area: meta;
-  align-self: end;
 }
 
 .book-covers {
@@ -404,7 +394,8 @@ h1:first-child,
 }
 
 .book-cover-list {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -431,14 +422,8 @@ h1:first-child,
 }
 
 @media (max-width: 640px) {
-  .book-masthead-with-covers {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "eyebrow"
-      "title"
-      "covers"
-      "logline"
-      "meta";
+  .book-masthead-with-covers .book-masthead-top {
+    display: block;
   }
 
   .book-covers {
@@ -451,8 +436,9 @@ h1:first-child,
   }
 }
 
-/* Script-free cover lightbox: hidden until its fragment is targeted. The
-   overlay is dark in both themes, like any photography lightbox. */
+/* Script-free image lightbox (cover art and character portraits): hidden
+   until its fragment is targeted. The overlay is dark in both themes, like
+   any photography lightbox. */
 .cover-modal {
   position: fixed;
   inset: 0;
@@ -467,19 +453,25 @@ h1:first-child,
   display: flex;
 }
 
+/* The tint is lighter than it looks: the blur carries most of the
+   separation, and too much alpha would hide it. */
 .cover-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(8, 10, 14, 0.86);
+  background: rgba(8, 10, 14, 0.65);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
+/* The original renders at its natural size, capped only by the viewport -
+   a tighter cap would read as a resized image. */
 .cover-modal-body {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: min(92vw, 640px);
+  max-width: 92vw;
   margin: 0;
 }
 
@@ -488,7 +480,7 @@ h1:first-child,
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: 78vh;
+  max-height: 84vh;
   margin: 0 auto;
   border-radius: 6px;
   background: #101216;
@@ -1637,10 +1629,11 @@ a.story-outline-title:hover {
   line-height: 1.55;
 }
 
-/* Character index and detail. */
+/* Character index and detail. Cards are wide enough that the right-edge
+   portrait leaves comfortable room for the copy. */
 .character-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   grid-auto-rows: 1fr;
   align-items: stretch;
   gap: 18px;
@@ -1679,13 +1672,52 @@ a.story-outline-title:hover {
   transform: translateY(-2px);
 }
 
+/* The image variant hands its padding to the inner link so the portrait can
+   sit flush with the card's right edge; `overflow: hidden` clips the image
+   to the card's rounded corners. */
+.character-card-with-image {
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.character-card-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.character-card-portrait {
+  display: block;
+  flex: none;
+  width: 118px;
+}
+
+.character-card-portrait img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.character-card-portrait:hover img,
+.character-card-portrait:focus-visible img {
+  opacity: 0.92;
+}
+
 .character-card-heading {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.character-card-heading > span:nth-child(2) {
+.character-card-copy {
   display: flex;
   min-width: 0;
   flex: 1;
@@ -1700,22 +1732,6 @@ a.story-outline-title:hover {
   font-weight: 600;
   line-height: 1.3;
   letter-spacing: -0.02em;
-}
-
-.character-avatar {
-  display: inline-flex;
-  width: 44px;
-  height: 44px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: linear-gradient(150deg, var(--blue-500, #5b74f5), var(--blue-800, #26358f));
-  color: #fff;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 15px;
-  font-weight: 600;
-  box-shadow: 0 6px 16px rgba(25, 42, 134, 0.25);
 }
 
 .character-card-meta {
@@ -1735,7 +1751,8 @@ a.story-outline-title:hover {
 }
 
 .character-card:hover .character-card-arrow,
-.character-card:focus-visible .character-card-arrow {
+.character-card:focus-visible .character-card-arrow,
+.character-card-main:focus-visible .character-card-arrow {
   opacity: 1;
   transform: translateX(0);
 }
@@ -1754,6 +1771,65 @@ a.story-outline-title:hover {
 .character-detail {
   width: min(100%, 720px);
   padding-top: 34px;
+}
+
+/* A character with a portrait widens the page into a three-column grid
+   with equal flanks, so the 720px reading column sits exactly where it
+   does on every other page; the portrait fills the right flank out to the
+   page's edge padding, at its natural aspect ratio (never cropped), its
+   top aligned with the detail header. */
+.character-detail-with-portrait {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 720px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.character-detail-with-portrait > * {
+  grid-column: 2;
+  min-width: 0;
+}
+
+/* Row 3 is the planning surface, whose top edge is the detail header. */
+.character-detail-with-portrait > .character-detail-portrait {
+  grid-column: 3;
+  grid-row: 3;
+  display: block;
+  padding-left: clamp(28px, 3vw, 56px);
+  padding-right: clamp(9px, 2.5vw, 20px);
+}
+
+.character-detail-portrait img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 82vh;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 12px;
+  box-shadow: var(--shadow-md, none);
+}
+
+/* Below this width the right flank is too narrow to be worth a column;
+   the portrait flows above the prose instead. */
+@media (max-width: 1200px) {
+  .character-detail-with-portrait {
+    display: block;
+    width: min(100%, 720px);
+  }
+
+  .character-detail-portrait {
+    display: block;
+    margin-bottom: 26px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .character-detail-portrait img {
+    margin: 0;
+    max-width: min(100%, 420px);
+    max-height: 60vh;
+  }
 }
 
 .character-back-link {
@@ -1777,12 +1853,6 @@ a.story-outline-title:hover {
   align-items: center;
   gap: 16px;
   margin-bottom: 22px;
-}
-
-.character-avatar-large {
-  width: 62px;
-  height: 62px;
-  font-size: 22px;
 }
 
 .character-detail h1 {
@@ -1933,12 +2003,6 @@ a.story-outline-title:hover {
 
   .character-detail-header {
     align-items: flex-start;
-  }
-
-  .character-avatar-large {
-    width: 54px;
-    height: 54px;
-    font-size: 19px;
   }
 }
 

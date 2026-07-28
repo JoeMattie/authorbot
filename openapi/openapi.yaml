@@ -6128,6 +6128,9 @@ components:
           type: string
         status:
           type: string
+        image:
+          type: string
+          description: Repo-relative portrait image path under public/.
 
     StoryApiLinks:
       type: object

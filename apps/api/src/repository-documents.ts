@@ -103,6 +103,19 @@ export async function validateRepositoryDocument(input: {
     if (!character.success) {
       issues.push(...character.error.issues.map((issue) => `character ${issue.path.join(".") || "document"}: ${issue.message}`));
     }
+    if (character.success && character.data.image !== undefined) {
+      // Same containment rule the validate gate enforces: the image must be
+      // a repo-relative path under public/, with no traversal.
+      const image = character.data.image;
+      const unsafe =
+        image.startsWith("/") ||
+        /^[A-Za-z]:/u.test(image) ||
+        image.split(/[/\\]/u).some((segment) => segment === "..") ||
+        !image.startsWith("public/");
+      if (unsafe) {
+        issues.push("character image must be a repository-relative path under public/");
+      }
+    }
     const safety = scanSafety(parsed.ast);
     if (safety.rawHtml.length > 0) issues.push("character Markdown must not contain raw HTML");
     for (const finding of safety.forbiddenUrls) {

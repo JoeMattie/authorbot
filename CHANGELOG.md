@@ -9,6 +9,32 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.50
+
+- **Characters can ship portrait images.** A character record gains an
+  optional `image`, a repo-relative path under `public/` (for example
+  `image: public/characters/mara-voss.png`). The character index and detail
+  pages render a lightweight WebP thumbnail, generated at build time and
+  named by content hash under `_astro/`, so ordinary page display never
+  loads the full-size original. Clicking a portrait opens the same pure-CSS
+  lightbox as cover art, with Close and Open original links; the static
+  site still ships zero JavaScript. Portrait and landscape sources both
+  work: card thumbnails crop with `object-fit: cover`, the detail page and
+  lightbox preserve the original aspect ratio.
+- **Character cards and pages got a new layout.** Cards on the character
+  index are wider, with the portrait flush against the card's right edge.
+  On a character's page the portrait fills the right gutter beside the
+  prose, as large as it fits uncropped, and stays in view while the text
+  scrolls. The circular monogram avatars are gone entirely: a character
+  without an image simply renders without one.
+- The validator checks character images the way it checks cover art: a
+  traversal path or a path outside `public/` is an error, a named image
+  that does not exist yet is a warning (the build skips it). The
+  collaboration API rejects character document writes whose image path is
+  unsafe, and the character projection now carries the field.
+- This release adds no D1 migration and no book-format migration to content
+  files; no previously valid book changes validity.
+
 ## 0.1.49
 
 - **Books can ship cover art on the landing page.** `book.yml` gains

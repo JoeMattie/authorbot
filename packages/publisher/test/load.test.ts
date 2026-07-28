@@ -558,7 +558,7 @@ describe("loadSiteModel - cover images", () => {
     );
     await mkdir(path.join(repo, "public", "covers"), { recursive: true });
     await writeFile(path.join(repo, "public", "covers", "one.png"), PNG_1X1);
-    const { model, warnings, coverAssets } = await loadSiteModel({ repoPath: repo });
+    const { model, warnings, imageAssets } = await loadSiteModel({ repoPath: repo });
 
     expect(model.book.coversLabel).toBe("Cover candidates");
     expect(model.book.covers).toHaveLength(1);
@@ -566,10 +566,10 @@ describe("loadSiteModel - cover images", () => {
     expect(cover?.label).toBe("Cover 1");
     expect(cover?.full).toBe("/covers/one.png");
     expect(cover?.thumb).toMatch(/^\/_astro\/authorbot-cover-1\.[0-9a-f]{10}\.webp$/);
-    expect(coverAssets).toHaveLength(1);
-    expect(cover?.thumb.endsWith(`/${coverAssets[0]?.fileName}`)).toBe(true);
+    expect(imageAssets).toHaveLength(1);
+    expect(cover?.thumb.endsWith(`/${imageAssets[0]?.fileName}`)).toBe(true);
     // WebP magic: RIFF....WEBP.
-    const data = coverAssets[0]?.data;
+    const data = imageAssets[0]?.data;
     expect(data && Buffer.from(data.slice(0, 4)).toString("ascii")).toBe("RIFF");
     expect(data && Buffer.from(data.slice(8, 12)).toString("ascii")).toBe("WEBP");
     expect(warnings.some((warning) => warning.includes('"public/covers/two.png" does not exist'))).toBe(
@@ -581,9 +581,9 @@ describe("loadSiteModel - cover images", () => {
     const repo = await makeRepo([
       { id: CH[0], slug: "pub", order: 10, status: "published" },
     ]);
-    const { model, coverAssets } = await loadSiteModel({ repoPath: repo });
+    const { model, imageAssets } = await loadSiteModel({ repoPath: repo });
     expect(model.book.covers).toBeUndefined();
-    expect(coverAssets).toEqual([]);
+    expect(imageAssets).toEqual([]);
   });
 
   it("prefixes cover hrefs with the base path", async () => {
@@ -612,6 +612,112 @@ describe("loadSiteModel - cover images", () => {
     });
     expect(model.book.covers?.[0]?.full).toBe("/books/test/covers/one.png");
     expect(model.book.covers?.[0]?.thumb.startsWith("/books/test/_astro/")).toBe(true);
+  });
+});
+
+describe("loadSiteModel - character images", () => {
+  const PNG_1X1 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  const characterRecord = (slug: string, name: string, image?: string): string =>
+    [
+      "---",
+      "schema: authorbot.character/v1",
+      `id: character:${slug}`,
+      `name: ${name}`,
+      ...(image === undefined ? [] : [`image: ${image}`]),
+      "---",
+      "",
+      "Body.",
+      "",
+    ].join("\n");
+
+  it("thumbnails an existing image and keeps imageless characters plain", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await mkdir(path.join(repo, "story", "characters"), { recursive: true });
+    await mkdir(path.join(repo, "public", "characters"), { recursive: true });
+    await writeFile(path.join(repo, "public", "characters", "mara.png"), PNG_1X1);
+    await writeFile(
+      path.join(repo, "story", "characters", "mara.md"),
+      characterRecord("mara", "Mara Voss", "public/characters/mara.png"),
+    );
+    await writeFile(
+      path.join(repo, "story", "characters", "plain.md"),
+      characterRecord("plain", "Plain Person"),
+    );
+    const { model, imageAssets } = await loadSiteModel({ repoPath: repo });
+
+    const mara = model.characters.find((entry) => entry.slug === "mara");
+    expect(mara?.image?.full).toBe("/characters/mara.png");
+    expect(mara?.image?.thumb).toMatch(/^\/_astro\/authorbot-character-mara\.[0-9a-f]{10}\.webp$/);
+    expect(imageAssets).toHaveLength(1);
+    expect(mara?.image?.thumb.endsWith(`/${imageAssets[0]?.fileName}`)).toBe(true);
+    // WebP magic: RIFF....WEBP.
+    const data = imageAssets[0]?.data;
+    expect(data && Buffer.from(data.slice(0, 4)).toString("ascii")).toBe("RIFF");
+    expect(data && Buffer.from(data.slice(8, 12)).toString("ascii")).toBe("WEBP");
+    const plain = model.characters.find((entry) => entry.slug === "plain");
+    expect(plain?.image).toBeUndefined();
+  });
+
+  it("omits the image with a warning when the file is missing", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await mkdir(path.join(repo, "story", "characters"), { recursive: true });
+    await writeFile(
+      path.join(repo, "story", "characters", "mara.md"),
+      characterRecord("mara", "Mara Voss", "public/characters/absent.png"),
+    );
+    const { model, warnings, imageAssets } = await loadSiteModel({ repoPath: repo });
+    expect(model.characters[0]?.image).toBeUndefined();
+    expect(imageAssets).toEqual([]);
+    expect(
+      warnings.some((warning) =>
+        warning.includes('character image "public/characters/absent.png" does not exist'),
+      ),
+    ).toBe(true);
+  });
+
+  it("skips unsafe image paths with a warning", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await mkdir(path.join(repo, "story", "characters"), { recursive: true });
+    await writeFile(
+      path.join(repo, "story", "characters", "mara.md"),
+      characterRecord("mara", "Mara Voss", "public/../secrets.png"),
+    );
+    const { model, warnings } = await loadSiteModel({ repoPath: repo });
+    expect(model.characters[0]?.image).toBeUndefined();
+    expect(
+      warnings.some((warning) =>
+        warning.includes('character image "public/../secrets.png" is not a safe path under public/'),
+      ),
+    ).toBe(true);
+  });
+
+  it("prefixes image hrefs with the base path", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await mkdir(path.join(repo, "story", "characters"), { recursive: true });
+    await mkdir(path.join(repo, "public", "characters"), { recursive: true });
+    await writeFile(path.join(repo, "public", "characters", "mara.png"), PNG_1X1);
+    await writeFile(
+      path.join(repo, "story", "characters", "mara.md"),
+      characterRecord("mara", "Mara Voss", "public/characters/mara.png"),
+    );
+    const { model } = await loadSiteModel({
+      repoPath: repo,
+      baseUrl: "https://example.org/books/test/",
+    });
+    expect(model.characters[0]?.image?.full).toBe("/books/test/characters/mara.png");
+    expect(model.characters[0]?.image?.thumb.startsWith("/books/test/_astro/")).toBe(true);
   });
 });
 

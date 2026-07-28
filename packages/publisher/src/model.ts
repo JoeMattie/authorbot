@@ -111,6 +111,14 @@ export interface SiteCharacter {
   aliases: string[];
   summary?: string;
   status?: string;
+  /**
+   * Portrait image (`image` in the character frontmatter). `full` is the
+   * original under the public passthrough; `thumb` is the generated WebP
+   * (falling back to the original when thumbnail generation is unavailable).
+   * Absent when the record names no image or the file is missing - the
+   * templates then render the character without a portrait.
+   */
+  image?: { full: string; thumb: string };
   href: string;
   /** Repository-relative canonical character document, for authorized editing. */
   sourcePath: string;

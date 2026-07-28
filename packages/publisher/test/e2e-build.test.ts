@@ -308,7 +308,7 @@ describe("buildSite on examples/book-repo", () => {
     );
     expect(characters).toContain("Who is in the room");
     expect(characters).toContain("character-card");
-    expect(characters).toContain(">MV<");
+    expect(characters).not.toContain("character-avatar");
     expect(characters).toContain("2 chapters");
 
     const mara = await readFile(
@@ -316,7 +316,7 @@ describe("buildSite on examples/book-repo", () => {
       "utf8",
     );
     expect(mara).toContain("All characters");
-    expect(mara).toContain("character-avatar-large");
+    expect(mara).not.toContain("character-avatar");
     expect(mara).toContain("also known as M.V.");
     expect(mara).toContain("character-appearances");
   });

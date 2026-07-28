@@ -35,32 +35,34 @@ const coversLabel = site.book.coversLabel ?? "Cover art";
 >
   <div class="reading-index">
     <header class:list={["book-masthead", covers.length > 0 && "book-masthead-with-covers"]}>
-      <p class="page-eyebrow">A serial book, written in the open</p>
-      <h1>{site.book.title}</h1>
-      {covers.length > 0 && (
-        <nav class="book-covers" aria-label={coversLabel}>
-          <p class="book-covers-label" aria-hidden="true">{coversLabel}</p>
-          <ul class="book-cover-list">
-            {covers.map((cover, index) => (
-              <li>
-                <a
-                  class="book-cover-thumb"
-                  href={`#cover-${index + 1}`}
-                  aria-label={`View ${cover.label} full size`}
-                >
-                  <img
-                    src={cover.thumb}
-                    alt={cover.label}
-                    width="64"
-                    height="96"
-                    decoding="async"
-                  />
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      )}
+      <div class="book-masthead-top">
+        <p class="page-eyebrow">A serial book, written in the open</p>
+        <h1>{site.book.title}</h1>
+        {covers.length > 0 && (
+          <nav class="book-covers" aria-label={coversLabel}>
+            <p class="book-covers-label" aria-hidden="true">{coversLabel}</p>
+            <ul class="book-cover-list">
+              {covers.map((cover, index) => (
+                <li>
+                  <a
+                    class="book-cover-thumb"
+                    href={`#cover-${index + 1}`}
+                    aria-label={`View ${cover.label} full size`}
+                  >
+                    <img
+                      src={cover.thumb}
+                      alt={cover.label}
+                      width="64"
+                      height="96"
+                      decoding="async"
+                    />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+      </div>
       {logline && <p class="book-logline">{logline}</p>}
       <p class="book-meta">
         <span>{site.chapters.length} {site.chapters.length === 1 ? "chapter" : "chapters"}</span>

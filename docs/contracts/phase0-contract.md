@@ -83,7 +83,10 @@ config). Where the design is silent:
   durable identity; `name` is an optional display label captured for an agent
   token so public bylines do not expose its opaque actor id.
 - Character frontmatter: `schema`, `id` (`character:<slug>`), `name`; optional
-  `aliases`, `summary`, `status`.
+  `aliases`, `summary`, `status`, `image` (repo-relative portrait path under
+  `public/`; traversal or a path outside `public/` is a validation error, a
+  named-but-absent file is a warning and the site renders the character
+  without a portrait).
 - Story graph node `type`: `premise|arc|part|chapter|scene|beat|character|`
   `concept|rule|theme|motif|development|custom`;
   `order`: number; chapter nodes carry `chapter_id` (UUID of a chapter).

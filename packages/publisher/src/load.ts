@@ -48,11 +48,12 @@ export interface LoadedSite {
   /** Non-fatal problems (skipped records); relevant under `--force`. */
   warnings: string[];
   /**
-   * Generated cover thumbnails, keyed by `_astro/` file name. `buildSite`
-   * writes them beside the other assets; the dev server serves them from
-   * memory. Empty when the book configures no covers (or none exist).
+   * Generated image thumbnails (covers and character portraits), keyed by
+   * `_astro/` file name. `buildSite` writes them beside the other assets;
+   * the dev server serves them from memory. Empty when the book configures
+   * no images (or none exist).
    */
-  coverAssets: { fileName: string; data: Uint8Array }[];
+  imageAssets: { fileName: string; data: Uint8Array }[];
 }
 
 const DEFAULT_CHAPTERS_GLOB = "chapters/*.md";
@@ -340,6 +341,8 @@ async function loadCharacters(
   rawHtmlAllowed: boolean,
   basePath: string,
   warnings: string[],
+  loadSharp: SharpLoader,
+  imageAssets: LoadedSite["imageAssets"],
 ): Promise<LoadedCharacter[]> {
   const characters: LoadedCharacter[] = [];
   /** Character id -> repo-relative path of the record that owns it. */
@@ -385,6 +388,20 @@ async function loadCharacters(
     }
     if (record.status !== undefined) {
       character.status = record.status;
+    }
+    if (record.image !== undefined) {
+      const image = await buildCharacterImage(
+        repoPath,
+        record.image,
+        slug,
+        basePath,
+        loadSharp,
+        imageAssets,
+        warnings,
+      );
+      if (image !== undefined) {
+        character.image = image;
+      }
     }
     characters.push({ character, refsId: record.id });
   }
@@ -616,26 +633,78 @@ const COVER_THUMB_WIDTH = 256;
 const COVER_THUMB_HEIGHT = 384;
 
 /**
+ * Character portrait thumbnail bounds. The largest CSS rendering is the
+ * detail page's right-gutter portrait, which shows the thumbnail at its
+ * natural size up to the column width; square bounds with `fit: inside`
+ * preserve the source aspect ratio for portrait and landscape images
+ * alike, and 1024px keeps it sharp on high-density displays without
+ * shipping the full original.
+ */
+const CHARACTER_THUMB_SIZE = 1024;
+
+/**
+ * Lazily loaded sharp module: `null` once loading has failed. A platform
+ * that cannot load sharp still ships every image, with thumbnails linking
+ * the originals (heavier page, never a broken one).
+ */
+type SharpLoader = () => Promise<typeof import("sharp") | null>;
+
+function createSharpLoader(warnings: string[]): SharpLoader {
+  let sharp: typeof import("sharp") | null | undefined;
+  return async () => {
+    if (sharp === undefined) {
+      try {
+        // sharp is CJS (`export =`): the ESM namespace wraps it in `default`.
+        sharp = (
+          (await import("sharp")) as unknown as { default: typeof import("sharp") }
+        ).default;
+      } catch (error) {
+        sharp = null;
+        warnings.push(
+          `image thumbnails unavailable (sharp failed to load: ${
+            error instanceof Error ? error.message : String(error)
+          }); thumbnails will link the original images`,
+        );
+      }
+    }
+    return sharp;
+  };
+}
+
+/** Resize to fit inside the bounds, encode WebP, and name by content hash. */
+async function webpThumbnail(
+  sharp: typeof import("sharp"),
+  source: Buffer,
+  width: number,
+  height: number,
+  namePrefix: string,
+): Promise<{ fileName: string; data: Uint8Array }> {
+  const data = await sharp(source)
+    .resize(width, height, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 78 })
+    .toBuffer();
+  const hash = createHash("sha256").update(data).digest("hex").slice(0, 10);
+  return { fileName: `${namePrefix}.${hash}.webp`, data };
+}
+
+/**
  * Load `publication.cover_images`: read each file, generate a WebP thumbnail
  * named by content hash under `_astro/`, and produce the model's cover
- * entries. sharp is imported lazily and only when covers are configured; a
- * platform that cannot load it still ships covers, with thumbnails linking
- * the originals (heavier page, never a broken one). Missing files are
- * skipped with a warning so a book can configure covers ahead of committing
- * the binaries.
+ * entries. Missing files are skipped with a warning so a book can configure
+ * covers ahead of committing the binaries.
  */
 async function buildCovers(
   repoPath: string,
   coverImages: readonly string[] | undefined,
   basePath: string,
   warnings: string[],
-): Promise<{ covers: SiteCover[]; coverAssets: LoadedSite["coverAssets"] }> {
+  loadSharp: SharpLoader,
+  imageAssets: LoadedSite["imageAssets"],
+): Promise<SiteCover[]> {
   const covers: SiteCover[] = [];
-  const coverAssets: LoadedSite["coverAssets"] = [];
   if (coverImages === undefined || coverImages.length === 0) {
-    return { covers, coverAssets };
+    return covers;
   }
-  let sharp: typeof import("sharp") | null | undefined;
   for (const [index, rel] of coverImages.entries()) {
     if (!rel.startsWith("public/") || rel.split(/[/\\]/).some((segment) => segment === "..")) {
       warnings.push(`cover image "${rel}" is not a safe path under public/; skipped`);
@@ -652,35 +721,19 @@ async function buildCovers(
     // earlier image is missing.
     const label = `Cover ${index + 1}`;
     const full = `${basePath}${rel.slice("public/".length)}`;
-    if (sharp === undefined) {
-      try {
-        // sharp is CJS (`export =`): the ESM namespace wraps it in `default`.
-        sharp = (
-          (await import("sharp")) as unknown as { default: typeof import("sharp") }
-        ).default;
-      } catch (error) {
-        sharp = null;
-        warnings.push(
-          `cover thumbnails unavailable (sharp failed to load: ${
-            error instanceof Error ? error.message : String(error)
-          }); thumbnails will link the original images`,
-        );
-      }
-    }
     let thumb = full;
+    const sharp = await loadSharp();
     if (sharp !== null) {
       try {
-        const data = await sharp(source)
-          .resize(COVER_THUMB_WIDTH, COVER_THUMB_HEIGHT, {
-            fit: "inside",
-            withoutEnlargement: true,
-          })
-          .webp({ quality: 78 })
-          .toBuffer();
-        const hash = createHash("sha256").update(data).digest("hex").slice(0, 10);
-        const fileName = `authorbot-cover-${index + 1}.${hash}.webp`;
-        coverAssets.push({ fileName, data });
-        thumb = `${basePath}_astro/${fileName}`;
+        const asset = await webpThumbnail(
+          sharp,
+          source,
+          COVER_THUMB_WIDTH,
+          COVER_THUMB_HEIGHT,
+          `authorbot-cover-${index + 1}`,
+        );
+        imageAssets.push(asset);
+        thumb = `${basePath}_astro/${asset.fileName}`;
       } catch (error) {
         warnings.push(
           `cover image "${rel}" could not be thumbnailed (${
@@ -691,7 +744,59 @@ async function buildCovers(
     }
     covers.push({ full, thumb, label });
   }
-  return { covers, coverAssets };
+  return covers;
+}
+
+/**
+ * Mirror of {@link buildCovers} for one character portrait: check the path,
+ * read the file, and generate a hashed WebP thumbnail under `_astro/`.
+ * A missing or unsafe image degrades to `undefined` with a warning - the
+ * templates then render the character without a portrait - so ordinary page
+ * display never touches the full-size original.
+ */
+async function buildCharacterImage(
+  repoPath: string,
+  rel: string,
+  slug: string,
+  basePath: string,
+  loadSharp: SharpLoader,
+  imageAssets: LoadedSite["imageAssets"],
+  warnings: string[],
+): Promise<{ full: string; thumb: string } | undefined> {
+  if (!rel.startsWith("public/") || rel.split(/[/\\]/).some((segment) => segment === "..")) {
+    warnings.push(`character image "${rel}" is not a safe path under public/; skipped`);
+    return undefined;
+  }
+  let source: Buffer;
+  try {
+    source = await readFile(path.join(repoPath, rel));
+  } catch {
+    warnings.push(`character image "${rel}" does not exist; skipped`);
+    return undefined;
+  }
+  const full = `${basePath}${rel.slice("public/".length)}`;
+  let thumb = full;
+  const sharp = await loadSharp();
+  if (sharp !== null) {
+    try {
+      const asset = await webpThumbnail(
+        sharp,
+        source,
+        CHARACTER_THUMB_SIZE,
+        CHARACTER_THUMB_SIZE,
+        `authorbot-character-${slug}`,
+      );
+      imageAssets.push(asset);
+      thumb = `${basePath}_astro/${asset.fileName}`;
+    } catch (error) {
+      warnings.push(
+        `character image "${rel}" could not be thumbnailed (${
+          error instanceof Error ? error.message : String(error)
+        }); the thumbnail links the original`,
+      );
+    }
+  }
+  return { full, thumb };
 }
 
 /**
@@ -794,12 +899,17 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
 
   const includedById = new Map(included.map((chapter) => [chapter.id, chapter]));
 
+  const imageAssets: LoadedSite["imageAssets"] = [];
+  const loadSharp = createSharpLoader(warnings);
+
   const characters = await loadCharacters(
     repoPath,
     charactersGlob,
     rawHtmlAllowed,
     basePath,
     warnings,
+    loadSharp,
+    imageAssets,
   );
   // Chapters referencing each character, in reading order.
   const refsByCharacter = new Map<string, { title: string; href: string }[]>();
@@ -840,11 +950,13 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
     warnings,
   );
 
-  const { covers, coverAssets } = await buildCovers(
+  const covers = await buildCovers(
     repoPath,
     book.publication?.cover_images,
     basePath,
     warnings,
+    loadSharp,
+    imageAssets,
   );
 
   const model: SiteModel = {
@@ -876,5 +988,5 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
   if (book.publication?.cover_images_label !== undefined) {
     model.book.coversLabel = book.publication.cover_images_label;
   }
-  return { model, warnings, coverAssets };
+  return { model, warnings, imageAssets };
 }

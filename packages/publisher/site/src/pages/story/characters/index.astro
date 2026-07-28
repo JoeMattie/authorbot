@@ -3,14 +3,11 @@ import Icon from "../../../components/Icon.astro";
 import Base from "../../../layouts/Base.astro";
 import { site } from "virtual:authorbot-site";
 
-const monogram = (name: string): string =>
-  name
-    .replace(/^Dr\.\s+/u, "")
-    .split(/\s+/u)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
+const portraits = site.characters.flatMap((character) =>
+  character.image === undefined
+    ? []
+    : [{ slug: character.slug, name: character.name, image: character.image }],
+);
 ---
 
 <Base title={`Characters · ${site.book.title}`} activeNav="characters">
@@ -24,26 +21,80 @@ const monogram = (name: string): string =>
         <p class="story-empty">This book has no character records yet.</p>
       ) : (
         <ul class="character-grid">
-          {site.characters.map((character) => (
-            <li>
-              <a class="character-card" href={character.href}>
-                <div class="character-card-heading">
-                  <span class="character-avatar" aria-hidden="true">{monogram(character.name)}</span>
-                  <span>
-                    <strong>{character.name}</strong>
-                    <span class="character-card-meta">
-                      {character.aliases.length > 0 && `${character.aliases.join(", ")} · `}
-                      {character.chapters.length} {character.chapters.length === 1 ? "chapter" : "chapters"}
-                    </span>
-                  </span>
-                  <Icon name="chevron-right" size={17} class="character-card-arrow" />
+          {site.characters.map((character) =>
+            character.image !== undefined ? (
+              <li>
+                <div class="character-card character-card-with-image">
+                  <a class="character-card-main" href={character.href}>
+                    <div class="character-card-heading">
+                      <span class="character-card-copy">
+                        <strong>{character.name}</strong>
+                        <span class="character-card-meta">
+                          {character.aliases.length > 0 && `${character.aliases.join(", ")} · `}
+                          {character.chapters.length} {character.chapters.length === 1 ? "chapter" : "chapters"}
+                        </span>
+                      </span>
+                      <Icon name="chevron-right" size={17} class="character-card-arrow" />
+                    </div>
+                    {character.summary && <span class="character-card-summary">{character.summary}</span>}
+                  </a>
+                  <a
+                    class="character-card-portrait"
+                    href={`#character-image-${character.slug}`}
+                    aria-label={`View portrait of ${character.name} full size`}
+                  >
+                    <img
+                      src={character.image.thumb}
+                      alt={`Portrait of ${character.name}`}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  </a>
                 </div>
-                {character.summary && <span class="character-card-summary">{character.summary}</span>}
-              </a>
-            </li>
-          ))}
+              </li>
+            ) : (
+              <li>
+                <a class="character-card" href={character.href}>
+                  <div class="character-card-heading">
+                    <span class="character-card-copy">
+                      <strong>{character.name}</strong>
+                      <span class="character-card-meta">
+                        {character.aliases.length > 0 && `${character.aliases.join(", ")} · `}
+                        {character.chapters.length} {character.chapters.length === 1 ? "chapter" : "chapters"}
+                      </span>
+                    </span>
+                    <Icon name="chevron-right" size={17} class="character-card-arrow" />
+                  </div>
+                  {character.summary && <span class="character-card-summary">{character.summary}</span>}
+                </a>
+              </li>
+            ),
+          )}
         </ul>
       )
     }
   </div>
+  {
+    /* Script-free portrait lightboxes, the same `:target` mechanism as the
+       cover art on the landing page: a thumbnail links to its overlay's
+       fragment, and closing is a link back to an inert fragment. */
+    portraits.map((portrait) => (
+      <div
+        class="cover-modal"
+        id={`character-image-${portrait.slug}`}
+        role="dialog"
+        aria-label={`Portrait of ${portrait.name}`}
+      >
+        <a class="cover-modal-backdrop" href="#_" aria-label="Close"></a>
+        <figure class="cover-modal-body">
+          <img src={portrait.image.full} alt={`Portrait of ${portrait.name}`} loading="lazy" decoding="async" />
+          <figcaption>
+            <span>{portrait.name}</span>
+            <a href={portrait.image.full} target="_blank" rel="noopener">Open original</a>
+            <a class="cover-modal-close" href="#_">Close</a>
+          </figcaption>
+        </figure>
+      </div>
+    ))
+  }
 </Base>
