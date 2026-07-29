@@ -9,6 +9,27 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.53
+
+- **Books can go fully headless.** `book.yml` gains `publication.mode:
+  headless`: the build emits no generated pages and no collaboration
+  islands - just the book's `public/` tree (its own `index.html` included),
+  the generated image thumbnails, `authorbot-site.json`, and the manifest
+  (now marked `mode: headless`). A book can ship a completely custom
+  frontend - a React SPA, anything - that renders from the site JSON and
+  talks to the same-origin API. In headless mode the route-root
+  reservations lift (`index.html`, `story/`, the chapter root, and the
+  collaboration roots become the book's to use); only the data artifacts
+  stay reserved, and the validator warns if `public/index.html` is missing.
+- `authorbot dev` deliberately ignores the mode and keeps serving the
+  generated pages: they are the local editorial workbench (planning
+  editors, annotations, work queue). Custom pages and the site JSON are
+  served alongside as usual.
+- The collaboration reading/editing UI ships only with generated pages; a
+  headless book that wants those features implements them against the API.
+- This release adds no D1 migration and no book-format migration to content
+  files; no previously valid book changes validity.
+
 ## 0.1.52
 
 - **The reserved output names are now documented and fully checked.** The

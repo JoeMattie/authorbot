@@ -85,6 +85,8 @@ config). Where the design is silent:
 - Book `publication.nav_links`: optional list of `{ label, href }` rendered
   in the site navigation; `href` must be a book-relative path (leading `/`,
   safe segments, no traversal, no scheme) - violations are validation errors.
+- Book `publication.mode`: `generated` (default) or `headless` (the build
+  emits no generated pages; the book's `public/` tree is the frontend).
 - Character frontmatter: `schema`, `id` (`character:<slug>`), `name`; optional
   `aliases`, `summary`, `status`, `image` (repo-relative portrait path under
   `public/`; traversal or a path outside `public/` is a validation error, a

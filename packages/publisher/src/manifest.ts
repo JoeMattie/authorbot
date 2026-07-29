@@ -48,6 +48,8 @@ export interface CreateManifestOptions {
   commit: string | null;
   builtAt?: string;
   baseUrl?: string | undefined;
+  /** Marks a `publication.mode: headless` build in the manifest. */
+  headless?: boolean | undefined;
   chapters: readonly SiteChapter[];
 }
 
@@ -69,6 +71,9 @@ export function createManifest(options: CreateManifestOptions): BuildManifest {
   };
   if (options.baseUrl !== undefined && options.baseUrl !== "") {
     manifest.base_url = options.baseUrl;
+  }
+  if (options.headless === true) {
+    manifest.mode = "headless";
   }
   return buildManifestSchema.parse(manifest);
 }

@@ -77,6 +77,31 @@ choice, this contract selects one.
     `settings/`, `revisions/`. Avoid these even on a collaboration-less
     book, so enabling collaboration later cannot break a custom page.
   Everything else at the top level is the book's to use.
+
+### Headless mode (`publication.mode: headless`, 0.1.53)
+
+- `publication.mode` (default `generated`) set to `headless` makes the book
+  own its entire frontend: `authorbot build` emits no generated pages and
+  no collaboration islands. The output is the `public/` tree copied
+  verbatim (including the book's own `index.html` at the site root), the
+  generated image thumbnails under `_astro/`, `authorbot-site.json`, the
+  manifest (now carrying `mode: headless`), and `_headers`. Base-path
+  nesting is unchanged.
+- In headless mode only `_astro/`, `authorbot-build.json`, and
+  `authorbot-site.json` stay reserved; every route root - `index.html`,
+  `story/`, the chapter root, and the collaboration roots - becomes the
+  book's to use. The validate gate warns when `public/index.html` is
+  missing (the site root would 404).
+- `authorbot dev` ignores the mode and serves the generated pages either
+  way: they are the local editorial workbench (planning editors, work
+  queue, annotations), not the published site. Custom pages and
+  `authorbot-site.json` are served by dev as usual, so a headless frontend
+  is still previewable at its own paths.
+- The collaboration UI ships only with generated pages; a headless book
+  that wants annotation, suggestion, or work-queue features implements
+  them against the same-origin API (`publication.api_url` still configures
+  the Worker, and the model's `collab` block still appears in
+  `authorbot-site.json`).
 - `publication.nav_links` (`[{label, href}]`) renders plain anchors after
   the built-in nav items on every generated page - the intended front door
   for those custom pages. Hrefs are book-relative paths (leading `/`, safe

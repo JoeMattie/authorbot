@@ -31,6 +31,8 @@ export const buildManifestSchema = z.strictObject({
   built_at: timestampSchema,
   publisher_version: z.string().min(1),
   base_url: z.string().min(1).optional(),
+  /** Present (as `headless`) only for a headless build; absent otherwise. */
+  mode: z.literal("headless").optional(),
   chapters: z.array(buildManifestChapterSchema),
 });
 export type BuildManifest = z.infer<typeof buildManifestSchema>;

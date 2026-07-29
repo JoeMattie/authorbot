@@ -92,6 +92,16 @@ export const bookConfigSchema = z.strictObject({
     .optional(),
   publication: z
     .strictObject({
+      /**
+       * Site mode (default `generated`). `headless` skips every generated
+       * page: the build emits only the book's `public/` tree, the generated
+       * image thumbnails under `_astro/`, `authorbot-site.json`, and the
+       * build manifest - the book owns the entire frontend, including
+       * `public/index.html` for the site root. `authorbot dev` still serves
+       * the generated pages either way (they are the local editorial
+       * workbench, not the published site).
+       */
+      mode: z.enum(["generated", "headless"]).optional(),
       chapter_url: z.string().min(1).optional(),
       /**
        * Collaboration API base URL (Phase 2b contract §1); enables the

@@ -48,6 +48,17 @@ const RESERVED_TOP_SEGMENTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The only names a headless build still generates: the data artifacts and
+ * the thumbnail dir. Everything else - `index.html` included - is the
+ * book's own frontend.
+ */
+const HEADLESS_RESERVED_TOP_SEGMENTS: ReadonlySet<string> = new Set([
+  "_astro",
+  "authorbot-build.json",
+  "authorbot-site.json",
+]);
+
+/**
  * Output roots that exist only in a collaboration build (`/work/`,
  * `/write/`, `/settings/`, `/revisions/`). A `public/` entry shadowing one
  * gets the same warning as the always-generated roots above, but these stay
@@ -164,12 +175,15 @@ async function checkCoverImages(
  * `public/` is copied verbatim into the site output, so a top-level entry
  * named like a generated route would silently shadow (or be shadowed by)
  * built pages. Warn rather than error: the collision is almost certainly a
- * mistake, but the build itself does not fail on it.
+ * mistake, but the build itself does not fail on it. A headless build
+ * generates no pages, so only the data artifacts stay reserved there - the
+ * route roots (including `index.html`) become the book's to use.
  */
 async function checkPublicDirCollisions(
   root: string,
   findings: FindingCollector,
   chapterUrl: string,
+  headless: boolean,
 ): Promise<void> {
   const entries = await listDirEntries(path.join(root, "public"));
   if (entries.length === 0) {
@@ -179,15 +193,36 @@ async function checkPublicDirCollisions(
     .split("/")
     .filter((segment) => segment.length > 0)[0]
     ?.toLowerCase();
+  const reservedInMode = headless ? HEADLESS_RESERVED_TOP_SEGMENTS : RESERVED_TOP_SEGMENTS;
   for (const entry of entries) {
     const name = entry.name.toLowerCase();
-    if (RESERVED_TOP_SEGMENTS.has(name) || COLLAB_ROUTE_ROOTS.has(name) || (chapterRoot !== undefined && !chapterRoot.includes("{slug}") && name === chapterRoot)) {
+    if (reservedInMode.has(name) || (!headless && (COLLAB_ROUTE_ROOTS.has(name) || (chapterRoot !== undefined && !chapterRoot.includes("{slug}") && name === chapterRoot)))) {
       findings.warning(
         "PATH_UNSAFE",
         `public/${entry.name}`,
         `public/${entry.name} collides with the generated "${name}" output path and may shadow built pages`,
       );
     }
+  }
+}
+
+/**
+ * A headless site serves whatever `public/` provides, so a missing
+ * `public/index.html` means the site root 404s in production. A warning,
+ * not an error: the book may be mid-migration, or serve its entry from a
+ * Worker instead.
+ */
+async function checkHeadlessEntryPage(
+  root: string,
+  findings: FindingCollector,
+): Promise<void> {
+  if (!(await isFile(path.join(root, "public", "index.html")))) {
+    findings.warning(
+      "BOOK_CONFIG_INVALID",
+      "book.yml",
+      "publication.mode is headless but public/index.html does not exist; the site root will 404",
+      "/publication/mode",
+    );
   }
 }
 
@@ -269,7 +304,11 @@ export async function loadBookConfig(
       checkChapterUrlPattern(findings, publication.chapter_url);
     }
     await checkCoverImages(root, findings, publication.cover_images);
-    await checkPublicDirCollisions(root, findings, settings.chapterUrl);
+    const headless = publication.mode === "headless";
+    await checkPublicDirCollisions(root, findings, settings.chapterUrl, headless);
+    if (headless) {
+      await checkHeadlessEntryPage(root, findings);
+    }
   }
 
   const result = bookConfigSchema.safeParse(parsed.data);

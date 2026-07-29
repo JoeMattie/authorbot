@@ -40,6 +40,17 @@ describe("bookConfigSchema", () => {
     expectInvalid(bookConfigSchema, bad);
   });
 
+  it("accepts the publication modes and rejects unknown ones", () => {
+    for (const mode of ["generated", "headless"]) {
+      const config = clone(validBook);
+      config.publication.mode = mode;
+      expectValid(bookConfigSchema, config);
+    }
+    const bad = clone(validBook);
+    bad.publication.mode = "fancy";
+    expectInvalid(bookConfigSchema, bad);
+  });
+
   it("accepts book-relative nav links", () => {
     const config = clone(validBook);
     config.publication.nav_links = [

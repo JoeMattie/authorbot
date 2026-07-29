@@ -30,6 +30,10 @@
       "type": "string",
       "minLength": 1
     },
+    "mode": {
+      "type": "string",
+      "const": "headless"
+    },
     "chapters": {
       "type": "array",
       "items": {

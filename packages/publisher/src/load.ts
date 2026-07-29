@@ -54,6 +54,12 @@ export interface LoadedSite {
    * no images (or none exist).
    */
   imageAssets: { fileName: string; data: Uint8Array }[];
+  /**
+   * `publication.mode: headless`: the build emits no generated pages, only
+   * the book's `public/` tree plus the data artifacts. The dev server
+   * ignores this (its generated pages are the local editorial workbench).
+   */
+  headless: boolean;
 }
 
 const DEFAULT_CHAPTERS_GLOB = "chapters/*.md";
@@ -996,5 +1002,10 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
       href: `${basePath}${link.href.slice(1)}`,
     }));
   }
-  return { model, warnings, imageAssets };
+  return {
+    model,
+    warnings,
+    imageAssets,
+    headless: book.publication?.mode === "headless",
+  };
 }

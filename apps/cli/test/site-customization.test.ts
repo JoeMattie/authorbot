@@ -94,6 +94,60 @@ describe("collab route root reservation", () => {
   });
 });
 
+describe("headless mode validation", () => {
+  async function withHeadless(root: string): Promise<void> {
+    await appendFile(
+      path.join(root, "book.yml"),
+      ["publication:", "  mode: headless", ""].join("\n"),
+    );
+  }
+
+  it("frees the route roots for the book's own frontend", async () => {
+    const repo = await makeRepo();
+    await withHeadless(repo);
+    for (const name of ["story", "work", "chapters"]) {
+      await mkdir(path.join(repo, "public", name), { recursive: true });
+      await writeFile(path.join(repo, "public", name, "index.html"), "mine");
+    }
+    await writeFile(path.join(repo, "public", "index.html"), "mine");
+    const report = await validateBookRepo(repo);
+    expect(report.valid).toBe(true);
+    expect(report.warnings).toEqual([]);
+  });
+
+  it("still reserves the data artifacts", async () => {
+    const repo = await makeRepo();
+    await withHeadless(repo);
+    await mkdir(path.join(repo, "public"), { recursive: true });
+    await writeFile(path.join(repo, "public", "index.html"), "mine");
+    await writeFile(path.join(repo, "public", "authorbot-site.json"), "{}");
+    const report = await validateBookRepo(repo);
+    expect(report.valid).toBe(true);
+    const warning = report.warnings.find((entry) => entry.code === "PATH_UNSAFE");
+    expect(warning?.message).toContain("authorbot-site.json");
+  });
+
+  it("warns when the entry page is missing", async () => {
+    const repo = await makeRepo();
+    await withHeadless(repo);
+    const report = await validateBookRepo(repo);
+    expect(report.valid).toBe(true);
+    const warning = report.warnings.find((entry) => entry.code === "BOOK_CONFIG_INVALID");
+    expect(warning?.message).toContain("public/index.html does not exist");
+    expect(warning?.pointer).toBe("/publication/mode");
+  });
+
+  it("rejects an unknown mode", async () => {
+    const repo = await makeRepo();
+    await appendFile(
+      path.join(repo, "book.yml"),
+      ["publication:", "  mode: fancy", ""].join("\n"),
+    );
+    const report = await validateBookRepo(repo);
+    expect(report.valid).toBe(false);
+  });
+});
+
 describe("authorbot-site.json reservation", () => {
   it("warns when public/ shadows the site-data JSON", async () => {
     const repo = await makeRepo();

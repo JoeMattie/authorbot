@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import type { ClientRequest } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -408,7 +408,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   const outDir = path.resolve(options.outDir);
   const siteRoot = fileURLToPath(new URL("../site/", import.meta.url));
 
-  const { model, warnings, imageAssets } = await loadSiteModel({
+  const { model, warnings, imageAssets, headless } = await loadSiteModel({
     repoPath,
     baseUrl: options.baseUrl,
     includeDrafts: options.includeDrafts,
@@ -446,41 +446,53 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   const bookPublicDir = path.join(repoPath, "public");
   const hasBookPublicDir = await isDirectory(bookPublicDir);
 
-  const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-  const previousCwd = process.cwd();
-  process.chdir(packageRoot);
-  try {
-    await build({
-      root: siteRoot,
-      outDir: siteOutDir,
-      output: "static",
-      base: model.basePath,
-      ...(hasBookPublicDir ? { publicDir: bookPublicDir } : {}),
-      integrations: [],
-      devToolbar: { enabled: false },
-      logLevel: options.logLevel ?? "warn",
-      build: {
-        format: "directory",
-        // One shared stylesheet for the whole site (design section 16.1);
-        // never inlined so every page links the same cacheable file.
-        inlineStylesheets: "never",
-      },
-      vite: {
-        plugins: [siteDataPlugin(model)],
-      },
-    });
-  } catch (error) {
-    throw new PublisherError(
-      `astro build failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  } finally {
-    process.chdir(previousCwd);
-  }
+  if (headless) {
+    // `publication.mode: headless` (Phase 1 contract): no generated pages,
+    // no islands - the book owns the entire frontend. The output is the
+    // `public/` tree copied verbatim plus the data artifacts written below
+    // (image thumbnails, `authorbot-site.json`, manifest, `_headers`).
+    await rm(siteOutDir, { recursive: true, force: true });
+    await mkdir(siteOutDir, { recursive: true });
+    if (hasBookPublicDir) {
+      await cp(bookPublicDir, siteOutDir, { recursive: true });
+    }
+  } else {
+    const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+    const previousCwd = process.cwd();
+    process.chdir(packageRoot);
+    try {
+      await build({
+        root: siteRoot,
+        outDir: siteOutDir,
+        output: "static",
+        base: model.basePath,
+        ...(hasBookPublicDir ? { publicDir: bookPublicDir } : {}),
+        integrations: [],
+        devToolbar: { enabled: false },
+        logLevel: options.logLevel ?? "warn",
+        build: {
+          format: "directory",
+          // One shared stylesheet for the whole site (design section 16.1);
+          // never inlined so every page links the same cacheable file.
+          inlineStylesheets: "never",
+        },
+        vite: {
+          plugins: [siteDataPlugin(model)],
+        },
+      });
+    } catch (error) {
+      throw new PublisherError(
+        `astro build failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      process.chdir(previousCwd);
+    }
 
-  if (model.collab !== null) {
-    // Islands land beside the rest of the site's assets, under the same base
-    // path prefix their `<script src>` tags point at.
-    await buildIslands(siteRoot, siteOutDir, model.basePath);
+    if (model.collab !== null) {
+      // Islands land beside the rest of the site's assets, under the same
+      // base path prefix their `<script src>` tags point at.
+      await buildIslands(siteRoot, siteOutDir, model.basePath);
+    }
   }
 
   if (imageAssets.length > 0) {
@@ -508,6 +520,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
   const manifest = createManifest({
     commit,
     baseUrl: options.baseUrl,
+    headless,
     chapters: model.chapters,
   });
   await writeFile(
