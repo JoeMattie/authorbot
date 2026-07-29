@@ -43,6 +43,7 @@ const RESERVED_TOP_SEGMENTS: ReadonlySet<string> = new Set([
   "story",
   "_astro",
   "authorbot-build.json",
+  "authorbot-site.json",
   "index.html",
 ]);
 

@@ -9,6 +9,27 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.51
+
+- **Book repos can build fully custom pages.** Every build now writes
+  `authorbot-site.json` next to `index.html`: the complete site model
+  (chapters with rendered prose, outline, timeline, characters, hrefs) as
+  versioned JSON (`authorbot.site/v1`). A page you ship in `public/` (say,
+  an interactive story map) can fetch it relatively at any base path and
+  render whatever the generated site does not - with no authorbot release
+  in the loop. `authorbot dev` serves the same URL, and the file name is
+  reserved so a `public/` copy cannot shadow it silently.
+- **Custom pages get a front door.** `book.yml` gains
+  `publication.nav_links`, a list of `{label, href}` rendered as plain
+  anchors after the built-in navigation items on every page. Hrefs must be
+  book-relative paths; anything scheme-ful, protocol-relative, or
+  traversing is a validation error. Generated pages still ship zero
+  JavaScript.
+- A book adopting `nav_links` must bump its pinned `@authorbot/*` packages
+  first; older pinned CLIs reject the unknown key.
+- This release adds no D1 migration and no book-format migration to content
+  files; no previously valid book changes validity.
+
 ## 0.1.50
 
 - **Characters can ship portrait images.** A character record gains an

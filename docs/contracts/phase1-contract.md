@@ -23,6 +23,7 @@ choice, this contract selects one.
 ├── index.html                    # book title + chapter index (published only)
 ├── _headers                      # no-transform: blocks edge beacon injection
 ├── authorbot-build.json          # build manifest (authorbot.build/v1)
+├── authorbot-site.json           # site data for custom pages (authorbot.site/v1); base-path nested
 ├── chapters/<slug>/index.html    # chapter pages per publication.chapter_url
 ├── <public/**>                   # book-owned static assets, copied verbatim
 ├── _astro/authorbot-cover-*.webp # cover thumbnails (publication.cover_images)
@@ -44,6 +45,36 @@ choice, this contract selects one.
   right gutter render a generated WebP thumbnail (never the full-size
   original) that opens the same script-free lightbox; characters without an
   image render plainly (no avatar).
+
+### Site data JSON (`authorbot.site/v1`) and book-defined nav links (0.1.51)
+
+- Every build writes `authorbot-site.json` next to `index.html` (so it nests
+  under the base path with the page URLs, unlike `authorbot-build.json`,
+  which stays at the deploy root for deploy tooling). Its shape is the page
+  model the generated site embeds - `book`, `basePath`, `chapters` (with
+  rendered prose HTML), `outline`, `timeline`, `characters`,
+  `planningDocuments`, `collab` - minus the dev-only `localDev` key, plus a
+  `schema` discriminator. This makes book-authored custom pages under
+  `public/` first-class: a page at `public/<name>/index.html` fetches
+  `../authorbot-site.json` relatively (base-path agnostic) and renders
+  whatever views it likes, with no toolchain involvement.
+- Versioning policy: additive changes keep `authorbot.site/v1`; a breaking
+  change bumps the discriminator to `authorbot.site/v2`. The exported
+  `SiteModel` TypeScript type in `@authorbot/publisher` is the authoritative
+  shape.
+- `--include-drafts` builds include drafts in the JSON exactly as the pages
+  do; `authorbot dev` serves the drafts-inclusive model at the same URL.
+- The generated file is written after the Astro copy, so it always wins over
+  a book-supplied `public/authorbot-site.json`; the name is reserved and the
+  validate gate warns about the shadowing.
+- `publication.nav_links` (`[{label, href}]`) renders plain anchors after
+  the built-in nav items on every generated page - the intended front door
+  for those custom pages. Hrefs are book-relative paths (leading `/`, safe
+  segments, no traversal, no schemes); unsafe hrefs are validation errors
+  enforced in the shared schema, so `validate` and the build reject
+  identically. The publisher prefixes the base path at build time; custom
+  links never carry `aria-current`. Generated pages still ship zero
+  JavaScript.
 
 - Chapters with `status: published` are included by default; `--include-drafts`
   adds `draft`/`proposed` chapters with a visible draft banner. `archived` is

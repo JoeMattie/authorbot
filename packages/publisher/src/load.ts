@@ -988,5 +988,13 @@ export async function loadSiteModel(options: LoadSiteModelOptions): Promise<Load
   if (book.publication?.cover_images_label !== undefined) {
     model.book.coversLabel = book.publication.cover_images_label;
   }
+  if (book.publication?.nav_links !== undefined) {
+    // Path safety was enforced by the schema parse; only the base path is
+    // resolved here (the covers/character-image pattern).
+    model.book.navLinks = book.publication.nav_links.map((link) => ({
+      label: link.label,
+      href: `${basePath}${link.href.slice(1)}`,
+    }));
+  }
   return { model, warnings, imageAssets };
 }

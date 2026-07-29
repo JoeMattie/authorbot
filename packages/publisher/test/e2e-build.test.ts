@@ -116,6 +116,7 @@ describe("buildSite on examples/book-repo", () => {
       "index.html",
       "_headers",
       "authorbot-build.json",
+      "authorbot-site.json",
       "chapters/baseline/index.html",
       "chapters/null-results/index.html",
       "story/index.html",

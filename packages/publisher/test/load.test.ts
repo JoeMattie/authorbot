@@ -721,6 +721,44 @@ describe("loadSiteModel - character images", () => {
   });
 });
 
+describe("loadSiteModel - nav links", () => {
+  it("resolves hrefs against the base path", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    await writeFile(
+      path.join(repo, "book.yml"),
+      [
+        "schema: authorbot.book/v1",
+        `id: ${BOOK_ID}`,
+        "title: Test Book",
+        "slug: test-book",
+        "language: en",
+        "publication:",
+        "  nav_links:",
+        "    - label: Story map",
+        "      href: /story-map/",
+        "",
+      ].join("\n"),
+    );
+    const { model } = await loadSiteModel({
+      repoPath: repo,
+      baseUrl: "https://example.org/books/test/",
+    });
+    expect(model.book.navLinks).toEqual([
+      { label: "Story map", href: "/books/test/story-map/" },
+    ]);
+  });
+
+  it("omits navLinks when none are configured", async () => {
+    const repo = await makeRepo([
+      { id: CH[0], slug: "pub", order: 10, status: "published" },
+    ]);
+    const { model } = await loadSiteModel({ repoPath: repo });
+    expect(model.book.navLinks).toBeUndefined();
+  });
+});
+
 describe("loadSiteModel - semantic outline nodes", () => {
   it("accepts theme/motif nodes and links character nodes to their pages", async () => {
     const repo = await makeRepo([

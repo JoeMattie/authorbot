@@ -40,6 +40,39 @@ describe("bookConfigSchema", () => {
     expectInvalid(bookConfigSchema, bad);
   });
 
+  it("accepts book-relative nav links", () => {
+    const config = clone(validBook);
+    config.publication.nav_links = [
+      { label: "Story map", href: "/story-map/" },
+      { label: "Extras", href: "/extras/gallery" },
+    ];
+    expectValid(bookConfigSchema, config);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "https://example.com/",
+    "//evil.example/",
+    "no-leading-slash",
+    "/../secrets/",
+    "/story map/",
+    "/a\\b/",
+    "/",
+  ])("rejects the unsafe nav href %s", (href) => {
+    const bad = clone(validBook);
+    bad.publication.nav_links = [{ label: "Bad", href }];
+    expectInvalid(bookConfigSchema, bad);
+  });
+
+  it("rejects an empty nav link list and a missing label", () => {
+    const bad = clone(validBook);
+    bad.publication.nav_links = [];
+    expectInvalid(bookConfigSchema, bad);
+    const noLabel = clone(validBook);
+    noLabel.publication.nav_links = [{ href: "/story-map/" }];
+    expectInvalid(bookConfigSchema, noLabel);
+  });
+
   it("rejects a wrong schema discriminator", () => {
     const bad = clone(validBook);
     bad.schema = "authorbot.book/v2";

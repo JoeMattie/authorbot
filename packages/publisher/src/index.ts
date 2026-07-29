@@ -34,6 +34,11 @@ export {
   renderMarkdownToHtml,
   type RenderOptions,
 } from "./render.js";
+export {
+  serializeSiteJson,
+  SITE_JSON_FILENAME,
+  SITE_JSON_SCHEMA,
+} from "./site-json.js";
 export type {
   ChapterCredit,
   IncludedChapterStatus,

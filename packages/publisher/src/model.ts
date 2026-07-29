@@ -181,6 +181,11 @@ export interface SiteBook {
   covers?: SiteCover[];
   /** `publication.cover_images_label` (the template defaults to "Cover art"). */
   coversLabel?: string;
+  /**
+   * Book-defined nav links (`publication.nav_links`), in config order.
+   * Hrefs are absolute, base path included, like {@link SiteCover.full}.
+   */
+  navLinks?: { label: string; href: string }[];
 }
 
 export interface SiteModel {

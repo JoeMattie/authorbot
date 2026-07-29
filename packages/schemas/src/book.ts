@@ -18,6 +18,44 @@ export const ANNOTATION_POLICY_MODES = [
 export const annotationPolicySchema = z.enum(ANNOTATION_POLICY_MODES);
 export type AnnotationPolicyMode = (typeof ANNOTATION_POLICY_MODES)[number];
 
+/** One nav-href path segment: no encoding tricks, no dot-segments. */
+const NAV_HREF_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Why a `publication.nav_links` href is unusable, or null when it is safe.
+ * Book-relative paths only: the link lands as a live anchor on every
+ * generated page, so anything scheme-ful (`javascript:`, `https:`),
+ * protocol-relative (`//`), or traversing (`..`) is rejected outright.
+ * Enforced inside the schema so `authorbot validate` and the publisher
+ * reject identically. External URLs could be permitted later without
+ * breaking any existing book.
+ */
+export function unsafeNavHrefReason(href: string): string | null {
+  if (!href.startsWith("/")) {
+    return "must be a book-relative path starting with /";
+  }
+  if (href.startsWith("//")) {
+    return "must not be protocol-relative (//)";
+  }
+  if (href.includes("\\")) {
+    return "must not contain backslashes";
+  }
+  const segments = href.split("/").slice(1);
+  // A single trailing empty segment is the optional trailing slash.
+  if (segments.at(-1) === "") {
+    segments.pop();
+  }
+  if (segments.length === 0) {
+    return "must name a path below the site root";
+  }
+  for (const segment of segments) {
+    if (!NAV_HREF_SEGMENT.test(segment)) {
+      return `has an unsafe path segment "${segment}"`;
+    }
+  }
+  return null;
+}
+
 /**
  * Book config `book.yml` - `authorbot.book/v1` (design section 8.2).
  * Optional sections default at load time; the schema does not inject defaults.
@@ -73,6 +111,30 @@ export const bookConfigSchema = z.strictObject({
       cover_images: z.array(z.string().min(1)).min(1).optional(),
       /** Label for the cover thumbnail group (default "Cover art"). */
       cover_images_label: z.string().min(1).optional(),
+      /**
+       * Book-defined navigation links, rendered as plain anchors after the
+       * built-in nav items on every generated page. Each `href` is a
+       * book-relative path (typically a custom page the book ships under
+       * `public/`), never an external URL. The publisher prefixes the base
+       * path at build time.
+       */
+      nav_links: z
+        .array(
+          z.strictObject({
+            label: z.string().min(1),
+            href: z
+              .string()
+              .min(1)
+              .superRefine((href, ctx) => {
+                const reason = unsafeNavHrefReason(href);
+                if (reason !== null) {
+                  ctx.addIssue({ code: "custom", message: reason });
+                }
+              }),
+          }),
+        )
+        .min(1)
+        .optional(),
     })
     .optional(),
   /**

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import type { ClientRequest } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { isDirectory } from "./fs-utils.js";
 import { loadSiteModel, PublisherError } from "./load.js";
 import { createManifest, detectGitCommit } from "./manifest.js";
 import type { SiteModel } from "./model.js";
+import { serializeSiteJson, SITE_JSON_FILENAME } from "./site-json.js";
 
 /**
  * Programmatic Astro 5 static build (Phase 1 contract section 1).
@@ -200,6 +201,35 @@ export async function startDevSite(options: StartDevSiteOptions): Promise<DevSit
           res.setHeader("content-type", "image/webp");
           res.setHeader("cache-control", "no-cache");
           res.end(Buffer.from(image.data));
+          return;
+        }
+        // Site-data JSON, same URL shape as a production build (base is
+        // always "/" in dev), so book-authored custom pages under public/
+        // can fetch it relatively in both environments.
+        if (pathname === `/${SITE_JSON_FILENAME}`) {
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json; charset=utf-8");
+          res.setHeader("cache-control", "no-cache");
+          res.end(serializeSiteJson(current.model));
+          return;
+        }
+        // Directory-index resolution for book-authored pages under public/:
+        // production static hosting serves `/story-map/` from
+        // `story-map/index.html`, but Vite's public-dir middleware does not,
+        // and a custom page that 404s only in dev would be a parity trap.
+        if (hasBookPublicDir && pathname.endsWith("/") && pathname !== "/") {
+          const indexRel = `${pathname.slice(1)}index.html`;
+          void stat(path.join(bookPublicDir, indexRel)).then(
+            (stats) => {
+              if (stats.isFile()) {
+                req.url = `/${indexRel}`;
+              }
+              next();
+            },
+            () => {
+              next();
+            },
+          );
           return;
         }
         if (pathname === "/__authorbot/status" && options.status !== undefined) {
@@ -462,6 +492,16 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildManifes
       await writeFile(path.join(assetDir, asset.fileName), asset.data);
     }
   }
+
+  // Site-data JSON for book-authored custom pages (Phase 1 contract): the
+  // same model the generated pages embed, next to `index.html` so it nests
+  // with the base path and a public/ page can fetch it relatively. Written
+  // after the Astro build, so it deterministically wins over a book's own
+  // `public/authorbot-site.json` (validate warns about the shadowing).
+  await writeFile(
+    path.join(siteOutDir, SITE_JSON_FILENAME),
+    serializeSiteJson(model),
+  );
 
   const commit =
     options.commit === undefined ? detectGitCommit(repoPath) : options.commit;

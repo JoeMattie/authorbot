@@ -76,6 +76,14 @@ const safeDescription =
                 </a>
               </li>
             )}
+            {
+              /* Book-defined links (`publication.nav_links`), plain anchors
+                 to book-owned pages; never aria-current, since a custom page
+                 is not a generated page the layout can recognize. */
+              site.book.navLinks?.map((link) => (
+                <li><a href={link.href}>{link.label}</a></li>
+              ))
+            }
           </ul>
           {account && <span class="site-account-divider" data-collab-nav="divider" aria-hidden="true"></span>}
           {account && (

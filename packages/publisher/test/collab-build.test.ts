@@ -185,6 +185,18 @@ describe("api-url-less build (script-free regression)", () => {
         expect(strip(collab)).toEqual(strip(plain));
         continue;
       }
+      if (file === "authorbot-site.json") {
+        // The site-data JSON mirrors the model, so it differs by exactly
+        // the collab configuration (null without an API base).
+        const parsedPlain = JSON.parse(plain) as Record<string, unknown>;
+        const parsedCollab = JSON.parse(collab) as Record<string, unknown>;
+        expect(parsedPlain["collab"]).toBeNull();
+        expect(parsedCollab["collab"]).not.toBeNull();
+        delete parsedPlain["collab"];
+        delete parsedCollab["collab"];
+        expect(parsedCollab).toEqual(parsedPlain);
+        continue;
+      }
       if (file.endsWith(".html")) {
         // Strip every island insertion; the remainder must be identical
         // (inter-tag whitespace normalized on both sides, since removing the

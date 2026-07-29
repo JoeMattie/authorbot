@@ -82,6 +82,9 @@ config). Where the design is silent:
   >= 1; `authors`: non-empty list of `{ actor, name? }`. `actor` is the
   durable identity; `name` is an optional display label captured for an agent
   token so public bylines do not expose its opaque actor id.
+- Book `publication.nav_links`: optional list of `{ label, href }` rendered
+  in the site navigation; `href` must be a book-relative path (leading `/`,
+  safe segments, no traversal, no scheme) - violations are validation errors.
 - Character frontmatter: `schema`, `id` (`character:<slug>`), `name`; optional
   `aliases`, `summary`, `status`, `image` (repo-relative portrait path under
   `public/`; traversal or a path outside `public/` is a validation error, a
