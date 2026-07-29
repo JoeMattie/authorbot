@@ -67,6 +67,33 @@ describe("publication.nav_links validation", () => {
   });
 });
 
+describe("collab route root reservation", () => {
+  it.each(["work", "write", "settings", "revisions"])(
+    "warns when public/%s shadows a collaboration page root",
+    async (root) => {
+      const repo = await makeRepo();
+      await mkdir(path.join(repo, "public", root), { recursive: true });
+      await writeFile(path.join(repo, "public", root, "index.html"), "shadow");
+      const report = await validateBookRepo(repo);
+      expect(report.valid).toBe(true);
+      const warning = report.warnings.find((entry) => entry.code === "PATH_UNSAFE");
+      expect(warning?.message).toContain(`public/${root}`);
+    },
+  );
+
+  it("does not reject a chapter_url routing under a collab root", async () => {
+    // Confusing, not colliding: /work/{slug}/ chapters live under slugs
+    // while the work page is the bare root, so this stays valid.
+    const repo = await makeRepo();
+    await appendFile(
+      path.join(repo, "book.yml"),
+      ["publication:", "  chapter_url: /work/{slug}/", ""].join("\n"),
+    );
+    const report = await validateBookRepo(repo);
+    expect(report.errors).toEqual([]);
+  });
+});
+
 describe("authorbot-site.json reservation", () => {
   it("warns when public/ shadows the site-data JSON", async () => {
     const repo = await makeRepo();

@@ -67,6 +67,16 @@ choice, this contract selects one.
 - The generated file is written after the Astro copy, so it always wins over
   a book-supplied `public/authorbot-site.json`; the name is reserved and the
   validate gate warns about the shadowing.
+- **Reserved top-level names.** A custom page (any top-level `public/`
+  entry) must avoid the names the build generates, or it will shadow or be
+  shadowed by generated output; the validate gate warns on all of them:
+  - Always generated: `story/`, `_astro/`, `index.html`,
+    `authorbot-build.json`, `authorbot-site.json`, and the first segment of
+    `publication.chapter_url` (`chapters/` by default).
+  - Generated only when collaboration is configured: `work/`, `write/`,
+    `settings/`, `revisions/`. Avoid these even on a collaboration-less
+    book, so enabling collaboration later cannot break a custom page.
+  Everything else at the top level is the book's to use.
 - `publication.nav_links` (`[{label, href}]`) renders plain anchors after
   the built-in nav items on every generated page - the intended front door
   for those custom pages. Hrefs are book-relative paths (leading `/`, safe

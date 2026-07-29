@@ -9,6 +9,17 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.52
+
+- **The reserved output names are now documented and fully checked.** The
+  Phase 1 contract lists every top-level name a custom page under `public/`
+  must avoid, and the validator now also warns when `public/` shadows a
+  collaboration page root (`work/`, `write/`, `settings/`, `revisions/`) -
+  previously those collided silently. Warnings only: no previously valid
+  book changes validity.
+- This release adds no D1 migration and no book-format migration to content
+  files.
+
 ## 0.1.51
 
 - **Book repos can build fully custom pages.** Every build now writes

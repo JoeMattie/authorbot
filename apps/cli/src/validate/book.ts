@@ -48,6 +48,22 @@ const RESERVED_TOP_SEGMENTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Output roots that exist only in a collaboration build (`/work/`,
+ * `/write/`, `/settings/`, `/revisions/`). A `public/` entry shadowing one
+ * gets the same warning as the always-generated roots above, but these stay
+ * out of {@link RESERVED_TOP_SEGMENTS}: a `chapter_url` routing chapters
+ * under them is confusing, not colliding (the pages live at the bare root,
+ * chapters under slugs), and erroring would invalidate a book that
+ * validates today.
+ */
+const COLLAB_ROUTE_ROOTS: ReadonlySet<string> = new Set([
+  "work",
+  "write",
+  "settings",
+  "revisions",
+]);
+
+/**
  * Why the route expanded from `publication.chapter_url` for `slug` is
  * unusable, or null when it is safe (mirrors `@authorbot/publisher`).
  */
@@ -165,7 +181,7 @@ async function checkPublicDirCollisions(
     ?.toLowerCase();
   for (const entry of entries) {
     const name = entry.name.toLowerCase();
-    if (RESERVED_TOP_SEGMENTS.has(name) || (chapterRoot !== undefined && !chapterRoot.includes("{slug}") && name === chapterRoot)) {
+    if (RESERVED_TOP_SEGMENTS.has(name) || COLLAB_ROUTE_ROOTS.has(name) || (chapterRoot !== undefined && !chapterRoot.includes("{slug}") && name === chapterRoot)) {
       findings.warning(
         "PATH_UNSAFE",
         `public/${entry.name}`,
