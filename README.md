@@ -211,6 +211,29 @@ tracking, or skip voting entirely - **Promote to work** on any suggestion
 creates a work item regardless of the tally, recording the tally it overrode.
 Thresholds only start mattering when other people arrive.
 
+## Your site, your frontend
+
+The generated reading site ships zero JavaScript and is deliberately minimal.
+Going beyond it never requires an Authorbot change:
+
+- **Add assets and pages.** The book's `public/` directory is copied verbatim
+  into the built site - cover art and character portraits (thumbnailed
+  automatically), extra styles, or entire custom pages with their own
+  JavaScript.
+- **Render real data.** Every build writes `authorbot-site.json`, the complete
+  site model (chapters with rendered prose, outline, timeline, characters) as
+  versioned JSON, so a custom page - an interactive story map, a different
+  reader - fetches it and renders whatever the generated pages do not.
+  `publication.nav_links` in `book.yml` puts such pages in the site
+  navigation.
+- **Or go headless.** `publication.mode: headless` skips the generated pages
+  entirely; the book owns the whole frontend (a React SPA, anything),
+  rendering from the site JSON and calling the same-origin collaboration API
+  directly.
+
+Details in [docs/getting-started.md](./docs/getting-started.md) ("Customizing
+the site") and the [Phase 1 contract](./docs/contracts/phase1-contract.md).
+
 ## For contributors
 
 This is a pnpm/TypeScript monorepo. Every published package shares one version;

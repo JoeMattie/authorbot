@@ -203,6 +203,49 @@ nothing else to pin.
 
 **You now have a working serial-fiction site.** Everything below is optional.
 
+### Customizing the site (optional)
+
+The generated site is deliberately minimal; the book owns what goes beyond it.
+
+- **`public/` is yours.** Anything in it is copied verbatim into the built
+  site: images, extra CSS, or entire custom pages with their own JavaScript.
+  Cover art (`publication.cover_images` in `book.yml`) and character
+  portraits (`image` in a character record, e.g.
+  `image: public/characters/mara.png`) live there too - the build generates
+  lightweight thumbnails and script-free lightboxes for them.
+- **Custom pages get real data.** Every build writes `authorbot-site.json`
+  next to `index.html`: the complete site model (chapters with rendered
+  prose, outline, timeline, characters) as versioned JSON. A page at
+  `public/story-map/index.html` can `fetch("../authorbot-site.json")` and
+  render whatever views you like - no toolchain changes, works in
+  `authorbot dev` too. Add it to the site navigation with
+  `publication.nav_links`:
+
+  ```yaml
+  publication:
+    nav_links:
+      - label: Story map
+        href: /story-map/
+  ```
+
+  Avoid the reserved top-level names (`story`, `chapters`, `_astro`,
+  `index.html`, `authorbot-build.json`, `authorbot-site.json`, and - once
+  collaboration is on - `work`, `write`, `settings`, `revisions`);
+  `authorbot validate` warns about collisions.
+- **Or own the whole frontend.** `publication.mode: headless` skips the
+  generated pages entirely: the build emits only your `public/` tree, the
+  generated image thumbnails, and the data artifacts, so the site can be
+  anything - a React SPA included - rendering from `authorbot-site.json`
+  and calling the same-origin collaboration API directly. `authorbot dev`
+  still serves the generated pages locally as your editorial workbench.
+  Note the built-in collaboration widgets ship only with generated pages;
+  a headless site implements the collaboration features it wants against
+  the API ([`openapi/openapi.yaml`](../openapi/openapi.yaml) is the
+  contract).
+
+The full rules live in the
+[Phase 1 contract](./contracts/phase1-contract.md).
+
 ---
 
 ## Stage 3 - Turn on collaboration

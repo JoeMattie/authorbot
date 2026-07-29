@@ -13,6 +13,13 @@ includes the same progressive-enhancement JavaScript as hosted mode. The
 script-free contract applies only to an API-less `authorbot build`; in both
 cases the reading HTML remains usable without JavaScript.
 
+The dev server also serves the book's customization surface the way
+production does: `public/` files (custom pages included, with directory
+index resolution, so `/story-map/` works) and `authorbot-site.json`. A book
+with `publication.mode: headless` still gets the generated pages here -
+they are the local editorial workbench, not the published site - while its
+own frontend stays previewable at its `public/` paths.
+
 ## Start it
 
 From a book repository:

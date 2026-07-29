@@ -161,6 +161,7 @@ in the Authorbot repository and replace every \`id\` with a fresh UUIDv7.
 \`\`\`text
 book.yml                  this book's identity and settings
 chapters/                 one Markdown file per chapter
+public/                   optional static assets and custom pages, copied verbatim
 story/outline.yml         the story graph: premise, parts, scenes
 story/timeline.yml        sortable events with human-readable labels
 story/characters/         one Markdown file per character

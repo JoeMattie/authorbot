@@ -26,6 +26,7 @@ book-repo/
 ├── package-lock.json         # the exact, checksummed toolchain CI installs
 ├── wrangler.jsonc            # Cloudflare Worker that serves the built site
 ├── chapters/                 # one Markdown file per chapter (empty: see below)
+├── public/                   # optional book-owned static assets and custom pages, copied verbatim
 ├── story/
 │   ├── outline.yml           # story graph: premise/part/chapter/scene nodes (empty)
 │   ├── timeline.yml          # sortable events with display labels (empty)

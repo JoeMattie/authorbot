@@ -103,7 +103,29 @@ boundary:
   locations, chapter links.
 - `story/characters/index.html` and `story/characters/<slug>/index.html` -
   character index and detail (frontmatter fields, rendered body, chapters
-  whose `character_refs` mention the character).
+  whose `character_refs` mention the character). A character `image` under
+  `public/` renders as a generated WebP thumbnail on the card's right edge
+  and in the detail page's right gutter, opening a script-free lightbox;
+  `publication.cover_images` does the same for the landing-page masthead.
+- `authorbot-site.json` - the complete site model as versioned JSON
+  (`authorbot.site/v1`), written next to `index.html` (base-path nested)
+  for book-authored custom pages under `public/` to consume.
+
+## Book-owned customization
+
+Three tiers, all documented in the Phase 1 contract:
+
+- **`public/` passthrough** - copied verbatim into the output; a custom
+  page (its own HTML/JS/CSS) fetches `../authorbot-site.json` relatively
+  and renders anything the generated site does not. Reserved top-level
+  names are listed in the contract.
+- **`publication.nav_links`** - book-defined `{label, href}` entries
+  rendered as plain anchors after the built-in nav items (hrefs are safe
+  book-relative paths, validated in the shared schema).
+- **`publication.mode: headless`** - no generated pages or islands at all:
+  the output is the `public/` tree plus the data artifacts, and the book
+  owns the entire frontend. `authorbot dev` still serves the generated
+  pages as the local editorial workbench.
 
 The API-less build uses one shared stylesheet
 (`site/src/styles/site.css`, emitted as a single hashed file), ~65ch measure,
