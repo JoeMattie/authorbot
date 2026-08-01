@@ -2,9 +2,9 @@
 /**
  * Extract one release's notes from the root changelog.
  *
- * The release workflow runs this before publishing to keep migration and
- * compatibility notes from becoming an optional follow-up. The GitHub
- * metadata job runs it again to produce the release body.
+ * The release workflow runs this before publishing to require a matching,
+ * nonempty changelog section. The GitHub metadata job runs it again to
+ * produce the release body.
  *
  * Usage: node scripts/extract-release-notes.mjs v1.5.0 [output-file]
  */

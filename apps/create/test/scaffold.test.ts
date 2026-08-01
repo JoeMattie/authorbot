@@ -356,6 +356,11 @@ describe("README", () => {
     expect(text).toContain("New chapter");
     expect(text).toContain("@novelist");
   });
+
+  it("points upgrades at the release migration notes", () => {
+    const text = renderReadme(identity);
+    expect(text).toContain("https://github.com/JoeMattie/authorbot/releases");
+  });
 });
 
 /** Line comments only - which is all `renderWrangler` emits. */

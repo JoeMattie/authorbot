@@ -241,7 +241,9 @@ the site") and the [Phase 1 contract](./docs/contracts/phase1-contract.md).
 ## For contributors
 
 This is a pnpm/TypeScript monorepo. Every published package shares one version;
-a git tag builds, tests, and publishes them together with provenance.
+a git tag builds, tests, and publishes them to npm together with provenance.
+After npm succeeds, the workflow creates the GitHub Release from the matching
+changelog entry.
 
 ```sh
 pnpm install
@@ -295,7 +297,8 @@ docs/                guides, the ADRs, and the design record
 - [Local authoring](./docs/local-authoring.md) - run the full authoring loop offline
 - [GitHub App setup](./docs/github-app-setup.md) - legacy manual recovery reference; the wizard handles setup
 - [Runbook](./docs/runbook.md) - failure modes, backup and restore, key rotation
-- [Releasing](./docs/npm-release.md) - how a version reaches npm
+- [Releasing](./docs/npm-release.md) - how a version reaches npm and GitHub
+  Releases
 - [Follow-up work](./docs/follow-up-work.md) - the live queue after the current implementation slice
 - [Architecture decisions](./docs/adr) - the ADRs
 - [`AUTHORBOT_PROJECT_DESIGN.md`](./AUTHORBOT_PROJECT_DESIGN.md) - the apex design document

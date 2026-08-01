@@ -7,7 +7,8 @@ you, rather than naming the function that changed.
 
 Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
-always the same commit.
+always the same commit. The matching section in this file supplies the GitHub
+Release notes after npm publication succeeds.
 
 ## 0.1.54
 

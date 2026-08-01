@@ -123,8 +123,12 @@ in a pull request next to whatever content migration it carries, and
 `git revert` undoes both together. A repository variable is invisible in
 history and cannot be rolled back with the content it was paired with.
 
-To upgrade, run `npx authorbot upgrade`, which opens a pull request rather
-than pushing (ADR-0021 §3). To do it by hand:
+Before upgrading, read the matching
+[Authorbot release notes](https://github.com/JoeMattie/authorbot/releases).
+Check the notes for any book-format or D1 migration guidance.
+
+Then run `npx authorbot upgrade`, which opens a pull request rather than
+pushing (ADR-0021 §3). To do it by hand:
 `npm install --save-dev @authorbot/cli@<version>` and commit both files.
 
 The command checks its own version before it changes anything. If

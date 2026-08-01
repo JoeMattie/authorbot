@@ -1,15 +1,17 @@
 # Release workflow (ADR-0021 §1, ADR-0022).
 #
-# A semver tag is the only trigger. Pushing `v1.5.0` builds the workspace
-# once, runs every test against exactly those build outputs, packs each
-# publishable package, and publishes the tarballs to npm with provenance.
+# A version-shaped tag is the only trigger. Pushing a valid tag such as
+# `v1.5.0` builds the workspace, runs the workspace test suite, checks and packs
+# build outputs, smokes the installed API tarball, and publishes those to npm with
+# provenance. After that succeeds, a separate job creates the GitHub Release
+# from the matching changelog section.
 #
-# WHY ONE JOB. Build, test, and publish share a single checkout and a single
-# `pnpm -r build`, so the artifacts that were tested are byte-for-byte the
-# artifacts that get published. Splitting them across jobs would mean either
-# rebuilding (and publishing something no test ever saw) or shuttling
-# `dist/` through an artifact upload, which is a lot of machinery to
-# reintroduce a guarantee we get for free by not splitting.
+# WHY BUILD, TEST, AND PUBLISH SHARE ONE JOB. They use a single checkout and a
+# single `pnpm -r build`. The suite covers behavior; the packaging check and
+# installed-API smoke cover the built and packed boundary. The tarballs that
+# pass those gates are the tarballs the job publishes. Splitting this across
+# jobs would mean either rebuilding or shuttling `dist/` through an artifact
+# upload, with more machinery and another place for the outputs to drift.
 #
 # WHY PACK WITH pnpm AND PUBLISH WITH npm. Internal dependencies are declared
 # `workspace:*`, which is meaningless to a consumer. `pnpm pack` rewrites each
@@ -39,9 +41,10 @@ name: release
 on:
   push:
     tags:
-      # Semver tags only. A `v1.5.0-rc.1` prerelease matches too and publishes
-      # under the `next` dist-tag (see the publish step); anything that is not
-      # a version tag never reaches this workflow.
+      # Version-shaped tag candidates. A `v1.5.0-rc.1` prerelease matches too
+      # and publishes under the `next` dist-tag (see the publish step). The
+      # strict version check rejects malformed candidates before publication;
+      # unrelated tags never reach this workflow.
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+-*"
 
@@ -51,15 +54,16 @@ permissions:
 jobs:
   release:
     # A fork that pushes a tag must never be able to publish, even though the
-    # registry credentials would not be available to it - this fails fast and
-    # visibly rather than at the last step with a confusing auth error.
+    # registry credentials would not be available to it - this skips the job
+    # immediately rather than reaching the last step with a confusing auth
+    # error.
     if: github.repository == 'JoeMattie/authorbot'
     runs-on: ubuntu-latest
     environment: npm-release
     permissions:
       contents: read
-      # Required for --provenance and for OIDC trusted publishing. Nothing
-      # else in this workflow needs a token.
+      # Required for --provenance and OIDC trusted publishing. No other step
+      # in this npm-publish job needs write permission.
       id-token: write
     steps:
       # ACTIONS ARE PINNED TO COMMIT SHAs, not tags: a tag can be moved to
@@ -108,10 +112,10 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: node scripts/check-release-versions.mjs "$TAG"
 
-      # Release notes are part of the compatibility contract: every entry
-      # says whether an author must run a book-format or D1 migration. Fail
-      # before the irreversible npm publish if the matching entry is absent.
-      - name: Check GitHub release notes
+      # A release entry is expected to disclose book-format and D1 migrations.
+      # This gate enforces the machine-checkable part: a matching, nonempty
+      # section must exist before the irreversible npm publish.
+      - name: Check changelog release notes
         env:
           TAG: ${{ github.ref_name }}
         run: node scripts/extract-release-notes.mjs "$TAG" > /dev/null
