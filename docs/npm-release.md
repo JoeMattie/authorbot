@@ -101,7 +101,12 @@ resolves precisely the tree that CI proved green.
 
 Everything below runs on a clean checkout of `main` with a green workspace.
 
-### 1. Set the version
+### 1. Write the release notes and set the version
+
+Add a `## 1.5.0` section at the top of `CHANGELOG.md`. Say what changed from
+an author's perspective and state explicitly whether the release carries a
+book-format migration or D1 migration. The release workflow refuses to publish
+if the tag has no matching changelog section.
 
 ```bash
 node scripts/bump-version.mjs 1.5.0
@@ -159,8 +164,9 @@ git tag v1.5.0
 git push origin main v1.5.0
 ```
 
-The tag is the trigger. `.github/workflows/release.yml` then, in one job on one
-checkout:
+The tag is the trigger. `.github/workflows/release.yml` runs one
+build/test/publish job on one checkout, followed by a separate GitHub Release
+metadata job. The publish job:
 
 1. verifies every publishable package's version equals the tag;
 2. builds the workspace once;
@@ -173,6 +179,9 @@ checkout:
    order, so nothing on the registry ever points at a package that is not
    there yet.
 
+After that job succeeds, the metadata job creates the GitHub Release from the
+matching `CHANGELOG.md` section.
+
 A tag ending in a prerelease suffix (`v1.5.0-rc.1`) publishes under the `next`
 dist-tag instead of `latest`, so it never becomes what a bare
 `npm install @authorbot/cli` gets.
@@ -181,11 +190,17 @@ The workflow will not run on a fork: `if: github.repository ==
 'JoeMattie/authorbot'` fails it immediately rather than at the last step with a
 confusing authentication error.
 
-### 4. Write the release notes
+### 4. Verify the release
 
-Tag the GitHub release with what changed and - critically - whether it carries
-a book-format migration or a database migration. That is what an author reads
+Check the completed workflow, the published package version, and the GitHub
+Release. The release body comes from the changelog entry written in step 1,
+including the book-format and database migration statement an author needs
 before deciding when to run `authorbot upgrade`.
+
+```bash
+npm view @authorbot/cli version
+gh release view v1.5.0
+```
 
 ---
 
@@ -265,7 +280,8 @@ pinned. It is a strictly stronger guarantee than the git ref this replaced -
 a tag can be moved, a signed attestation cannot.
 
 Provenance requires `id-token: write`, which is the only elevated permission
-the release workflow holds.
+the npm-publish job holds. The dependent GitHub metadata job has
+`contents: write`, used only to create the Release after publication succeeds.
 
 ---
 

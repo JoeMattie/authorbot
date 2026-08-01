@@ -21,7 +21,9 @@
 # tarball to this workflow file, this commit, and this repository, published
 # to Sigstore's transparency log. Anyone can then check that the code on npm
 # came from the tag it claims to. That is the whole reason `id-token: write`
-# is here, and it is the only elevated permission this workflow holds.
+# is here, and it is the only elevated permission the npm-publish job holds.
+# The dependent metadata job separately gets `contents: write` so it can create
+# the GitHub Release after publication succeeds.
 #
 # FIRST PUBLISH NEEDS A TOKEN. Trusted publishing (OIDC) is configured
 # per-package on npmjs.com, and a package that does not exist yet cannot have
@@ -106,6 +108,14 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: node scripts/check-release-versions.mjs "$TAG"
 
+      # Release notes are part of the compatibility contract: every entry
+      # says whether an author must run a book-format or D1 migration. Fail
+      # before the irreversible npm publish if the matching entry is absent.
+      - name: Check GitHub release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node scripts/extract-release-notes.mjs "$TAG" > /dev/null
+
       - name: Build
         run: pnpm -r build
 
@@ -156,6 +166,9 @@ jobs:
           done
 
       - name: Summarise
+        # This is informational and must not strand release metadata after all
+        # immutable npm versions have already published successfully.
+        continue-on-error: true
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -168,3 +181,46 @@ jobs:
               | xargs -n1 basename \
               | sed -E 's/^authorbot-(.*)-([0-9].*)\.tgz$/| @authorbot\/\1 | \2 |/'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Keep release metadata separate from the irreversible npm publication.
+  # If GitHub has a transient failure, this job can be rerun without trying
+  # to publish the same immutable package versions again.
+  github-release:
+    needs: release
+    if: github.repository == 'JoeMattie/authorbot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare GitHub release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: node scripts/extract-release-notes.mjs "$TAG" "$RUNNER_TEMP/github-release-notes.md"
+
+      - name: Create GitHub release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "GitHub release $TAG already exists; nothing to do."
+            exit 0
+          fi
+
+          release_args=(
+            "$TAG"
+            --verify-tag
+            --title "$TAG"
+            --notes-file "$RUNNER_TEMP/github-release-notes.md"
+          )
+          case "$TAG" in
+            *-*) release_args+=(--prerelease --latest=false) ;;
+          esac
+          gh release create "${release_args[@]}"

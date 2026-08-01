@@ -9,6 +9,15 @@ Every published package shares this version. A tag builds, tests, and publishes
 all of them together, so `@authorbot/cli@0.1.15` and `@authorbot/api@0.1.15` are
 always the same commit.
 
+## 0.1.54
+
+- **The site-customization surface is now documented end to end.** The README,
+  getting-started guide, local-authoring guide, publisher documentation, and
+  generated book README now explain `public/`, `authorbot-site.json`,
+  `publication.nav_links`, and `publication.mode: headless`.
+- This release adds no runtime behavior, D1 migration, or book-format
+  migration; no previously valid book changes validity.
+
 ## 0.1.53
 
 - **Books can go fully headless.** `book.yml` gains `publication.mode:

@@ -8,6 +8,10 @@
 
 <p align="center">
   <a href="https://authorbot.joemattie.com">authorbot.joemattie.com</a>
+  ·
+  <a href="https://github.com/JoeMattie/authorbot/releases/latest">latest release</a>
+  ·
+  <a href="https://www.npmjs.com/package/@authorbot/cli">npm</a>
 </p>
 
 > **Authorbot manages authorship. It does not perform authorship.**
