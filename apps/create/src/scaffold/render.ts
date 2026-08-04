@@ -179,6 +179,10 @@ npm run build       # render the site into _site/ (gitignored)
 npm run upgrade     # move to a newer Authorbot, as a pull request
 \`\`\`
 
+Before upgrading, read the matching
+[Authorbot release notes](https://github.com/JoeMattie/authorbot/releases).
+Check the notes for any book-format or D1 migration guidance.
+
 ## Things worth knowing
 
 - **IDs are permanent.** \`book.id\`, chapter ids, and block markers are

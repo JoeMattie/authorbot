@@ -90,13 +90,18 @@ standing publish credential anywhere.
 
 The `NODE_AUTH_TOKEN` line stays in the workflow: it is empty and unread while
 trusted publishing is configured, and it leaves a deliberate fallback for a
-fork or a future maintainer who has not set it up.
+future maintainer bootstrapping a package before its trusted publisher is
+configured.
 
 ### Release process
 
-A semver tag triggers a workflow that builds once and publishes to npm with
-**`--provenance`** (GitHub Actions OIDC attestation, tying each published
-artifact to the commit and workflow that produced it).
+A semver tag triggers a workflow that requires a matching `CHANGELOG.md`
+section, builds once, and publishes to npm with **`--provenance`** (GitHub
+Actions OIDC attestation, tying each published artifact to the commit and
+workflow that produced it). After npm publication succeeds, a separate
+dependent job creates a GitHub Release from that changelog section. We attach
+no distribution artifacts to GitHub Releases; npm remains the sole supported
+distribution channel.
 
 ### No bespoke vendoring channel
 

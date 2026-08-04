@@ -101,7 +101,12 @@ resolves precisely the tree that CI proved green.
 
 Everything below runs on a clean checkout of `main` with a green workspace.
 
-### 1. Set the version
+### 1. Write the release notes and set the version
+
+Add a `## 1.5.0` section at the top of `CHANGELOG.md`. Say what changed from
+an author's perspective and state explicitly whether the release carries a
+book-format migration or D1 migration. The release workflow refuses to publish
+if the tag has no matching changelog section.
 
 ```bash
 node scripts/bump-version.mjs 1.5.0
@@ -119,6 +124,7 @@ git commit -am "release: v1.5.0"
 ### 2. Rehearse
 
 ```bash
+node scripts/extract-release-notes.mjs v1.5.0 > /dev/null
 pnpm build
 pnpm typecheck
 pnpm test
@@ -126,6 +132,9 @@ pnpm check:packaging     # npm pack --dry-run over every package; publishes noth
 pnpm check:author-ci     # installs the packed CLI with npm ci and runs it
 pnpm check:api-tarball   # installs and imports the packed API Worker
 ```
+
+The release-notes check proves that the exact tag has a matching, nonempty
+changelog section before the tag leaves your machine.
 
 `check:packaging` asserts each tarball carries `dist/` and a licence and leaks
 no tests, sources, tsconfigs, or source maps. `check:author-ci` is the one that
@@ -159,13 +168,14 @@ git tag v1.5.0
 git push origin main v1.5.0
 ```
 
-The tag is the trigger. `.github/workflows/release.yml` then, in one job on one
-checkout:
+The tag is the trigger. `.github/workflows/release.yml` runs one
+build/test/publish job on one checkout, followed by a separate GitHub Release
+metadata job. The publish job:
 
 1. verifies every publishable package's version equals the tag;
 2. builds the workspace once;
-3. typechecks and runs the full suite **against those build outputs**;
-4. runs the packaging check;
+3. typechecks and runs the workspace test suite;
+4. runs the packaging check against the build outputs;
 5. packs with `pnpm` (rewriting `workspace:*` to the exact version);
 6. installs and imports that exact packed API Worker and verifies its
    migrations;
@@ -173,19 +183,46 @@ checkout:
    order, so nothing on the registry ever points at a package that is not
    there yet.
 
+After that job succeeds, the metadata job creates the GitHub Release from the
+matching `CHANGELOG.md` section.
+
 A tag ending in a prerelease suffix (`v1.5.0-rc.1`) publishes under the `next`
 dist-tag instead of `latest`, so it never becomes what a bare
-`npm install @authorbot/cli` gets.
+`npm install @authorbot/cli` gets. The metadata job also marks it as a GitHub
+prerelease and explicitly prevents it from becoming GitHub's `Latest` release.
 
-The workflow will not run on a fork: `if: github.repository ==
-'JoeMattie/authorbot'` fails it immediately rather than at the last step with a
-confusing authentication error.
+The publish and metadata jobs are skipped on a fork. Their
+`github.repository == 'JoeMattie/authorbot'` guards stop the run before it
+reaches a confusing authentication error.
 
-### 4. Write the release notes
+### 4. Verify the release
 
-Tag the GitHub release with what changed and - critically - whether it carries
-a book-format migration or a database migration. That is what an author reads
+Check the completed workflow, the published package version, and the GitHub
+Release. The release body comes from the changelog entry written in step 1,
+including the book-format and database migration statement an author needs
 before deciding when to run `authorbot upgrade`.
+
+```bash
+npm view @authorbot/cli version
+gh release view v1.5.0
+```
+
+For a prerelease, query the exact version because npm's bare `version` lookup
+deliberately stays on the stable `latest` tag:
+
+```bash
+npm view @authorbot/cli@1.5.0-rc.1 version
+gh release view v1.5.0-rc.1
+```
+
+If the npm job succeeded and only `github-release` failed, use **Re-run failed
+jobs** in GitHub Actions (or `gh run rerun <run-id> --failed`). That reruns only
+the GitHub Release job without trying to republish immutable npm versions. If
+the GitHub Release already exists, the job leaves it unchanged and succeeds.
+
+This recovery applies only after the npm job reports success. A publish that
+stopped partway through its package loop is not resume-safe; inspect the npm
+package set before doing anything else.
 
 ---
 
@@ -265,7 +302,8 @@ pinned. It is a strictly stronger guarantee than the git ref this replaced -
 a tag can be moved, a signed attestation cannot.
 
 Provenance requires `id-token: write`, which is the only elevated permission
-the release workflow holds.
+the npm-publish job holds. The dependent GitHub metadata job has
+`contents: write`, used only to create the Release after publication succeeds.
 
 ---
 
@@ -306,10 +344,12 @@ lockfile that already resolved the version. Publish a fixed patch instead, and
 
 1. Add its directory to `scripts/publishable.mjs`, in dependency order.
 2. Give its `package.json` a `description`, `license`, `repository.directory`,
-   `files`, `publishConfig: { "access": "public", "provenance": true }`, and a
-   `prepack` that runs `node ../../scripts/copy-license.mjs`.
+   `files`, `publishConfig: { "access": "public" }`, and a `prepack` that runs
+   `node ../../scripts/copy-license.mjs`.
 3. Run `pnpm check:packaging`. It will tell you what is missing.
 
 Scoped packages default to **restricted** - that is, private - so a package
 without `publishConfig.access` either fails to publish or, worse, publishes
 privately and is invisible to authors. The check refuses to pass without it.
+The workflow sets `NPM_CONFIG_PROVENANCE=true` for the whole publish loop, so a
+new package cannot silently omit provenance through its own manifest.
